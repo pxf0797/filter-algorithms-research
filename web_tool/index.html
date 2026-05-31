@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>滤波算法交互式对比分析工具</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-card: rgba(22, 27, 34, 0.8);
+  --border: #30363d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --accent: #00d4aa;
+  --accent-dim: rgba(0, 212, 170, 0.15);
+  --gray: #666;
+  --white: #fff;
+  --glass: rgba(22, 27, 34, 0.6);
+  --glass-border: rgba(48, 54, 61, 0.5);
+}
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  display: flex;
+}
+#app { display: flex; width: 100%; height: 100vh; }
+#left-panel {
+  width: 320px; min-width: 320px; height: 100vh; overflow-y: auto;
+  background: var(--bg-secondary); border-right: 1px solid var(--border);
+  padding: 20px 16px; display: flex; flex-direction: column; gap: 14px;
+}
+#left-panel::-webkit-scrollbar { width: 4px; }
+#left-panel::-webkit-scrollbar-track { background: transparent; }
+#left-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+.title { font-size: 16px; font-weight: 700; color: var(--accent); letter-spacing: 0.5px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.ctrl-group { display: flex; flex-direction: column; gap: 4px; }
+.ctrl-label { font-size: 12px; color: var(--text-secondary); font-weight: 500; }
+select, input[type="color"], button { font-family: inherit; }
+select {
+  width: 100%; padding: 7px 10px; font-size: 13px;
+  background: var(--bg-primary); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: 6px;
+  outline: none; cursor: pointer; appearance: auto;
+}
+select:focus { border-color: var(--accent); }
+.version-toggle {
+  display: flex; background: var(--bg-primary); border: 1px solid var(--border);
+  border-radius: 6px; overflow: hidden;
+}
+.version-opt {
+  flex: 1; padding: 6px 0; text-align: center; font-size: 12px; cursor: pointer;
+  color: var(--text-secondary); transition: all 0.2s; user-select: none;
+}
+.version-opt.active { background: var(--accent-dim); color: var(--accent); font-weight: 600; }
+.version-opt:not(.active):hover { background: rgba(255,255,255,0.05); }
+#param-container { display: flex; flex-direction: column; gap: 8px; }
+.param-row { display: flex; flex-direction: column; gap: 3px; }
+.param-row .param-header { display: flex; justify-content: space-between; align-items: center; }
+.param-row .param-name { font-size: 11px; color: var(--text-secondary); }
+.param-row .param-value { font-size: 11px; color: var(--accent); font-weight: 600; min-width: 30px; text-align: right; }
+input[type="range"] {
+  width: 100%; height: 4px; appearance: none; -webkit-appearance: none;
+  background: var(--border); border-radius: 2px; outline: none;
+  margin: 4px 0; cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none; -webkit-appearance: none;
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--accent); border: 2px solid var(--bg-primary); cursor: pointer;
+}
+input[type="range"]:focus { outline: none; }
+.toggle-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.toggle-btn {
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  font-size: 12px; color: var(--text-secondary); user-select: none;
+}
+.toggle-btn input[type="checkbox"] { display: none; }
+.toggle-btn .toggle-track {
+  width: 32px; height: 18px; background: var(--border); border-radius: 9px;
+  position: relative; transition: background 0.2s; flex-shrink: 0;
+}
+.toggle-btn .toggle-track::after {
+  content: ''; position: absolute; top: 2px; left: 2px;
+  width: 14px; height: 14px; border-radius: 50%; background: var(--text-secondary);
+  transition: all 0.2s;
+}
+.toggle-btn input:checked + .toggle-track { background: var(--accent-dim); }
+.toggle-btn input:checked + .toggle-track::after { left: 16px; background: var(--accent); }
+.color-picker-row { display: flex; align-items: center; gap: 10px; }
+.color-picker-row input[type="color"] {
+  width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 6px;
+  padding: 2px; background: var(--bg-primary); cursor: pointer;
+}
+#apply-btn {
+  padding: 8px 16px; font-size: 13px; font-weight: 600;
+  background: var(--accent); color: var(--bg-primary); border: none;
+  border-radius: 6px; cursor: pointer; transition: opacity 0.2s;
+}
+#apply-btn:hover { opacity: 0.85; }
+#apply-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+#right-panel { flex: 1; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+#main-plot { flex: 1; min-height: 0; }
+#metrics-row {
+  display: flex; gap: 8px; padding: 8px 12px; flex-shrink: 0;
+  background: var(--bg-secondary); border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.metric-card {
+  flex: 1; min-width: 100px; padding: 8px 10px;
+  background: var(--glass); border: 1px solid var(--glass-border);
+  border-radius: 8px; backdrop-filter: blur(4px); text-align: center;
+}
+.metric-card .metric-label { font-size: 10px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.3px; }
+.metric-card .metric-value { font-size: 15px; font-weight: 700; color: var(--text-primary); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.metric-card .metric-value.good { color: var(--accent); }
+.metric-card .metric-value.bad { color: #f85149; }
+#residual-plot { height: 180px; min-height: 180px; flex-shrink: 0; }
+#warning-banner {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+  background: rgba(248, 81, 73, 0.9); color: #fff; padding: 8px 16px;
+  font-size: 13px; text-align: center; transform: translateY(-100%);
+  transition: transform 0.3s; display: none;
+}
+#warning-banner.show { transform: translateY(0); display: block; }
+.placeholder-plot {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%; color: var(--text-secondary); font-size: 14px;
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="left-panel">
+    <div class="title">滤波算法交互式对比分析工具</div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">数据集</div>
+      <select id="dataset-select"></select>
+    </div>
+    <div id="dataset-desc" style="font-size:11px;color:var(--text-secondary);line-height:1.4;padding:2px 0;"></div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">信号长度</div>
+      <div class="version-toggle" id="version-toggle">
+        <div class="version-opt" data-version="short">短 (200pt)</div>
+        <div class="version-opt active" data-version="long">长 (1000pt)</div>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">滤波器</div>
+      <select id="filter-select">
+        <option value="sma">SMA — 简单滑动平均</option>
+        <option value="ema">EMA — 指数滑动平均</option>
+        <option value="wma">WMA — 加权滑动平均</option>
+        <option value="alma">ALMA — 高斯加权移动平均</option>
+        <option value="savgol">Savitzky-Golay</option>
+        <option value="kalman">Kalman 滤波</option>
+        <option value="butterworth">Butterworth 低通</option>
+        <option value="gaussian">Gaussian 滤波</option>
+        <option value="median">Median 中值滤波</option>
+        <option value="lowess">LOWESS 局部回归</option>
+      </select>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">参数</div>
+      <div id="param-container"></div>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">滤波线颜色</div>
+      <div class="color-picker-row">
+        <input type="color" id="color-picker" value="#00d4aa">
+        <span style="font-size:12px;color:var(--text-secondary)">选择颜色</span>
+      </div>
+    </div>
+    <div class="ctrl-group">
+      <div class="ctrl-label">显示控制</div>
+      <div class="toggle-row">
+        <label class="toggle-btn">
+          <input type="checkbox" id="show-noisy" checked>
+          <span class="toggle-track"></span>噪声信号
+        </label>
+        <label class="toggle-btn">
+          <input type="checkbox" id="show-clean" checked>
+          <span class="toggle-track"></span>干净信号
+        </label>
+        <label class="toggle-btn">
+          <input type="checkbox" id="show-filtered" checked>
+          <span class="toggle-track"></span>滤波结果
+        </label>
+      </div>
+    </div>
+    <button id="apply-btn">应用滤波</button>
+  </div>
+  <div id="right-panel">
+    <div id="main-plot"><div class="placeholder-plot">加载数据中...</div></div>
+    <div id="metrics-row">
+      <div class="metric-card"><div class="metric-label">MSE</div><div class="metric-value" id="mse-val">--</div></div>
+      <div class="metric-card"><div class="metric-label">RMSE</div><div class="metric-value" id="rmse-val">--</div></div>
+      <div class="metric-card"><div class="metric-label">MAE</div><div class="metric-value" id="mae-val">--</div></div>
+      <div class="metric-card"><div class="metric-label">SNR 改善 (dB)</div><div class="metric-value" id="snr-val">--</div></div>
+      <div class="metric-card"><div class="metric-label">延迟 (样本)</div><div class="metric-value" id="lag-val">--</div></div>
+      <div class="metric-card"><div class="metric-label">粗糙度</div><div class="metric-value" id="rough-val">--</div></div>
+    </div>
+    <div id="residual-plot"><div class="placeholder-plot">残差图</div></div>
+  </div>
+</div>
+<div id="warning-banner"></div>
+<script>
+// ============================================================
+// Data
+// ============================================================
+let datasets = [];
+let currentData = null;
+
+async function loadData() {
+  try {
+    const resp = await fetch('sample_data.json');
+    const json = await resp.json();
+    datasets = json.datasets;
+    populateDatasetSelect();
+    onDatasetChange();
+  } catch(e) {
+    document.querySelector('#main-plot .placeholder-plot').textContent = '数据加载失败: ' + e.message;
+  }
+}
+
+function populateDatasetSelect() {
+  const sel = document.getElementById('dataset-select');
+  sel.innerHTML = datasets.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+}
+
+// ============================================================
+// Filter Definitions (params spec)
+// ============================================================
+const FILTER_PARAMS = {
+  sma:        { window: { type: 'int', min: 3, max: 101, step: 2, default: 21, label: '窗口大小' } },
+  ema:        { span:   { type: 'int', min: 2, max: 200, step: 1, default: 10, label: '跨度 (span)' } },
+  wma:        { window: { type: 'int', min: 3, max: 101, step: 2, default: 21, label: '窗口大小' } },
+  alma:       { window: { type: 'int', min: 5, max: 101, step: 2, default: 21, label: '窗口大小' },
+                offset: { type: 'float', min: 0, max: 1, step: 0.01, default: 0.85, label: '偏移 (offset)' },
+                sigma:  { type: 'float', min: 1, max: 20, step: 0.1, default: 6, label: 'Sigma' } },
+  savgol:     { window: { type: 'int', min: 5, max: 101, step: 2, default: 21, label: '窗口大小' },
+                order:  { type: 'int', min: 2, max: 5, step: 1, default: 3, label: '多项式阶数' } },
+  kalman:     { R:      { type: 'float', min: 0.001, max: 1, step: 0.001, default: 0.1, label: '测量噪声 (R)' },
+                Q:      { type: 'float', min: 0.0001, max: 0.1, step: 0.0001, default: 0.01, label: '过程噪声 (Q)' } },
+  butterworth: { order: { type: 'int', min: 1, max: 8, step: 1, default: 4, label: '阶数' },
+                 cutoff: { type: 'float', min: 1, max: 49, step: 0.5, default: 10, label: '截止频率 (Hz)' } },
+  gaussian:   { sigma:  { type: 'float', min: 0.5, max: 20, step: 0.1, default: 3, label: 'Sigma' } },
+  median:     { window: { type: 'int', min: 3, max: 101, step: 2, default: 11, label: '窗口大小' } },
+  lowess:     { frac:   { type: 'float', min: 0.05, max: 1, step: 0.01, default: 0.3, label: '邻域比例 (frac)' } }
+};
+
+// ============================================================
+// Filter Implementations
+// ============================================================
+
+// Helper: ensure odd integer
+function ensureOdd(v) { const n = Math.round(v); return n % 2 === 0 ? n + 1 : n; }
+
+// 1. SMA
+function smaFilter(signal, params) {
+  const w = ensureOdd(params.window);
+  const half = (w - 1) / 2;
+  const n = signal.length;
+  const result = new Array(n);
+  for (let i = 0; i < n; i++) {
+    if (i < half || i >= n - half) { result[i] = NaN; continue; }
+    let sum = 0;
+    for (let j = -half; j <= half; j++) sum += signal[i + j];
+    result[i] = sum / w;
+  }
+  return result;
+}
+
+// 2. EMA
+function emaFilter(signal, params) {
+  const span = Math.max(2, Math.round(params.span));
+  const alpha = 2 / (span + 1);
+  const n = signal.length;
+  const result = new Array(n);
+  result[0] = signal[0];
+  for (let i = 1; i < n; i++) {
+    result[i] = alpha * signal[i] + (1 - alpha) * result[i - 1];
+  }
+  return result;
+}
+
+// 3. WMA
+function wmaFilter(signal, params) {
+  const w = ensureOdd(params.window);
+  const half = (w - 1) / 2;
+  const n = signal.length;
+  const weights = new Array(w);
+  for (let j = 0; j < w; j++) weights[j] = j + 1;
+  const wSum = w * (w + 1) / 2;
+  const result = new Array(n);
+  for (let i = 0; i < n; i++) {
+    if (i < half || i >= n - half) { result[i] = NaN; continue; }
+    let sum = 0;
+    for (let j = 0; j < w; j++) sum += signal[i - half + j] * weights[j];
+    result[i] = sum / wSum;
+  }
+  return result;
+}
+
+// 4. ALMA
+function almaFilter(signal, params) {
+  const w = ensureOdd(params.window);
+  const offset = Math.min(1, Math.max(0, params.offset));
+  const sigmaVal = Math.max(0.5, params.sigma);
+  const n = signal.length;
+  const center = (w - 1) * (1 - offset);
+  const sigma = w / sigmaVal;
+  const weights = new Array(w);
+  let weightSum = 0;
+  for (let j = 0; j < w; j++) {
+    weights[j] = Math.exp(-0.5 * Math.pow((j - center) / sigma, 2));
+    weightSum += weights[j];
+  }
+  for (let j = 0; j < w; j++) weights[j] /= weightSum;
+  const half = (w - 1) / 2;
+  const result = new Array(n);
+  for (let i = 0; i < n; i++) {
+    if (i < half || i >= n - half) { result[i] = NaN; continue; }
+    let sum = 0;
+    for (let j = 0; j < w; j++) sum += signal[i - half + j] * weights[j];
+    result[i] = sum;
+  }
+  return result;
+}
+
+// 5. Savitzky-Golay (Gram polynomial approach)
+// Precompute coefficients for a given (window, order)
+function savgolCoeffs(windowLen, order) {
+  const m = (windowLen - 1) / 2;
+  const x = new Array(windowLen);
+  for (let i = 0; i < windowLen; i++) x[i] = i - m;
+
+  // Build Vandermonde X: rows = windowLen, cols = order+1
+  const rows = windowLen, cols = order + 1;
+  const X = new Array(rows);
+  for (let i = 0; i < rows; i++) {
+    X[i] = new Array(cols);
+    for (let j = 0; j < cols; j++) X[i][j] = Math.pow(x[i], j);
+  }
+
+  // X^T * X
+  function matMul(A, B) {
+    const ar = A.length, ac = A[0].length, bc = B[0].length;
+    const C = new Array(ar);
+    for (let i = 0; i < ar; i++) { C[i] = new Array(bc).fill(0);
+      for (let k = 0; k < ac; k++) { const aik = A[i][k]; if (aik === 0) continue;
+        for (let j = 0; j < bc; j++) C[i][j] += aik * B[k][j]; } }
+    return C;
+  }
+  function matT(A) {
+    const r = A.length, c = A[0].length;
+    const T = new Array(c); for (let j = 0; j < c; j++) { T[j] = new Array(r); for (let i = 0; i < r; i++) T[j][i] = A[i][j]; }
+    return T;
+  }
+
+  const Xt = matT(X);
+  const XtX = matMul(Xt, X);
+
+  // Invert XtX via Gaussian elimination (small matrix, cols <= 6)
+  const size = cols;
+  const inv = new Array(size);
+  for (let i = 0; i < size; i++) {
+    inv[i] = new Array(size).fill(0);
+    inv[i][i] = 1;
+  }
+  const aug = new Array(size);
+  for (let i = 0; i < size; i++) {
+    aug[i] = XtX[i].slice();
+    for (let j = 0; j < size; j++) aug[i][j + size] = inv[i][j];
+  }
+
+  for (let col = 0; col < size; col++) {
+    // Partial pivot
+    let maxRow = col;
+    for (let row = col + 1; row < size; row++) {
+      if (Math.abs(aug[row][col]) > Math.abs(aug[maxRow][col])) maxRow = row;
+    }
+    if (maxRow !== col) { const tmp = aug[col]; aug[col] = aug[maxRow]; aug[maxRow] = tmp; }
+    const pivot = aug[col][col];
+    if (Math.abs(pivot) < 1e-15) return null; // singular
+    for (let j = col; j < 2 * size; j++) aug[col][j] /= pivot;
+    for (let row = 0; row < size; row++) {
+      if (row === col) continue;
+      const factor = aug[row][col];
+      for (let j = col; j < 2 * size; j++) aug[row][j] -= factor * aug[col][j];
+    }
+  }
+
+  const XtXinv = new Array(size);
+  for (let i = 0; i < size; i++) XtXinv[i] = aug[i].slice(size);
+
+  // Pseudo-inverse: (X^T X)^{-1} X^T, first row gives constant-term coefficients
+  const pinv = matMul(XtXinv, Xt);
+  return pinv[0]; // coefficients for center-point evaluation
+}
+
+function savgolFilter(signal, params) {
+  const w = ensureOdd(params.window);
+  const order = Math.min(5, Math.max(2, Math.round(params.order)));
+  if (order >= w) return signal.map(() => NaN);
+  const coeffs = savgolCoeffs(w, order);
+  if (!coeffs) return signal.map(() => NaN);
+  const half = (w - 1) / 2;
+  const n = signal.length;
+  const result = new Array(n);
+  for (let i = 0; i < n; i++) {
+    if (i < half || i >= n - half) { result[i] = NaN; continue; }
+    let sum = 0;
+    for (let j = 0; j < w; j++) sum += signal[i - half + j] * coeffs[j];
+    result[i] = sum;
+  }
+  return result;
+}
+
+// 6. Kalman (1D constant-velocity)
+function kalmanFilter(signal, params) {
+  const R = Math.max(0.001, params.R);
+  const Q = Math.max(0.0001, params.Q);
+  const n = signal.length;
+  const result = new Array(n);
+  if (n === 0) return result;
+  let x = signal[0];    // position
+  let dx = 0;           // velocity
+  let P = [[1, 0], [0, 1]]; // 2x2 covariance
+
+  const H = [1, 0]; // measurement matrix (1x2)
+
+  function mat2Mul(A, B) {
+    return [
+      [A[0][0]*B[0][0] + A[0][1]*B[1][0], A[0][0]*B[0][1] + A[0][1]*B[1][1]],
+      [A[1][0]*B[0][0] + A[1][1]*B[1][0], A[1][0]*B[0][1] + A[1][1]*B[1][1]]
+    ];
+  }
+  function mat2Add(A, B) {
+    return [[A[0][0]+B[0][0], A[0][1]+B[0][1]], [A[1][0]+B[1][0], A[1][1]+B[1][1]]];
+  }
+
+  result[0] = signal[0];
+  for (let i = 1; i < n; i++) {
+    const dt = 1; // signal is uniformly sampled; dt = 1 sample
+    // State transition matrix F
+    const F = [[1, dt], [0, 1]];
+    const Ft = [[1, 0], [dt, 1]];
+
+    // Predict
+    x = x + dx * dt;
+    // P = F * P * F^T + Q_process
+    let FP = mat2Mul(F, P);
+    let FPFT = mat2Mul(FP, Ft);
+    const Qm = [[Q * dt*dt*dt / 3, Q * dt*dt / 2], [Q * dt*dt / 2, Q * dt]];
+    P = mat2Add(FPFT, Qm);
+
+    // Update
+    // S = H * P * H^T + R
+    const HP = [P[0][0] * H[0] + P[0][1] * H[1], P[1][0] * H[0] + P[1][1] * H[1]];
+    const S = HP[0] * H[0] + HP[1] * H[1] + R;
+    // Kalman gain: K = P * H^T / S
+    const K = [HP[0] / S, HP[1] / S];
+
+    const innovation = signal[i] - x;
+    x = x + K[0] * innovation;
+    dx = dx + K[1] * innovation;
+
+    // P = (I - K*H) * P
+    const KH = [[K[0] * H[0], K[0] * H[1]], [K[1] * H[0], K[1] * H[1]]];
+    const IminusKH = [[1 - KH[0][0], -KH[0][1]], [-KH[1][0], 1 - KH[1][1]]];
+    P = mat2Mul(IminusKH, P);
+
+    result[i] = x;
+  }
+  return result;
+}
+
+// 7. Butterworth (bilinear transform, cascaded first-order, forward-backward)
+function butterworthFilter(signal, params) {
+  const order = Math.max(1, Math.min(8, Math.round(params.order)));
+  const cutoff = Math.max(0.5, Math.min(49, params.cutoff));
+  const sampleRate = currentData ? currentData.sampleRate : 100;
+  const w0 = Math.tan(Math.PI * cutoff / sampleRate);
+  const a = (1 - w0) / (1 + w0); // feedback coefficient for 1st order
+  // b0 = w0/(1+w0), which equals (1-a)/2
+  const n = signal.length;
+  if (n < 2) return signal.slice();
+
+  // Forward cascade
+  let result = signal.slice();
+  for (let k = 0; k < order; k++) {
+    const inp = result.slice();
+    result[0] = inp[0];
+    for (let i = 1; i < n; i++) {
+      result[i] = a * result[i - 1] + (1 - a) * (inp[i] + inp[i - 1]) / 2;
+    }
+  }
+
+  // Backward cascade (filtfilt: apply same filter to reversed signal)
+  let rev = new Array(n);
+  for (let i = 0; i < n; i++) rev[i] = result[n - 1 - i];
+  for (let k = 0; k < order; k++) {
+    const inp = rev.slice();
+    rev[0] = inp[0];
+    for (let i = 1; i < n; i++) {
+      rev[i] = a * rev[i - 1] + (1 - a) * (inp[i] + inp[i - 1]) / 2;
+    }
+  }
+
+  // Reverse back
+  for (let i = 0; i < n; i++) result[i] = rev[n - 1 - i];
+  return result;
+}
+
+// 8. Gaussian
+function gaussianFilter(signal, params) {
+  const sigma = Math.max(0.1, params.sigma);
+  const radius = Math.ceil(3 * sigma);
+  const kernelSize = 2 * radius + 1;
+  const kernel = new Array(kernelSize);
+  let kSum = 0;
+  for (let j = 0; j < kernelSize; j++) {
+    const d = j - radius;
+    kernel[j] = Math.exp(-0.5 * (d * d) / (sigma * sigma));
+    kSum += kernel[j];
+  }
+  for (let j = 0; j < kernelSize; j++) kernel[j] /= kSum;
+  const n = signal.length;
+  const result = new Array(n);
+  for (let i = 0; i < n; i++) {
+    if (i < radius || i >= n - radius) { result[i] = NaN; continue; }
+    let sum = 0;
+    for (let j = 0; j < kernelSize; j++) sum += signal[i - radius + j] * kernel[j];
+    result[i] = sum;
+  }
+  return result;
+}
+
+// 9. Median
+function medianFilter(signal, params) {
+  const w = ensureOdd(params.window);
+  const half = (w - 1) / 2;
+  const n = signal.length;
+  const result = new Array(n);
+  const buf = new Array(w);
+  for (let i = 0; i < n; i++) {
+    if (i < half || i >= n - half) { result[i] = NaN; continue; }
+    for (let j = 0; j < w; j++) buf[j] = signal[i - half + j];
+    buf.sort((a, b) => a - b);
+    result[i] = buf[half];
+  }
+  return result;
+}
+
+// 10. LOWESS (local linear regression)
+function lowessFilter(signal, params) {
+  const frac = Math.min(1, Math.max(0.02, params.frac));
+  const n = signal.length;
+  const result = new Array(n);
+  const nNeighbors = Math.max(2, Math.round(frac * n));
+
+  for (let i = 0; i < n; i++) {
+    // Find nNeighbors nearest neighbors
+    const dist = new Array(n);
+    for (let j = 0; j < n; j++) dist[j] = { idx: j, d: Math.abs(j - i) };
+    dist.sort((a, b) => a.d - b.d);
+    const neighbors = dist.slice(0, nNeighbors);
+    const maxDist = neighbors[neighbors.length - 1].d;
+    if (maxDist === 0) {
+      // All neighbors at same point (shouldn't happen with idx)
+      // Fallback: use all points with center weight
+      result[i] = signal[i];
+      continue;
+    }
+
+    // Tricube weights
+    const xVals = new Array(nNeighbors);
+    const yVals = new Array(nNeighbors);
+    const wts = new Array(nNeighbors);
+    for (let k = 0; k < nNeighbors; k++) {
+      const d = neighbors[k].d / maxDist;
+      wts[k] = Math.pow(1 - Math.pow(Math.abs(d), 3), 3);
+      xVals[k] = neighbors[k].idx;
+      yVals[k] = signal[neighbors[k].idx];
+    }
+
+    // Weighted linear regression: y = a + b*x
+    let S0 = 0, S1 = 0, S2 = 0, T0 = 0, T1 = 0;
+    for (let k = 0; k < nNeighbors; k++) {
+      const w = wts[k];
+      const xk = xVals[k];
+      const yk = yVals[k];
+      S0 += w;
+      S1 += w * xk;
+      S2 += w * xk * xk;
+      T0 += w * yk;
+      T1 += w * xk * yk;
+    }
+    const den = S0 * S2 - S1 * S1;
+    if (Math.abs(den) < 1e-15) {
+      result[i] = signal[i];
+      continue;
+    }
+    const aCoeff = (S2 * T0 - S1 * T1) / den;
+    const bCoeff = (S0 * T1 - S1 * T0) / den;
+    result[i] = aCoeff + bCoeff * i;
+  }
+
+  return result;
+}
+
+// ============================================================
+// Filter Dispatcher
+// ============================================================
+const FILTER_REGISTRY = {
+  sma: smaFilter, ema: emaFilter, wma: wmaFilter, alma: almaFilter,
+  savgol: savgolFilter, kalman: kalmanFilter, butterworth: butterworthFilter,
+  gaussian: gaussianFilter, median: medianFilter, lowess: lowessFilter
+};
+
+// ============================================================
+// Metrics Computation
+// ============================================================
+function computeMetrics(clean, filtered, noisy) {
+  const n = Math.min(clean.length, filtered.length);
+  let sumSE = 0, sumAE = 0, count = 0;
+  for (let i = 0; i < n; i++) {
+    const cf = clean[i];
+    const ff = filtered[i];
+    if (cf == null || ff == null || !isFinite(cf) || !isFinite(ff)) continue;
+    const diff = cf - ff;
+    sumSE += diff * diff;
+    sumAE += Math.abs(diff);
+    count++;
+  }
+  if (count < 2) return { mse: NaN, rmse: NaN, mae: NaN, snrImp: NaN, lag: 0, roughness: NaN };
+
+  const mse = sumSE / count;
+  const rmse = Math.sqrt(mse);
+  const mae = sumAE / count;
+
+  // SNR improvement: 10*log10(var(noisy-clean) / var(filtered-clean))
+  let nDiffSum = 0, nDiffSumSq = 0, nc = 0;
+  for (let i = 0; i < n; i++) {
+    const ci = clean[i], ni = noisy[i];
+    if (ci == null || ni == null || !isFinite(ci) || !isFinite(ni)) continue;
+    nDiffSum += ni - ci;
+    nDiffSumSq += (ni - ci) * (ni - ci);
+    nc++;
+  }
+  let fDiffSum = 0, fDiffSumSq = 0, fc = 0;
+  for (let i = 0; i < n; i++) {
+    const ci = clean[i], fi = filtered[i];
+    if (ci == null || fi == null || !isFinite(ci) || !isFinite(fi)) continue;
+    fDiffSum += fi - ci;
+    fDiffSumSq += (fi - ci) * (fi - ci);
+    fc++;
+  }
+  const nVar = (nc > 1) ? (nDiffSumSq - nDiffSum * nDiffSum / nc) / (nc - 1) : 0;
+  const fVar = (fc > 1) ? (fDiffSumSq - fDiffSum * fDiffSum / fc) / (fc - 1) : 0;
+  const snrImp = (nVar > 1e-15 && fVar > 1e-15) ? 10 * Math.log10(nVar / fVar) : NaN;
+
+  // Lag: cross-correlate (noisy-clean) vs (filtered-clean)
+  const maxLag = Math.min(50, Math.floor(n / 4));
+  let bestLag = 0, bestCorr = -Infinity;
+  const noiseOnly = new Array(n);
+  const filterOnly = new Array(n);
+  for (let i = 0; i < n; i++) {
+    noiseOnly[i] = isFinite(noisy[i]) && isFinite(clean[i]) ? noisy[i] - clean[i] : 0;
+    filterOnly[i] = isFinite(filtered[i]) && isFinite(clean[i]) ? filtered[i] - clean[i] : 0;
+  }
+  for (let lag = -maxLag; lag <= maxLag; lag++) {
+    let corr = 0, cc = 0;
+    for (let i = 0; i < n; i++) {
+      const j = i + lag;
+      if (j < 0 || j >= n) continue;
+      corr += noiseOnly[i] * filterOnly[j];
+      cc++;
+    }
+    if (cc > 0 && corr > bestCorr) { bestCorr = corr; bestLag = lag; }
+  }
+
+  // Roughness: sum of squared second differences (ignore NaN)
+  let rough = 0, rc = 0;
+  for (let i = 1; i < n - 1; i++) {
+    const f0 = filtered[i - 1], f1 = filtered[i], f2 = filtered[i + 1];
+    if (!isFinite(f0) || !isFinite(f1) || !isFinite(f2)) continue;
+    const d2 = f2 - 2 * f1 + f0;
+    rough += d2 * d2;
+    rc++;
+  }
+
+  return { mse, rmse, mae, snrImp, lag: bestLag, roughness: rc > 0 ? rough / rc : NaN };
+}
+
+// ============================================================
+// Application State & Plotting
+// ============================================================
+let state = {
+  datasetId: null,
+  version: 'long',
+  filterType: 'savgol',
+  params: {},
+  color: '#00d4aa',
+  showNoisy: true,
+  showClean: true,
+  showFiltered: true
+};
+
+function getDataset(id) {
+  return datasets.find(d => d.id === id) || datasets[0];
+}
+
+function getCurrentVersion() {
+  const ds = getDataset(state.datasetId);
+  if (!ds) return null;
+  const ver = ds.versions[state.version] || ds.versions['short'];
+  return ver;
+}
+
+function readFilterParams() {
+  const spec = FILTER_PARAMS[state.filterType];
+  if (!spec) return {};
+  const params = {};
+  for (const [key, cfg] of Object.entries(spec)) {
+    const el = document.getElementById('param-' + key);
+    if (el) params[key] = cfg.type === 'int' ? Number(el.value) : parseFloat(el.value);
+  }
+  state.params = params;
+  return params;
+}
+
+function buildParamControls(filterType) {
+  const container = document.getElementById('param-container');
+  const spec = FILTER_PARAMS[filterType];
+  if (!spec) { container.innerHTML = ''; return; }
+
+  const ds = getDataset(state.datasetId);
+  let inner = '';
+  for (const [key, cfg] of Object.entries(spec)) {
+    let defaultValue = cfg.default;
+    if (ds && ds.defaultFilter === filterType && ds.defaultParams && ds.defaultParams[key] !== undefined) {
+      defaultValue = ds.defaultParams[key];
+    }
+    const val = (state.params && state.params[key] !== undefined) ? state.params[key] : defaultValue;
+    inner += `<div class="param-row">
+      <div class="param-header">
+        <span class="param-name">${cfg.label}</span>
+        <span class="param-value" id="pval-${key}">${val}</span>
+      </div>
+      <input type="range" id="param-${key}"
+        min="${cfg.min}" max="${cfg.max}" step="${cfg.step}" value="${val}">
+    </div>`;
+  }
+  container.innerHTML = inner;
+
+  // Attach events
+  for (const key of Object.keys(spec)) {
+    const slider = document.getElementById('param-' + key);
+    if (!slider) continue;
+    slider.addEventListener('input', function() {
+      const cfg2 = spec[key];
+      const value = cfg2.type === 'int' ? Number(this.value) : parseFloat(this.value);
+      document.getElementById('pval-' + key).textContent = value;
+      debouncedApply();
+    });
+  }
+}
+
+// ============================================================
+// Debounce
+// ============================================================
+let debounceTimer = null;
+function debouncedApply() {
+  if (debounceTimer) clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(() => {
+    applyFilterAndUpdate();
+  }, 150);
+}
+
+// ============================================================
+// Apply Filter & Update Plots
+// ============================================================
+function applyFilterAndUpdate() {
+  const ver = getCurrentVersion();
+  if (!ver) return;
+  currentData = ver;
+
+  const noisy = ver.noisy;
+  const clean = ver.clean;
+  const t = ver.t;
+
+  readFilterParams();
+  const filterFn = FILTER_REGISTRY[state.filterType];
+  if (!filterFn) return;
+
+  let filtered;
+  try {
+    filtered = filterFn(noisy.slice(), state.params);
+  } catch(e) {
+    showWarning('滤波执行出错: ' + e.message);
+    filtered = noisy.map(() => NaN);
+  }
+
+  // Check for NaN/Inf warnings
+  let nanCount = 0;
+  for (let i = 0; i < filtered.length; i++) {
+    if (!isFinite(filtered[i])) nanCount++;
+  }
+  const totalSignificant = filtered.length;
+  if (nanCount > totalSignificant * 0.5) {
+    showWarning('警告: 滤波结果中超过 50% 的值无效 (NaN/Inf)，请调整参数');
+  } else if (nanCount > 0) {
+    showWarning(`提示: 滤波结果中 ${nanCount}/${totalSignificant} 个值为无效 (NaN/Inf) — 边缘效应正常`);
+  } else {
+    hideWarning();
+  }
+
+  // Compute metrics
+  const metrics = computeMetrics(clean, filtered, noisy);
+
+  // Update metrics display
+  document.getElementById('mse-val').textContent = isFinite(metrics.mse) ? metrics.mse.toExponential(4) : '--';
+  document.getElementById('rmse-val').textContent = isFinite(metrics.rmse) ? metrics.rmse.toFixed(5) : '--';
+  document.getElementById('mae-val').textContent = isFinite(metrics.mae) ? metrics.mae.toFixed(5) : '--';
+  const snrEl = document.getElementById('snr-val');
+  if (isFinite(metrics.snrImp)) {
+    snrEl.textContent = metrics.snrImp.toFixed(2);
+    snrEl.className = 'metric-value ' + (metrics.snrImp > 5 ? 'good' : metrics.snrImp < -3 ? 'bad' : '');
+  } else { snrEl.textContent = '--'; snrEl.className = 'metric-value'; }
+  document.getElementById('lag-val').textContent = isFinite(metrics.lag) ? metrics.lag + '' : '--';
+  document.getElementById('rough-val').textContent = isFinite(metrics.roughness) ? metrics.roughness.toExponential(4) : '--';
+
+  // Main plot
+  const color = state.color;
+  const traces = [];
+  if (state.showNoisy) {
+    traces.push({
+      x: t, y: noisy, type: 'scatter', mode: 'lines',
+      name: '噪声信号', line: { color: '#888', width: 1 }
+    });
+  }
+  if (state.showClean) {
+    traces.push({
+      x: t, y: clean, type: 'scatter', mode: 'lines',
+      name: '干净信号', line: { color: '#fff', width: 1.5, dash: 'dash' }
+    });
+  }
+  if (state.showFiltered) {
+    traces.push({
+      x: t, y: filtered, type: 'scatter', mode: 'lines',
+      name: '滤波结果', line: { color: color, width: 2 }
+    });
+  }
+
+  const layout = {
+    title: { text: '时域波形对比', font: { color: '#e6edf3', size: 13 } },
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    font: { color: '#8b949e', family: '-apple-system,BlinkMacSystemFont,sans-serif' },
+    xaxis: { title: '时间 (s)', gridcolor: '#21262d', zerolinecolor: '#30363d', color: '#8b949e' },
+    yaxis: { title: '幅值', gridcolor: '#21262d', zerolinecolor: '#30363d', color: '#8b949e' },
+    legend: { font: { color: '#e6edf3', size: 11 }, bgcolor: 'rgba(0,0,0,0)' },
+    margin: { l: 50, r: 20, t: 40, b: 50 },
+    hovermode: 'x unified'
+  };
+  const config = { responsive: true, displayModeBar: false };
+
+  Plotly.newPlot('main-plot', traces, layout, config);
+
+  // Residual plot
+  const residual = new Array(t.length);
+  for (let i = 0; i < t.length; i++) {
+    residual[i] = (isFinite(filtered[i]) && isFinite(clean[i])) ? filtered[i] - clean[i] : NaN;
+  }
+  const resTrace = [{
+    x: t, y: residual, type: 'scatter', mode: 'lines',
+    name: '残差 (滤波 - 干净)',
+    line: { color: color, width: 1 }
+  }];
+  const resLayout = {
+    title: { text: '残差分析', font: { color: '#e6edf3', size: 12 } },
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    font: { color: '#8b949e', family: '-apple-system,BlinkMacSystemFont,sans-serif' },
+    xaxis: { title: '时间 (s)', gridcolor: '#21262d', zerolinecolor: '#30363d', color: '#8b949e' },
+    yaxis: { title: '残差', gridcolor: '#21262d', zerolinecolor: '#30363d', color: '#8b949e' },
+    margin: { l: 45, r: 15, t: 30, b: 40 },
+    showlegend: false,
+    hovermode: 'x unified'
+  };
+  Plotly.newPlot('residual-plot', resTrace, resLayout, config);
+}
+
+// ============================================================
+// Warning Banner
+// ============================================================
+let warningTimer = null;
+function showWarning(msg) {
+  const banner = document.getElementById('warning-banner');
+  banner.textContent = msg;
+  banner.classList.add('show');
+  if (warningTimer) clearTimeout(warningTimer);
+  const autoHideMs = msg.includes('提示:') ? 4000 : 10000;
+  warningTimer = setTimeout(() => {
+    hideWarning();
+    warningTimer = null;
+  }, autoHideMs);
+}
+function hideWarning() {
+  if (warningTimer) { clearTimeout(warningTimer); warningTimer = null; }
+  document.getElementById('warning-banner').classList.remove('show');
+}
+
+// ============================================================
+// Event Handlers
+// ============================================================
+function onDatasetChange() {
+  const sel = document.getElementById('dataset-select');
+  state.datasetId = sel.value;
+  const ds = getDataset(state.datasetId);
+  if (!ds) return;
+
+  // Show dataset description
+  document.getElementById('dataset-desc').textContent = ds.description || '';
+
+  // Set default filter
+  const defaultFilter = ds.defaultFilter || 'savgol';
+  document.getElementById('filter-select').value = defaultFilter;
+  state.filterType = defaultFilter;
+  state.params = {};
+
+  buildParamControls(defaultFilter);
+  applyFilterAndUpdate();
+}
+
+function onVersionChange(version) {
+  state.version = version;
+  document.querySelectorAll('.version-opt').forEach(el => {
+    el.classList.toggle('active', el.dataset.version === version);
+  });
+  applyFilterAndUpdate();
+}
+
+function onFilterTypeChange() {
+  const sel = document.getElementById('filter-select');
+  state.filterType = sel.value;
+  state.params = {};
+  buildParamControls(state.filterType);
+  applyFilterAndUpdate();
+}
+
+function onColorChange() {
+  state.color = document.getElementById('color-picker').value;
+  applyFilterAndUpdate();
+}
+
+// ============================================================
+// Initialization
+// ============================================================
+document.addEventListener('DOMContentLoaded', function() {
+  // Init version toggle
+  document.querySelectorAll('.version-opt').forEach(el => {
+    el.addEventListener('click', function() {
+      onVersionChange(this.dataset.version);
+    });
+  });
+
+  // Dataset change
+  document.getElementById('dataset-select').addEventListener('change', onDatasetChange);
+
+  // Filter change
+  document.getElementById('filter-select').addEventListener('change', onFilterTypeChange);
+
+  // Color picker
+  document.getElementById('color-picker').addEventListener('input', onColorChange);
+
+  // Show/hide toggles
+  document.getElementById('show-noisy').addEventListener('change', function() {
+    state.showNoisy = this.checked;
+    applyFilterAndUpdate();
+  });
+  document.getElementById('show-clean').addEventListener('change', function() {
+    state.showClean = this.checked;
+    applyFilterAndUpdate();
+  });
+  document.getElementById('show-filtered').addEventListener('change', function() {
+    state.showFiltered = this.checked;
+    applyFilterAndUpdate();
+  });
+
+  // Apply button
+  document.getElementById('apply-btn').addEventListener('click', function() {
+    applyFilterAndUpdate();
+  });
+
+  // Load data
+  loadData();
+});
+
+console.log('滤波算法交互式对比分析工具已加载');
+</script>
+</body>
+</html>

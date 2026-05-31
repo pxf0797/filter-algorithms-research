@@ -1,0 +1,450 @@
+"""
+Streamlit 滤波算法交互式对比分析工具
+=====================================
+基于 scipy/numpy 的信号滤波器对比可视化平台。
+支持 5 种测试信号 × 10 种滤波器算法，提供时域波形、残差分析、多项质量指标。
+"""
+
+import streamlit as st
+import numpy as np
+from scipy.signal import savgol_filter, butter, sosfiltfilt, medfilt
+from scipy.ndimage import gaussian_filter1d
+import plotly.graph_objects as go
+from pandas import DataFrame
+from statsmodels.nonparametric.smoothers_lowess import lowess
+
+# ---------------------------------------------------------------------------
+# Page config (must be the first Streamlit command)
+# ---------------------------------------------------------------------------
+st.set_page_config(
+    page_title="滤波算法对比",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+SAMPLE_RATE = 100  # Hz, fixed across all signals
+
+
+# ---------------------------------------------------------------------------
+# Signal generation (cached)
+# ---------------------------------------------------------------------------
+@st.cache_data
+def generate_signals(n_points: int = 1000, sample_rate: int = 100, seed: int = 42):
+    """生成 5 种测试信号，返回 {signal_id: {...}} 字典。"""
+    rng = np.random.default_rng(seed)
+    t = np.arange(n_points) / sample_rate
+    datasets = {}
+
+    # 1) 正弦波 + AWGN
+    clean = np.sin(2 * np.pi * 5 * t)
+    noisy = clean + rng.normal(0, 0.25, n_points)
+    datasets["sinusoid"] = {
+        "t": t, "clean": clean, "noisy": noisy,
+        "name": "正弦波 + 高斯噪声",
+        "desc": "5Hz 正弦信号，SNR ≈ 3dB",
+    }
+
+    # 2) 阶跃信号
+    clean = np.zeros(n_points)
+    clean[n_points // 2:] = 1.0
+    noisy = clean + rng.normal(0, 0.15, n_points)
+    datasets["step"] = {
+        "t": t, "clean": clean, "noisy": noisy,
+        "name": "阶跃信号",
+        "desc": "中点 0→1 跳变，测试瞬态响应",
+    }
+
+    # 3) 趋势 + 季节性 + AR(1) 噪声
+    clean = 0.002 * np.arange(n_points) + 0.3 * np.sin(2 * np.pi * 3 * t)
+    ar_noise = np.zeros(n_points)
+    for i in range(1, n_points):
+        ar_noise[i] = 0.7 * ar_noise[i - 1] + rng.normal(0, 0.1)
+    noisy = clean + ar_noise
+    datasets["trend_seasonal"] = {
+        "t": t, "clean": clean, "noisy": noisy,
+        "name": "趋势 + 季节性",
+        "desc": "线性趋势 + 3Hz 周期 + AR(1) 噪声",
+    }
+
+    # 4) 脉冲信号（高斯脉冲在 t=1s）
+    clean = 0.2 * np.sin(2 * np.pi * 2 * t)
+    pulse = 2.0 * np.exp(-0.5 * ((t - 1.0) / 0.02) ** 2)
+    clean = clean + pulse
+    noisy = clean + rng.normal(0, 0.1, n_points)
+    datasets["impulse"] = {
+        "t": t, "clean": clean, "noisy": noisy,
+        "name": "脉冲信号",
+        "desc": "t=1s 高斯脉冲 + 正弦基线，测试峰值保持",
+    }
+
+    # 5) Chirp 扫频 1→20Hz
+    freq = np.linspace(1, 20, n_points)
+    phase = 2 * np.pi * np.cumsum(freq) / sample_rate
+    clean = np.sin(phase)
+    noisy = clean + rng.normal(0, 0.02, n_points)
+    datasets["chirp"] = {
+        "t": t, "clean": clean, "noisy": noisy,
+        "name": "Chirp 扫频",
+        "desc": "1→20Hz 线性扫频，测试频率响应",
+    }
+
+    return datasets
+
+
+# ---------------------------------------------------------------------------
+# Filter implementations (scipy / numpy only)
+# All accept (signal, t, ...) signature so they can be called uniformly as
+#   filter_func(noisy, t, **param_values)
+# ---------------------------------------------------------------------------
+
+def apply_sma(signal, t, window):
+    """简单移动平均 (Simple Moving Average)."""
+    if window % 2 == 0:
+        window += 1
+    kernel = np.ones(window) / window
+    return np.convolve(signal, kernel, mode="same")
+
+
+def apply_ema(signal, t, span):
+    """指数移动平均 (Exponential Moving Average) via pandas ewm."""
+    return DataFrame({"v": signal}).ewm(span=span, adjust=False).mean().values.flatten()
+
+
+def apply_wma(signal, t, window):
+    """加权移动平均 (Weighted Moving Average)."""
+    if window % 2 == 0:
+        window += 1
+    weights = np.arange(1, window + 1)
+    weights = weights / weights.sum()
+    return np.convolve(signal, weights, mode="same")
+
+
+def apply_alma(signal, t, window, offset, sigma):
+    """Arnaud Legoux 移动平均 (ALMA)."""
+    if window % 2 == 0:
+        window += 1
+    m = (window - 1) * (1 - offset)          # center position
+    s = (window - 1) / sigma if sigma > 0 else 1.0
+    i = np.arange(window)
+    weights = np.exp(-0.5 * ((i - m) / s) ** 2)
+    weights /= weights.sum()
+    return np.convolve(signal, weights, mode="same")
+
+
+def apply_savgol(signal, t, window, order):
+    """Savitzky-Golay 滤波 (多项式平滑)."""
+    if window % 2 == 0:
+        window += 1
+    if order >= window:
+        order = window - 1
+    return savgol_filter(signal, window, order)
+
+
+def apply_kalman(signal, t, Q, R):
+    """1D 恒定速度卡尔曼滤波."""
+    dt = t[1] - t[0]
+    n = len(signal)
+    x = np.array([signal[0], 0.0])     # [position, velocity]
+    P = np.eye(2) * 0.1
+    F = np.array([[1, dt], [0, 1]])     # state transition
+    result = np.zeros(n)
+    for i in range(n):
+        # Predict
+        x = F @ x
+        P = F @ P @ F.T + np.array([
+            [Q * dt ** 4 / 4, Q * dt ** 3 / 2],
+            [Q * dt ** 3 / 2, Q * dt ** 2],
+        ])
+        # Update (scalar observation)
+        y = signal[i] - x[0]             # innovation
+        S = P[0, 0] + R                  # innovation covariance
+        K = np.array([P[0, 0] / S, P[1, 0] / S])  # Kalman gain
+        x = x + K * y
+        P = P - np.outer(K, K) * S
+        result[i] = x[0]
+    return result
+
+
+def apply_butterworth(signal, t, order, cutoff):
+    """巴特沃斯低通滤波 (零相位)."""
+    nyquist = SAMPLE_RATE / 2.0
+    if cutoff >= nyquist:
+        cutoff = nyquist * 0.99
+    sos = butter(order, cutoff / nyquist, btype="low", output="sos")
+    return sosfiltfilt(sos, signal)
+
+
+def apply_gaussian(signal, t, sigma):
+    """高斯滤波 (scipy.ndimage)."""
+    return gaussian_filter1d(signal, sigma)
+
+
+def apply_median(signal, t, window):
+    """中值滤波."""
+    if window % 2 == 0:
+        window += 1
+    return medfilt(signal, kernel_size=window)
+
+
+def apply_lowess(signal, t, frac):
+    """LOWESS 局部加权回归平滑."""
+    result = lowess(signal, t, frac=frac, return_sorted=False)
+    # return_sorted=False returns a 1-D array of smoothed y-values
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Filter registry
+# Each entry: (name, function, {param_name: (label, min, max, step, default)})
+# ---------------------------------------------------------------------------
+FILTERS = {
+    "sma": {
+        "name": "简单移动平均 (SMA)",
+        "func": apply_sma,
+        "params": {"window": ("窗口大小", 3, 101, 2, 11)},
+    },
+    "ema": {
+        "name": "指数移动平均 (EMA)",
+        "func": apply_ema,
+        "params": {"span": ("跨度", 2, 100, 1, 10)},
+    },
+    "wma": {
+        "name": "加权移动平均 (WMA)",
+        "func": apply_wma,
+        "params": {"window": ("窗口大小", 3, 101, 2, 11)},
+    },
+    "alma": {
+        "name": "Arnaud Legoux 移动平均 (ALMA)",
+        "func": apply_alma,
+        "params": {
+            "window": ("窗口大小", 3, 101, 2, 21),
+            "offset": ("偏移量", 0.0, 1.0, 0.01, 0.85),
+            "sigma": ("标准差", 1.0, 20.0, 0.1, 6.0),
+        },
+    },
+    "savgol": {
+        "name": "Savitzky-Golay 滤波",
+        "func": apply_savgol,
+        "params": {
+            "window": ("窗口大小", 5, 101, 2, 21),
+            "order": ("多项式阶数", 1, 5, 1, 2),
+        },
+    },
+    "kalman": {
+        "name": "卡尔曼滤波",
+        "func": apply_kalman,
+        "params": {
+            "Q": ("过程噪声 Q", 0.001, 1.0, 0.001, 0.01),
+            "R": ("测量噪声 R", 0.01, 10.0, 0.01, 1.0),
+        },
+    },
+    "butterworth": {
+        "name": "巴特沃斯低通滤波",
+        "func": apply_butterworth,
+        "params": {
+            "order": ("滤波器阶数", 1, 8, 1, 4),
+            "cutoff": ("截止频率 (Hz)", 1.0, 45.0, 0.5, 10.0),
+        },
+    },
+    "gaussian": {
+        "name": "高斯滤波",
+        "func": apply_gaussian,
+        "params": {"sigma": ("标准差 Sigma", 0.5, 20.0, 0.1, 3.0)},
+    },
+    "median": {
+        "name": "中值滤波",
+        "func": apply_median,
+        "params": {"window": ("窗口大小", 3, 101, 2, 5)},
+    },
+    "lowess": {
+        "name": "LOWESS 平滑",
+        "func": apply_lowess,
+        "params": {"frac": ("平滑比例", 0.01, 0.5, 0.01, 0.1)},
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Metrics computation
+# ---------------------------------------------------------------------------
+def compute_metrics(clean, noisy, filtered):
+    """计算 6 项滤波质量指标."""
+    valid = ~np.isnan(filtered) & ~np.isnan(clean) & ~np.isnan(noisy)
+    c, n, f = clean[valid], noisy[valid], filtered[valid]
+    if len(c) < 3:
+        return {
+            "mse": np.nan, "rmse": np.nan, "mae": np.nan,
+            "snr_imp": np.nan, "lag": 0, "roughness": np.nan,
+        }
+
+    residuals = f - c
+    mse = float(np.mean(residuals ** 2))
+    rmse = float(np.sqrt(mse))
+    mae = float(np.mean(np.abs(residuals)))
+
+    noise_var = float(np.var(n - c))
+    err_var = float(np.var(residuals))
+    snr_imp = 10 * np.log10(noise_var / err_var) if err_var > 1e-12 else 99.0
+
+    # Lag via cross-correlation (peak of corr(filtered, noisy))
+    crosscorr = np.correlate(f - np.mean(f), n - np.mean(n), mode="full")
+    lag = int(np.argmax(crosscorr) - (len(f) - 1))
+
+    # Roughness: sum of squared second differences
+    roughness = float(np.sum(np.diff(f, 2) ** 2)) if len(f) > 2 else 0.0
+
+    return {
+        "mse": mse, "rmse": rmse, "mae": mae,
+        "snr_imp": snr_imp, "lag": lag, "roughness": roughness,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Helper: render a slider for each filter parameter
+# ---------------------------------------------------------------------------
+def _render_param_slider(label, pmin, pmax, pstep, pdefault):
+    """Render an st.slider with appropriate numeric format."""
+    if isinstance(pstep, int):
+        return st.sidebar.slider(label, pmin, pmax, pdefault, pstep)
+    fmt = "%.3f" if pstep < 0.01 else "%.2f"
+    return st.sidebar.slider(label, pmin, pmax, pdefault, pstep, format=fmt)
+
+
+# ---------------------------------------------------------------------------
+# Main app
+# ---------------------------------------------------------------------------
+def main():
+    # ======================== SIDEBAR ========================
+    st.sidebar.title("滤波算法交互式对比分析工具")
+
+    # Dataset length
+    n_points = st.sidebar.radio("数据长度", [200, 1000], horizontal=True)
+    datasets = generate_signals(n_points=n_points)
+
+    # Dataset selector
+    dataset_id = st.sidebar.selectbox(
+        "数据集",
+        options=list(datasets.keys()),
+        format_func=lambda x: datasets[x]["name"],
+    )
+
+    # Filter selector
+    filter_id = st.sidebar.selectbox(
+        "滤波器",
+        options=list(FILTERS.keys()),
+        format_func=lambda x: FILTERS[x]["name"],
+    )
+
+    # Dynamic parameter sliders
+    selected_filter = FILTERS[filter_id]
+    param_values = {}
+    for pname, spec in selected_filter["params"].items():
+        param_values[pname] = _render_param_slider(*spec)
+
+    # Display toggles
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("#### 显示选项")
+    show_noisy = st.sidebar.checkbox("含噪信号", value=True)
+    show_clean = st.sidebar.checkbox("干净信号", value=True)
+    show_filtered = st.sidebar.checkbox("滤波输出", value=True)
+    filter_color = st.sidebar.color_picker("滤波输出颜色", "#00d4aa")
+
+    # Stop button
+    st.sidebar.markdown("---")
+    if st.sidebar.button("🛑 停止服务", type="primary", use_container_width=True):
+        st.warning("服务已停止，可关闭浏览器标签页。")
+        st.stop()
+
+    # ======================== MAIN AREA ========================
+    data = datasets[dataset_id]
+    t = data["t"]
+    clean = data["clean"]
+    noisy = data["noisy"]
+
+    st.header(f"数据集: {data['name']}")
+    st.caption(data["desc"])
+
+    # ---- Apply filter ----
+    try:
+        filtered = selected_filter["func"](noisy, t, **param_values)
+        # Ensure 1-D output
+        filtered = np.asarray(filtered, dtype=float).ravel()
+    except Exception as exc:
+        st.error(f"滤波计算出错: {exc}")
+        filtered = np.full_like(noisy, np.nan)
+
+    if np.all(np.isnan(filtered)):
+        st.error("滤波输出全部为 NaN，请调整参数。")
+
+    # ---- Time-domain plot ----
+    fig_main = go.Figure()
+
+    if show_clean:
+        fig_main.add_trace(go.Scatter(
+            x=t, y=clean, mode="lines", name="干净信号",
+            line=dict(color="#ff6b6b", width=1.5),
+        ))
+    if show_noisy:
+        fig_main.add_trace(go.Scatter(
+            x=t, y=noisy, mode="lines", name="含噪信号",
+            line=dict(color="#5f6c80", width=1.0),
+        ))
+    if show_filtered and not np.all(np.isnan(filtered)):
+        fig_main.add_trace(go.Scatter(
+            x=t, y=filtered, mode="lines", name="滤波输出",
+            line=dict(color=filter_color, width=2.0),
+        ))
+
+    fig_main.update_layout(
+        template="plotly_dark",
+        height=450,
+        title="时域波形对比",
+        xaxis_title="时间 (s)",
+        yaxis_title="幅值",
+        hovermode="x unified",
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02,
+            xanchor="right", x=1,
+        ),
+    )
+    st.plotly_chart(fig_main, use_container_width=True)
+
+    # ---- Metrics row ----
+    metrics = compute_metrics(clean, noisy, filtered)
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("MSE", f"{metrics['mse']:.4f}" if not np.isnan(metrics["mse"]) else "N/A")
+    c2.metric("RMSE", f"{metrics['rmse']:.4f}" if not np.isnan(metrics["rmse"]) else "N/A")
+    c3.metric("MAE", f"{metrics['mae']:.4f}" if not np.isnan(metrics["mae"]) else "N/A")
+
+    snr = metrics["snr_imp"]
+    c4.metric("SNR ↑", f"{snr:.1f} dB" if not np.isnan(snr) else "N/A")
+
+    c5.metric("延迟", f"{metrics['lag']:.0f} 点")
+    c6.metric("平滑度", f"{metrics['roughness']:.1f}")
+
+    # ---- Residual plot ----
+    if not np.all(np.isnan(filtered)):
+        residuals = filtered - clean
+        fig_res = go.Figure()
+        fig_res.add_trace(go.Scatter(
+            x=t, y=residuals, mode="lines",
+            name="残差 (滤波 - 干净)",
+            line=dict(color="#ffa502", width=1.5),
+        ))
+        fig_res.add_hline(
+            y=0, line_dash="dash", line_color="gray", opacity=0.5,
+        )
+        fig_res.update_layout(
+            template="plotly_dark",
+            height=200,
+            title="残差分析",
+            xaxis_title="时间 (s)",
+            yaxis_title="残差",
+            hovermode="x unified",
+        )
+        st.plotly_chart(fig_res, use_container_width=True)
+
+
+if __name__ == "__main__":
+    main()
