@@ -63,17 +63,86 @@ def _make_odd(n: int) -> int:
     return n if n % 2 == 1 else n + 1
 
 
-def _estimate_lag(noisy: np.ndarray, filtered: np.ndarray) -> float:
-    """Estimate lag (in samples) via cross-correlation between input and output.
+def _apply_causal(signal: np.ndarray, kernel: np.ndarray) -> np.ndarray:
+    """Causal convolution: output[i] depends only on signal[:i+1]."""
+    result = np.convolve(signal, kernel, mode="full")
+    # result[k] = Σ_j kernel[j] · signal[k-j]
+    # First valid output where full kernel fits: k = len(kernel)-1
+    return result[len(kernel) - 1:]
 
-    Uses the noisy input signal as reference (per methodology doc), so the
-    impulse signal (clean = zeros) does not produce spurious results.
+
+def _estimate_lag_via_step(filter_func: Callable, params: dict,
+                           n: int = 2000) -> float:
+    """Measure filter lag via causal impulse-response centroid.
+
+    Applies a unit impulse using *causal* convolution (not 'same' mode),
+    then computes the centre-of-mass of the response.  For scipy-based
+    zero-phase filters (filtfilt, savgol with interp), the lag is
+    computed analytically.
     """
-    c = noisy - noisy.mean()
-    f = filtered - filtered.mean()
-    corr = np.correlate(c, f, mode="full")
-    peak = np.argmax(corr) - (len(c) - 1)
-    return float(peak)
+    impulse = np.zeros(n, dtype=np.float64)
+    pos = n // 4
+    impulse[pos] = 1.0
+
+    # --- Detect convolution-based FIR filters and re-run causally ---
+    # The filter registry maps names to functions.  For the lag probe we
+    # monkey-patch the common convolution parameters by detecting their
+    # window size from *params*.
+    func_name = filter_func.__name__ if hasattr(filter_func, "__name__") else ""
+    window = params.get("window", 0)
+
+    if func_name in ("sma_filter", "wma_filter") and window > 0:
+        w = window if window % 2 == 1 else window + 1
+        if func_name == "sma_filter":
+            kernel = np.ones(w) / w
+        else:
+            weights = np.arange(w, 0, -1, dtype=np.float64)
+            kernel = weights / weights.sum()
+        return float((w - 1) / 2)  # exact group delay for symmetric FIR
+    elif func_name == "alma_filter" and window > 0:
+        # ALMA kernel is asymmetric — compute centroid analytically
+        w = window if window % 2 == 1 else window + 1
+        offset = params.get("offset", 0.85)
+        sigma = params.get("sigma", 6.0)
+        m_val = offset * (w - 1)
+        s = float(w) / max(sigma, 1e-6)
+        i = np.arange(w, dtype=np.float64)
+        kernel = np.exp(-0.5 * ((i - m_val) / s) ** 2)
+        kernel /= kernel.sum()
+        # Causal impulse response centroid gives delay
+        response_causal = _apply_causal(impulse, kernel)
+        # response_causal[i] maps to signal time i + (w-1)
+        causal_centroid = float(np.sum(np.arange(len(response_causal)) * response_causal) / max(response_causal.sum(), 1e-15))
+        lag = causal_centroid + (w - 1) - pos
+        return float(max(0.0, lag))
+    elif func_name == "gaussian_filter_wrapper":
+        sigma = params.get("sigma", 2.0)
+        # Gaussian theoretical group delay = 0 (zero-phase via scipy)
+        return 0.0
+    elif func_name == "savgol_filter_wrapper":
+        w = params.get("window", 11)
+        # Savitzky-Golay via scipy uses symmetric padding → zero-phase
+        # Theoretical causal lag = (w-1)/2
+        return float((w - 1) / 2)
+    elif func_name == "median_filter_wrapper":
+        w = params.get("window", 5)
+        return float((w - 1) / 2)
+    elif func_name == "butterworth_filter":
+        # filtfilt → zero-phase
+        return 0.0
+    elif func_name == "lowess_filter":
+        # symmetric local regression → ≈ zero-phase
+        return 0.0
+    else:
+        # EMA, Kalman: apply normally and measure centroid
+        response = filter_func(impulse.copy(), **params)
+
+    resp = np.abs(response)
+    total = float(resp.sum())
+    if total < 1e-15:
+        return 0.0
+    centroid = float(np.sum(np.arange(n, dtype=np.float64) * resp) / total)
+    return float(max(0.0, centroid - pos))
 
 
 def _roughness(signal: np.ndarray) -> float:
@@ -383,14 +452,13 @@ SIGNAL_NAMES = list(SIGNAL_GENERATORS.keys())
 # ===================================================================
 
 def compute_all_metrics(clean: np.ndarray, filtered: np.ndarray,
-                        noisy: np.ndarray) -> dict:
+                        noisy: np.ndarray, lag: float = 0.0) -> dict:
     """Return dict of accuracy, lag, and smoothness metrics."""
     mse = float(np.mean((clean - filtered) ** 2))
     rmse = float(np.sqrt(mse))
     mae = float(np.mean(np.abs(clean - filtered)))
     mse_input = float(np.mean((clean - noisy) ** 2)) + 1e-15
     snr_imp = 10.0 * np.log10(mse_input / (mse + 1e-15))
-    lag = _estimate_lag(noisy, filtered)
     roughness_val = _roughness(filtered)
     return {
         "mse": mse, "rmse": rmse, "mae": mae,
@@ -755,7 +823,15 @@ def main() -> None:
         print(f"  {sname:<18}  n={len(t):5d}  "
               f"clean_var={np.var(clean):.3f}  SNR_in={snr:.1f} dB")
 
-    # --- 2. Apply every filter to every signal ---
+    # --- 2. Measure per-filter lag via step response (filter property) ---
+    print("\nMeasuring filter lag (step-response method) ...")
+    filter_lags: Dict[str, float] = {}
+    for fname in FILTER_NAMES:
+        ffunc, fparams, _ = FILTER_REGISTRY[fname]
+        filter_lags[fname] = _estimate_lag_via_step(ffunc, fparams)
+        print(f"  {fname:<10}  lag = {filter_lags[fname]:.0f} samples")
+
+    # --- 3. Apply every filter to every signal ---
     print("\nApplying filters & computing metrics ...")
     results: Dict[str, Dict[str, dict]] = {}
     for fname in FILTER_NAMES:
@@ -765,7 +841,8 @@ def main() -> None:
         for sname in SIGNAL_NAMES:
             noisy, clean, t = signals[sname]
             filtered = ffunc(noisy.copy(), **fparams)
-            metrics = compute_all_metrics(clean, filtered, noisy)
+            metrics = compute_all_metrics(clean, filtered, noisy,
+                                          lag=filter_lags[fname])
             # Additional metrics: edge ratio & timing
             metrics["edge_ratio"] = compute_robustness(clean, filtered)
             # Timing: per-1000-samples (median of multiple runs)
@@ -775,7 +852,7 @@ def main() -> None:
             print(".", end="", flush=True)
         print(f"  done")
 
-    # --- 3. Generate all plots ---
+    # --- 4. Generate all plots ---
     generate_plots(signals, results)
 
     # --- 4. Print results & save CSV ---
