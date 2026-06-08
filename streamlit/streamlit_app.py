@@ -506,6 +506,24 @@ def main():
     for pname, spec in selected_filter["params"].items():
         param_values[pname] = _render_param_slider(*spec)
 
+    # ---- Second filter (optional comparison) ----
+    st.sidebar.markdown("---")
+    dual_mode = st.sidebar.checkbox("对比双滤波器", value=False)
+    if dual_mode:
+        filter_id2 = st.sidebar.selectbox(
+            "滤波器 2",
+            options=list(FILTERS.keys()),
+            format_func=lambda x: FILTERS[x]["name"],
+            key="filter2",
+        )
+        selected_filter2 = FILTERS[filter_id2]
+        param_values2 = {}
+        for pname, spec in selected_filter2["params"].items():
+            param_values2[pname] = _render_param_slider(*spec)
+    else:
+        selected_filter2 = None
+        param_values2 = {}
+
     # Display toggles
     st.sidebar.markdown("---")
     st.sidebar.markdown("#### 显示选项")
@@ -513,6 +531,10 @@ def main():
     show_clean = st.sidebar.checkbox("干净信号", value=True)
     show_filtered = st.sidebar.checkbox("滤波输出", value=True)
     filter_color = st.sidebar.color_picker("滤波输出颜色", "#00d4aa")
+    if dual_mode:
+        filter_color2 = st.sidebar.color_picker("滤波输出 2 颜色", "#ff6b6b")
+    else:
+        filter_color2 = "#ff6b6b"
 
     # ======================== MAIN AREA ========================
     data = datasets[dataset_id]
@@ -534,6 +556,17 @@ def main():
 
     if np.all(np.isnan(filtered)):
         st.error("滤波输出全部为 NaN，请调整参数。")
+
+    # ---- Apply second filter (if dual mode) ----
+    if dual_mode and selected_filter2:
+        try:
+            filtered2 = selected_filter2["func"](noisy, t, **param_values2)
+            filtered2 = np.asarray(filtered2, dtype=float).ravel()
+        except Exception as exc:
+            st.error(f"滤波 2 计算出错: {exc}")
+            filtered2 = np.full_like(noisy, np.nan)
+    else:
+        filtered2 = None
 
     # ---- Unified subplots figure (4 rows, shared x-axis, crosshair) ----
     rows = 4
@@ -561,8 +594,13 @@ def main():
             x=t, y=filtered, mode="lines", name="滤波输出",
             line=dict(color=filter_color, width=2.0),
         ), row=1, col=1)
+    if dual_mode and filtered2 is not None and not np.all(np.isnan(filtered2)):
+        fig.add_trace(go.Scatter(
+            x=t, y=filtered2, mode="lines", name="滤波输出 2",
+            line=dict(color=filter_color2, width=2.0),
+        ), row=1, col=1)
 
-    # Row 2: residuals
+    # Row 2: residuals (from filter 1 only)
     if not np.all(np.isnan(filtered)):
         residuals = filtered - clean
         fig.add_trace(go.Scatter(
