@@ -10,6 +10,7 @@ import numpy as np
 from scipy.signal import savgol_filter, butter, sosfiltfilt, medfilt
 from scipy.ndimage import gaussian_filter1d
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from pandas import DataFrame
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
@@ -349,12 +350,6 @@ def main():
     show_filtered = st.sidebar.checkbox("滤波输出", value=True)
     filter_color = st.sidebar.color_picker("滤波输出颜色", "#00d4aa")
 
-    # Stop button
-    st.sidebar.markdown("---")
-    if st.sidebar.button("🛑 停止服务", type="primary", use_container_width=True):
-        st.warning("服务已停止，可关闭浏览器标签页。")
-        st.stop()
-
     # ======================== MAIN AREA ========================
     data = datasets[dataset_id]
     t = data["t"]
@@ -397,7 +392,8 @@ def main():
 
     fig_main.update_layout(
         template="plotly_dark",
-        height=450,
+        height=280,
+        margin=dict(l=20, r=20, t=40, b=20),
         title="时域波形对比",
         xaxis_title="时间 (s)",
         yaxis_title="幅值",
@@ -437,13 +433,52 @@ def main():
         )
         fig_res.update_layout(
             template="plotly_dark",
-            height=200,
+            height=180,
+            margin=dict(l=20, r=20, t=40, b=20),
             title="残差分析",
             xaxis_title="时间 (s)",
             yaxis_title="残差",
             hovermode="x unified",
         )
         st.plotly_chart(fig_res, use_container_width=True)
+
+    # ---- Velocity & Acceleration subplots (shared x-axis) ----
+    if not np.all(np.isnan(filtered)):
+        velocity = np.gradient(filtered, t)
+        acceleration = np.gradient(velocity, t)
+
+        fig_va = make_subplots(
+            rows=2, cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.04,
+            subplot_titles=("速度 (v)", "加速度 (a)"),
+        )
+
+        fig_va.add_trace(go.Scatter(
+            x=t, y=velocity, mode="lines",
+            name="速度 v",
+            line=dict(color=filter_color, width=1.5),
+        ), row=1, col=1)
+        fig_va.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=1, col=1)
+
+        fig_va.add_trace(go.Scatter(
+            x=t, y=acceleration, mode="lines",
+            name="加速度 a",
+            line=dict(color="#ffa502", width=1.5),
+        ), row=2, col=1)
+        fig_va.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=2, col=1)
+
+        fig_va.update_layout(
+            template="plotly_dark",
+            height=360,
+            margin=dict(l=20, r=20, t=40, b=20),
+            hovermode="x unified",
+        )
+        fig_va.update_xaxes(title_text="时间 (s)", row=2, col=1)
+        fig_va.update_yaxes(title_text="速度", row=1, col=1)
+        fig_va.update_yaxes(title_text="加速度", row=2, col=1)
+
+        st.plotly_chart(fig_va, use_container_width=True)
 
 
 if __name__ == "__main__":
