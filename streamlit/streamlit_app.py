@@ -505,7 +505,7 @@ def main():
     selected_filter = FILTERS[filter_id]
     param_values = {}
     for pname, spec in selected_filter["params"].items():
-        param_values[pname] = _render_param_slider(*spec)
+        param_values[pname] = _render_param_slider(*spec, key_suffix=f"f1_{filter_id}")
 
     # ---- Second filter (optional comparison) ----
     st.sidebar.markdown("---")
@@ -520,7 +520,7 @@ def main():
         selected_filter2 = FILTERS[filter_id2]
         param_values2 = {}
         for pname, spec in selected_filter2["params"].items():
-            param_values2[pname] = _render_param_slider(*spec, key_suffix="f2")
+            param_values2[pname] = _render_param_slider(*spec, key_suffix=f"f2_{filter_id2}")
     else:
         selected_filter2 = None
         param_values2 = {}
