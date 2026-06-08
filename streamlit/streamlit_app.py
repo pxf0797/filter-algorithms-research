@@ -441,42 +441,46 @@ def main():
         )
         st.plotly_chart(fig_res, use_container_width=True)
 
-    # ---- Velocity & Acceleration (dual y-axis, unified hover) ----
+    # ---- Velocity plot ----
     if not np.all(np.isnan(filtered)):
         velocity = np.gradient(filtered, t)
         acceleration = np.gradient(velocity, t)
 
-        fig_va = go.Figure()
-
-        fig_va.add_trace(go.Scatter(
+        fig_v = go.Figure()
+        fig_v.add_trace(go.Scatter(
             x=t, y=velocity, mode="lines",
             name="速度 v",
             line=dict(color=filter_color, width=1.5),
-            yaxis="y",
         ))
-        fig_va.add_trace(go.Scatter(
+        fig_v.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+        fig_v.update_layout(
+            template="plotly_dark",
+            height=200,
+            margin=dict(l=20, r=20, t=40, b=20),
+            hovermode="x unified",
+            title="滤波输出 — 速度 (v)",
+            xaxis_title="时间 (s)",
+            yaxis_title="速度",
+        )
+        st.plotly_chart(fig_v, use_container_width=True)
+
+        fig_a = go.Figure()
+        fig_a.add_trace(go.Scatter(
             x=t, y=acceleration, mode="lines",
             name="加速度 a",
             line=dict(color="#ffa502", width=1.5),
-            yaxis="y2",
         ))
-
-        fig_va.update_layout(
+        fig_a.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+        fig_a.update_layout(
             template="plotly_dark",
-            height=280,
+            height=200,
             margin=dict(l=20, r=20, t=40, b=20),
             hovermode="x unified",
-            title="滤波输出 — 速度 & 加速度",
-            xaxis=dict(title="时间 (s)"),
-            yaxis=dict(title=dict(text="速度"), side="left"),
-            yaxis2=dict(title=dict(text="加速度"), side="right", overlaying="y"),
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02,
-                xanchor="right", x=1,
-            ),
+            title="滤波输出 — 加速度 (a)",
+            xaxis_title="时间 (s)",
+            yaxis_title="加速度",
         )
-
-        st.plotly_chart(fig_va, use_container_width=True)
+        st.plotly_chart(fig_a, use_container_width=True)
 
 
 if __name__ == "__main__":
