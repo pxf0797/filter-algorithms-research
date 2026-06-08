@@ -10,7 +10,6 @@ import numpy as np
 from scipy.signal import savgol_filter, butter, sosfiltfilt, medfilt
 from scipy.ndimage import gaussian_filter1d
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from pandas import DataFrame
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
@@ -442,41 +441,40 @@ def main():
         )
         st.plotly_chart(fig_res, use_container_width=True)
 
-    # ---- Velocity & Acceleration subplots (shared x-axis) ----
+    # ---- Velocity & Acceleration (dual y-axis, unified hover) ----
     if not np.all(np.isnan(filtered)):
         velocity = np.gradient(filtered, t)
         acceleration = np.gradient(velocity, t)
 
-        fig_va = make_subplots(
-            rows=2, cols=1,
-            shared_xaxes=True,
-            vertical_spacing=0.04,
-            subplot_titles=("速度 (v)", "加速度 (a)"),
-        )
+        fig_va = go.Figure()
 
         fig_va.add_trace(go.Scatter(
             x=t, y=velocity, mode="lines",
             name="速度 v",
             line=dict(color=filter_color, width=1.5),
-        ), row=1, col=1)
-        fig_va.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=1, col=1)
-
+            yaxis="y",
+        ))
         fig_va.add_trace(go.Scatter(
             x=t, y=acceleration, mode="lines",
             name="加速度 a",
             line=dict(color="#ffa502", width=1.5),
-        ), row=2, col=1)
-        fig_va.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=2, col=1)
+            yaxis="y2",
+        ))
 
         fig_va.update_layout(
             template="plotly_dark",
-            height=360,
+            height=280,
             margin=dict(l=20, r=20, t=40, b=20),
             hovermode="x unified",
+            title="滤波输出 — 速度 & 加速度",
+            xaxis=dict(title="时间 (s)"),
+            yaxis=dict(title=dict(text="速度"), side="left"),
+            yaxis2=dict(title=dict(text="加速度"), side="right", overlaying="y"),
+            legend=dict(
+                orientation="h", yanchor="bottom", y=1.02,
+                xanchor="right", x=1,
+            ),
         )
-        fig_va.update_xaxes(title_text="时间 (s)", row=2, col=1)
-        fig_va.update_yaxes(title_text="速度", row=1, col=1)
-        fig_va.update_yaxes(title_text="加速度", row=2, col=1)
 
         st.plotly_chart(fig_va, use_container_width=True)
 
