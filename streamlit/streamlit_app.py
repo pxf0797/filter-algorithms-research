@@ -126,8 +126,8 @@ def apply_alma(signal, t, window, offset, sigma):
     """Arnaud Legoux 移动平均 (ALMA)."""
     if window % 2 == 0:
         window += 1
-    m = (window - 1) * (1 - offset)          # center position
-    s = (window - 1) / sigma if sigma > 0 else 1.0
+    m = (window - 1) * offset               # Gaussian center (offset=0.85 → near right = past)
+    s = window / sigma if sigma > 0 else 1.0
     i = np.arange(window)
     weights = np.exp(-0.5 * ((i - m) / s) ** 2)
     weights /= weights.sum()
