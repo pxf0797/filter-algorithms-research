@@ -5,10 +5,10 @@ Streamlit 滤波算法交互式对比分析工具
 支持 5 种测试信号 × 10 种滤波器算法，提供时域波形、残差分析、多项质量指标。
 """
 
+import json
 import uuid
 import streamlit as st
 import numpy as np
-import plotly.io as pio
 from scipy.signal import savgol_filter, butter, sosfiltfilt, medfilt
 from scipy.ndimage import gaussian_filter1d
 import plotly.graph_objects as go
@@ -322,8 +322,32 @@ def _render_plotly(fig, height=750):
     解决 Plotly 原生 hovermode="x unified" 只能聚合当前子图 trace 的限制：
     JS 在 hover 时遍历 gd.data 中全部 trace，查找 hover x 处的 y 值，
     渲染为自定义 tooltip，实现"光标位置看到所有 y 轴数据"。
+
+    关键：pio.to_json 将 numpy 数组编码为 base64 bdata，JS 端无法通过
+    trace.x[idx] 索引访问。这里手动构建 figure JSON，将 x/y 数据替换为
+    普通 JSON 数组，确保 gd.data[t].x[idx] / y[idx] 在浏览器中可用。
     """
-    figure_json = pio.to_json(fig)
+    # 构建 figure dict，手动替换 trace 中的 x/y bdata 为 Python list
+    fig_dict = {"data": [], "layout": fig.layout.to_plotly_json()}
+    for trace in fig.data:
+        tr = trace.to_plotly_json()
+        if isinstance(tr.get("x"), dict) and "bdata" in tr["x"]:
+            tr["x"] = trace.x.tolist()
+        if isinstance(tr.get("y"), dict) and "bdata" in tr["y"]:
+            tr["y"] = trace.y.tolist()
+        fig_dict["data"].append(tr)
+
+    class _NpEncoder(json.JSONEncoder):
+        def default(self, obj):
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, (np.integer,)):
+                return int(obj)
+            if isinstance(obj, (np.floating,)):
+                return float(obj)
+            return super().default(obj)
+
+    figure_json = json.dumps(fig_dict, cls=_NpEncoder)
     div_id = f"plot-{uuid.uuid4().hex[:8]}"
 
     html = """<!DOCTYPE html>
@@ -335,6 +359,9 @@ def _render_plotly(fig, height=750):
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{ width: 100%; height: 100vh; overflow: hidden; }}
 #{div_id} {{ width: 100%; height: 100%; }}
+/* 隐藏 Plotly 原生 hover 标签和 spike，由自定义 tooltip + 十字光标替代 */
+g.hovertext {{ visibility: hidden !important; }}
+.spikeline {{ visibility: hidden !important; }}
 #custom-tooltip {{
     display: none;
     position: fixed;
