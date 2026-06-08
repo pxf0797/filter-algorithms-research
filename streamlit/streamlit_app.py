@@ -317,11 +317,11 @@ def _render_param_slider(label, pmin, pmax, pstep, pdefault):
 # Plotly cross-subplot crosshair helper
 # ---------------------------------------------------------------------------
 def _render_plotly(fig, height=750):
-    """将 Plotly 图表渲染为带跨子图十字光标的 HTML 组件。
+    """将 Plotly 图表渲染为带跨子图十字光标+统一 tooltip 的 HTML 组件。
 
-    Plotly 的 showspikes 只在鼠标所在子图中绘制竖线。通过注入 JavaScript，
-    监听 plotly_hover 事件并动态更新 yref="paper" 的 shape，实现跨越全部
-    子图的同步十字光标。
+    解决 Plotly 原生 hovermode="x unified" 只能聚合当前子图 trace 的限制：
+    JS 在 hover 时遍历 gd.data 中全部 trace，查找 hover x 处的 y 值，
+    渲染为自定义 tooltip，实现"光标位置看到所有 y 轴数据"。
     """
     figure_json = pio.to_json(fig)
     div_id = f"plot-{uuid.uuid4().hex[:8]}"
@@ -335,10 +335,26 @@ def _render_plotly(fig, height=750):
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 body {{ width: 100%; height: 100vh; overflow: hidden; }}
 #{div_id} {{ width: 100%; height: 100%; }}
+#custom-tooltip {{
+    display: none;
+    position: fixed;
+    z-index: 9999;
+    background: rgba(30, 30, 44, 0.94);
+    color: #e0e0e0;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid rgba(200, 200, 200, 0.25);
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    pointer-events: none;
+    white-space: nowrap;
+}}
 </style>
 </head>
 <body>
 <div id="{div_id}"></div>
+<div id="custom-tooltip"></div>
 <script>
 (function() {{
     var figure = {figure_json};
@@ -352,6 +368,8 @@ body {{ width: 100%; height: 100vh; overflow: hidden; }}
         gd.on('plotly_hover', function(evt) {{
             if (!evt.points || evt.points.length === 0) return;
             var xv = evt.points[0].x;
+
+            // 1) Update crosshair line
             var shapes = gd.layout.shapes || [];
             var update = {{}};
             for (var i = 0; i < shapes.length; i++) {{
@@ -364,8 +382,40 @@ body {{ width: 100%; height: 100vh; overflow: hidden; }}
             if (Object.keys(update).length > 0) {{
                 Plotly.relayout(gd, update);
             }}
+
+            // 2) Find nearest x-index (all traces share the same t array)
+            var xArr = gd.data[0].x;
+            if (!xArr || xArr.length === 0) return;
+            var idx = 0;
+            for (var i = 0; i < xArr.length; i++) {{
+                if (Math.abs(xArr[i] - xv) < Math.abs(xArr[idx] - xv)) idx = i;
+            }}
+
+            // 3) Collect y-values from ALL traces across ALL subplots
+            var lines = [];
+            lines.push('<b>x = ' + xv.toFixed(4) + '</b>');
+            for (var t = 0; t < gd.data.length; t++) {{
+                var trace = gd.data[t];
+                var yArr = trace.y;
+                if (!yArr || idx >= yArr.length) continue;
+                var yVal = yArr[idx];
+                if (yVal === null || yVal === undefined || isNaN(yVal)) continue;
+                // Use trace color as indicator dot
+                var color = trace.line ? trace.line.color : '#ccc';
+                var name = trace.name || ('trace ' + t);
+                lines.push('<span style="color:' + color + '">●</span> ' + name + ': ' + yVal.toFixed(5));
+            }}
+
+            // 4) Show custom tooltip
+            var tip = document.getElementById('custom-tooltip');
+            if (tip && lines.length > 1) {{
+                tip.innerHTML = lines.join('<br>');
+                tip.style.display = 'block';
+            }}
         }});
+
         gd.on('plotly_unhover', function() {{
+            // Hide crosshair
             var shapes = gd.layout.shapes || [];
             var update = {{}};
             for (var i = 0; i < shapes.length; i++) {{
@@ -375,6 +425,18 @@ body {{ width: 100%; height: 100vh; overflow: hidden; }}
             }}
             if (Object.keys(update).length > 0) {{
                 Plotly.relayout(gd, update);
+            }}
+            // Hide custom tooltip
+            var tip = document.getElementById('custom-tooltip');
+            if (tip) tip.style.display = 'none';
+        }});
+
+        // Follow mouse
+        document.getElementById('{div_id}').addEventListener('mousemove', function(e) {{
+            var tip = document.getElementById('custom-tooltip');
+            if (tip && tip.style.display === 'block') {{
+                tip.style.left = (e.clientX + 18) + 'px';
+                tip.style.top = (e.clientY - 10) + 'px';
             }}
         }});
     }});
