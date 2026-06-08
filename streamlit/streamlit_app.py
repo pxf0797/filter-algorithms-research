@@ -5,11 +5,14 @@ Streamlit 滤波算法交互式对比分析工具
 支持 5 种测试信号 × 10 种滤波器算法，提供时域波形、残差分析、多项质量指标。
 """
 
+import uuid
 import streamlit as st
 import numpy as np
+import plotly.io as pio
 from scipy.signal import savgol_filter, butter, sosfiltfilt, medfilt
 from scipy.ndimage import gaussian_filter1d
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from pandas import DataFrame
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
@@ -311,6 +314,79 @@ def _render_param_slider(label, pmin, pmax, pstep, pdefault):
 
 
 # ---------------------------------------------------------------------------
+# Plotly cross-subplot crosshair helper
+# ---------------------------------------------------------------------------
+def _render_plotly(fig, height=750):
+    """将 Plotly 图表渲染为带跨子图十字光标的 HTML 组件。
+
+    Plotly 的 showspikes 只在鼠标所在子图中绘制竖线。通过注入 JavaScript，
+    监听 plotly_hover 事件并动态更新 yref="paper" 的 shape，实现跨越全部
+    子图的同步十字光标。
+    """
+    figure_json = pio.to_json(fig)
+    div_id = f"plot-{uuid.uuid4().hex[:8]}"
+
+    html = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+body {{ width: 100%; height: 100vh; overflow: hidden; }}
+#{div_id} {{ width: 100%; height: 100%; }}
+</style>
+</head>
+<body>
+<div id="{div_id}"></div>
+<script>
+(function() {{
+    var figure = {figure_json};
+    var config = {{
+        responsive: true,
+        displayModeBar: true,
+        displaylogo: false,
+        modeBarButtonsToRemove: ['lasso2d', 'select2d']
+    }};
+    Plotly.newPlot('{div_id}', figure.data, figure.layout, config).then(function(gd) {{
+        gd.on('plotly_hover', function(evt) {{
+            if (!evt.points || evt.points.length === 0) return;
+            var xv = evt.points[0].x;
+            var shapes = gd.layout.shapes || [];
+            var update = {{}};
+            for (var i = 0; i < shapes.length; i++) {{
+                if (shapes[i].yref === 'paper') {{
+                    update['shapes[' + i + '].x0'] = xv;
+                    update['shapes[' + i + '].x1'] = xv;
+                    update['shapes[' + i + '].visible'] = true;
+                }}
+            }}
+            if (Object.keys(update).length > 0) {{
+                Plotly.relayout(gd, update);
+            }}
+        }});
+        gd.on('plotly_unhover', function() {{
+            var shapes = gd.layout.shapes || [];
+            var update = {{}};
+            for (var i = 0; i < shapes.length; i++) {{
+                if (shapes[i].yref === 'paper') {{
+                    update['shapes[' + i + '].visible'] = false;
+                }}
+            }}
+            if (Object.keys(update).length > 0) {{
+                Plotly.relayout(gd, update);
+            }}
+        }});
+    }});
+}})();
+</script>
+</body>
+</html>""".format(div_id=div_id, figure_json=figure_json)
+
+    return st.components.v1.html(html, height=height)
+
+
+# ---------------------------------------------------------------------------
 # Main app
 # ---------------------------------------------------------------------------
 def main():
@@ -370,39 +446,83 @@ def main():
     if np.all(np.isnan(filtered)):
         st.error("滤波输出全部为 NaN，请调整参数。")
 
-    # ---- Time-domain plot ----
-    fig_main = go.Figure()
+    # ---- Unified subplots figure (4 rows, shared x-axis, crosshair) ----
+    rows = 4
+    fig = make_subplots(
+        rows=rows, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[0.35, 0.18, 0.22, 0.25],
+        subplot_titles=("时域波形对比", "残差分析", "滤波输出 — 速度 (v)", "滤波输出 — 加速度 (a)"),
+    )
 
+    # Row 1: time-domain
     if show_clean:
-        fig_main.add_trace(go.Scatter(
+        fig.add_trace(go.Scatter(
             x=t, y=clean, mode="lines", name="干净信号",
             line=dict(color="#ff6b6b", width=1.5),
-        ))
+        ), row=1, col=1)
     if show_noisy:
-        fig_main.add_trace(go.Scatter(
+        fig.add_trace(go.Scatter(
             x=t, y=noisy, mode="lines", name="含噪信号",
             line=dict(color="#5f6c80", width=1.0),
-        ))
+        ), row=1, col=1)
     if show_filtered and not np.all(np.isnan(filtered)):
-        fig_main.add_trace(go.Scatter(
+        fig.add_trace(go.Scatter(
             x=t, y=filtered, mode="lines", name="滤波输出",
             line=dict(color=filter_color, width=2.0),
-        ))
+        ), row=1, col=1)
 
-    fig_main.update_layout(
+    # Row 2: residuals
+    if not np.all(np.isnan(filtered)):
+        residuals = filtered - clean
+        fig.add_trace(go.Scatter(
+            x=t, y=residuals, mode="lines",
+            name="残差 (滤波 - 干净)",
+            line=dict(color="#ffa502", width=1.5),
+        ), row=2, col=1)
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=2, col=1)
+
+    # Row 3 & 4: velocity & acceleration
+    if not np.all(np.isnan(filtered)):
+        velocity = np.gradient(filtered, t)
+        acceleration = np.gradient(velocity, t)
+
+        fig.add_trace(go.Scatter(
+            x=t, y=velocity, mode="lines",
+            name="速度 v",
+            line=dict(color=filter_color, width=1.5),
+        ), row=3, col=1)
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=3, col=1)
+
+        fig.add_trace(go.Scatter(
+            x=t, y=acceleration, mode="lines",
+            name="加速度 a",
+            line=dict(color="#ffa502", width=1.5),
+        ), row=4, col=1)
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=4, col=1)
+
+    # Crosshair shape (initially hidden, yref=paper spans all subplots)
+    fig.add_vline(x=0, line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"),
+                   yref="paper", visible=False)
+
+    fig.update_layout(
         template="plotly_dark",
-        height=280,
+        height=700,
         margin=dict(l=20, r=20, t=40, b=20),
-        title="时域波形对比",
-        xaxis_title="时间 (s)",
-        yaxis_title="幅值",
         hovermode="x unified",
         legend=dict(
             orientation="h", yanchor="bottom", y=1.02,
             xanchor="right", x=1,
         ),
     )
-    st.plotly_chart(fig_main, use_container_width=True)
+    fig.update_xaxes(title_text="时间 (s)", row=rows, col=1)
+    fig.update_yaxes(title_text="幅值", row=1, col=1)
+    fig.update_yaxes(title_text="残差", row=2, col=1)
+    fig.update_yaxes(title_text="速度", row=3, col=1)
+    fig.update_yaxes(title_text="加速度", row=4, col=1)
+
+    _render_plotly(fig, height=740)
 
     # ---- Metrics row ----
     metrics = compute_metrics(clean, noisy, filtered)
@@ -417,70 +537,6 @@ def main():
 
     c5.metric("延迟", f"{metrics['lag']:.0f} 点")
     c6.metric("平滑度", f"{metrics['roughness']:.1f}")
-
-    # ---- Residual plot ----
-    if not np.all(np.isnan(filtered)):
-        residuals = filtered - clean
-        fig_res = go.Figure()
-        fig_res.add_trace(go.Scatter(
-            x=t, y=residuals, mode="lines",
-            name="残差 (滤波 - 干净)",
-            line=dict(color="#ffa502", width=1.5),
-        ))
-        fig_res.add_hline(
-            y=0, line_dash="dash", line_color="gray", opacity=0.5,
-        )
-        fig_res.update_layout(
-            template="plotly_dark",
-            height=180,
-            margin=dict(l=20, r=20, t=40, b=20),
-            title="残差分析",
-            xaxis_title="时间 (s)",
-            yaxis_title="残差",
-            hovermode="x unified",
-        )
-        st.plotly_chart(fig_res, use_container_width=True)
-
-    # ---- Velocity plot ----
-    if not np.all(np.isnan(filtered)):
-        velocity = np.gradient(filtered, t)
-        acceleration = np.gradient(velocity, t)
-
-        fig_v = go.Figure()
-        fig_v.add_trace(go.Scatter(
-            x=t, y=velocity, mode="lines",
-            name="速度 v",
-            line=dict(color=filter_color, width=1.5),
-        ))
-        fig_v.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
-        fig_v.update_layout(
-            template="plotly_dark",
-            height=200,
-            margin=dict(l=20, r=20, t=40, b=20),
-            hovermode="x unified",
-            title="滤波输出 — 速度 (v)",
-            xaxis_title="时间 (s)",
-            yaxis_title="速度",
-        )
-        st.plotly_chart(fig_v, use_container_width=True)
-
-        fig_a = go.Figure()
-        fig_a.add_trace(go.Scatter(
-            x=t, y=acceleration, mode="lines",
-            name="加速度 a",
-            line=dict(color="#ffa502", width=1.5),
-        ))
-        fig_a.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
-        fig_a.update_layout(
-            template="plotly_dark",
-            height=200,
-            margin=dict(l=20, r=20, t=40, b=20),
-            hovermode="x unified",
-            title="滤波输出 — 加速度 (a)",
-            xaxis_title="时间 (s)",
-            yaxis_title="加速度",
-        )
-        st.plotly_chart(fig_a, use_container_width=True)
 
 
 if __name__ == "__main__":
