@@ -400,7 +400,7 @@ g.hovertext {{ visibility: hidden !important; }}
             var shapes = gd.layout.shapes || [];
             var update = {{}};
             for (var i = 0; i < shapes.length; i++) {{
-                if (shapes[i].yref === 'paper') {{
+                if (shapes[i].yref === 'paper' || shapes[i].yref === 'y domain') {{
                     update['shapes[' + i + '].x0'] = xv;
                     update['shapes[' + i + '].x1'] = xv;
                     update['shapes[' + i + '].visible'] = true;
@@ -446,7 +446,7 @@ g.hovertext {{ visibility: hidden !important; }}
             var shapes = gd.layout.shapes || [];
             var update = {{}};
             for (var i = 0; i < shapes.length; i++) {{
-                if (shapes[i].yref === 'paper') {{
+                if (shapes[i].yref === 'paper' || shapes[i].yref === 'y domain') {{
                     update['shapes[' + i + '].visible'] = false;
                 }}
             }}
@@ -592,8 +592,10 @@ def main():
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=4, col=1)
 
     # Crosshair shape (initially hidden, yref=paper spans all subplots)
-    fig.add_vline(x=0, line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"),
-                   yref="paper", visible=False)
+    fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=1,
+                   xref="x", yref="paper",
+                   line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"),
+                   visible=False)
 
     fig.update_layout(
         template="plotly_dark",
