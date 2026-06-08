@@ -305,12 +305,13 @@ def compute_metrics(clean, noisy, filtered):
 # ---------------------------------------------------------------------------
 # Helper: render a slider for each filter parameter
 # ---------------------------------------------------------------------------
-def _render_param_slider(label, pmin, pmax, pstep, pdefault):
+def _render_param_slider(label, pmin, pmax, pstep, pdefault, key_suffix=""):
     """Render an st.slider with appropriate numeric format."""
+    key = f"{label}_{key_suffix}" if key_suffix else None
     if isinstance(pstep, int):
-        return st.sidebar.slider(label, pmin, pmax, pdefault, pstep)
+        return st.sidebar.slider(label, pmin, pmax, pdefault, pstep, key=key)
     fmt = "%.3f" if pstep < 0.01 else "%.2f"
-    return st.sidebar.slider(label, pmin, pmax, pdefault, pstep, format=fmt)
+    return st.sidebar.slider(label, pmin, pmax, pdefault, pstep, format=fmt, key=key)
 
 
 # ---------------------------------------------------------------------------
@@ -519,7 +520,7 @@ def main():
         selected_filter2 = FILTERS[filter_id2]
         param_values2 = {}
         for pname, spec in selected_filter2["params"].items():
-            param_values2[pname] = _render_param_slider(*spec)
+            param_values2[pname] = _render_param_slider(*spec, key_suffix="f2")
     else:
         selected_filter2 = None
         param_values2 = {}
