@@ -556,7 +556,12 @@ def _fetch_stock(market, code, tf, n_pts):
     if data.empty:
         return None, None, None, full, f"无数据: {full}"
 
-    # Drop NaN Close rows first, then trim — keeps OHLC & close aligned
+    # yfinance >=0.2.x returns MultiIndex columns even for single ticker,
+    # e.g. ('Close','AAPL'). Flatten to simple column names first.
+    if isinstance(data.columns, pd.MultiIndex):
+        data.columns = data.columns.droplevel(1)
+
+    # Drop rows where Close is NaN, then trim to last n_pts
     data = data[data["Close"].notna()]
     if len(data) > n_pts:
         data = data.iloc[-n_pts:]
