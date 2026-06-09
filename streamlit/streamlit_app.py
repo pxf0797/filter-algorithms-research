@@ -827,6 +827,9 @@ def main():
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     fig.update_xaxes(title_text="时间索引" if is_stock else "时间 (s)", row=rows, col=1)
+    # Disable Candlestick's default rangeslider — crosshair + modebar zoom suffice
+    if is_stock:
+        fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
     first_row = main_row if is_stock else t_row
     fig.update_yaxes(title_text="价格" if is_stock else "幅值", row=first_row, col=1)
     fig.update_yaxes(title_text="残差", row=r_row, col=1)
