@@ -556,12 +556,12 @@ def _fetch_stock(market, code, tf, n_pts):
     if data.empty:
         return None, None, None, full, f"无数据: {full}"
 
+    # Drop NaN Close rows first, then trim — keeps OHLC & close aligned
+    data = data[data["Close"].notna()]
+    if len(data) > n_pts:
+        data = data.iloc[-n_pts:]
+    n = len(data)
     close = data["Close"].values.ravel()
-    close = close[~np.isnan(close)]
-    if len(close) > n_pts:
-        close = close[-n_pts:]
-    n = len(close)
-    data = data.iloc[-n:]
     t_arr = np.arange(n, dtype=float)
     return t_arr, close, data, full, None
 
