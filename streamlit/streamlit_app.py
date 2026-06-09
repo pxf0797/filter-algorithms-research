@@ -609,6 +609,11 @@ def main():
             name="残差 (滤波 - 干净)",
             line=dict(color="#ffa502", width=1.5),
         ), row=2, col=1)
+        fig.add_trace(go.Scatter(
+            x=t, y=filtered - noisy, mode="lines",
+            name="残差 (滤波 - 含噪)",
+            line=dict(color="#5f6c80", width=1.0, dash="dot"),
+        ), row=2, col=1)
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=2, col=1)
 
     # Row 3 & 4: velocity & acceleration
