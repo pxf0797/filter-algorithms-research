@@ -91,6 +91,63 @@ def generate_signals(n_points: int = 1000, sample_rate: int = 100, seed: int = 4
         "desc": "1→20Hz 线性扫频，测试频率响应",
     }
 
+    # 6) Random walk (Brownian motion)
+    steps = rng.normal(0, 0.05, n_points)
+    clean = np.cumsum(steps)
+    clean -= clean[0]
+    noisy = clean + rng.normal(0, 0.03, n_points)
+    datasets["random_walk"] = {
+        "t": t, "clean": clean, "noisy": noisy,
+        "name": "随机游走",
+        "desc": "布朗运动轨迹，测试非平稳信号滤波",
+    }
+
+    # 7) Multi-tone composite
+    clean = (
+        np.sin(2 * np.pi * 2 * t)
+        + 0.5 * np.sin(2 * np.pi * 7 * t)
+        + 0.25 * np.sin(2 * np.pi * 15 * t)
+    )
+    noisy = clean + rng.normal(0, 0.12, n_points)
+    datasets["multitone"] = {
+        "t": t, "clean": clean, "noisy": noisy,
+        "name": "多频叠加",
+        "desc": "2+7+15Hz 三频复合信号，测试频率选择性",
+    }
+
+    # 8) Sparse spikes
+    clean = np.zeros(n_points)
+    spike_positions = rng.choice(n_points, size=8, replace=False)
+    for pos in spike_positions:
+        clean[pos] = rng.choice([-1, 1]) * rng.uniform(0.8, 2.0)
+    noisy = clean + rng.normal(0, 0.08, n_points)
+    datasets["spikes"] = {
+        "t": t, "clean": clean, "noisy": noisy,
+        "name": "稀疏脉冲",
+        "desc": "8 个随机位置脉冲 + 低噪底，测试离群值保持/抑制",
+    }
+
+    # 9) Triangle wave
+    period = int(sample_rate / 3)  # 3Hz triangle
+    phase = np.arange(n_points) % period
+    clean = 2 * np.abs(2 * phase / period - 1) - 1
+    noisy = clean + rng.normal(0, 0.15, n_points)
+    datasets["triangle"] = {
+        "t": t, "clean": clean, "noisy": noisy,
+        "name": "三角波",
+        "desc": "3Hz 三角波 + 高斯噪声，测试谐波响应",
+    }
+
+    # 10) Exponential decay + oscillation
+    decay_env = np.exp(-t / 2.0)
+    clean = decay_env * np.sin(2 * np.pi * 4 * t)
+    noisy = clean + rng.normal(0, 0.06, n_points)
+    datasets["damped_osc"] = {
+        "t": t, "clean": clean, "noisy": noisy,
+        "name": "阻尼振荡",
+        "desc": "指数衰减包络 × 4Hz 正弦，测试瞬态 + 时变幅度",
+    }
+
     return datasets
 
 
