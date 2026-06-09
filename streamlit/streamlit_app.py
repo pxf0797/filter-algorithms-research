@@ -716,13 +716,14 @@ def main():
 
     # ==================== BUILD FIGURE ====================
     if is_stock:
-        rows = 5
-        row_heights = [0.28, 0.22, 0.15, 0.17, 0.18]
-        titles = ("蜡烛图", "收盘价 & 滤波输出", "残差分析", "滤波输出 — 速度 (v)", "滤波输出 — 加速度 (a)")
-        t_row = 2       # time-domain row
-        r_row = 3       # residual row
-        v_row = 4       # velocity row
-        a_row = 5       # acceleration row
+        rows = 4
+        row_heights = [0.40, 0.18, 0.20, 0.22]
+        titles = ("价格 & 滤波输出", "残差分析", "滤波输出 — 速度 (v)", "滤波输出 — 加速度 (a)")
+        main_row = 1
+        r_row = 2
+        v_row = 3
+        a_row = 4
+        t_row = None  # not used in stock mode
     else:
         rows = 4
         row_heights = [0.35, 0.18, 0.22, 0.25]
@@ -731,13 +732,14 @@ def main():
         r_row = 2
         v_row = 3
         a_row = 4
+        main_row = None  # not used in synthetic mode
 
     fig = make_subplots(
         rows=rows, cols=1, shared_xaxes=True,
         vertical_spacing=0.03, row_heights=row_heights,
         subplot_titles=titles)
 
-    # Row 1 (stock): candlestick
+    # Row 1 (stock): candlestick + close + filter all in same subplot
     if is_stock and ohlc_data is not None:
         fig.add_trace(go.Candlestick(
             x=t,
@@ -747,29 +749,37 @@ def main():
             close=ohlc_data["Close"].values.ravel(),
             name="K线", increasing_line_color="#26a69a",
             decreasing_line_color="#ef5350",
-        ), row=1, col=1)
-
-    # Time-domain row
-    if show_clean and clean is not None:
+            showlegend=False,
+        ), row=main_row, col=1)
         fig.add_trace(go.Scatter(
-            x=t, y=clean, mode="lines", name="干净信号",
-            line=dict(color="#ff6b6b", width=1.5),
-        ), row=t_row, col=1)
-    if show_noisy:
-        fig.add_trace(go.Scatter(
-            x=t, y=noisy, mode="lines", name=noisy_label,
+            x=t, y=noisy, mode="lines", name="收盘价",
             line=dict(color="#5f6c80", width=1.0),
-        ), row=t_row, col=1)
+        ), row=main_row, col=1)
+    if not is_stock:
+        # Synthetic: time-domain traces in row 1
+        if show_clean and clean is not None:
+            fig.add_trace(go.Scatter(
+                x=t, y=clean, mode="lines", name="干净信号",
+                line=dict(color="#ff6b6b", width=1.5),
+            ), row=t_row, col=1)
+        if show_noisy:
+            fig.add_trace(go.Scatter(
+                x=t, y=noisy, mode="lines", name=noisy_label,
+                line=dict(color="#5f6c80", width=1.0),
+            ), row=t_row, col=1)
+
+    # Filter output (both modes)
+    filter_row = main_row if is_stock else t_row
     if show_filtered and not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(
             x=t, y=filtered, mode="lines", name="滤波输出",
             line=dict(color=filter_color, width=2.0),
-        ), row=t_row, col=1)
+        ), row=filter_row, col=1)
     if dual_mode and filtered2 is not None and not np.all(np.isnan(filtered2)):
         fig.add_trace(go.Scatter(
             x=t, y=filtered2, mode="lines", name="滤波输出 2",
             line=dict(color=filter_color2, width=2.0),
-        ), row=t_row, col=1)
+        ), row=filter_row, col=1)
 
     # Residual row
     if not np.all(np.isnan(filtered)):
@@ -809,7 +819,7 @@ def main():
                    line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"),
                    visible=False)
 
-    fig_height = 900 if is_stock else 700
+    fig_height = 700
     fig.update_layout(
         template="plotly_dark", height=fig_height,
         margin=dict(l=20, r=20, t=40, b=20),
@@ -817,7 +827,8 @@ def main():
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     fig.update_xaxes(title_text="时间索引" if is_stock else "时间 (s)", row=rows, col=1)
-    fig.update_yaxes(title_text="价格" if is_stock else "幅值", row=t_row, col=1)
+    first_row = main_row if is_stock else t_row
+    fig.update_yaxes(title_text="价格" if is_stock else "幅值", row=first_row, col=1)
     fig.update_yaxes(title_text="残差", row=r_row, col=1)
     fig.update_yaxes(title_text="速度", row=v_row, col=1)
     fig.update_yaxes(title_text="加速度", row=a_row, col=1)
