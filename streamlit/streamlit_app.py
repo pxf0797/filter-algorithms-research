@@ -9,6 +9,8 @@ import json
 import uuid
 import streamlit as st
 import numpy as np
+import pandas as pd
+import yfinance as yf
 from scipy.signal import savgol_filter, butter, sosfiltfilt, medfilt
 from scipy.ndimage import gaussian_filter1d
 import plotly.graph_objects as go
@@ -534,31 +536,106 @@ g.hovertext {{ visibility: hidden !important; }}
 
 
 # ---------------------------------------------------------------------------
+# Stock data fetcher (module-level for @st.cache_data)
+# ---------------------------------------------------------------------------
+@st.cache_data(show_spinner=False, ttl=300)
+def _fetch_stock(market, code, tf, n_pts):
+    if market == "A股(沪深)":
+        suffix = ".SS" if code[0] == "6" else ".SZ"
+        full = code + suffix
+    elif market == "港股 HK":
+        full = code.zfill(4) + ".HK"
+    else:
+        full = code.upper()
+
+    tf_map = {"5分钟": "5m", "15分钟": "15m", "60分钟": "60m", "日线": "1d"}
+    interval = tf_map[tf]
+    period = f"{max(n_pts * 2, 10)}d" if tf == "日线" else "60d"
+
+    data = yf.download(full, period=period, interval=interval, progress=False)
+    if data.empty:
+        return None, None, None, full, f"无数据: {full}"
+
+    close = data["Close"].values.ravel()
+    close = close[~np.isnan(close)]
+    if len(close) > n_pts:
+        close = close[-n_pts:]
+    n = len(close)
+    data = data.iloc[-n:]
+    t_arr = np.arange(n, dtype=float)
+    return t_arr, close, data, full, None
+
+
+# ---------------------------------------------------------------------------
 # Main app
 # ---------------------------------------------------------------------------
 def main():
     # ======================== SIDEBAR ========================
     st.sidebar.title("滤波算法交互式对比分析工具")
 
-    # Dataset length
-    n_points = st.sidebar.radio("数据长度", [200, 1000], horizontal=True)
-    datasets = generate_signals(n_points=n_points)
+    # ---- Data source ----
+    st.sidebar.markdown("#### 数据源")
+    data_source = st.sidebar.radio("", ["合成信号", "股票数据"], horizontal=True,
+                                    key="data_source")
 
-    # Dataset selector
-    dataset_id = st.sidebar.selectbox(
-        "数据集",
-        options=list(datasets.keys()),
-        format_func=lambda x: datasets[x]["name"],
-    )
+    # ==================== STOCK MODE ====================
+    if data_source == "股票数据":
+        st.sidebar.markdown("---")
+        market = st.sidebar.radio("市场", ["美股 US", "A股(沪深)", "港股 HK"],
+                                   horizontal=True, key="stock_market")
+        ticker_code = st.sidebar.text_input("股票代码", value="AAPL",
+                                             key="stock_ticker").strip()
+        timeframe = st.sidebar.radio("周期", ["5分钟", "15分钟", "60分钟", "日线"],
+                                      horizontal=True, index=3, key="stock_tf")
+        n_points = st.sidebar.number_input("数据点数", 20, 500, 120, 10, key="stock_n")
 
-    # Filter selector
+        fetch_clicked = st.sidebar.button("获取股票数据", type="primary",
+                                           use_container_width=True)
+
+        # Fetch or use cached
+        if fetch_clicked:
+            t, noisy, ohlc_data, ticker_full, err = _fetch_stock(
+                market, ticker_code, timeframe, n_points)
+            if err:
+                st.sidebar.error(err)
+                st.session_state.stock_data = None
+            else:
+                st.session_state.stock_data = (t, noisy, ohlc_data, ticker_full, timeframe)
+        else:
+            # Use persisted data if available
+            pass
+
+        stock = st.session_state.get("stock_data")
+        if stock is None:
+            st.info("输入股票代码后点击「获取股票数据」")
+            st.stop()
+
+        t, noisy, ohlc_data, ticker_full, tf_label = stock
+        clean = None  # no clean signal for stocks
+        st.header(f"{ticker_full}  ·  {tf_label}")
+        st.caption(f"数据点数: {len(t)}  |  收盘价范围: ¥{noisy.min():.2f} – ¥{noisy.max():.2f}")
+        n_points_syn = len(t)  # not used
+        datasets = None
+        dataset_id = None
+        show_clean = False
+        show_noisy = True
+        noisy_label = "收盘价"
+        is_stock = True
+
+    # ==================== SYNTHETIC MODE ====================
+    else:
+        n_points_syn = st.sidebar.radio("数据长度", [200, 1000], horizontal=True)
+        datasets = generate_signals(n_points=n_points_syn)
+        dataset_id = st.sidebar.selectbox(
+            "数据集", options=list(datasets.keys()),
+            format_func=lambda x: datasets[x]["name"])
+        is_stock = False
+
+    # ==================== COMMON: FILTER SELECTION ====================
     filter_id = st.sidebar.selectbox(
-        "滤波器",
-        options=list(FILTERS.keys()),
-        format_func=lambda x: FILTERS[x]["name"],
-    )
+        "滤波器", options=list(FILTERS.keys()),
+        format_func=lambda x: FILTERS[x]["name"])
 
-    # Dynamic parameter sliders
     selected_filter = FILTERS[filter_id]
     param_values = {}
     for pname, spec in selected_filter["params"].items():
@@ -569,11 +646,8 @@ def main():
     dual_mode = st.sidebar.checkbox("对比双滤波器", value=False)
     if dual_mode:
         filter_id2 = st.sidebar.selectbox(
-            "滤波器 2",
-            options=list(FILTERS.keys()),
-            format_func=lambda x: FILTERS[x]["name"],
-            key="filter2",
-        )
+            "滤波器 2", options=list(FILTERS.keys()),
+            format_func=lambda x: FILTERS[x]["name"], key="filter2")
         selected_filter2 = FILTERS[filter_id2]
         param_values2 = {}
         for pname, spec in selected_filter2["params"].items():
@@ -585,8 +659,14 @@ def main():
     # Display toggles
     st.sidebar.markdown("---")
     st.sidebar.markdown("#### 显示选项")
-    show_noisy = st.sidebar.checkbox("含噪信号", value=True)
-    show_clean = st.sidebar.checkbox("干净信号", value=True)
+    if is_stock:
+        show_noisy = True   # always show close price
+        show_clean = False
+        noisy_label = "收盘价"
+    else:
+        show_noisy = st.sidebar.checkbox("含噪信号", value=True)
+        show_clean = st.sidebar.checkbox("干净信号", value=True)
+        noisy_label = "含噪信号"
     show_filtered = st.sidebar.checkbox("滤波输出", value=True)
     filter_color = st.sidebar.color_picker("滤波输出颜色", "#00d4aa")
     if dual_mode:
@@ -594,19 +674,22 @@ def main():
     else:
         filter_color2 = "#ff6b6b"
 
-    # ======================== MAIN AREA ========================
-    data = datasets[dataset_id]
-    t = data["t"]
-    clean = data["clean"]
-    noisy = data["noisy"]
-
-    st.header(f"数据集: {data['name']}")
-    st.caption(data["desc"])
+    # ==================== MAIN AREA: LOAD DATA ====================
+    if is_stock:
+        stock = st.session_state.stock_data
+        t, noisy, ohlc_data, ticker_full, tf_label = stock
+        clean = None
+    else:
+        data = datasets[dataset_id]
+        t = data["t"]
+        clean = data["clean"]
+        noisy = data["noisy"]
+        st.header(f"数据集: {data['name']}")
+        st.caption(data["desc"])
 
     # ---- Apply filter ----
     try:
         filtered = selected_filter["func"](noisy, t, **param_values)
-        # Ensure 1-D output
         filtered = np.asarray(filtered, dtype=float).ravel()
     except Exception as exc:
         st.error(f"滤波计算出错: {exc}")
@@ -626,109 +709,133 @@ def main():
     else:
         filtered2 = None
 
-    # ---- Unified subplots figure (4 rows, shared x-axis, crosshair) ----
-    rows = 4
-    fig = make_subplots(
-        rows=rows, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.03,
-        row_heights=[0.35, 0.18, 0.22, 0.25],
-        subplot_titles=("时域波形对比", "残差分析", "滤波输出 — 速度 (v)", "滤波输出 — 加速度 (a)"),
-    )
+    # ==================== BUILD FIGURE ====================
+    if is_stock:
+        rows = 5
+        row_heights = [0.28, 0.22, 0.15, 0.17, 0.18]
+        titles = ("蜡烛图", "收盘价 & 滤波输出", "残差分析", "滤波输出 — 速度 (v)", "滤波输出 — 加速度 (a)")
+        t_row = 2       # time-domain row
+        r_row = 3       # residual row
+        v_row = 4       # velocity row
+        a_row = 5       # acceleration row
+    else:
+        rows = 4
+        row_heights = [0.35, 0.18, 0.22, 0.25]
+        titles = ("时域波形对比", "残差分析", "滤波输出 — 速度 (v)", "滤波输出 — 加速度 (a)")
+        t_row = 1
+        r_row = 2
+        v_row = 3
+        a_row = 4
 
-    # Row 1: time-domain
-    if show_clean:
+    fig = make_subplots(
+        rows=rows, cols=1, shared_xaxes=True,
+        vertical_spacing=0.03, row_heights=row_heights,
+        subplot_titles=titles)
+
+    # Row 1 (stock): candlestick
+    if is_stock and ohlc_data is not None:
+        fig.add_trace(go.Candlestick(
+            x=t,
+            open=ohlc_data["Open"].values.ravel(),
+            high=ohlc_data["High"].values.ravel(),
+            low=ohlc_data["Low"].values.ravel(),
+            close=ohlc_data["Close"].values.ravel(),
+            name="K线", increasing_line_color="#26a69a",
+            decreasing_line_color="#ef5350",
+        ), row=1, col=1)
+
+    # Time-domain row
+    if show_clean and clean is not None:
         fig.add_trace(go.Scatter(
             x=t, y=clean, mode="lines", name="干净信号",
             line=dict(color="#ff6b6b", width=1.5),
-        ), row=1, col=1)
+        ), row=t_row, col=1)
     if show_noisy:
         fig.add_trace(go.Scatter(
-            x=t, y=noisy, mode="lines", name="含噪信号",
+            x=t, y=noisy, mode="lines", name=noisy_label,
             line=dict(color="#5f6c80", width=1.0),
-        ), row=1, col=1)
+        ), row=t_row, col=1)
     if show_filtered and not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(
             x=t, y=filtered, mode="lines", name="滤波输出",
             line=dict(color=filter_color, width=2.0),
-        ), row=1, col=1)
+        ), row=t_row, col=1)
     if dual_mode and filtered2 is not None and not np.all(np.isnan(filtered2)):
         fig.add_trace(go.Scatter(
             x=t, y=filtered2, mode="lines", name="滤波输出 2",
             line=dict(color=filter_color2, width=2.0),
-        ), row=1, col=1)
+        ), row=t_row, col=1)
 
-    # Row 2: residuals (from filter 1 only)
+    # Residual row
     if not np.all(np.isnan(filtered)):
-        residuals = filtered - clean
-        fig.add_trace(go.Scatter(
-            x=t, y=residuals, mode="lines",
-            name="残差 (滤波 - 干净)",
-            line=dict(color="#ffa502", width=1.5),
-        ), row=2, col=1)
+        if clean is not None:
+            fig.add_trace(go.Scatter(
+                x=t, y=filtered - clean, mode="lines",
+                name="残差 (滤波 - 干净)",
+                line=dict(color="#ffa502", width=1.5),
+            ), row=r_row, col=1)
         fig.add_trace(go.Scatter(
             x=t, y=filtered - noisy, mode="lines",
-            name="残差 (滤波 - 含噪)",
+            name="残差 (滤波 - 收盘)" if is_stock else "残差 (滤波 - 含噪)",
             line=dict(color="#5f6c80", width=1.0, dash="dot"),
-        ), row=2, col=1)
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=2, col=1)
+        ), row=r_row, col=1)
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=r_row, col=1)
 
-    # Row 3 & 4: velocity & acceleration
+    # Velocity & acceleration rows
     if not np.all(np.isnan(filtered)):
         velocity = np.gradient(filtered, t)
         acceleration = np.gradient(velocity, t)
 
         fig.add_trace(go.Scatter(
-            x=t, y=velocity, mode="lines",
-            name="速度 v",
+            x=t, y=velocity, mode="lines", name="速度 v",
             line=dict(color=filter_color, width=1.5),
-        ), row=3, col=1)
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=3, col=1)
+        ), row=v_row, col=1)
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=v_row, col=1)
 
         fig.add_trace(go.Scatter(
-            x=t, y=acceleration, mode="lines",
-            name="加速度 a",
+            x=t, y=acceleration, mode="lines", name="加速度 a",
             line=dict(color="#ffa502", width=1.5),
-        ), row=4, col=1)
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=4, col=1)
+        ), row=a_row, col=1)
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=a_row, col=1)
 
-    # Crosshair shape (initially hidden, yref=paper spans all subplots)
+    # Crosshair
     fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=1,
                    xref="x", yref="paper",
                    line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"),
                    visible=False)
 
+    fig_height = 900 if is_stock else 700
     fig.update_layout(
-        template="plotly_dark",
-        height=700,
+        template="plotly_dark", height=fig_height,
         margin=dict(l=20, r=20, t=40, b=20),
         hovermode="x unified",
-        legend=dict(
-            orientation="h", yanchor="bottom", y=1.02,
-            xanchor="right", x=1,
-        ),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
-    fig.update_xaxes(title_text="时间 (s)", row=rows, col=1)
-    fig.update_yaxes(title_text="幅值", row=1, col=1)
-    fig.update_yaxes(title_text="残差", row=2, col=1)
-    fig.update_yaxes(title_text="速度", row=3, col=1)
-    fig.update_yaxes(title_text="加速度", row=4, col=1)
+    fig.update_xaxes(title_text="时间索引" if is_stock else "时间 (s)", row=rows, col=1)
+    fig.update_yaxes(title_text="价格" if is_stock else "幅值", row=t_row, col=1)
+    fig.update_yaxes(title_text="残差", row=r_row, col=1)
+    fig.update_yaxes(title_text="速度", row=v_row, col=1)
+    fig.update_yaxes(title_text="加速度", row=a_row, col=1)
 
-    _render_plotly(fig, height=740)
+    _render_plotly(fig, height=fig_height + 40)
 
     # ---- Metrics row ----
-    metrics = compute_metrics(clean, noisy, filtered)
-
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("MSE", f"{metrics['mse']:.4f}" if not np.isnan(metrics["mse"]) else "N/A")
-    c2.metric("RMSE", f"{metrics['rmse']:.4f}" if not np.isnan(metrics["rmse"]) else "N/A")
-    c3.metric("MAE", f"{metrics['mae']:.4f}" if not np.isnan(metrics["mae"]) else "N/A")
-
-    snr = metrics["snr_imp"]
-    c4.metric("SNR ↑", f"{snr:.1f} dB" if not np.isnan(snr) else "N/A")
-
-    c5.metric("延迟", f"{metrics['lag']:.0f} 点")
-    c6.metric("平滑度", f"{metrics['roughness']:.1f}")
+    if clean is not None:
+        metrics = compute_metrics(clean, noisy, filtered)
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        c1.metric("MSE", f"{metrics['mse']:.4f}" if not np.isnan(metrics["mse"]) else "N/A")
+        c2.metric("RMSE", f"{metrics['rmse']:.4f}" if not np.isnan(metrics["rmse"]) else "N/A")
+        c3.metric("MAE", f"{metrics['mae']:.4f}" if not np.isnan(metrics["mae"]) else "N/A")
+        snr = metrics["snr_imp"]
+        c4.metric("SNR ↑", f"{snr:.1f} dB" if not np.isnan(snr) else "N/A")
+        c5.metric("延迟", f"{metrics['lag']:.0f} 点")
+        c6.metric("平滑度", f"{metrics['roughness']:.1f}")
+    else:
+        roughness = float(np.sum(np.diff(filtered, 2) ** 2)) if len(filtered) > 2 else 0.0
+        c1, c2, c3 = st.columns(3)
+        c1.metric("收盘价均值", f"{noisy.mean():.4f}")
+        c2.metric("收盘价标准差", f"{noisy.std():.4f}")
+        c3.metric("平滑度", f"{roughness:.1f}")
 
 
 if __name__ == "__main__":
