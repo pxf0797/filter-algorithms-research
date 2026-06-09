@@ -417,7 +417,7 @@ def _render_plotly(fig, height=750):
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-body {{ width: 100%; height: 100vh; overflow: hidden; }}
+html, body {{ width: 100%; height: 100%; overflow: hidden; }}
 #{div_id} {{ width: 100%; height: 100%; }}
 /* 隐藏 Plotly 原生 hover 标签和 spike，由自定义 tooltip + 十字光标替代 */
 g.hovertext {{ visibility: hidden !important; }}
