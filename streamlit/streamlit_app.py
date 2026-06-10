@@ -551,43 +551,28 @@ def _fetch_stock(market, code, tf, n_pts):
     tf_map = {"1分钟": "1m", "5分钟": "5m", "15分钟": "15m", "60分钟": "1h",
                "日线": "1d", "周线": "1wk", "月线": "1mo", "季线": "3mo"}
     interval = tf_map[tf]
-    # yfinance period: ONLY standard strings — not arbitrary day counts
-    if tf == "1分钟":
-        period = "7d"    # 1m data max ~7 days
-    elif tf in ("5分钟", "15分钟"):
-        period = "60d"   # 5m/15m max ~60 days
-    elif tf == "60分钟":
-        period = "60d"   # 1h max ~60 days
-    elif tf == "日线":
-        wanted_days = max(n_pts * 2, 10)
-        if wanted_days <= 30:      period = "1mo"
-        elif wanted_days <= 90:    period = "3mo"
-        elif wanted_days <= 180:   period = "6mo"
-        elif wanted_days <= 365:   period = "1y"
-        elif wanted_days <= 730:   period = "2y"
-        elif wanted_days <= 1825:  period = "5y"
-        elif wanted_days <= 3650:  period = "10y"
-        else:                      period = "max"
-    elif tf == "周线":
-        wanted_weeks = max(n_pts * 5, 52)
-        if wanted_weeks <= 52:     period = "1y"
-        elif wanted_weeks <= 104:  period = "2y"
-        elif wanted_weeks <= 260:  period = "5y"
-        elif wanted_weeks <= 520:  period = "10y"
-        else:                      period = "max"
-    elif tf == "月线":
-        wanted_months = max(n_pts * 1.5, 12)
-        if wanted_months <= 12:    period = "1y"
-        elif wanted_months <= 24:  period = "2y"
-        elif wanted_months <= 60:  period = "5y"
-        elif wanted_months <= 120: period = "10y"
-        else:                      period = "max"
-    else:  # 季线
-        wanted_quarters = max(n_pts * 1.5, 40)
-        if wanted_quarters <= 40:  period = "10y"
-        else:                      period = "max"
 
-    data = yf.download(full, period=period, interval=interval, progress=False)
+    # Use start/end dates instead of 'period' for precise control
+    from datetime import datetime, timedelta
+    end_date = datetime.now()
+    if tf == "1分钟":
+        cal_days = 7         # yfinance 1m limit ~7 calendar days
+    elif tf in ("5分钟", "15分钟"):
+        cal_days = 60        # 5m/15m limit ~60 days
+    elif tf == "60分钟":
+        cal_days = 730       # 1h data available up to ~730 days
+    elif tf == "日线":
+        cal_days = max(n_pts * 3, 30)   # 3x to account for weekends/holidays
+    elif tf == "周线":
+        cal_days = max(n_pts * 10, 365)  # 10 calendar days per week bar
+    elif tf == "月线":
+        cal_days = max(n_pts * 35, 365 * 2)  # ~35 calendar days per month bar
+    else:  # 季线
+        cal_days = max(n_pts * 100, 365 * 5)  # ~100 calendar days per quarter bar
+
+    start_date = end_date - timedelta(days=cal_days)
+    data = yf.download(full, start=start_date, end=end_date,
+                        interval=interval, progress=False)
     if data.empty:
         return None, None, None, full, f"无数据: {full}"
 
@@ -937,6 +922,11 @@ def main():
         fig.add_trace(go.Scatter(
             x=t, y=-eps_arr, mode="lines",
             name="-ε_t", line=dict(color="#f85149", width=0.8, dash="dash"),
+        ), row=st_a_row, col=1)
+        # σ_t(v) — raw volatility before clamping
+        fig.add_trace(go.Scatter(
+            x=t, y=schmitt["sigma_v"], mode="lines",
+            name="σ_t(v)", line=dict(color="#a371f7", width=1.0, dash="dot"),
         ), row=st_a_row, col=1)
         # acceleration a
         fig.add_trace(go.Scatter(
