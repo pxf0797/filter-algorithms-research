@@ -551,18 +551,41 @@ def _fetch_stock(market, code, tf, n_pts):
     tf_map = {"1分钟": "1m", "5分钟": "5m", "15分钟": "15m", "60分钟": "1h",
                "日线": "1d", "周线": "1wk", "月线": "1mo", "季线": "3mo"}
     interval = tf_map[tf]
-    # Adjust period per timeframe: shorter bars need less calendar time
-    intraday = tf in ("1分钟", "5分钟", "15分钟", "60分钟")
-    if intraday:
-        period = "7d"   # yfinance intraday max ~7 days for 1m, ~60 days for others
+    # yfinance period: ONLY standard strings — not arbitrary day counts
+    if tf == "1分钟":
+        period = "7d"    # 1m data max ~7 days
+    elif tf in ("5分钟", "15分钟"):
+        period = "60d"   # 5m/15m max ~60 days
+    elif tf == "60分钟":
+        period = "60d"   # 1h max ~60 days
     elif tf == "日线":
-        period = f"{max(n_pts * 2, 10)}d"
+        wanted_days = max(n_pts * 2, 10)
+        if wanted_days <= 30:      period = "1mo"
+        elif wanted_days <= 90:    period = "3mo"
+        elif wanted_days <= 180:   period = "6mo"
+        elif wanted_days <= 365:   period = "1y"
+        elif wanted_days <= 730:   period = "2y"
+        elif wanted_days <= 1825:  period = "5y"
+        elif wanted_days <= 3650:  period = "10y"
+        else:                      period = "max"
     elif tf == "周线":
-        period = f"{max(n_pts * 5, 52)}wk"
+        wanted_weeks = max(n_pts * 5, 52)
+        if wanted_weeks <= 52:     period = "1y"
+        elif wanted_weeks <= 104:  period = "2y"
+        elif wanted_weeks <= 260:  period = "5y"
+        elif wanted_weeks <= 520:  period = "10y"
+        else:                      period = "max"
     elif tf == "月线":
-        period = f"{max(n_pts * 21, 730)}d"
+        wanted_months = max(n_pts * 1.5, 12)
+        if wanted_months <= 12:    period = "1y"
+        elif wanted_months <= 24:  period = "2y"
+        elif wanted_months <= 60:  period = "5y"
+        elif wanted_months <= 120: period = "10y"
+        else:                      period = "max"
     else:  # 季线
-        period = f"{max(n_pts * 63, 2190)}d"
+        wanted_quarters = max(n_pts * 1.5, 40)
+        if wanted_quarters <= 40:  period = "10y"
+        else:                      period = "max"
 
     data = yf.download(full, period=period, interval=interval, progress=False)
     if data.empty:
