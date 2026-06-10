@@ -757,11 +757,22 @@ def main():
     else:
         filter_color2 = "#ff6b6b"
 
-    # Schmitt trigger toggle (stock mode only)
+    # Schmitt trigger toggle + params (stock mode only)
     show_schmitt = False
+    schmitt_k_eps = 0.15; schmitt_smin = 0.05; schmitt_ewma = 60
     if is_stock:
         show_schmitt = st.sidebar.checkbox("施密特触发器", value=True,
-            help="ALMA3/5 趋势动量 + S-G 加速度 + 自适应迟滞带 (§二)")
+            help="v=动量(一阶导) a=加速度(二阶导) → 自适应死区 → 迟滞信号")
+        if show_schmitt:
+            schmitt_k_eps = st.sidebar.slider(
+                "k_ε 灵敏度系数", 0.01, 0.50, 0.15, 0.01,
+                help="无量纲,越小越敏感。ε_t=k_ε·max(σ_t(v),σ_min)")
+            schmitt_smin = st.sidebar.slider(
+                "σ_min 地板保护", 0.01, 0.20, 0.05, 0.01,
+                help="防止低波动下ε_t→0导致频繁触发")
+            schmitt_ewma = st.sidebar.slider(
+                "EWMA 周期 N", 10, 120, 60, 10,
+                help="α=2/(N+1),越大越平滑,滞后越大")
 
     # ==================== MAIN AREA: LOAD DATA ====================
     if is_stock:
@@ -803,18 +814,20 @@ def main():
     if is_stock and show_schmitt and not np.all(np.isnan(filtered)):
         _v = np.gradient(filtered, t)
         _a = np.gradient(_v, t)
-        schmitt = _schmitt_trigger(_v, _a)
+        schmitt = _schmitt_trigger(_v, _a,
+            ewma_span=schmitt_ewma, k_eps=schmitt_k_eps, sigma_min=schmitt_smin)
 
     # ==================== BUILD FIGURE ====================
     if is_stock:
         if show_schmitt and schmitt:
             rows = 5
-            row_heights = [0.30, 0.18, 0.14, 0.18, 0.20]
-            titles = ("价格 & 滤波输出", "施密特: 加速度 a & 死区 ±ε",
-                       "施密特: 离散信号 Sig_t",
-                       "滤波输出 — 速度 (v)", "残差分析")
-            main_row = 1; st_a_row = 2; st_sig_row = 3; v_row = 4; r_row = 5
-            a_row = None  # merged into st_a_row
+            row_heights = [0.28, 0.15, 0.18, 0.18, 0.21]
+            titles = ("价格 & 滤波输出", "残差分析",
+                       "滤波输出 — 速度 (v)",
+                       "施密特: 加速度 a & 死区 ±ε",
+                       "施密特: 离散信号 Sig_t")
+            main_row = 1; r_row = 2; v_row = 3; st_a_row = 4; st_sig_row = 5
+            a_row = None
         else:
             rows = 4; row_heights = [0.40, 0.18, 0.20, 0.22]
             titles = ("价格 & 滤波输出", "残差分析",
@@ -981,14 +994,13 @@ def main():
         fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
     first_row = main_row if is_stock else t_row
     fig.update_yaxes(title_text="价格" if is_stock else "幅值", row=first_row, col=1)
+    fig.update_yaxes(title_text="残差", row=r_row, col=1)
+    fig.update_yaxes(title_text="速度", row=v_row, col=1)
     if is_stock and schmitt is not None:
         fig.update_yaxes(title_text="a & ±ε", row=st_a_row, col=1)
         fig.update_yaxes(title_text="Sig", row=st_sig_row, col=1,
                           tickvals=[-1, 0, 1], ticktext=["空头", "观望", "多头"],
                           range=[-1.5, 1.5])
-    fig.update_yaxes(title_text="速度", row=v_row, col=1)
-    if r_row is not None:
-        fig.update_yaxes(title_text="残差", row=r_row, col=1)
     if a_row is not None:
         fig.update_yaxes(title_text="加速度", row=a_row, col=1)
 
