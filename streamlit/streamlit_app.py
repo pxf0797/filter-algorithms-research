@@ -548,9 +548,21 @@ def _fetch_stock(market, code, tf, n_pts):
     else:
         full = code.upper()
 
-    tf_map = {"5分钟": "5m", "15分钟": "15m", "60分钟": "60m", "日线": "1d"}
+    tf_map = {"1分钟": "1m", "5分钟": "5m", "15分钟": "15m", "60分钟": "1h",
+               "日线": "1d", "周线": "1wk", "月线": "1mo", "季线": "3mo"}
     interval = tf_map[tf]
-    period = f"{max(n_pts * 2, 10)}d" if tf == "日线" else "60d"
+    # Adjust period per timeframe: shorter bars need less calendar time
+    intraday = tf in ("1分钟", "5分钟", "15分钟", "60分钟")
+    if intraday:
+        period = "7d"   # yfinance intraday max ~7 days for 1m, ~60 days for others
+    elif tf == "日线":
+        period = f"{max(n_pts * 2, 10)}d"
+    elif tf == "周线":
+        period = f"{max(n_pts * 5, 52)}wk"
+    elif tf == "月线":
+        period = f"{max(n_pts * 21, 730)}d"
+    else:  # 季线
+        period = f"{max(n_pts * 63, 2190)}d"
 
     data = yf.download(full, period=period, interval=interval, progress=False)
     if data.empty:
@@ -572,6 +584,85 @@ def _fetch_stock(market, code, tf, n_pts):
 
 
 # ---------------------------------------------------------------------------
+# Schmitt Trigger computation (document: 多周期趋势策略V2_优化4 §二)
+# ---------------------------------------------------------------------------
+def _schmitt_trigger(close, t, alma_fast_window=3, alma_slow_window=5,
+                     alma_offset=0.85, alma_sigma=6.0, beta=1.0,
+                     ewma_span=60, sg_window=5, k_eps=0.15, sigma_min=0.05):
+    """Compute trend momentum x_t, acceleration a_t, adaptive deadband ε_t,
+    and Schmitt trigger state from close prices.
+
+    Returns dict with: x_t, mu_t, sigma_t, a_t, eps_t, sig_t, dur_t
+    """
+    n = len(close)
+    if n < max(alma_fast_window, alma_slow_window, sg_window, ewma_span):
+        return None
+
+    # ALMA helper
+    def _alma(signal, window):
+        w = window if window % 2 == 1 else window + 1
+        m = (w - 1) * alma_offset
+        s = w / alma_sigma if alma_sigma > 0 else 1.0
+        i = np.arange(w)
+        weights = np.exp(-0.5 * ((i - m) / s) ** 2)
+        weights /= weights.sum()
+        return np.convolve(signal, weights, mode="same")
+
+    alma_fast = _alma(close, alma_fast_window)
+    alma_slow = _alma(close, alma_slow_window)
+
+    # x_t = (ALMA_fast - ALMA_slow) / sqrt(ALMA_slow^2 + beta^2)  — trend momentum
+    x_t = (alma_fast - alma_slow) / np.sqrt(alma_slow ** 2 + beta ** 2)
+
+    # EWMA statistics: mu_t, sigma_t
+    alpha = 2.0 / (ewma_span + 1)
+    mu_t = np.full(n, np.nan)
+    sigma_t = np.full(n, np.nan)
+    mu_t[0] = x_t[0]
+    sigma_t[0] = 0.0
+    for i in range(1, n):
+        mu_t[i] = alpha * x_t[i] + (1 - alpha) * mu_t[i - 1]
+        sigma_t[i] = np.sqrt(
+            alpha * (x_t[i] - mu_t[i]) ** 2 + (1 - alpha) * sigma_t[i - 1] ** 2)
+
+    # a_t = S-G first derivative of x_t (5-point: [-2,-1,0,1,2]/10)
+    sg_coeffs = np.array([-2, -1, 0, 1, 2]) / 10.0
+    a_t = np.convolve(x_t, sg_coeffs[::-1], mode="same")
+
+    # Adaptive deadband ε_t = k_ε * max(σ_t, σ_min)
+    eps_t = k_eps * np.maximum(sigma_t, sigma_min)
+
+    # Schmitt trigger state: ±1 = signal, 0 = dead zone
+    sig_t = np.zeros(n, dtype=int)
+    dur_t = np.zeros(n, dtype=int)
+    current_state = 0
+    current_dur = 0
+    for i in range(n):
+        if np.isnan(a_t[i]) or np.isnan(x_t[i]):
+            sig_t[i] = current_state
+            current_dur += 1
+        elif a_t[i] > eps_t[i] and x_t[i] > 0:
+            if current_state != 1:
+                current_state = 1
+                current_dur = 1
+            else:
+                current_dur += 1
+        elif a_t[i] < -eps_t[i] and x_t[i] < 0:
+            if current_state != -1:
+                current_state = -1
+                current_dur = 1
+            else:
+                current_dur += 1
+        else:
+            current_dur += 1
+        sig_t[i] = current_state
+        dur_t[i] = current_dur
+
+    return {"x": x_t, "mu": mu_t, "sigma": sigma_t,
+            "a": a_t, "eps": eps_t, "sig": sig_t, "dur": dur_t}
+
+
+# ---------------------------------------------------------------------------
 # Main app
 # ---------------------------------------------------------------------------
 def main():
@@ -590,8 +681,9 @@ def main():
                                    horizontal=True, key="stock_market")
         ticker_code = st.sidebar.text_input("股票代码", value="AAPL",
                                              key="stock_ticker").strip()
-        timeframe = st.sidebar.radio("周期", ["5分钟", "15分钟", "60分钟", "日线"],
-                                      horizontal=True, index=3, key="stock_tf")
+        timeframe = st.sidebar.radio("周期",
+            ["1分钟", "5分钟", "15分钟", "60分钟", "日线", "周线", "月线", "季线"],
+            horizontal=False, index=4, key="stock_tf")
         n_points = st.sidebar.number_input("数据点数", 20, 500, 120, 10, key="stock_n")
 
         fetch_clicked = st.sidebar.button("获取股票数据", type="primary",
@@ -679,6 +771,12 @@ def main():
     else:
         filter_color2 = "#ff6b6b"
 
+    # Schmitt trigger toggle (stock mode only)
+    show_schmitt = False
+    if is_stock:
+        show_schmitt = st.sidebar.checkbox("施密特触发器", value=True,
+            help="ALMA3/5 趋势动量 + S-G 加速度 + 自适应迟滞带 (§二)")
+
     # ==================== MAIN AREA: LOAD DATA ====================
     if is_stock:
         stock = st.session_state.stock_data
@@ -714,15 +812,24 @@ def main():
     else:
         filtered2 = None
 
+    # ---- Schmitt Trigger computation (stock mode) ----
+    schmitt = None
+    if is_stock and show_schmitt:
+        schmitt = _schmitt_trigger(noisy, t)
+
     # ==================== BUILD FIGURE ====================
     if is_stock:
-        rows = 4
-        row_heights = [0.40, 0.18, 0.20, 0.22]
-        titles = ("价格 & 滤波输出", "残差分析", "滤波输出 — 速度 (v)", "滤波输出 — 加速度 (a)")
-        main_row = 1
-        r_row = 2
-        v_row = 3
-        a_row = 4
+        rows = 5 if show_schmitt and schmitt else 4
+        if show_schmitt and schmitt:
+            row_heights = [0.32, 0.22, 0.14, 0.16, 0.16]
+            titles = ("价格 & 滤波输出", "施密特触发器", "残差分析",
+                       "滤波输出 — 速度 (v)", "滤波输出 — 加速度 (a)")
+            main_row = 1; st_row = 2; r_row = 3; v_row = 4; a_row = 5
+        else:
+            row_heights = [0.40, 0.18, 0.20, 0.22]
+            titles = ("价格 & 滤波输出", "残差分析",
+                       "滤波输出 — 速度 (v)", "滤波输出 — 加速度 (a)")
+            main_row = 1; r_row = 2; v_row = 3; a_row = 4
         t_row = None  # not used in stock mode
     else:
         rows = 4
@@ -781,6 +888,43 @@ def main():
             line=dict(color=filter_color2, width=2.0),
         ), row=filter_row, col=1)
 
+    # ---- Schmitt trigger subplot (stock mode) ----
+    if is_stock and schmitt is not None:
+        # Background: green/red bands for Schmitt state
+        x_arr = schmitt["x"]; sig_arr = schmitt["sig"]
+        eps_arr = schmitt["eps"]; a_arr = schmitt["a"]
+        # Deadband fill
+        fig.add_trace(go.Scatter(
+            x=list(t) + list(t[::-1]),
+            y=list(eps_arr) + list(-eps_arr[::-1]),
+            fill="toself", fillcolor="rgba(128,128,128,0.08)",
+            line=dict(width=0), name="死区 ±ε", showlegend=True,
+            hoverinfo="skip",
+        ), row=st_row, col=1)
+        # Trend momentum x_t
+        fig.add_trace(go.Scatter(
+            x=t, y=x_arr, mode="lines", name="趋势动量 x_t",
+            line=dict(color="#00d4aa", width=1.5),
+        ), row=st_row, col=1)
+        # Deadband lines
+        fig.add_hline(y=0, line_dash="solid", line_color="gray", opacity=0.3, row=st_row, col=1)
+        # Acceleration a_t
+        fig.add_trace(go.Scatter(
+            x=t, y=a_arr, mode="lines", name="加速度 a_t",
+            line=dict(color="#ffa502", width=1.0, dash="dot"),
+        ), row=st_row, col=1)
+        # Schmitt state shading on x_t
+        for state, color, label in [(1, "rgba(0,212,170,0.08)", "多头"),
+                                      (-1, "rgba(239,83,80,0.08)", "空头")]:
+            mask = sig_arr == state
+            if mask.any():
+                fig.add_trace(go.Scatter(
+                    x=t[mask], y=x_arr[mask],
+                    mode="lines", name=f"Schmitt {label}",
+                    line=dict(width=0), showlegend=False,
+                    fill="tozeroy", fillcolor=color, hoverinfo="skip",
+                ), row=st_row, col=1)
+
     # Residual row
     if not np.all(np.isnan(filtered)):
         if clean is not None:
@@ -819,7 +963,7 @@ def main():
                    line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"),
                    visible=False)
 
-    fig_height = 700
+    fig_height = 850 if (is_stock and show_schmitt and schmitt) else 700
     fig.update_layout(
         template="plotly_dark", height=fig_height,
         margin=dict(l=20, r=20, t=40, b=20),
@@ -832,6 +976,8 @@ def main():
         fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
     first_row = main_row if is_stock else t_row
     fig.update_yaxes(title_text="价格" if is_stock else "幅值", row=first_row, col=1)
+    if is_stock and schmitt is not None:
+        fig.update_yaxes(title_text="x_t / a_t", row=st_row, col=1)
     fig.update_yaxes(title_text="残差", row=r_row, col=1)
     fig.update_yaxes(title_text="速度", row=v_row, col=1)
     fig.update_yaxes(title_text="加速度", row=a_row, col=1)
