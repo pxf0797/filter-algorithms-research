@@ -1,8 +1,5 @@
 """
-Streamlit 滤波算法交互式对比分析工具
-=====================================
-基于 scipy/numpy 的信号滤波器对比可视化平台。
-支持 5 种测试信号 × 10 种滤波器算法，提供时域波形、残差分析、多项质量指标。
+多周期股票滤波分析工具 — 4视图独立配置, 施密特触发器 + 滤波对比
 """
 
 import json
@@ -26,132 +23,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
-SAMPLE_RATE = 100  # Hz, fixed across all signals
-
-
-# ---------------------------------------------------------------------------
-# Signal generation (cached)
-# ---------------------------------------------------------------------------
-@st.cache_data
-def generate_signals(n_points: int = 1000, sample_rate: int = 100, seed: int = 42):
-    """生成 5 种测试信号，返回 {signal_id: {...}} 字典。"""
-    rng = np.random.default_rng(seed)
-    t = np.arange(n_points) / sample_rate
-    datasets = {}
-
-    # 1) 正弦波 + AWGN
-    clean = np.sin(2 * np.pi * 5 * t)
-    noisy = clean + rng.normal(0, 0.25, n_points)
-    datasets["sinusoid"] = {
-        "t": t, "clean": clean, "noisy": noisy,
-        "name": "正弦波 + 高斯噪声",
-        "desc": "5Hz 正弦信号，SNR ≈ 3dB",
-    }
-
-    # 2) 阶跃信号
-    clean = np.zeros(n_points)
-    clean[n_points // 2:] = 1.0
-    noisy = clean + rng.normal(0, 0.15, n_points)
-    datasets["step"] = {
-        "t": t, "clean": clean, "noisy": noisy,
-        "name": "阶跃信号",
-        "desc": "中点 0→1 跳变，测试瞬态响应",
-    }
-
-    # 3) 趋势 + 季节性 + AR(1) 噪声
-    clean = 0.002 * np.arange(n_points) + 0.3 * np.sin(2 * np.pi * 3 * t)
-    ar_noise = np.zeros(n_points)
-    for i in range(1, n_points):
-        ar_noise[i] = 0.7 * ar_noise[i - 1] + rng.normal(0, 0.1)
-    noisy = clean + ar_noise
-    datasets["trend_seasonal"] = {
-        "t": t, "clean": clean, "noisy": noisy,
-        "name": "趋势 + 季节性",
-        "desc": "线性趋势 + 3Hz 周期 + AR(1) 噪声",
-    }
-
-    # 4) 脉冲信号（高斯脉冲在 t=1s）
-    clean = 0.2 * np.sin(2 * np.pi * 2 * t)
-    pulse = 2.0 * np.exp(-0.5 * ((t - 1.0) / 0.02) ** 2)
-    clean = clean + pulse
-    noisy = clean + rng.normal(0, 0.1, n_points)
-    datasets["impulse"] = {
-        "t": t, "clean": clean, "noisy": noisy,
-        "name": "脉冲信号",
-        "desc": "t=1s 高斯脉冲 + 正弦基线，测试峰值保持",
-    }
-
-    # 5) Chirp 扫频 1→20Hz
-    freq = np.linspace(1, 20, n_points)
-    phase = 2 * np.pi * np.cumsum(freq) / sample_rate
-    clean = np.sin(phase)
-    noisy = clean + rng.normal(0, 0.02, n_points)
-    datasets["chirp"] = {
-        "t": t, "clean": clean, "noisy": noisy,
-        "name": "Chirp 扫频",
-        "desc": "1→20Hz 线性扫频，测试频率响应",
-    }
-
-    # 6) Random walk (Brownian motion)
-    steps = rng.normal(0, 0.05, n_points)
-    clean = np.cumsum(steps)
-    clean -= clean[0]
-    noisy = clean + rng.normal(0, 0.03, n_points)
-    datasets["random_walk"] = {
-        "t": t, "clean": clean, "noisy": noisy,
-        "name": "随机游走",
-        "desc": "布朗运动轨迹，测试非平稳信号滤波",
-    }
-
-    # 7) Multi-tone composite
-    clean = (
-        np.sin(2 * np.pi * 2 * t)
-        + 0.5 * np.sin(2 * np.pi * 7 * t)
-        + 0.25 * np.sin(2 * np.pi * 15 * t)
-    )
-    noisy = clean + rng.normal(0, 0.12, n_points)
-    datasets["multitone"] = {
-        "t": t, "clean": clean, "noisy": noisy,
-        "name": "多频叠加",
-        "desc": "2+7+15Hz 三频复合信号，测试频率选择性",
-    }
-
-    # 8) Sparse spikes
-    clean = np.zeros(n_points)
-    spike_positions = rng.choice(n_points, size=8, replace=False)
-    for pos in spike_positions:
-        clean[pos] = rng.choice([-1, 1]) * rng.uniform(0.8, 2.0)
-    noisy = clean + rng.normal(0, 0.08, n_points)
-    datasets["spikes"] = {
-        "t": t, "clean": clean, "noisy": noisy,
-        "name": "稀疏脉冲",
-        "desc": "8 个随机位置脉冲 + 低噪底，测试离群值保持/抑制",
-    }
-
-    # 9) Triangle wave
-    period = int(sample_rate / 3)  # 3Hz triangle
-    phase = np.arange(n_points) % period
-    clean = 2 * np.abs(2 * phase / period - 1) - 1
-    noisy = clean + rng.normal(0, 0.15, n_points)
-    datasets["triangle"] = {
-        "t": t, "clean": clean, "noisy": noisy,
-        "name": "三角波",
-        "desc": "3Hz 三角波 + 高斯噪声，测试谐波响应",
-    }
-
-    # 10) Exponential decay + oscillation
-    decay_env = np.exp(-t / 2.0)
-    clean = decay_env * np.sin(2 * np.pi * 4 * t)
-    noisy = clean + rng.normal(0, 0.06, n_points)
-    datasets["damped_osc"] = {
-        "t": t, "clean": clean, "noisy": noisy,
-        "name": "阻尼振荡",
-        "desc": "指数衰减包络 × 4Hz 正弦，测试瞬态 + 时变幅度",
-    }
-
-    return datasets
-
 
 # ---------------------------------------------------------------------------
 # Filter implementations (scipy / numpy only)
@@ -229,7 +100,7 @@ def apply_kalman(signal, t, Q, R):
 
 def apply_butterworth(signal, t, order, cutoff):
     """巴特沃斯低通滤波 (零相位)."""
-    nyquist = SAMPLE_RATE / 2.0
+    nyquist = 0.5  # stock: bar index dt≈1, fs=1, nyquist=0.5
     if cutoff >= nyquist:
         cutoff = nyquist * 0.99
     sos = butter(order, cutoff / nyquist, btype="low", output="sos")
@@ -672,9 +543,188 @@ def _schmitt_trigger(v, a, ewma_span=60, k_eps=0.15, sigma_min=0.05):
 # ---------------------------------------------------------------------------
 # Main app
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Helper: render one complete analysis view for a given timeframe
+# ---------------------------------------------------------------------------
+DEFAULT_TFS = ["日线", "60分钟", "15分钟", "5分钟"]
+
+def _render_view(market, ticker_code, n_points, tf_default, key):
+    """Render one complete multi-subplot analysis panel for a single timeframe."""
+    st.markdown("---")
+    c1, c2 = st.columns([1, 3])
+    with c1:
+        timeframe = st.selectbox("周期",
+            ["1分钟","5分钟","15分钟","60分钟","日线","周线","月线","季线"],
+            index=["1分钟","5分钟","15分钟","60分钟","日线","周线","月线","季线"].index(tf_default),
+            key=f"{key}_tf")
+    with c2:
+        n_pts = st.slider("数据点数", 20, 300, n_points, 10, key=f"{key}_n")
+
+    # Fetch data
+    t, noisy, ohlc_data, ticker_full, err = _fetch_stock(market, ticker_code, timeframe, n_pts)
+    if err:
+        st.error(err); return
+
+    # ---- View params (compact 3-col) ----
+    pc1, pc2, pc3 = st.columns(3)
+    with pc1:
+        filter_id = st.selectbox("滤波器", list(FILTERS.keys()),
+            format_func=lambda x: FILTERS[x]["name"], key=f"{key}_f")
+        sf = FILTERS[filter_id]
+        pv = {}
+        for pn, sp in sf["params"].items():
+            pv[pn] = _render_param_slider(*sp, key_suffix=f"{key}_f1_{filter_id}")
+    with pc2:
+        dual = st.checkbox("双滤波对比", value=False, key=f"{key}_dual")
+        fc = st.color_picker("滤波颜色", "#00d4aa", key=f"{key}_fc")
+        if dual:
+            fid2 = st.selectbox("滤波器2", list(FILTERS.keys()),
+                format_func=lambda x: FILTERS[x]["name"], key=f"{key}_f2")
+            sf2 = FILTERS[fid2]; pv2 = {}
+            for pn, sp in sf2["params"].items():
+                pv2[pn] = _render_param_slider(*sp, key_suffix=f"{key}_f2_{fid2}")
+            fc2 = st.color_picker("滤波2颜色", "#ff6b6b", key=f"{key}_fc2")
+        else:
+            sf2 = None; pv2 = {}; fc2 = "#ff6b6b"
+    with pc3:
+        show_sch = st.checkbox("施密特触发器", value=True, key=f"{key}_sch")
+        ke=0.15; sm=0.05; ew=60
+        if show_sch:
+            ke = st.slider("k_ε", 0.01,0.50,0.15,0.01, key=f"{key}_ke")
+            sm = st.slider("σ_min", 0.01,0.20,0.05,0.01, key=f"{key}_sm")
+            ew = st.slider("N_EWMA", 10,120,60,10, key=f"{key}_ew")
+
+    # Apply filters
+    try:
+        filtered = sf["func"](noisy, t, **pv)
+        filtered = np.asarray(filtered, dtype=float).ravel()
+    except Exception as exc:
+        st.error(f"滤波出错: {exc}"); filtered = np.full_like(noisy, np.nan)
+    filtered2 = None
+    if dual and sf2:
+        try:
+            filtered2 = sf2["func"](noisy, t, **pv2)
+            filtered2 = np.asarray(filtered2, dtype=float).ravel()
+        except Exception: filtered2 = np.full_like(noisy, np.nan)
+
+    # Schmitt
+    schmitt = None
+    if show_sch and not np.all(np.isnan(filtered)):
+        _v = np.gradient(filtered, t); _a = np.gradient(_v, t)
+        schmitt = _schmitt_trigger(_v, _a, ewma_span=ew, k_eps=ke, sigma_min=sm)
+
+    # Build figure
+    has_s = schmitt is not None
+    rows = 5 if has_s else 4
+    if has_s:
+        rh = [0.28,0.14,0.18,0.18,0.22]
+        titles = ("价格&滤波","残差","速度v","施密特:a&±ε","施密特:Sig_t")
+        mr=1; rr=2; vr=3; sar=4; ssr=5; ar=None
+    else:
+        rh = [0.40,0.18,0.20,0.22]
+        titles = ("价格&滤波","残差","速度v","加速度a")
+        mr=1; rr=2; vr=3; ar=4; sar=ssr=None
+
+    fig = make_subplots(rows=rows, cols=1, shared_xaxes=True,
+                        vertical_spacing=0.03, row_heights=rh, subplot_titles=titles)
+    # K-line + close + filter
+    fig.add_trace(go.Candlestick(
+        x=t, open=ohlc_data["Open"].values.ravel(),
+        high=ohlc_data["High"].values.ravel(),
+        low=ohlc_data["Low"].values.ravel(),
+        close=ohlc_data["Close"].values.ravel(),
+        name="K线", increasing_line_color="#26a69a",
+        decreasing_line_color="#ef5350", showlegend=False), row=mr, col=1)
+    fig.add_trace(go.Scatter(x=t, y=noisy, mode="lines", name="收盘价",
+        line=dict(color="#5f6c80", width=1.0)), row=mr, col=1)
+    if not np.all(np.isnan(filtered)):
+        fig.add_trace(go.Scatter(x=t, y=filtered, mode="lines", name="滤波",
+            line=dict(color=fc, width=2.0)), row=mr, col=1)
+    if dual and filtered2 is not None and not np.all(np.isnan(filtered2)):
+        fig.add_trace(go.Scatter(x=t, y=filtered2, mode="lines", name="滤波2",
+            line=dict(color=fc2, width=2.0)), row=mr, col=1)
+    # Residual
+    if not np.all(np.isnan(filtered)):
+        fig.add_trace(go.Scatter(x=t, y=filtered-noisy, mode="lines", name="残差",
+            line=dict(color="#5f6c80", width=1.0, dash="dot")), row=rr, col=1)
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=rr, col=1)
+    # Velocity + Acceleration
+    if not np.all(np.isnan(filtered)):
+        vel = np.gradient(filtered, t); acc = np.gradient(vel, t)
+        fig.add_trace(go.Scatter(x=t, y=vel, mode="lines", name="v",
+            line=dict(color=fc, width=1.5)), row=vr, col=1)
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=vr, col=1)
+    # Schmitt a+ε
+    if has_s:
+        eps=schmitt["eps"]; sig=schmitt["sig"]
+        fig.add_trace(go.Scatter(x=list(t)+list(t[::-1]),
+            y=list(eps)+list(-eps[::-1]), fill="toself",
+            fillcolor="rgba(128,128,128,0.06)", line=dict(width=0),
+            name="死区±ε", hoverinfo="skip"), row=sar, col=1)
+        fig.add_trace(go.Scatter(x=t, y=eps, mode="lines", name="+ε",
+            line=dict(color="#f85149", width=0.8, dash="dash"), showlegend=False), row=sar, col=1)
+        fig.add_trace(go.Scatter(x=t, y=-eps, mode="lines", name="-ε",
+            line=dict(color="#f85149", width=0.8, dash="dash")), row=sar, col=1)
+        fig.add_trace(go.Scatter(x=t, y=schmitt["sigma_v"], mode="lines", name="σ(v)",
+            line=dict(color="#a371f7", width=1.0, dash="dot")), row=sar, col=1)
+        fig.add_trace(go.Scatter(x=t, y=acc, mode="lines", name="a",
+            line=dict(color="#d2991d", width=1.5)), row=sar, col=1)
+        fig.add_hline(y=0, line_dash="solid", line_color="gray", opacity=0.3, row=sar, col=1)
+    # Schmitt Sig
+    if has_s:
+        fig.add_trace(go.Scatter(x=t, y=sig.astype(float), mode="lines", name="Sig",
+            line=dict(color="#58a6ff", width=2, shape="hv")), row=ssr, col=1)
+        for st,cl in [(1,"rgba(63,185,80,0.06)"),(-1,"rgba(248,81,73,0.06)")]:
+            msk = sig==st
+            if msk.any():
+                fig.add_trace(go.Scatter(x=t[msk], y=np.where(msk,st,0),
+                    mode="lines", line=dict(width=0), fill="tozeroy",
+                    fillcolor=cl, showlegend=False, hoverinfo="skip"), row=ssr, col=1)
+    # Acceleration (non-Schmitt)
+    if ar is not None and not np.all(np.isnan(filtered)):
+        fig.add_trace(go.Scatter(x=t, y=acc, mode="lines", name="a",
+            line=dict(color="#ffa502", width=1.5)), row=ar, col=1)
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=ar, col=1)
+
+    fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=1, xref="x", yref="paper",
+                   line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"), visible=False)
+    fh = 880 if has_s else 700
+    fig.update_layout(template="plotly_dark", height=fh,
+        margin=dict(l=20,r=20,t=30,b=20), hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+    fig.update_xaxes(title_text="", row=rows, col=1)
+    fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
+    fig.update_yaxes(title_text="价格", row=mr, col=1)
+    fig.update_yaxes(title_text="残差", row=rr, col=1)
+    fig.update_yaxes(title_text="速度", row=vr, col=1)
+    if has_s:
+        fig.update_yaxes(title_text="a±ε", row=sar, col=1)
+        fig.update_yaxes(title_text="Sig", row=ssr, col=1,
+                          tickvals=[-1,0,1], ticktext=["空","观","多"], range=[-1.5,1.5])
+    if ar is not None:
+        fig.update_yaxes(title_text="加速度", row=ar, col=1)
+    _render_plotly(fig, height=fh+40)
+
+    rough = float(np.sum(np.diff(filtered,2)**2)) if len(filtered)>2 else 0.0
+    c1,c2,c3,c4=st.columns(4)
+    c1.metric(f"{ticker_full}·{timeframe}", f"{noisy[-1]:.2f}")
+    c2.metric("σ(价格)", f"{noisy.std():.2f}")
+    c3.metric("平滑度", f"{rough:.1f}")
+    c4.metric("数据点", f"{len(t)}")
+
+
+# =====================================================================
 def main():
-    # ======================== SIDEBAR ========================
-    st.sidebar.title("滤波算法交互式对比分析工具")
+    st.sidebar.title("多周期股票滤波分析")
+    market = st.sidebar.radio("市场", ["美股 US","A股(沪深)","港股 HK"],
+                               horizontal=True, key="market")
+    ticker_code = st.sidebar.text_input("股票代码", value="AAPL", key="ticker").strip()
+    n_points = st.sidebar.slider("数据点数", 20, 300, 120, 10)
+
+    tabs = st.tabs([f"视图{i+1}: {DEFAULT_TFS[i]}" for i in range(4)])
+    for i, tab in enumerate(tabs):
+        with tab:
+            _render_view(market, ticker_code, n_points, DEFAULT_TFS[i], f"v{i}")
 
     # ---- Data source ----
     st.sidebar.markdown("#### 数据源")
@@ -1031,25 +1081,6 @@ def main():
         fig.update_yaxes(title_text="加速度", row=a_row, col=1)
 
     _render_plotly(fig, height=fig_height + 40)
-
-    # ---- Metrics row ----
-    if clean is not None:
-        metrics = compute_metrics(clean, noisy, filtered)
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
-        c1.metric("MSE", f"{metrics['mse']:.4f}" if not np.isnan(metrics["mse"]) else "N/A")
-        c2.metric("RMSE", f"{metrics['rmse']:.4f}" if not np.isnan(metrics["rmse"]) else "N/A")
-        c3.metric("MAE", f"{metrics['mae']:.4f}" if not np.isnan(metrics["mae"]) else "N/A")
-        snr = metrics["snr_imp"]
-        c4.metric("SNR ↑", f"{snr:.1f} dB" if not np.isnan(snr) else "N/A")
-        c5.metric("延迟", f"{metrics['lag']:.0f} 点")
-        c6.metric("平滑度", f"{metrics['roughness']:.1f}")
-    else:
-        roughness = float(np.sum(np.diff(filtered, 2) ** 2)) if len(filtered) > 2 else 0.0
-        c1, c2, c3 = st.columns(3)
-        c1.metric("收盘价均值", f"{noisy.mean():.4f}")
-        c2.metric("收盘价标准差", f"{noisy.std():.4f}")
-        c3.metric("平滑度", f"{roughness:.1f}")
-
 
 if __name__ == "__main__":
     main()
