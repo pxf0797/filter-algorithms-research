@@ -558,8 +558,8 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     """Ultra-compact parameter panel. Returns config dict."""
     cfg = {"_fid": filter_id, "_dual": dual, "_fid2": filter_id2}
 
-    # Row 1: [周期] [N] [Schmitt☑] [k_ε ▬] [σ_min ▬] [N_EWMA ▬]
-    c = st.columns([1.4, 0.9, 0.6, 1.1, 1.1, 1.1])
+    # Row 1: [周期▼] [N▬] [施密特☑] [k_ε▬] [σ_min▬] [N_EWMA▬]
+    c = st.columns([1.0, 0.8, 0.8, 1.1, 1.1, 1.1])
     with c[0]:
         cfg["tf"] = st.selectbox("周期", ALL_TFS, index=ALL_TFS.index(tf_default),
             key=f"{key}_tf", label_visibility="collapsed")
