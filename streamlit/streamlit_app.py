@@ -717,25 +717,26 @@ def main():
     st.sidebar.title("多周期股票滤波分析")
 
     # ── Import config (before any widget) ──
-    # Two-phase: upload → auto-rerun → apply → manual rerun
     if "_import_data" not in st.session_state:
         st.session_state._import_data = None
     uploaded = st.sidebar.file_uploader("导入配置", type=["json"], key="config_import",
                                          label_visibility="collapsed")
-    # Phase 1: upload triggers Streamlit's auto-rerun, we just store the data
+    # Only read file if _import_data is None (fresh upload, not a stale file_uploader hold)
     if uploaded is not None and st.session_state._import_data is None:
         try:
             st.session_state._import_data = json.loads(uploaded.read())
         except Exception as e:
             st.sidebar.error(f"导入失败: {e}")
-    # Phase 2: apply stored data to session_state (runs on next rerun)
+            st.session_state._import_data = True  # sentinel: prevent re-read on error
+
+    # Apply & mark as done (True = applied, not None = won't re-read stale file)
     pending = st.session_state.get("_import_data")
-    if pending is not None:
+    if isinstance(pending, dict):
         for k, v in pending.items():
             st.session_state[k] = v
-        st.session_state._import_data = None
+        st.session_state._import_data = True  # sentinel: applied, skip re-read
         st.sidebar.success("配置已加载")
-        st.rerun()  # single manual rerun after applying values
+        st.rerun()
 
     market = st.sidebar.radio("市场", ["美股 US","A股(沪深)","港股 HK"],
                                horizontal=True, key="market")
