@@ -548,123 +548,112 @@ def _schmitt_trigger(v, a, ewma_span=60, k_eps=0.15, sigma_min=0.05):
 # Main app
 # ---------------------------------------------------------------------------
 # ---------------------------------------------------------------------------
-# Helper: render one complete analysis view for a given timeframe
+# ---------------------------------------------------------------------------
+# Split render: params (top 2x2) + chart (bottom 2x2)
 # ---------------------------------------------------------------------------
 DEFAULT_TFS = ["日线", "60分钟", "15分钟", "5分钟"]
+ALL_TFS = ["1分钟","5分钟","15分钟","60分钟","日线","周线","月线","季线"]
 
-def _render_view(market, ticker_code, n_points, tf_default, key,
-                 filter_id, dual, filter_id2=None, compact=False):
-    """Render one complete multi-subplot analysis panel for a single timeframe.
-    filter_id, dual, filter_id2 come from global sidebar config.
-    Each view has its own parameter sliders for the shared filter types.
-    """
-    st.markdown("---")
-    c1, c2 = st.columns([1, 3])
+def _render_params(key, filter_id, dual, filter_id2, tf_default):
+    """Compact parameter panel for one view. Returns config dict."""
+    cfg = {"_fid": filter_id, "_dual": dual, "_fid2": filter_id2}
+    c1,c2 = st.columns(2)
     with c1:
-        timeframe = st.selectbox("周期",
-            ["1分钟","5分钟","15分钟","60分钟","日线","周线","月线","季线"],
-            index=["1分钟","5分钟","15分钟","60分钟","日线","周线","月线","季线"].index(tf_default),
-            key=f"{key}_tf")
+        cfg["tf"] = st.selectbox("周期", ALL_TFS,
+            index=ALL_TFS.index(tf_default), key=f"{key}_tf")
     with c2:
-        n_pts = st.slider("数据点数", 20, 300, n_points, 10, key=f"{key}_n")
-        st.caption(f"滤波: {FILTERS[filter_id]['name']}" +
-                   (f" vs {FILTERS[filter_id2]['name']}" if dual and filter_id2 else ""))
+        cfg["n_pts"] = st.slider("点数", 20, 300, 120, 10, key=f"{key}_n")
 
-    # Fetch data
-    t, noisy, ohlc_data, ticker_full, err = _fetch_stock(market, ticker_code, timeframe, n_pts)
-    if err:
-        st.error(err); return
+    # Filter 1 params
+    sf = FILTERS[filter_id]; cfg["pv"] = {}
+    for pn, sp in sf["params"].items():
+        cfg["pv"][pn] = _render_param_slider(*sp, key_suffix=f"{key}_f1_{filter_id}", container=st)
+    cfg["fc"] = st.color_picker("C1", "#00d4aa", key=f"{key}_fc", label_visibility="collapsed")
 
-    # ---- Per-view parameter sliders (3-col) ----
-    pc1, pc2, pc3 = st.columns(3)
-    with pc1:
-        sf = FILTERS[filter_id]; pv = {}
-        for pn, sp in sf["params"].items():
-            pv[pn] = _render_param_slider(*sp, key_suffix=f"{key}_f1_{filter_id}", container=st)
-        fc = st.color_picker("滤波颜色", "#00d4aa", key=f"{key}_fc")
-    with pc2:
-        if dual and filter_id2:
-            sf2 = FILTERS[filter_id2]; pv2 = {}
-            for pn, sp in sf2["params"].items():
-                pv2[pn] = _render_param_slider(*sp, key_suffix=f"{key}_f2_{filter_id2}", container=st)
-            fc2 = st.color_picker("滤波2颜色", "#ff6b6b", key=f"{key}_fc2")
-        else:
-            sf2 = None; pv2 = {}; fc2 = "#ff6b6b"
-    with pc3:
-        show_sch = st.checkbox("施密特触发器", value=True, key=f"{key}_sch")
-        ke=0.15; sm=0.05; ew=60
-        if show_sch:
-            ke = st.slider("k_ε", 0.01,0.50,0.15,0.01, key=f"{key}_ke")
-            sm = st.slider("σ_min", 0.01,0.20,0.05,0.01, key=f"{key}_sm")
-            ew = st.slider("N_EWMA", 10,120,60,10, key=f"{key}_ew")
+    # Filter 2 params
+    if dual and filter_id2:
+        sf2 = FILTERS[filter_id2]; cfg["pv2"] = {}
+        for pn, sp in sf2["params"].items():
+            cfg["pv2"][pn] = _render_param_slider(*sp, key_suffix=f"{key}_f2_{filter_id2}", container=st)
+        cfg["fc2"] = st.color_picker("C2", "#ff6b6b", key=f"{key}_fc2", label_visibility="collapsed")
+    else:
+        cfg["pv2"] = {}; cfg["fc2"] = "#ff6b6b"
 
-    # Apply filters
+    # Schmitt
+    cfg["show_sch"] = st.checkbox("施密特", value=True, key=f"{key}_sch")
+    cfg["ke"]=0.15; cfg["sm"]=0.05; cfg["ew"]=60
+    if cfg["show_sch"]:
+        ck1,ck2,ck3 = st.columns(3)
+        with ck1: cfg["ke"] = st.slider("k_ε",0.01,0.50,0.15,0.01,key=f"{key}_ke")
+        with ck2: cfg["sm"] = st.slider("σ_min",0.01,0.20,0.05,0.01,key=f"{key}_sm")
+        with ck3: cfg["ew"] = st.slider("N",10,120,60,10,key=f"{key}_ew")
+    return cfg
+
+
+def _render_chart(market, ticker_code, cfg, key, compact=True):
+    """Fetch data + render multi-subplot figure from config."""
+    t, noisy, ohlc, ticker_full, err = _fetch_stock(market, ticker_code, cfg["tf"], cfg["n_pts"])
+    if err: st.error(err); return
+
+    sf = FILTERS[cfg["_fid"]]
     try:
-        filtered = sf["func"](noisy, t, **pv)
+        filtered = sf["func"](noisy, t, **cfg["pv"])
         filtered = np.asarray(filtered, dtype=float).ravel()
-    except Exception as exc:
-        st.error(f"滤波出错: {exc}"); filtered = np.full_like(noisy, np.nan)
+    except Exception:
+        filtered = np.full_like(noisy, np.nan)
     filtered2 = None
-    if dual and sf2:
+    if cfg["_dual"] and cfg["_fid2"] and cfg["pv2"]:
         try:
-            filtered2 = sf2["func"](noisy, t, **pv2)
+            sf2 = FILTERS[cfg["_fid2"]]
+            filtered2 = sf2["func"](noisy, t, **cfg["pv2"])
             filtered2 = np.asarray(filtered2, dtype=float).ravel()
-        except Exception: filtered2 = np.full_like(noisy, np.nan)
+        except Exception:
+            filtered2 = np.full_like(noisy, np.nan)
 
     # Schmitt
     schmitt = None
-    if show_sch and not np.all(np.isnan(filtered)):
+    if cfg["show_sch"] and not np.all(np.isnan(filtered)):
         _v = np.gradient(filtered, t); _a = np.gradient(_v, t)
-        schmitt = _schmitt_trigger(_v, _a, ewma_span=ew, k_eps=ke, sigma_min=sm)
+        schmitt = _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
 
-    # Build figure
+    # Build figure (same as before, compact)
     has_s = schmitt is not None
     rows = 5 if has_s else 4
     if has_s:
         rh = [0.28,0.14,0.18,0.18,0.22]
-        titles = ("价格&滤波","残差","速度v","施密特:a&±ε","施密特:Sig_t")
-        mr=1; rr=2; vr=3; sar=4; ssr=5; ar=None
+        titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t")
+        mr=1;rr=2;vr=3;sar=4;ssr=5;ar=None
     else:
-        rh = [0.40,0.18,0.20,0.22]
-        titles = ("价格&滤波","残差","速度v","加速度a")
-        mr=1; rr=2; vr=3; ar=4; sar=ssr=None
-
+        rh=[0.40,0.18,0.20,0.22]; titles=("价格&滤波","残差","速度v","加速度a")
+        mr=1;rr=2;vr=3;ar=4;sar=ssr=None
     fig = make_subplots(rows=rows, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.03, row_heights=rh, subplot_titles=titles)
-    # K-line + close + filter
-    fig.add_trace(go.Candlestick(
-        x=t, open=ohlc_data["Open"].values.ravel(),
-        high=ohlc_data["High"].values.ravel(),
-        low=ohlc_data["Low"].values.ravel(),
-        close=ohlc_data["Close"].values.ravel(),
-        name="K线", increasing_line_color="#26a69a",
-        decreasing_line_color="#ef5350", showlegend=False), row=mr, col=1)
-    fig.add_trace(go.Scatter(x=t, y=noisy, mode="lines", name="收盘价",
+                        vertical_spacing=0.02, row_heights=rh, subplot_titles=titles)
+    fig.add_trace(go.Candlestick(x=t, open=ohlc["Open"].values.ravel(),
+        high=ohlc["High"].values.ravel(), low=ohlc["Low"].values.ravel(),
+        close=ohlc["Close"].values.ravel(), name="K",
+        increasing_line_color="#26a69a", decreasing_line_color="#ef5350",
+        showlegend=False), row=mr, col=1)
+    fig.add_trace(go.Scatter(x=t, y=noisy, mode="lines", name="收盘",
         line=dict(color="#5f6c80", width=1.0)), row=mr, col=1)
     if not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=filtered, mode="lines", name="滤波",
-            line=dict(color=fc, width=2.0)), row=mr, col=1)
-    if dual and filtered2 is not None and not np.all(np.isnan(filtered2)):
+            line=dict(color=cfg["fc"], width=2.0)), row=mr, col=1)
+    if cfg["_dual"] and filtered2 is not None and not np.all(np.isnan(filtered2)):
         fig.add_trace(go.Scatter(x=t, y=filtered2, mode="lines", name="滤波2",
-            line=dict(color=fc2, width=2.0)), row=mr, col=1)
-    # Residual
+            line=dict(color=cfg["fc2"], width=2.0)), row=mr, col=1)
     if not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=filtered-noisy, mode="lines", name="残差",
             line=dict(color="#5f6c80", width=1.0, dash="dot")), row=rr, col=1)
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=rr, col=1)
-    # Velocity + Acceleration
-    if not np.all(np.isnan(filtered)):
-        vel = np.gradient(filtered, t); acc = np.gradient(vel, t)
+        vel=np.gradient(filtered,t); acc=np.gradient(vel,t)
         fig.add_trace(go.Scatter(x=t, y=vel, mode="lines", name="v",
-            line=dict(color=fc, width=1.5)), row=vr, col=1)
+            line=dict(color=cfg["fc"], width=1.5)), row=vr, col=1)
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=vr, col=1)
-    # Schmitt a+ε
     if has_s:
         eps=schmitt["eps"]; sig=schmitt["sig"]
-        fig.add_trace(go.Scatter(x=list(t)+list(t[::-1]),
-            y=list(eps)+list(-eps[::-1]), fill="toself",
-            fillcolor="rgba(128,128,128,0.06)", line=dict(width=0),
-            name="死区±ε", hoverinfo="skip"), row=sar, col=1)
+        fig.add_trace(go.Scatter(x=list(t)+list(t[::-1]), y=list(eps)+list(-eps[::-1]),
+            fill="toself", fillcolor="rgba(128,128,128,0.06)", line=dict(width=0),
+            name="±ε", hoverinfo="skip"), row=sar, col=1)
         fig.add_trace(go.Scatter(x=t, y=eps, mode="lines", name="+ε",
             line=dict(color="#f85149", width=0.8, dash="dash"), showlegend=False), row=sar, col=1)
         fig.add_trace(go.Scatter(x=t, y=-eps, mode="lines", name="-ε",
@@ -674,28 +663,24 @@ def _render_view(market, ticker_code, n_points, tf_default, key,
         fig.add_trace(go.Scatter(x=t, y=acc, mode="lines", name="a",
             line=dict(color="#d2991d", width=1.5)), row=sar, col=1)
         fig.add_hline(y=0, line_dash="solid", line_color="gray", opacity=0.3, row=sar, col=1)
-    # Schmitt Sig
-    if has_s:
         fig.add_trace(go.Scatter(x=t, y=sig.astype(float), mode="lines", name="Sig",
             line=dict(color="#58a6ff", width=2, shape="hv")), row=ssr, col=1)
-        for state, cl in [(1,"rgba(63,185,80,0.06)"),(-1,"rgba(248,81,73,0.06)")]:
-            msk = sig == state
+        for state,cl in [(1,"rgba(63,185,80,0.06)"),(-1,"rgba(248,81,73,0.06)")]:
+            msk=sig==state
             if msk.any():
-                fig.add_trace(go.Scatter(x=t[msk], y=np.where(msk, state, 0),
+                fig.add_trace(go.Scatter(x=t[msk], y=np.where(msk,state,0),
                     mode="lines", line=dict(width=0), fill="tozeroy",
                     fillcolor=cl, showlegend=False, hoverinfo="skip"), row=ssr, col=1)
-    # Acceleration (non-Schmitt)
     if ar is not None and not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=acc, mode="lines", name="a",
             line=dict(color="#ffa502", width=1.5)), row=ar, col=1)
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=ar, col=1)
-
     fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=1, xref="x", yref="paper",
                    line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"), visible=False)
-    fh = (620 if has_s else 500) if compact else (880 if has_s else 700)
+    fh = (540 if has_s else 420) if compact else (880 if has_s else 700)
     fig.update_layout(template="plotly_dark", height=fh,
-        margin=dict(l=20,r=20,t=30,b=20), hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+        margin=dict(l=10,r=10,t=25,b=10), hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=9)))
     fig.update_xaxes(title_text="", row=rows, col=1)
     fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
     fig.update_yaxes(title_text="价格", row=mr, col=1)
@@ -707,14 +692,12 @@ def _render_view(market, ticker_code, n_points, tf_default, key,
                           tickvals=[-1,0,1], ticktext=["空","观","多"], range=[-1.5,1.5])
     if ar is not None:
         fig.update_yaxes(title_text="加速度", row=ar, col=1)
-    _render_plotly(fig, height=fh+40)
-
+    _render_plotly(fig, height=fh+30)
     rough = float(np.sum(np.diff(filtered,2)**2)) if len(filtered)>2 else 0.0
-    c1,c2,c3,c4=st.columns(4)
-    c1.metric(f"{ticker_full}·{timeframe}", f"{noisy[-1]:.2f}")
-    c2.metric("σ(价格)", f"{noisy.std():.2f}")
-    c3.metric("平滑度", f"{rough:.1f}")
-    c4.metric("数据点", f"{len(t)}")
+    c1,c2,c3 = st.columns(3)
+    c1.caption(f"{ticker_full}·{cfg['tf']}  |  ¥{noisy[-1]:.2f}")
+    c2.caption(f"σ={noisy.std():.2f}  平滑={rough:.1f}")
+    c3.caption(f"{len(t)} 点")
 
 
 # =====================================================================
@@ -723,9 +706,6 @@ def main():
     market = st.sidebar.radio("市场", ["美股 US","A股(沪深)","港股 HK"],
                                horizontal=True, key="market")
     ticker_code = st.sidebar.text_input("股票代码", value="AAPL", key="ticker").strip()
-    n_points = st.sidebar.slider("数据点数", 20, 300, 120, 10)
-
-    # ---- Global filter config (shared across all 4 views) ----
     st.sidebar.markdown("---")
     filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),
         format_func=lambda x: FILTERS[x]["name"], key="global_f")
@@ -735,15 +715,26 @@ def main():
         filter_id2 = st.sidebar.selectbox("滤波器 2", list(FILTERS.keys()),
             format_func=lambda x: FILTERS[x]["name"], key="global_f2")
 
-    # 2x2 grid
+    # ---- Pass 1: Top 2x2 parameter panels ----
+    st.markdown("### 参数配置")
+    configs = []
     for row_idx in range(2):
         c1, c2 = st.columns(2)
         for col_idx, col in enumerate([c1, c2]):
             i = row_idx * 2 + col_idx
             with col:
-                st.subheader(f"视图{i+1}: {DEFAULT_TFS[i]}")
-                _render_view(market, ticker_code, n_points, DEFAULT_TFS[i],
-                           f"v{i}", compact=True,
-                           filter_id=filter_id, dual=dual, filter_id2=filter_id2)
+                with st.container(border=True):
+                    st.caption(f"视图{i+1} — {DEFAULT_TFS[i]}")
+                    cfg = _render_params(f"v{i}", filter_id, dual, filter_id2, DEFAULT_TFS[i])
+                    configs.append(cfg)
+
+    # ---- Pass 2: Bottom 2x2 chart views ----
+    st.markdown("### 分析图表")
+    for row_idx in range(2):
+        c1, c2 = st.columns(2)
+        for col_idx, col in enumerate([c1, c2]):
+            i = row_idx * 2 + col_idx
+            with col:
+                _render_chart(market, ticker_code, configs[i], f"v{i}", compact=True)
 if __name__ == "__main__":
     main()
