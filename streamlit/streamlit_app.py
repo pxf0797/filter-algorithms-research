@@ -621,6 +621,12 @@ def _render_chart(market, ticker_code, cfg, key, compact=True):
         except Exception:
             filtered2 = np.full_like(noisy, np.nan)
 
+    rough = float(np.sum(np.diff(filtered,2)**2)) if len(filtered)>2 else 0.0
+    c1,c2,c3 = st.columns(3)
+    c1.caption(f"{ticker_full}·{cfg['tf']}  |  ¥{noisy[-1]:.2f}")
+    c2.caption(f"σ={noisy.std():.2f}  平滑={rough:.1f}")
+    c3.caption(f"{len(t)} 点")
+
     # Schmitt
     schmitt = None
     if cfg["show_sch"] and not np.all(np.isnan(filtered)):
@@ -704,11 +710,6 @@ def _render_chart(market, ticker_code, cfg, key, compact=True):
     if ar is not None:
         fig.update_yaxes(title_text="加速度", row=ar, col=1)
     _render_plotly(fig, height=fh+30)
-    rough = float(np.sum(np.diff(filtered,2)**2)) if len(filtered)>2 else 0.0
-    c1,c2,c3 = st.columns(3)
-    c1.caption(f"{ticker_full}·{cfg['tf']}  |  ¥{noisy[-1]:.2f}")
-    c2.caption(f"σ={noisy.std():.2f}  平滑={rough:.1f}")
-    c3.caption(f"{len(t)} 点")
 
 
 # =====================================================================
