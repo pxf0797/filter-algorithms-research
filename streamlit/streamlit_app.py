@@ -555,38 +555,46 @@ DEFAULT_TFS = ["日线", "60分钟", "15分钟", "5分钟"]
 ALL_TFS = ["1分钟","5分钟","15分钟","60分钟","日线","周线","月线","季线"]
 
 def _render_params(key, filter_id, dual, filter_id2, tf_default):
-    """Compact parameter panel for one view. Returns config dict."""
+    """Ultra-compact parameter panel. Returns config dict."""
     cfg = {"_fid": filter_id, "_dual": dual, "_fid2": filter_id2}
-    c1,c2 = st.columns(2)
-    with c1:
-        cfg["tf"] = st.selectbox("周期", ALL_TFS,
-            index=ALL_TFS.index(tf_default), key=f"{key}_tf")
-    with c2:
-        cfg["n_pts"] = st.slider("点数", 20, 300, 120, 10, key=f"{key}_n")
 
-    # Filter 1 params
-    sf = FILTERS[filter_id]; cfg["pv"] = {}
-    for pn, sp in sf["params"].items():
-        cfg["pv"][pn] = _render_param_slider(*sp, key_suffix=f"{key}_f1_{filter_id}", container=st)
-    cfg["fc"] = st.color_picker("C1", "#00d4aa", key=f"{key}_fc", label_visibility="collapsed")
-
-    # Filter 2 params
-    if dual and filter_id2:
-        sf2 = FILTERS[filter_id2]; cfg["pv2"] = {}
-        for pn, sp in sf2["params"].items():
-            cfg["pv2"][pn] = _render_param_slider(*sp, key_suffix=f"{key}_f2_{filter_id2}", container=st)
-        cfg["fc2"] = st.color_picker("C2", "#ff6b6b", key=f"{key}_fc2", label_visibility="collapsed")
-    else:
-        cfg["pv2"] = {}; cfg["fc2"] = "#ff6b6b"
-
-    # Schmitt
-    cfg["show_sch"] = st.checkbox("施密特", value=True, key=f"{key}_sch")
+    # Row 1: [周期] [N] [Sch] [kε] [σm] [Nw] — all collapsed labels
+    c = st.columns([1.2, 0.9, 0.6, 0.8, 0.8, 0.8])
+    with c[0]:
+        cfg["tf"] = st.selectbox("周期", ALL_TFS, index=ALL_TFS.index(tf_default),
+            key=f"{key}_tf", label_visibility="collapsed")
+    with c[1]:
+        cfg["n_pts"] = st.slider("N", 20, 300, 120, 10, key=f"{key}_n", label_visibility="collapsed")
+    with c[2]:
+        cfg["show_sch"] = st.checkbox("Sch", value=True, key=f"{key}_sch")
     cfg["ke"]=0.15; cfg["sm"]=0.05; cfg["ew"]=60
     if cfg["show_sch"]:
-        ck1,ck2,ck3 = st.columns(3)
-        with ck1: cfg["ke"] = st.slider("k_ε",0.01,0.50,0.15,0.01,key=f"{key}_ke")
-        with ck2: cfg["sm"] = st.slider("σ_min",0.01,0.20,0.05,0.01,key=f"{key}_sm")
-        with ck3: cfg["ew"] = st.slider("N",10,120,60,10,key=f"{key}_ew")
+        with c[3]: cfg["ke"] = st.slider("kε",0.01,0.50,0.15,0.05,key=f"{key}_ke",label_visibility="collapsed")
+        with c[4]: cfg["sm"] = st.slider("σm",0.01,0.20,0.05,0.02,key=f"{key}_sm",label_visibility="collapsed")
+        with c[5]: cfg["ew"] = st.slider("Nw",10,120,60,10,key=f"{key}_ew",label_visibility="collapsed")
+
+    # Row 2: filter 1 params
+    sf = FILTERS[filter_id]; cfg["pv"] = {}
+    f1 = list(sf["params"].items())
+    fc1 = st.columns([1]*len(f1) + [0.25])
+    for j, (pn, sp) in enumerate(f1):
+        with fc1[j]:
+            cfg["pv"][pn] = _render_param_slider(*sp, key_suffix=f"{key}_f1_{filter_id}", container=st)
+    with fc1[-1]:
+        cfg["fc"] = st.color_picker("", "#00d4aa", key=f"{key}_fc", label_visibility="collapsed")
+
+    # Row 3 (optional): filter 2 params
+    if dual and filter_id2:
+        sf2 = FILTERS[filter_id2]; cfg["pv2"] = {}
+        f2 = list(sf2["params"].items())
+        fc2 = st.columns([1]*len(f2) + [0.25])
+        for j, (pn, sp) in enumerate(f2):
+            with fc2[j]:
+                cfg["pv2"][pn] = _render_param_slider(*sp, key_suffix=f"{key}_f2_{filter_id2}", container=st)
+        with fc2[-1]:
+            cfg["fc2"] = st.color_picker("", "#ff6b6b", key=f"{key}_fc2", label_visibility="collapsed")
+    else:
+        cfg["pv2"] = {}; cfg["fc2"] = "#ff6b6b"
     return cfg
 
 
@@ -716,20 +724,18 @@ def main():
             format_func=lambda x: FILTERS[x]["name"], key="global_f2")
 
     # ---- Pass 1: Top 2x2 parameter panels ----
-    st.markdown("### 参数配置")
     configs = []
     for row_idx in range(2):
         c1, c2 = st.columns(2)
         for col_idx, col in enumerate([c1, c2]):
             i = row_idx * 2 + col_idx
             with col:
-                with st.container(border=True):
-                    st.caption(f"视图{i+1} — {DEFAULT_TFS[i]}")
+                    st.caption(f"视图{i+1} · {DEFAULT_TFS[i]}")
                     cfg = _render_params(f"v{i}", filter_id, dual, filter_id2, DEFAULT_TFS[i])
                     configs.append(cfg)
 
     # ---- Pass 2: Bottom 2x2 chart views ----
-    st.markdown("### 分析图表")
+    
     for row_idx in range(2):
         c1, c2 = st.columns(2)
         for col_idx, col in enumerate([c1, c2]):
