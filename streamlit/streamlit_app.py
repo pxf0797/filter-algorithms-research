@@ -552,8 +552,12 @@ def _schmitt_trigger(v, a, ewma_span=60, k_eps=0.15, sigma_min=0.05):
 # ---------------------------------------------------------------------------
 DEFAULT_TFS = ["日线", "60分钟", "15分钟", "5分钟"]
 
-def _render_view(market, ticker_code, n_points, tf_default, key, compact=False):
-    """Render one complete multi-subplot analysis panel for a single timeframe."""
+def _render_view(market, ticker_code, n_points, tf_default, key,
+                 filter_id, dual, filter_id2=None, compact=False):
+    """Render one complete multi-subplot analysis panel for a single timeframe.
+    filter_id, dual, filter_id2 come from global sidebar config.
+    Each view has its own parameter sliders for the shared filter types.
+    """
     st.markdown("---")
     c1, c2 = st.columns([1, 3])
     with c1:
@@ -563,30 +567,26 @@ def _render_view(market, ticker_code, n_points, tf_default, key, compact=False):
             key=f"{key}_tf")
     with c2:
         n_pts = st.slider("数据点数", 20, 300, n_points, 10, key=f"{key}_n")
+        st.caption(f"滤波: {FILTERS[filter_id]['name']}" +
+                   (f" vs {FILTERS[filter_id2]['name']}" if dual and filter_id2 else ""))
 
     # Fetch data
     t, noisy, ohlc_data, ticker_full, err = _fetch_stock(market, ticker_code, timeframe, n_pts)
     if err:
         st.error(err); return
 
-    # ---- View params (compact 3-col) ----
+    # ---- Per-view parameter sliders (3-col) ----
     pc1, pc2, pc3 = st.columns(3)
     with pc1:
-        filter_id = st.selectbox("滤波器", list(FILTERS.keys()),
-            format_func=lambda x: FILTERS[x]["name"], key=f"{key}_f")
-        sf = FILTERS[filter_id]
-        pv = {}
+        sf = FILTERS[filter_id]; pv = {}
         for pn, sp in sf["params"].items():
             pv[pn] = _render_param_slider(*sp, key_suffix=f"{key}_f1_{filter_id}", container=st)
-    with pc2:
-        dual = st.checkbox("双滤波对比", value=False, key=f"{key}_dual")
         fc = st.color_picker("滤波颜色", "#00d4aa", key=f"{key}_fc")
-        if dual:
-            fid2 = st.selectbox("滤波器2", list(FILTERS.keys()),
-                format_func=lambda x: FILTERS[x]["name"], key=f"{key}_f2")
-            sf2 = FILTERS[fid2]; pv2 = {}
+    with pc2:
+        if dual and filter_id2:
+            sf2 = FILTERS[filter_id2]; pv2 = {}
             for pn, sp in sf2["params"].items():
-                pv2[pn] = _render_param_slider(*sp, key_suffix=f"{key}_f2_{fid2}", container=st)
+                pv2[pn] = _render_param_slider(*sp, key_suffix=f"{key}_f2_{filter_id2}", container=st)
             fc2 = st.color_picker("滤波2颜色", "#ff6b6b", key=f"{key}_fc2")
         else:
             sf2 = None; pv2 = {}; fc2 = "#ff6b6b"
@@ -725,6 +725,16 @@ def main():
     ticker_code = st.sidebar.text_input("股票代码", value="AAPL", key="ticker").strip()
     n_points = st.sidebar.slider("数据点数", 20, 300, 120, 10)
 
+    # ---- Global filter config (shared across all 4 views) ----
+    st.sidebar.markdown("---")
+    filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),
+        format_func=lambda x: FILTERS[x]["name"], key="global_f")
+    dual = st.sidebar.checkbox("双滤波对比", value=False, key="global_dual")
+    filter_id2 = None
+    if dual:
+        filter_id2 = st.sidebar.selectbox("滤波器 2", list(FILTERS.keys()),
+            format_func=lambda x: FILTERS[x]["name"], key="global_f2")
+
     # 2x2 grid
     for row_idx in range(2):
         c1, c2 = st.columns(2)
@@ -732,6 +742,8 @@ def main():
             i = row_idx * 2 + col_idx
             with col:
                 st.subheader(f"视图{i+1}: {DEFAULT_TFS[i]}")
-                _render_view(market, ticker_code, n_points, DEFAULT_TFS[i], f"v{i}", compact=True)
+                _render_view(market, ticker_code, n_points, DEFAULT_TFS[i],
+                           f"v{i}", compact=True,
+                           filter_id=filter_id, dual=dual, filter_id2=filter_id2)
 if __name__ == "__main__":
     main()
