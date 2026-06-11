@@ -548,7 +548,7 @@ def _schmitt_trigger(v, a, ewma_span=60, k_eps=0.15, sigma_min=0.05):
 # ---------------------------------------------------------------------------
 DEFAULT_TFS = ["日线", "60分钟", "15分钟", "5分钟"]
 
-def _render_view(market, ticker_code, n_points, tf_default, key):
+def _render_view(market, ticker_code, n_points, tf_default, key, compact=False):
     """Render one complete multi-subplot analysis panel for a single timeframe."""
     st.markdown("---")
     c1, c2 = st.columns([1, 3])
@@ -688,7 +688,7 @@ def _render_view(market, ticker_code, n_points, tf_default, key):
 
     fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=1, xref="x", yref="paper",
                    line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"), visible=False)
-    fh = 880 if has_s else 700
+    fh = (620 if has_s else 500) if compact else (880 if has_s else 700)
     fig.update_layout(template="plotly_dark", height=fh,
         margin=dict(l=20,r=20,t=30,b=20), hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
@@ -721,9 +721,13 @@ def main():
     ticker_code = st.sidebar.text_input("股票代码", value="AAPL", key="ticker").strip()
     n_points = st.sidebar.slider("数据点数", 20, 300, 120, 10)
 
-    tabs = st.tabs([f"视图{i+1}: {DEFAULT_TFS[i]}" for i in range(4)])
-    for i, tab in enumerate(tabs):
-        with tab:
-            _render_view(market, ticker_code, n_points, DEFAULT_TFS[i], f"v{i}")
+    # 2x2 grid
+    for row_idx in range(2):
+        c1, c2 = st.columns(2)
+        for col_idx, col in enumerate([c1, c2]):
+            i = row_idx * 2 + col_idx
+            with col:
+                st.subheader(f"视图{i+1}: {DEFAULT_TFS[i]}")
+                _render_view(market, ticker_code, n_points, DEFAULT_TFS[i], f"v{i}", compact=True)
 if __name__ == "__main__":
     main()
