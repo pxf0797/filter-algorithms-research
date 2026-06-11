@@ -776,9 +776,16 @@ def main():
     for i in range(4):
         for k in ["tf", "n", "sch", "ke", "sm", "ew", "fc", "fc2"]:
             _export_keys.append(f"v{i}_{k}")
-        for sk in st.session_state:
-            if sk.startswith(f"v{i}_f1_") or sk.startswith(f"v{i}_f2_"):
-                _export_keys.append(sk)
+        # Explicitly construct filter param keys from FILTERS registry (reliable)
+        fid = st.session_state.get("global_f", "")
+        if fid in FILTERS:
+            for pname in FILTERS[fid]["params"]:
+                _export_keys.append(f"{pname}_v{i}_f1_{fid}")
+        if st.session_state.get("global_dual"):
+            fid2 = st.session_state.get("global_f2", "")
+            if fid2 in FILTERS:
+                for pname in FILTERS[fid2]["params"]:
+                    _export_keys.append(f"{pname}_v{i}_f2_{fid2}")
     export_data = {k: st.session_state.get(k) for k in _export_keys if k in st.session_state}
     if export_data:
         st.sidebar.download_button("导出配置", json.dumps(export_data, ensure_ascii=False, indent=2),
