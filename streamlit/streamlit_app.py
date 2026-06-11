@@ -757,8 +757,9 @@ def main():
         for col_idx, col in enumerate([c1, c2]):
             i = row_idx * 2 + col_idx
             with col:
+                    tf_label = st.session_state.get(f"v{i}_tf", DEFAULT_TFS[i])
+                    st.caption(f"视图{i+1} · {tf_label}")
                     cfg = _render_params(f"v{i}", filter_id, dual, filter_id2, DEFAULT_TFS[i])
-                    st.caption(f"视图{i+1} · {cfg['tf']}")
                     configs.append(cfg)
 
     # ---- Pass 2: Bottom 2x2 chart views ----
