@@ -558,20 +558,23 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     """Ultra-compact parameter panel. Returns config dict."""
     cfg = {"_fid": filter_id, "_dual": dual, "_fid2": filter_id2}
 
-    # Row 1: [周期] [N] [Sch] [kε] [σm] [Nw] — all collapsed labels
-    c = st.columns([1.2, 0.9, 0.6, 0.8, 0.8, 0.8])
+    # Row 1: [周期] [N] [Schmitt☑] [k_ε ▬] [σ_min ▬] [N_EWMA ▬]
+    c = st.columns([1.4, 0.9, 0.6, 1.1, 1.1, 1.1])
     with c[0]:
         cfg["tf"] = st.selectbox("周期", ALL_TFS, index=ALL_TFS.index(tf_default),
             key=f"{key}_tf", label_visibility="collapsed")
     with c[1]:
         cfg["n_pts"] = st.slider("N", 20, 300, 120, 10, key=f"{key}_n", label_visibility="collapsed")
     with c[2]:
-        cfg["show_sch"] = st.checkbox("Sch", value=True, key=f"{key}_sch")
+        cfg["show_sch"] = st.checkbox("施密特", value=True, key=f"{key}_sch")
     cfg["ke"]=0.15; cfg["sm"]=0.05; cfg["ew"]=60
     if cfg["show_sch"]:
-        with c[3]: cfg["ke"] = st.slider("kε",0.01,0.50,0.15,0.05,key=f"{key}_ke",label_visibility="collapsed")
-        with c[4]: cfg["sm"] = st.slider("σm",0.01,0.20,0.05,0.02,key=f"{key}_sm",label_visibility="collapsed")
-        with c[5]: cfg["ew"] = st.slider("Nw",10,120,60,10,key=f"{key}_ew",label_visibility="collapsed")
+        with c[3]: cfg["ke"] = st.slider("k_ε",0.01,0.50,0.15,0.05,key=f"{key}_ke",
+            help="灵敏度系数,越小越敏感. ε_t=k_ε·max(σ_t(v),σ_min)")
+        with c[4]: cfg["sm"] = st.slider("σ_min",0.01,0.20,0.05,0.02,key=f"{key}_sm",
+            help="地板保护,防止低波动下ε_t→0")
+        with c[5]: cfg["ew"] = st.slider("N_EWMA",10,120,60,10,key=f"{key}_ew",
+            help="EWMA周期,α=2/(N+1),越大越平滑")
 
     # Row 2: filter 1 params
     sf = FILTERS[filter_id]; cfg["pv"] = {}
