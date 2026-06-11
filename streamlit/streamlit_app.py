@@ -785,10 +785,15 @@ def main():
         export_data[f"v{i}_ew"] = cfg["ew"]
         export_data[f"v{i}_fc"] = cfg["fc"]
         export_data[f"v{i}_fc2"] = cfg["fc2"]
+        # Use slider label (Chinese) as key prefix, matching _render_param_slider
+        f1 = FILTERS.get(filter_id, {})
         for pname, pval in cfg.get("pv", {}).items():
-            export_data[f"{pname}_v{i}_f1_{filter_id}"] = pval
+            label = f1["params"].get(pname, (pname,))[0]  # spec tuple's first element = label
+            export_data[f"{label}_v{i}_f1_{filter_id}"] = pval
+        f2 = FILTERS.get(filter_id2, {}) if filter_id2 else {}
         for pname, pval in cfg.get("pv2", {}).items():
-            export_data[f"{pname}_v{i}_f2_{filter_id2}"] = pval
+            label = f2["params"].get(pname, (pname,))[0]
+            export_data[f"{label}_v{i}_f2_{filter_id2}"] = pval
     st.sidebar.download_button("导出配置", json.dumps(export_data, ensure_ascii=False, indent=2),
         file_name="filter_config.json", mime="application/json",
         use_container_width=True)
