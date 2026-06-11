@@ -235,13 +235,17 @@ def compute_metrics(clean, noisy, filtered):
 # ---------------------------------------------------------------------------
 # Helper: render a slider for each filter parameter
 # ---------------------------------------------------------------------------
-def _render_param_slider(label, pmin, pmax, pstep, pdefault, key_suffix=""):
-    """Render an st.slider with appropriate numeric format."""
+def _render_param_slider(label, pmin, pmax, pstep, pdefault, key_suffix="", container=None):
+    """Render an st.slider with appropriate numeric format.
+    If container is None, renders in sidebar (backward compat).
+    Pass container=st to render inline in the current column context.
+    """
+    ctx = container if container is not None else st.sidebar
     key = f"{label}_{key_suffix}" if key_suffix else None
     if isinstance(pstep, int):
-        return st.sidebar.slider(label, pmin, pmax, pdefault, pstep, key=key)
+        return ctx.slider(label, pmin, pmax, pdefault, pstep, key=key)
     fmt = "%.3f" if pstep < 0.01 else "%.2f"
-    return st.sidebar.slider(label, pmin, pmax, pdefault, pstep, format=fmt, key=key)
+    return ctx.slider(label, pmin, pmax, pdefault, pstep, format=fmt, key=key)
 
 
 # ---------------------------------------------------------------------------
@@ -573,7 +577,7 @@ def _render_view(market, ticker_code, n_points, tf_default, key, compact=False):
         sf = FILTERS[filter_id]
         pv = {}
         for pn, sp in sf["params"].items():
-            pv[pn] = _render_param_slider(*sp, key_suffix=f"{key}_f1_{filter_id}")
+            pv[pn] = _render_param_slider(*sp, key_suffix=f"{key}_f1_{filter_id}", container=st)
     with pc2:
         dual = st.checkbox("双滤波对比", value=False, key=f"{key}_dual")
         fc = st.color_picker("滤波颜色", "#00d4aa", key=f"{key}_fc")
@@ -582,7 +586,7 @@ def _render_view(market, ticker_code, n_points, tf_default, key, compact=False):
                 format_func=lambda x: FILTERS[x]["name"], key=f"{key}_f2")
             sf2 = FILTERS[fid2]; pv2 = {}
             for pn, sp in sf2["params"].items():
-                pv2[pn] = _render_param_slider(*sp, key_suffix=f"{key}_f2_{fid2}")
+                pv2[pn] = _render_param_slider(*sp, key_suffix=f"{key}_f2_{fid2}", container=st)
             fc2 = st.color_picker("滤波2颜色", "#ff6b6b", key=f"{key}_fc2")
         else:
             sf2 = None; pv2 = {}; fc2 = "#ff6b6b"
