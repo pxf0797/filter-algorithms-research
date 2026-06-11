@@ -674,10 +674,10 @@ def _render_view(market, ticker_code, n_points, tf_default, key):
     if has_s:
         fig.add_trace(go.Scatter(x=t, y=sig.astype(float), mode="lines", name="Sig",
             line=dict(color="#58a6ff", width=2, shape="hv")), row=ssr, col=1)
-        for st,cl in [(1,"rgba(63,185,80,0.06)"),(-1,"rgba(248,81,73,0.06)")]:
-            msk = sig==st
+        for state, cl in [(1,"rgba(63,185,80,0.06)"),(-1,"rgba(248,81,73,0.06)")]:
+            msk = sig == state
             if msk.any():
-                fig.add_trace(go.Scatter(x=t[msk], y=np.where(msk,st,0),
+                fig.add_trace(go.Scatter(x=t[msk], y=np.where(msk, state, 0),
                     mode="lines", line=dict(width=0), fill="tozeroy",
                     fillcolor=cl, showlegend=False, hoverinfo="skip"), row=ssr, col=1)
     # Acceleration (non-Schmitt)
