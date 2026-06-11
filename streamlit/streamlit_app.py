@@ -750,21 +750,6 @@ def main():
         filter_id2 = st.sidebar.selectbox("滤波器 2", list(FILTERS.keys()),
             format_func=lambda x: FILTERS[x]["name"], key="global_f2")
 
-    # ── Export config (after widgets rendered) ──
-    st.sidebar.markdown("---")
-    _export_keys = ["market", "ticker", "global_f", "global_dual", "global_f2"]
-    for i in range(4):
-        for k in ["tf", "n", "sch", "ke", "sm", "ew", "fc", "fc2"]:
-            _export_keys.append(f"v{i}_{k}")
-        for sk in st.session_state:
-            if sk.startswith(f"v{i}_f1_") or sk.startswith(f"v{i}_f2_"):
-                _export_keys.append(sk)
-    export_data = {k: st.session_state.get(k) for k in _export_keys if k in st.session_state}
-    if export_data:
-        st.sidebar.download_button("导出配置", json.dumps(export_data, ensure_ascii=False, indent=2),
-            file_name="filter_config.json", mime="application/json",
-            use_container_width=True)
-
     # ---- Pass 1: Top 2x2 parameter panels ----
     configs = []
     for row_idx in range(2):
@@ -784,5 +769,21 @@ def main():
             i = row_idx * 2 + col_idx
             with col:
                 _render_chart(market, ticker_code, configs[i], f"v{i}", compact=True)
+
+    # ── Export (after ALL widgets: filter sliders now in session_state) ──
+    st.sidebar.markdown("---")
+    _export_keys = ["market", "ticker", "global_f", "global_dual", "global_f2"]
+    for i in range(4):
+        for k in ["tf", "n", "sch", "ke", "sm", "ew", "fc", "fc2"]:
+            _export_keys.append(f"v{i}_{k}")
+        for sk in st.session_state:
+            if sk.startswith(f"v{i}_f1_") or sk.startswith(f"v{i}_f2_"):
+                _export_keys.append(sk)
+    export_data = {k: st.session_state.get(k) for k in _export_keys if k in st.session_state}
+    if export_data:
+        st.sidebar.download_button("导出配置", json.dumps(export_data, ensure_ascii=False, indent=2),
+            file_name="filter_config.json", mime="application/json",
+            use_container_width=True)
+
 if __name__ == "__main__":
     main()
