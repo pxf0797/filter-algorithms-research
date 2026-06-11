@@ -715,6 +715,26 @@ def _render_chart(market, ticker_code, cfg, key, compact=True):
 # =====================================================================
 def main():
     st.sidebar.title("多周期股票滤波分析")
+
+    # ── Import config (before any widget) ──
+    if "_import_data" not in st.session_state:
+        st.session_state._import_data = None
+    uploaded = st.sidebar.file_uploader("导入配置", type=["json"], key="config_import",
+                                         label_visibility="collapsed")
+    if uploaded is not None and st.session_state._import_data is None:
+        try:
+            st.session_state._import_data = json.loads(uploaded.read())
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"导入失败: {e}")
+    pending = st.session_state.get("_import_data")
+    if pending is not None:
+        for k, v in pending.items():
+            st.session_state[k] = v
+        st.session_state._import_data = None
+        st.sidebar.success("配置已加载")
+        st.rerun()
+
     market = st.sidebar.radio("市场", ["美股 US","A股(沪深)","港股 HK"],
                                horizontal=True, key="market")
     ticker_code = st.sidebar.text_input("股票代码", value="AAPL", key="ticker").strip()
@@ -726,6 +746,21 @@ def main():
     if dual:
         filter_id2 = st.sidebar.selectbox("滤波器 2", list(FILTERS.keys()),
             format_func=lambda x: FILTERS[x]["name"], key="global_f2")
+
+    # ── Export config (after widgets rendered) ──
+    st.sidebar.markdown("---")
+    _export_keys = ["market", "ticker", "global_f", "global_dual", "global_f2"]
+    for i in range(4):
+        for k in ["tf", "n", "sch", "ke", "sm", "ew", "fc", "fc2"]:
+            _export_keys.append(f"v{i}_{k}")
+        for sk in st.session_state:
+            if sk.startswith(f"v{i}_f1_") or sk.startswith(f"v{i}_f2_"):
+                _export_keys.append(sk)
+    export_data = {k: st.session_state.get(k) for k in _export_keys if k in st.session_state}
+    if export_data:
+        st.sidebar.download_button("导出配置", json.dumps(export_data, ensure_ascii=False, indent=2),
+            file_name="filter_config.json", mime="application/json",
+            use_container_width=True)
 
     # ---- Pass 1: Top 2x2 parameter panels ----
     configs = []
