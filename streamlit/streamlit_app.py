@@ -810,12 +810,14 @@ def main():
         now = time.time()
         last = st.session_state.get("_last_auto_refresh")
         if last is None:
-            st.session_state._last_auto_refresh = now  # start counting from now
+            st.session_state._last_auto_refresh = now
         elif now - last >= interval:
             _fetch_stock.clear()
             st.session_state._last_auto_refresh = now
             st.rerun()
-        time.sleep(1)
+        # Sleep until next check, capped at 5s to allow user interaction
+        remaining = interval - (now - st.session_state._last_auto_refresh)
+        time.sleep(min(remaining, 5))
         st.rerun()
 
 if __name__ == "__main__":
