@@ -716,6 +716,10 @@ def _render_chart(market, ticker_code, cfg, key, compact=True):
 def main():
     st.sidebar.title("多周期股票滤波分析")
 
+    if st.sidebar.button("刷新数据", use_container_width=True):
+        _fetch_stock.clear()
+        st.rerun()
+
     # ── Import config (before any widget) ──
     if "_import_data" not in st.session_state:
         st.session_state._import_data = None
