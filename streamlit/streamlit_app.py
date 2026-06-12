@@ -466,7 +466,7 @@ def _fetch_stock(market, code, tf, n_pts):
 
     data = yf.download(full, period=period, interval=interval, progress=False)
     if data.empty:
-        return None, None, None, full, f"无数据: {full}"
+        return None, None, None, full, f"无数据: {full}", None
 
     # yfinance >=0.2.x returns MultiIndex columns even for single ticker,
     # e.g. ('Close','AAPL'). Flatten to simple column names first.
