@@ -751,6 +751,25 @@ def main():
     market = st.sidebar.radio("市场", ["美股 US","A股(沪深)","港股 HK"],
                                horizontal=True, key="market")
     ticker_code = st.sidebar.text_input("股票代码", value="AAPL", key="ticker").strip()
+
+    @st.cache_data(show_spinner=False, ttl=3600)
+    def _stock_name(market, code):
+        try:
+            if market == "A股(沪深)":
+                full = code + (".SS" if code[0] == "6" else ".SZ")
+            elif market == "港股 HK":
+                full = code.zfill(4) + ".HK"
+            else:
+                full = code.upper()
+            info = yf.Ticker(full).info
+            return info.get("longName") or info.get("shortName") or ""
+        except Exception:
+            return ""
+
+    name = _stock_name(market, ticker_code) if ticker_code else ""
+    if name:
+        st.sidebar.caption(f"📌 {name}")
+
     st.sidebar.markdown("---")
     filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),
         format_func=lambda x: FILTERS[x]["name"], key="global_f")
