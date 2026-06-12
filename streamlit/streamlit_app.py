@@ -808,12 +808,14 @@ def main():
     if auto_refresh:
         interval = st.sidebar.slider("刷新间隔(秒)", 10, 600, 60, 10, key="refresh_interval")
         now = time.time()
-        last = st.session_state.get("_last_auto_refresh", 0)
-        if now - last >= interval:
+        last = st.session_state.get("_last_auto_refresh")
+        if last is None:
+            st.session_state._last_auto_refresh = now  # start counting from now
+        elif now - last >= interval:
             _fetch_stock.clear()
             st.session_state._last_auto_refresh = now
             st.rerun()
-        time.sleep(2)
+        time.sleep(1)
         st.rerun()
 
 if __name__ == "__main__":
