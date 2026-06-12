@@ -803,7 +803,7 @@ def main():
         file_name="filter_config.json", mime="application/json",
         use_container_width=True)
 
-    # ── Auto-refresh (at end: all widgets rendered) ──
+    # ── Auto-refresh: sleep→check→rerun, capped at 10s check interval ──
     auto_refresh = st.sidebar.checkbox("自动刷新", value=False, key="auto_refresh")
     if auto_refresh:
         interval = st.sidebar.slider("刷新间隔(秒)", 10, 600, 60, 10, key="refresh_interval")
@@ -815,9 +815,8 @@ def main():
             _fetch_stock.clear()
             st.session_state._last_auto_refresh = now
             st.rerun()
-        # Sleep until next check, capped at 5s to allow user interaction
         remaining = interval - (now - st.session_state._last_auto_refresh)
-        time.sleep(min(remaining, 5))
+        time.sleep(min(remaining, 10))
         st.rerun()
 
 if __name__ == "__main__":
