@@ -3,6 +3,7 @@
 """
 
 import json
+import time
 import uuid
 import streamlit as st
 import numpy as np
@@ -801,6 +802,19 @@ def main():
     st.sidebar.download_button("导出配置", json.dumps(export_data, ensure_ascii=False, indent=2),
         file_name="filter_config.json", mime="application/json",
         use_container_width=True)
+
+    # ── Auto-refresh (at end: all widgets rendered) ──
+    auto_refresh = st.sidebar.checkbox("自动刷新", value=False, key="auto_refresh")
+    if auto_refresh:
+        interval = st.sidebar.slider("刷新间隔(秒)", 10, 600, 60, 10, key="refresh_interval")
+        now = time.time()
+        last = st.session_state.get("_last_auto_refresh", 0)
+        if now - last >= interval:
+            _fetch_stock.clear()
+            st.session_state._last_auto_refresh = now
+            st.rerun()
+        time.sleep(2)
+        st.rerun()
 
 if __name__ == "__main__":
     main()
