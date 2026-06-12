@@ -476,8 +476,8 @@ def _fetch_stock(market, code, tf, n_pts):
         data = data.iloc[-n_pts:]
     n = len(data)
     close = data["Close"].values.ravel()
-    t_arr = np.arange(n, dtype=float)
-    return t_arr, close, data, full, None
+    dates = data.index  # DatetimeIndex for x-axis display
+    return np.arange(n, dtype=float), close, data, full, None, dates
 
 
 # ---------------------------------------------------------------------------
@@ -604,8 +604,54 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
 
 def _render_chart(market, ticker_code, cfg, key, compact=True):
     """Fetch data + render multi-subplot figure from config."""
-    t, noisy, ohlc, ticker_full, err = _fetch_stock(market, ticker_code, cfg["tf"], cfg["n_pts"])
+    t, noisy, ohlc, ticker_full, err, dates = _fetch_stock(market, ticker_code, cfg["tf"], cfg["n_pts"])
     if err: st.error(err); return
+
+    # ── Date markers: vertical dashed lines + tick labels ──
+    def _date_markers(dates, tf):
+        """Return (positions, labels) for vertical date markers."""
+        if dates is None or len(dates) == 0:
+            return [], []
+        positions, labels = [], []
+        n = len(dates)
+        if tf in ("1分钟", "5分钟", "15分钟", "60分钟"):
+            # Intraday: mark each calendar day boundary
+            prev_d = None
+            for i, d in enumerate(dates):
+                day = d.date() if hasattr(d, 'date') else pd.Timestamp(d).date()
+                if prev_d is not None and day != prev_d:
+                    positions.append(i)
+                    labels.append(day.strftime("%m/%d"))
+                prev_d = day
+        elif tf == "日线":
+            # Daily: mark Monday (week start)
+            for i, d in enumerate(dates):
+                if d.weekday() == 0:
+                    positions.append(i)
+                    labels.append(d.strftime("%m/%d"))
+        elif tf == "周线":
+            # Weekly: mark first week of each month
+            prev_m = None
+            for i, d in enumerate(dates):
+                m = d.month
+                if prev_m is not None and m != prev_m:
+                    positions.append(i)
+                    labels.append(d.strftime("%m/%d"))
+                prev_m = m
+        elif tf == "月线":
+            # Monthly: mark January
+            for i, d in enumerate(dates):
+                if d.month == 1:
+                    positions.append(i)
+                    labels.append(d.strftime("%Y"))
+        else:  # 季线
+            for i, d in enumerate(dates):
+                if d.month == 1:
+                    positions.append(i)
+                    labels.append(d.strftime("%Y"))
+        return positions, labels
+
+    marker_positions, marker_labels = _date_markers(dates, cfg["tf"])
 
     sf = FILTERS[cfg["_fid"]]
     try:
@@ -695,11 +741,18 @@ def _render_chart(market, ticker_code, cfg, key, compact=True):
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=ar, col=1)
     fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=1, xref="x", yref="paper",
                    line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"), visible=False)
+    # Date markers: vertical dashed lines at period boundaries
+    for pos in marker_positions:
+        fig.add_vline(x=pos, line=dict(color="rgba(255,255,255,0.10)", width=0.8, dash="dot"),
+                       layer="below")
     fh = (540 if has_s else 420) if compact else (880 if has_s else 700)
     fig.update_layout(template="plotly_dark", height=fh,
         margin=dict(l=10,r=10,t=25,b=10), hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=9)))
-    fig.update_xaxes(title_text="", row=rows, col=1)
+    # X-axis: show date labels at marker positions
+    fig.update_xaxes(title_text="", row=rows, col=1,
+                      tickvals=marker_positions, ticktext=marker_labels,
+                      tickfont=dict(size=9, color="#8b949e"))
     fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
     fig.update_yaxes(title_text="价格", row=mr, col=1)
     fig.update_yaxes(title_text="残差", row=rr, col=1)
