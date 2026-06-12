@@ -718,7 +718,6 @@ def main():
 
     if st.sidebar.button("刷新数据", use_container_width=True):
         _fetch_stock.clear()
-        st.rerun()
 
     # ── Import config (before any widget) ──
     if "_import_data" not in st.session_state:
