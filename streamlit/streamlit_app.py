@@ -717,8 +717,15 @@ def _render_chart(market, ticker_code, cfg, key, compact=True):
 def main():
     st.sidebar.title("多周期股票滤波分析")
 
-    if st.sidebar.button("刷新数据", use_container_width=True):
-        _fetch_stock.clear()
+    # Refresh row: button + auto toggle in one line
+    c_refresh, c_auto = st.sidebar.columns([1, 1.2])
+    with c_refresh:
+        if st.button("刷新数据", use_container_width=True):
+            _fetch_stock.clear()
+    with c_auto:
+        auto_refresh = st.checkbox("自动刷新", value=False, key="auto_refresh")
+    if auto_refresh:
+        interval = st.sidebar.slider("刷新间隔(秒)", 10, 600, 60, 10, key="refresh_interval")
 
     # ── Import config (before any widget) ──
     if "_import_data" not in st.session_state:
@@ -740,7 +747,6 @@ def main():
             st.session_state[k] = v
         st.session_state._import_data = True  # sentinel: applied, skip re-read
         st.sidebar.success("配置已加载")
-        st.rerun()
 
     market = st.sidebar.radio("市场", ["美股 US","A股(沪深)","港股 HK"],
                                horizontal=True, key="market")
@@ -803,10 +809,8 @@ def main():
         file_name="filter_config.json", mime="application/json",
         use_container_width=True)
 
-    # ── Auto-refresh: sleep full interval, single rerun, zero flicker ──
-    auto_refresh = st.sidebar.checkbox("自动刷新", value=False, key="auto_refresh")
+    # ── Auto-refresh execution ──
     if auto_refresh:
-        interval = st.sidebar.slider("刷新间隔(秒)", 10, 600, 60, 10, key="refresh_interval")
         now = time.time()
         last = st.session_state.get("_last_auto_refresh")
         if last is None:
