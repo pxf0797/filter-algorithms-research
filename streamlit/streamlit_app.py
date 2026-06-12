@@ -252,19 +252,19 @@ def _render_param_slider(label, pmin, pmax, pstep, pdefault, key_suffix="", cont
 # ---------------------------------------------------------------------------
 # Plotly cross-subplot crosshair helper
 # ---------------------------------------------------------------------------
-def _render_plotly(fig, height=750):
-    """将 Plotly 图表渲染为带跨子图十字光标+统一 tooltip 的 HTML 组件。
+def _render_plotly(fig, height=750, dates=None):
+    """Render Plotly chart with cross-subplot crosshair + custom tooltip.
 
-    解决 Plotly 原生 hovermode="x unified" 只能聚合当前子图 trace 的限制：
-    JS 在 hover 时遍历 gd.data 中全部 trace，查找 hover x 处的 y 值，
-    渲染为自定义 tooltip，实现"光标位置看到所有 y 轴数据"。
-
-    关键：pio.to_json 将 numpy 数组编码为 base64 bdata，JS 端无法通过
-    trace.x[idx] 索引访问。这里手动构建 figure JSON，将 x/y 数据替换为
-    普通 JSON 数组，确保 gd.data[t].x[idx] / y[idx] 在浏览器中可用。
+    If dates is provided (list of Timestamps), the tooltip will display the
+    date at the hovered position.
     """
-    # 构建 figure dict，手动替换 trace 中的 x/y bdata 为 Python list
     fig_dict = {"data": [], "layout": fig.layout.to_plotly_json()}
+    if dates is not None:
+        # Store date strings in layout for JS tooltip
+        if hasattr(dates[0], 'strftime'):
+            fig_dict["layout"]["_dates"] = [d.strftime("%Y-%m-%d %H:%M") for d in dates]
+        else:
+            fig_dict["layout"]["_dates"] = [str(d) for d in dates]
     for trace in fig.data:
         tr = trace.to_plotly_json()
         if isinstance(tr.get("x"), dict) and "bdata" in tr["x"]:
@@ -356,6 +356,9 @@ g.hovertext {{ visibility: hidden !important; }}
 
             // 3) Collect y-values from ALL traces across ALL subplots
             var lines = [];
+            var dateStr = (gd.layout._dates && idx < gd.layout._dates.length)
+                ? gd.layout._dates[idx] : '';
+            if (dateStr) lines.push('<b>' + dateStr + '</b>');
             lines.push('<b>x = ' + xv.toFixed(4) + '</b>');
             for (var t = 0; t < gd.data.length; t++) {{
                 var trace = gd.data[t];
@@ -763,7 +766,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True):
                           tickvals=[-1,0,1], ticktext=["空","观","多"], range=[-1.5,1.5])
     if ar is not None:
         fig.update_yaxes(title_text="加速度", row=ar, col=1)
-    _render_plotly(fig, height=fh+30)
+    _render_plotly(fig, height=fh+30, dates=dates)
 
 
 # =====================================================================
