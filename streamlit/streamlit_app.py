@@ -928,7 +928,15 @@ def main():
         if st.button("刷新数据", use_container_width=True):
             _fetch_stock.clear()
             with st.spinner("正在获取全部周期..."):
-                _fetch_all_timeframes(market, ticker_code)
+                results = _fetch_all_timeframes(market, ticker_code)
+            ok = sum(1 for r_ok, _ in results.values() if r_ok)
+            fail = sum(1 for r_ok, _ in results.values() if not r_ok)
+            if ok > 0:
+                st.sidebar.success(f"✅ 获取成功 {ok}/8 个周期")
+            if fail > 0:
+                for tf, (r_ok, detail) in results.items():
+                    if not r_ok:
+                        st.sidebar.warning(f"❌ {tf}: {detail}")
     with c_auto:
         auto_refresh = st.checkbox("自动刷新", value=False, key="auto_refresh")
     if auto_refresh:
