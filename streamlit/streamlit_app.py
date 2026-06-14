@@ -6,6 +6,10 @@ import hashlib
 import json
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import zipfile
+import os
+from pathlib import Path
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -16,6 +20,13 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pandas import DataFrame
 from statsmodels.nonparametric.smoothers_lowess import lowess
+
+# 回测引擎
+try:
+    from backtest_engine import run_backtest
+    _HAS_BACKTEST = True
+except ImportError:
+    _HAS_BACKTEST = False
 
 # ---------------------------------------------------------------------------
 # Page config (must be the first Streamlit command)
@@ -419,7 +430,7 @@ g.hovertext {{ visibility: hidden !important; }}
 # Stock data fetcher (module-level for @st.cache_data)
 # ---------------------------------------------------------------------------
 @st.cache_data(show_spinner=False, ttl=300)
-def _fetch_stock(market, code, tf, n_pts):
+def _fetch_stock(market, code, tf, n_pts, force_period=None):
     if market == "A股(沪深)":
         suffix = ".SS" if code[0] == "6" else ".SZ"
         full = code + suffix
@@ -465,6 +476,9 @@ def _fetch_stock(market, code, tf, n_pts):
     else:  # 季线
         period = "max"
 
+    if force_period is not None:
+        period = force_period
+
     data = yf.download(full, period=period, interval=interval, progress=False)
     if data.empty:
         return None, None, None, full, f"无数据: {full}", None
@@ -482,6 +496,67 @@ def _fetch_stock(market, code, tf, n_pts):
     close = data["Close"].values.ravel()
     dates = data.index  # DatetimeIndex for x-axis display
     return np.arange(n, dtype=float), close, data, full, None, dates
+
+
+# ---------------------------------------------------------------------------
+# Batch export
+# ---------------------------------------------------------------------------
+def _batch_export(market, ticker, selected_tfs, start_date, end_date):
+    """批量导出多个周期的K线数据（并行下载）。
+    返回 (results, summary)"""
+    data_dir = Path(__file__).parent.parent / "data" / ticker
+    data_dir.mkdir(parents=True, exist_ok=True)
+
+    # 周期 → (force_period, n_pts)
+    tf_config = {
+        "1分钟": ("7d", 99999),
+        "5分钟": ("60d", 99999),
+        "15分钟": ("60d", 99999),
+        "60分钟": ("730d", 99999),
+        "日线": ("max", 99999),
+        "周线": ("max", 99999),
+        "月线": ("max", 99999),
+        "季线": ("max", 99999),
+    }
+
+    def _download_one(tf):
+        force_period, n_pts = tf_config.get(tf, ("max", 99999))
+        try:
+            t, close, ohlc, full, err, dates = _fetch_stock(
+                market, ticker, tf, n_pts, force_period=force_period)
+            if err or ohlc is None or dates is None:
+                return {"tf": tf, "status": "error", "msg": err or "无数据", "count": 0, "path": None}
+            # 日期过滤
+            _d = dates.tz_localize(None) if hasattr(dates, 'tz') and dates.tz is not None else dates
+            if start_date and end_date:
+                mask = (_d >= pd.Timestamp(start_date)) & (_d <= pd.Timestamp(end_date))
+            else:
+                mask = slice(None)
+            export_df = ohlc[mask].copy()
+            export_df.insert(0, "Date", dates[mask])
+            if len(export_df) == 0:
+                return {"tf": tf, "status": "error", "msg": "日期范围内无数据", "count": 0, "path": None}
+            save_path = str(data_dir / f"{tf}.csv")
+            export_df.to_csv(save_path, index=False)
+            return {"tf": tf, "status": "ok", "count": len(export_df), "path": save_path, "msg": ""}
+        except Exception as e:
+            return {"tf": tf, "status": "error", "msg": str(e)[:80], "count": 0, "path": None}
+
+    results = []
+    n_total = len(selected_tfs)
+
+    with ThreadPoolExecutor(max_workers=8) as exec:
+        futures = {exec.submit(_download_one, tf): tf for tf in selected_tfs}
+        for i, fut in enumerate(as_completed(futures)):
+            results.append(fut.result())
+
+    # 保持选中顺序
+    tf_order = {tf: i for i, tf in enumerate(selected_tfs)}
+    results.sort(key=lambda r: tf_order.get(r["tf"], 99))
+
+    ok = sum(1 for r in results if r["status"] == "ok")
+    fail = sum(1 for r in results if r["status"] == "error")
+    return results, {"total": n_total, "ok": ok, "fail": fail}
 
 
 # ---------------------------------------------------------------------------
@@ -606,9 +681,105 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     return cfg
 
 
-def _render_chart(market, ticker_code, cfg, key, compact=True):
+def _infer_timeframe(dates):
+    """根据日期序列推断K线周期。返回 (周期名, 置信度)"""
+    if len(dates) < 3:
+        return "未知", 0
+    diffs = np.diff(dates)
+    median_diff = pd.Timedelta(np.median(diffs))
+    seconds = median_diff.total_seconds()
+
+    if seconds < 120:        return "1分钟", 0.9
+    elif seconds < 600:      return "5分钟", 0.9
+    elif seconds < 1800:     return "15分钟", 0.9
+    elif seconds < 5400:     return "60分钟", 0.9
+    elif seconds < 86400*2:  return "日线", 0.95
+    elif seconds < 86400*10: return "周线", 0.9
+    elif seconds < 86400*40: return "月线", 0.9
+    else:                    return "季线", 0.8
+
+
+def _align_index(multi_tf, view_tf, view_idx, view_total):
+    """将回放索引按比例映射到目标周期。
+
+    Args:
+        multi_tf: _imported_multi_tf
+        view_tf: 当前视图周期名
+        view_idx: 回放进度索引 (0-based)
+        view_total: 当前周期总数据条数
+
+    Returns:
+        int: 切片终点
+    """
+    # 获取基准周期（日线）的总数
+    ref_data = multi_tf.get("日线")
+    if ref_data and ref_data.get("loaded"):
+        ref_total = len(ref_data["close"])
+    else:
+        ref_total = max((len(v["close"]) for v in multi_tf.values() if v.get("loaded")), default=view_total)
+
+    # 按比例映射
+    progress = min(view_idx / max(ref_total, 1), 1.0)
+    n = max(20, int(progress * view_total))  # 至少显示20条
+    return min(n, view_total)
+
+
+def _render_chart(market, ticker_code, cfg, key, compact=True, collect_signal=False, slice_to=None):
     """Fetch data + render multi-subplot figure from config."""
-    t, noisy, ohlc, ticker_full, err, dates = _fetch_stock(market, ticker_code, cfg["tf"], cfg["n_pts"])
+
+    # 优先使用导入的历史数据
+    if st.session_state._data_source == "historical" and st.session_state._imported_data is not None:
+        imp = st.session_state._imported_data
+        n_pts = cfg["n_pts"]
+        close_full = imp["close"]
+        dates_full = imp["dates"]
+        if len(close_full) > n_pts:
+            close_full = close_full[-n_pts:]
+            dates_full = dates_full[-n_pts:]
+        n = len(close_full)
+        t = np.arange(n, dtype=float)
+        noisy = close_full
+        ohlc = pd.DataFrame({
+            "Open": imp["open"][-n:],
+            "High": imp["high"][-n:],
+            "Low": imp["low"][-n:],
+            "Close": imp["close"][-n:],
+        }, index=dates_full)
+        ticker_full = st.session_state.get("_imported_ticker", "IMPORTED")
+        err = None
+        dates = dates_full
+    elif st.session_state._data_source == "historical_multi" and st.session_state._imported_multi_tf:
+        multi_tf = st.session_state._imported_multi_tf
+        view_tf = cfg["tf"]
+        view_data = multi_tf.get(view_tf, {})
+        if view_data.get("loaded"):
+            n_pts = cfg["n_pts"]
+            total = len(view_data["close"])
+            # 回放模式：按比例切片；非回放：显示最后 n_pts
+            if st.session_state.get("_backtest_mode"):
+                global_idx = st.session_state.get("_backtest_current_idx", 0)
+                n = _align_index(multi_tf, view_tf, global_idx, total)
+            else:
+                n = min(n_pts, total)
+            # 取最后 n 条数据
+            start = max(0, total - n)
+            close_full = view_data["close"][start:]
+            dates_full = view_data["dates"][start:]
+            t = np.arange(len(close_full), dtype=float)
+            noisy = close_full
+            ohlc = pd.DataFrame({
+                "Open": view_data["open"][start:],
+                "High": view_data["high"][start:],
+                "Low": view_data["low"][start:],
+                "Close": close_full,
+            }, index=dates_full)
+            ticker_full = st.session_state.get("_imported_ticker", ticker_code)
+            err = None
+            dates = dates_full
+        else:
+            t, noisy, ohlc, ticker_full, err, dates = _fetch_stock(market, ticker_code, cfg["tf"], cfg["n_pts"])
+    else:
+        t, noisy, ohlc, ticker_full, err, dates = _fetch_stock(market, ticker_code, cfg["tf"], cfg["n_pts"])
     if err: st.error(err); return
 
     # ── Date markers: vertical dashed lines + tick labels ──
@@ -684,6 +855,35 @@ def _render_chart(market, ticker_code, cfg, key, compact=True):
         _v = np.gradient(filtered, t); _a = np.gradient(_v, t)
         schmitt = _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
 
+    # ── 回测信号收集 ──
+    if collect_signal and schmitt is not None:
+        st.session_state._backtest_signals[key] = {
+            "sig_t": schmitt["sig"].copy(),
+            "close": noisy.copy() if isinstance(noisy, np.ndarray) else np.array(noisy),
+            "dates": dates,
+        }
+
+    # Pre-compute vel/acc on full data (before slicing for display)
+    if not np.all(np.isnan(filtered)):
+        vel = np.gradient(filtered, t)
+        acc = np.gradient(vel, t)
+    else:
+        vel = acc = None
+
+    # ── 回放数据切片 ──
+    if slice_to is not None and slice_to < len(t):
+        end = slice_to + 1
+        t = t[:end]; noisy = noisy[:end]
+        ohlc = ohlc.iloc[:end]; dates = dates[:end]
+        if not np.all(np.isnan(filtered)):
+            filtered = filtered[:end]
+        if filtered2 is not None and not np.all(np.isnan(filtered2)):
+            filtered2 = filtered2[:end]
+        if schmitt is not None:
+            schmitt = {k: v[:end] for k, v in schmitt.items()}
+        if vel is not None: vel = vel[:end]
+        if acc is not None: acc = acc[:end]
+
     # Build figure (same as before, compact)
     has_s = schmitt is not None
     rows = 5 if has_s else 4
@@ -713,7 +913,6 @@ def _render_chart(market, ticker_code, cfg, key, compact=True):
         fig.add_trace(go.Scatter(x=t, y=filtered-noisy, mode="lines", name="残差",
             line=dict(color="#5f6c80", width=1.0, dash="dot")), row=rr, col=1)
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=rr, col=1)
-        vel=np.gradient(filtered,t); acc=np.gradient(vel,t)
         fig.add_trace(go.Scatter(x=t, y=vel, mode="lines", name="v",
             line=dict(color=cfg["fc"], width=1.5)), row=vr, col=1)
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=vr, col=1)
@@ -790,6 +989,27 @@ def main():
     # (same file re-triggering on rerun) vs genuine new uploads.
     if "_import_data" not in st.session_state:
         st.session_state._import_data = None  # None = no config applied yet
+    if "_data_source" not in st.session_state:
+        st.session_state._data_source = "live"           # "live" 或 "historical"
+    if "_imported_data" not in st.session_state:
+        st.session_state._imported_data = None           # dict or None
+    if "_imported_ticker" not in st.session_state:
+        st.session_state._imported_ticker = ""            # 导入数据的股票代码
+    if "_imported_multi_tf" not in st.session_state:
+        st.session_state._imported_multi_tf = {}
+
+    # ── 回测 session state 初始化 ──
+    for key, default in [
+        ("_backtest_mode", False),
+        ("_backtest_current_idx", 0),
+        ("_backtest_is_playing", False),
+        ("_backtest_speed", 1),
+        ("_backtest_total_steps", 0),
+        ("_backtest_slice_to", None),
+        ("_backtest_signals", {}),
+    ]:
+        if key not in st.session_state:
+            st.session_state[key] = default
 
     uploaded = st.sidebar.file_uploader("导入配置", type=["json"], key="config_import",
                                          label_visibility="collapsed")
@@ -829,6 +1049,29 @@ def main():
             if name:
                 st.caption(f"📌 {name}")
 
+    # ── 数据源切换 ──
+    data_source = st.sidebar.radio(
+        "数据源",
+        ["实时数据 (yfinance)", "历史数据 (单周期)", "历史数据 (多周期)"],
+        index=0 if st.session_state._data_source == "live" else (1 if st.session_state._data_source == "historical" else 2),
+        horizontal=True, key="_bt_datasource")
+    if "实时" in data_source:
+        st.session_state._data_source = "live"
+    elif "单周期" in data_source:
+        st.session_state._data_source = "historical"
+    else:
+        st.session_state._data_source = "historical_multi"
+
+    # 显示导入数据信息
+    if st.session_state._imported_data is not None:
+        imp = st.session_state._imported_data
+        tf = imp.get("inferred_tf", "未知")
+        st.sidebar.caption(f"📂 已导入: {st.session_state._imported_ticker} · {tf} · {len(imp['close'])}条")
+    if st.session_state._imported_multi_tf:
+        loaded_tfs = [k for k, v in st.session_state._imported_multi_tf.items() if v.get("loaded")]
+        if loaded_tfs:
+            st.sidebar.caption(f"📂 多周期: {st.session_state._imported_ticker} · {len(loaded_tfs)}周期 · {', '.join(loaded_tfs[:4])}")
+
     st.sidebar.markdown("---")
     filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),
         format_func=lambda x: FILTERS[x]["name"], key="global_f")
@@ -837,6 +1080,184 @@ def main():
     if dual:
         filter_id2 = st.sidebar.selectbox("滤波器 2", list(FILTERS.keys()),
             format_func=lambda x: FILTERS[x]["name"], key="global_f2")
+
+    # ── 历史数据导入（用于回放）──
+    st.sidebar.markdown("---")
+    uploaded_data = st.sidebar.file_uploader(
+        "📂 导入历史数据 (CSV)", type=["csv"], key="data_import",
+        label_visibility="collapsed",
+        help="导入之前导出的K线CSV文件用于回放")
+    if uploaded_data is not None:
+        try:
+            import io
+            df = pd.read_csv(io.BytesIO(uploaded_data.read()))
+            required_cols = {"Date", "Open", "High", "Low", "Close"}
+            if not required_cols.issubset(df.columns):
+                st.sidebar.error(f"CSV缺少必要列: {required_cols - set(df.columns)}")
+            else:
+                df["Date"] = pd.to_datetime(df["Date"])
+                df = df.set_index("Date").sort_index()
+                inferred_tf, confidence = _infer_timeframe(df.index)
+                st.session_state._imported_data = {
+                    "dates": df.index,
+                    "open": df["Open"].values,
+                    "high": df["High"].values,
+                    "low": df["Low"].values,
+                    "close": df["Close"].values,
+                    "volume": df["Volume"].values if "Volume" in df.columns else np.zeros(len(df)),
+                    "inferred_tf": inferred_tf,
+                }
+                st.session_state._imported_ticker = ticker_code
+                st.session_state._data_source = "historical"
+                st.session_state._backtest_total_steps = len(df)
+                st.sidebar.success(f"已导入 {ticker_code} {inferred_tf} 数据 ({len(df)}条)")
+        except Exception as e:
+            st.sidebar.error(f"导入失败: {e}")
+
+    # ── 批量导入多周期 ──
+    st.sidebar.markdown("── 或 ──")
+    st.sidebar.caption("📂 批量导入全部周期")
+    batch_ticker = st.sidebar.text_input("股票代码(目录)", value=ticker_code, key="multi_import_ticker")
+    if st.sidebar.button("加载全部周期", key="multi_import_btn", use_container_width=True):
+        data_dir = Path(__file__).parent.parent / "data" / batch_ticker
+        if not data_dir.exists():
+            st.sidebar.error(f"目录不存在: {data_dir}")
+        else:
+            imported = {}
+            for tf in ALL_TFS:
+                csv_path = data_dir / f"{tf}.csv"
+                if not csv_path.exists():
+                    imported[tf] = {"loaded": False, "count": 0}
+                    continue
+                try:
+                    df = pd.read_csv(csv_path)
+                    required_cols = {"Date", "Open", "High", "Low", "Close"}
+                    if not required_cols.issubset(df.columns):
+                        imported[tf] = {"loaded": False, "count": 0, "error": "列不完整"}
+                        continue
+                    df["Date"] = pd.to_datetime(df["Date"])
+                    df = df.set_index("Date").sort_index()
+                    # 统一为无时区datetime，避免后续比较报错
+                    if df.index.tz is not None:
+                        df.index = df.index.tz_localize(None)
+                    imported[tf] = {
+                        "loaded": True, "count": len(df),
+                        "dates": df.index,
+                        "open": df["Open"].values, "high": df["High"].values,
+                        "low": df["Low"].values, "close": df["Close"].values,
+                        "volume": df["Volume"].values if "Volume" in df.columns else np.zeros(len(df)),
+                    }
+                except Exception as e:
+                    imported[tf] = {"loaded": False, "count": 0, "error": str(e)[:60]}
+            st.session_state._imported_multi_tf = imported
+            st.session_state._imported_ticker = batch_ticker
+            st.session_state._data_source = "historical_multi"
+            st.session_state._backtest_total_steps = max(
+                (v["count"] for v in imported.values() if v.get("loaded")), default=0)
+            ok_count = sum(1 for v in imported.values() if v.get("loaded"))
+            for tf in ALL_TFS:
+                v = imported.get(tf, {})
+                if v.get("loaded"):
+                    st.sidebar.success(f"✅ {tf}: {v['count']}条")
+                elif v.get("error"):
+                    st.sidebar.caption(f"❌ {tf}: {v.get('error', '无文件')}")
+            st.sidebar.info(f"已加载 {ok_count}/{len(ALL_TFS)} 个周期")
+
+    if st.sidebar.button("清除导入数据", key="clear_import", use_container_width=True):
+        st.session_state._imported_data = None
+        st.session_state._imported_multi_tf = {}
+        st.session_state._imported_ticker = ""
+        st.session_state._data_source = "live"
+        st.rerun()
+
+    # ── 回测模式 + 回放控制 ──
+    st.sidebar.markdown("---")
+    if _HAS_BACKTEST:
+        backtest_mode = st.sidebar.checkbox("🔬 进入回测模式", value=st.session_state._backtest_mode,
+                                             key="_backtest_toggle")
+        if backtest_mode != st.session_state._backtest_mode:
+            st.session_state._backtest_mode = backtest_mode
+            if backtest_mode:
+                st.session_state._backtest_current_idx = 0
+                st.session_state._backtest_is_playing = False
+                st.session_state._backtest_slice_to = None
+                # 多周期模式用日线步数
+                if st.session_state._data_source == "historical_multi":
+                    daily = st.session_state._imported_multi_tf.get("日线", {})
+                    st.session_state._backtest_total_steps = daily.get("count", 0)
+            else:
+                st.session_state._backtest_signals = {}
+                st.session_state._backtest_is_playing = False
+                st.session_state._backtest_slice_to = None
+
+        if st.session_state._backtest_mode:
+            total = st.session_state._backtest_total_steps
+            idx = st.session_state._backtest_current_idx
+
+            # 当前日期显示
+            if st.session_state._data_source == "historical_multi":
+                daily = st.session_state._imported_multi_tf.get("日线", {})
+                if daily.get("loaded") and idx < len(daily.get("dates", [])):
+                    cur_date = daily["dates"][idx]
+                    st.sidebar.caption(f"📅 {cur_date.strftime('%Y-%m-%d %H:%M') if hasattr(cur_date, 'strftime') else str(cur_date)[:16]}")
+            elif st.session_state._imported_data is not None:
+                imp = st.session_state._imported_data
+                dates = imp.get("dates")
+                if dates is not None and idx < len(dates):
+                    cur_date = dates[idx]
+                    st.sidebar.caption(f"📅 {str(cur_date)[:16]}")
+
+            # 播放控制按钮
+            c1, c2, c3, c4, c5, c6 = st.sidebar.columns(6)
+            with c1:
+                if st.button("⏮", key="_bt_first", help="首帧", use_container_width=True):
+                    st.session_state._backtest_current_idx = 0
+                    st.session_state._backtest_slice_to = 0
+                    st.session_state._backtest_is_playing = False
+            with c2:
+                if st.button("⏪", key="_bt_prev", help="退一帧", use_container_width=True):
+                    st.session_state._backtest_current_idx = max(0, idx - 1)
+                    st.session_state._backtest_slice_to = st.session_state._backtest_current_idx
+                    st.session_state._backtest_is_playing = False
+            with c3:
+                is_playing = st.session_state._backtest_is_playing
+                btn_label = "⏸" if is_playing else "▶"
+                if st.button(btn_label, key="_bt_play", help="播放/暂停", use_container_width=True):
+                    st.session_state._backtest_is_playing = not is_playing
+            with c4:
+                if st.button("⏩", key="_bt_next", help="进一帧", use_container_width=True):
+                    if total > 0:
+                        st.session_state._backtest_current_idx = min(total - 1, idx + 1)
+                    st.session_state._backtest_slice_to = st.session_state._backtest_current_idx
+                    st.session_state._backtest_is_playing = False
+            with c5:
+                if st.button("⏭", key="_bt_last", help="末帧", use_container_width=True):
+                    if total > 0:
+                        st.session_state._backtest_current_idx = total - 1
+                        st.session_state._backtest_slice_to = total - 1
+                    st.session_state._backtest_is_playing = False
+            with c6:
+                if st.button("■", key="_bt_stop", help="停止", use_container_width=True):
+                    st.session_state._backtest_current_idx = 0
+                    st.session_state._backtest_slice_to = None
+                    st.session_state._backtest_is_playing = False
+
+            # 速度
+            speed = st.sidebar.radio("速度", ["1x", "2x", "5x", "10x"],
+                index=["1x","2x","5x","10x"].index(f"{st.session_state._backtest_speed}x"),
+                horizontal=True, key="_bt_speed")
+            st.session_state._backtest_speed = int(speed.replace("x", ""))
+
+            # 时间轴滑块
+            if total > 0:
+                new_idx = st.sidebar.slider("时间轴", 0, total - 1, idx, 1, key="_bt_slider")
+                if new_idx != idx:
+                    st.session_state._backtest_current_idx = new_idx
+                    st.session_state._backtest_slice_to = new_idx
+                    st.session_state._backtest_is_playing = False
+                st.sidebar.caption(f"第 {idx+1} / {total} 步")
+    else:
+        st.sidebar.caption("⚠️ 回测引擎未安装，pip install vectorbt")
 
     # ---- Pass 1: Top 2x2 parameter panels ----
     configs = []
@@ -851,13 +1272,17 @@ def main():
                     configs.append(cfg)
 
     # ---- Pass 2: Bottom 2x2 chart views ----
-    
+    if st.session_state.get("_backtest_mode"):
+        st.session_state._backtest_signals = {}
+
     for row_idx in range(2):
         c1, c2 = st.columns(2)
         for col_idx, col in enumerate([c1, c2]):
             i = row_idx * 2 + col_idx
             with col:
-                _render_chart(market, ticker_code, configs[i], f"v{i}", compact=True)
+                _render_chart(market, ticker_code, configs[i], f"v{i}", compact=True,
+                              collect_signal=st.session_state.get("_backtest_mode", False),
+                              slice_to=st.session_state.get("_backtest_slice_to"))
 
     # ── Export (after ALL widgets) ──
     st.sidebar.markdown("---")
@@ -886,6 +1311,141 @@ def main():
     st.sidebar.download_button("导出配置", json.dumps(export_data, ensure_ascii=False, indent=2),
         file_name="filter_config.json", mime="application/json",
         use_container_width=True)
+
+    # ── K线数据导出 ──
+    st.sidebar.markdown("---")
+    st.sidebar.caption("📥 K线数据导出")
+
+    export_mode = st.sidebar.radio("导出模式", ["单周期", "批量所有周期"], horizontal=True, key="export_mode")
+
+    if export_mode == "单周期":
+        # ── 现有单周期导出代码（原封不动）──
+        export_tf = st.sidebar.selectbox("导出周期", ALL_TFS, index=0, key="export_tf")
+        is_long_tf = export_tf in ("月线", "季线")
+        if is_long_tf:
+            st.sidebar.caption("📌 月线/季线将导出全部历史数据")
+            export_start = None; export_end = None
+        else:
+            limits = {"1分钟": "~7天", "5分钟": "~60天", "15分钟": "~60天", "60分钟": "~2年", "日线": "全部", "周线": "全部"}
+            st.sidebar.caption(f"⏳ {export_tf}最大可获取: {limits.get(export_tf, '未知')}")
+            c_start, c_end = st.sidebar.columns(2)
+            with c_start:
+                default_start = pd.Timestamp.now() - {"1分钟": pd.Timedelta(days=5), "5分钟": pd.Timedelta(days=50), "15分钟": pd.Timedelta(days=50)}.get(export_tf, pd.Timedelta(days=365))
+                export_start = st.date_input("起始", value=default_start, key="export_start")
+            with c_end:
+                export_end = st.date_input("结束", value=pd.Timestamp.now(), key="export_end")
+
+        if st.sidebar.button("获取并导出", key="export_btn", use_container_width=True):
+            with st.spinner("正在获取数据..."):
+                try:
+                    if is_long_tf:
+                        fetch_n = 99999; force_period = "max"
+                    else:
+                        fetch_n = 99999
+                        if export_tf == "1分钟": force_period = "7d"
+                        elif export_tf in ("5分钟", "15分钟"): force_period = "60d"
+                        elif export_tf == "60分钟": force_period = "730d"
+                        elif export_tf == "日线": force_period = "max"
+                        elif export_tf == "周线": force_period = "max"
+                        else: force_period = "max"
+                    t, close, ohlc, ticker_full, err, dates = _fetch_stock(market, ticker_code, export_tf, fetch_n, force_period=force_period)
+                    if err: st.sidebar.error(err)
+                    elif ohlc is not None and dates is not None:
+                        if is_long_tf:
+                            export_df = ohlc.copy(); export_df.insert(0, "Date", dates)
+                        else:
+                            _dates = dates.tz_localize(None) if hasattr(dates, 'tz_localize') and dates.tz is not None else dates
+                            mask = (_dates >= pd.Timestamp(export_start)) & (_dates <= pd.Timestamp(export_end))
+                            if mask.any():
+                                export_df = ohlc[mask].copy(); export_df.insert(0, "Date", dates[mask])
+                            else:
+                                st.sidebar.warning("所选日期范围内无数据"); export_df = None
+                        if export_df is not None and len(export_df) > 0:
+                            csv = export_df.to_csv(index=False)
+                            data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+                            os.makedirs(data_dir, exist_ok=True)
+                            save_path = os.path.join(data_dir, f"{ticker_code}_{export_tf}.csv")
+                            export_df.to_csv(save_path, index=False)
+                            date_label = "all" if is_long_tf else f"{export_start}_{export_end}"
+                            st.sidebar.download_button("📥 下载 CSV", csv, file_name=f"{ticker_code}_{export_tf}_{date_label}.csv", mime="text/csv", use_container_width=True, key="export_dl")
+                            st.sidebar.success(f"已导出 {len(export_df)} 条 → {save_path}")
+                except Exception as e:
+                    st.sidebar.error(f"导出失败: {e}")
+
+    else:
+        # ── 批量导出模式 ──
+        all_tfs = ["1分钟","5分钟","15分钟","60分钟","日线","周线","月线","季线"]
+        st.sidebar.caption("选择要导出的周期")
+        selected_tfs = []
+        cols = st.sidebar.columns(2)
+        for i, tf in enumerate(all_tfs):
+            with cols[i % 2]:
+                if st.checkbox(tf, value=tf in ["日线","60分钟","周线","月线"], key=f"batch_{tf}"):
+                    selected_tfs.append(tf)
+
+        c_start, c_end = st.sidebar.columns(2)
+        with c_start:
+            batch_start = st.date_input("起始", value=pd.Timestamp.now() - pd.Timedelta(days=365), key="batch_start")
+        with c_end:
+            batch_end = st.date_input("结束", value=pd.Timestamp.now(), key="batch_end")
+
+        if st.sidebar.button("开始批量导出", key="batch_export_btn", use_container_width=True):
+            if not selected_tfs:
+                st.sidebar.warning("请至少选择一个周期")
+            else:
+                with st.spinner(f"正在并行导出 {len(selected_tfs)} 个周期..."):
+                    results, summary = _batch_export(market, ticker_code, selected_tfs, batch_start, batch_end)
+
+                for r in results:
+                    if r["status"] == "ok":
+                        st.sidebar.success(f"✅ {r['tf']}: {r['count']}条")
+                    else:
+                        st.sidebar.error(f"❌ {r['tf']}: {r['msg']}")
+                st.sidebar.info(f"汇总: {summary['ok']}/{summary['total']} 成功")
+
+                # ZIP打包下载
+                if summary['ok'] > 0:
+                    import io as _io
+                    zip_buf = _io.BytesIO()
+                    with zipfile.ZipFile(zip_buf, 'w') as zf:
+                        for r in results:
+                            if r["status"] == "ok" and r["path"]:
+                                zf.write(r["path"], arcname=f"{ticker_code}_{r['tf']}.csv")
+                    zip_buf.seek(0)
+                    st.sidebar.download_button("📦 下载全部 (ZIP)", zip_buf, file_name=f"{ticker_code}_批量导出.zip", mime="application/zip", use_container_width=True, key="batch_dl_zip")
+
+    # ── 回测结果 ──
+    if st.session_state.get("_backtest_mode") and st.session_state.get("_backtest_signals"):
+        st.markdown("---")
+        st.subheader("📊 回测结果")
+        for view_key, sig_data in st.session_state._backtest_signals.items():
+            sig_t = sig_data.get("sig_t")
+            close = sig_data.get("close")
+            dates = sig_data.get("dates")
+            if sig_t is not None and close is not None:
+                try:
+                    result = run_backtest(close, sig_t, dates)
+                    equity = result["equity"]
+                    metrics = result["metrics"]
+                    st.line_chart(equity, height=200)
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("夏普比率", f"{metrics.get('sharpe_ratio', 0):.2f}")
+                    c2.metric("最大回撤", f"{metrics.get('max_drawdown', 0):.1f}%")
+                    c3.metric("胜率", f"{metrics.get('win_rate', 0):.1f}%")
+                    c4.metric("总收益率", f"{metrics.get('total_return', 0):.1f}%")
+                except Exception as e:
+                    st.warning(f"回测计算失败: {e}")
+                break
+
+    # ── 回放时钟 ──
+    if st.session_state.get("_backtest_is_playing"):
+        if st.session_state._backtest_current_idx >= st.session_state._backtest_total_steps - 1:
+            st.session_state._backtest_is_playing = False
+        else:
+            time.sleep(1.0 / st.session_state._backtest_speed)
+            st.session_state._backtest_current_idx += 1
+            st.session_state._backtest_slice_to = st.session_state._backtest_current_idx
+            st.rerun()
 
     # ── Auto-refresh execution ──
     if auto_refresh:
