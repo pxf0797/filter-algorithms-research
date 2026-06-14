@@ -421,7 +421,7 @@ g.hovertext {{ visibility: hidden !important; }}
 # Stock data fetcher (module-level for @st.cache_data)
 # ---------------------------------------------------------------------------
 @st.cache_data(show_spinner=False, ttl=300)
-def _fetch_stock(market, code, tf, n_pts):
+def _fetch_stock(market, code, tf, n_pts, force_period=None):
     if market == "A股(沪深)":
         suffix = ".SS" if code[0] == "6" else ".SZ"
         full = code + suffix
@@ -433,8 +433,9 @@ def _fetch_stock(market, code, tf, n_pts):
     tf_map = {"1分钟": "1m", "5分钟": "5m", "15分钟": "15m", "60分钟": "1h",
                "日线": "1d", "周线": "1wk", "月线": "1mo", "季线": "3mo"}
     interval = tf_map[tf]
-    # yfinance period: standard strings only
-    if tf == "1分钟":
+    if force_period:
+        period = force_period
+    elif tf == "1分钟":
         period = "7d"
     elif tf in ("5分钟", "15分钟"):
         period = "60d"
@@ -471,35 +472,67 @@ def _fetch_stock(market, code, tf, n_pts):
     if data.empty:
         return None, None, None, full, f"无数据: {full}", None
 
-    # yfinance >=0.2.x returns MultiIndex columns even for single ticker,
-    # e.g. ('Close','AAPL'). Flatten to simple column names first.
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.droplevel(1)
 
-    # Drop rows where Close is NaN, then trim to last n_pts
     data = data[data["Close"].notna()]
+
+    # ── 保存全量到归档目录（不截断，供前移使用）──
+    try:
+        archive_dir = Path(__file__).parent.parent / "data" / code
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        save_df = data.copy()
+        save_df.insert(0, "Date", data.index)
+        save_df.to_parquet(archive_dir / f"{tf}.parquet", index=False)
+    except Exception:
+        pass
+
+    # 返回最后 n_pts 条
     if len(data) > n_pts:
         data = data.iloc[-n_pts:]
     n = len(data)
     close = data["Close"].values.ravel()
-    dates = data.index  # DatetimeIndex for x-axis display
-
-    # ── 保存到本地 Parquet（归档 + 显示缓冲）──
-    try:
-        # 归档：按股票代码分目录
-        archive_dir = Path(__file__).parent.parent / "data" / code
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        save_df = data.copy()
-        save_df.insert(0, "Date", dates)
-        save_df.to_parquet(archive_dir / f"{tf}.parquet", index=False)
-        # 同步到统一显示目录（所有图表从这里读取）
-        display_dir = Path(__file__).parent.parent / "data" / "display"
-        display_dir.mkdir(parents=True, exist_ok=True)
-        save_df.to_parquet(display_dir / f"{tf}.parquet", index=False)
-    except Exception:
-        pass
+    dates = data.index
 
     return np.arange(n, dtype=float), close, data, full, None, dates
+
+
+def _sync_to_display(code, tf, day_offset, n_pts):
+    """从归档按天偏移复制窗口到显示目录。各周期独立计算bar偏移，保证时间对齐。"""
+    archive_path = Path(__file__).parent.parent / "data" / code / f"{tf}.parquet"
+    if not archive_path.exists():
+        return False, 0
+    try:
+        df = pd.read_parquet(archive_path)
+        if "Date" not in df.columns or len(df) < n_pts:
+            return False, len(df)
+        df["Date"] = pd.to_datetime(df["Date"])
+        df = df.set_index("Date").sort_index()
+        total = len(df)
+        if day_offset <= 0:
+            # 无偏移：取最后 n_pts 条
+            window = df.iloc[-n_pts:]
+        else:
+            # 按天偏移：找到最后一天，往前推 day_offset 天，取该日期之后的 n_pts 条
+            last_date = df.index[-1]
+            cutoff = last_date - pd.Timedelta(days=day_offset)
+            mask = df.index <= cutoff
+            if mask.any():
+                end_idx = mask.sum()  # cutoff 之前的条数
+                start_idx = max(0, end_idx - n_pts)
+                window = df.iloc[start_idx:end_idx]
+            else:
+                window = df.iloc[:n_pts]  # 数据不够，取最早的 n_pts 条
+        if len(window) < 5:
+            return False, len(window)
+        display_dir = Path(__file__).parent.parent / "data" / "display"
+        display_dir.mkdir(parents=True, exist_ok=True)
+        out = window.copy()
+        out.insert(0, "Date", window.index)
+        out.to_parquet(display_dir / f"{tf}.parquet", index=False)
+        return True, len(window)
+    except Exception:
+        return False, 0
 
 
 # ---------------------------------------------------------------------------
@@ -624,37 +657,50 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     return cfg
 
 
-def _render_chart(market, ticker_code, cfg, key, compact=True):
+def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
     """Fetch data + render multi-subplot figure from config.
-    优先从本地CSV读取，不存在时调用yfinance并自动保存CSV。"""
+    优先从本地 Parquet 读取；day_offset=向历史前移N天（各周期独立对齐）。"""
     tf = cfg["tf"]
     n_pts = cfg["n_pts"]
 
-    # 1) 尝试从统一显示目录读取 Parquet
-    display_dir = Path(__file__).parent.parent / "data" / "display"
-    parquet_path = display_dir / f"{tf}.parquet"
+    # ── 数据同步：按天偏移，各周期独立对齐 ──
     from_cache = False
-    if parquet_path.exists():
+    archive_path = Path(__file__).parent.parent / "data" / ticker_code / f"{tf}.parquet"
+    if archive_path.exists():
+        ok, count = _sync_to_display(ticker_code, tf, day_offset, n_pts)
+        if ok:
+            from_cache = True
+        elif count < 10:
+            pass  # 归档数据不足，回退到 yfinance
+        else:
+            from_cache = True  # sync 可能因窗口太小失败但归档数据本身可用
+
+    display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
+
+    # 1) 从显示目录读取（_sync_to_display 已准备好正确窗口）
+    if from_cache and display_path.exists():
         try:
-            df = pd.read_parquet(parquet_path)
-            if "Date" in df.columns and "Close" in df.columns and len(df) >= 10:
+            df = pd.read_parquet(display_path)
+            if "Date" in df.columns and "Close" in df.columns and len(df) >= 5:
                 df["Date"] = pd.to_datetime(df["Date"])
                 df = df.set_index("Date").sort_index()
-                if len(df) > n_pts:
-                    df = df.iloc[-n_pts:]
                 t = np.arange(len(df), dtype=float)
                 noisy = df["Close"].values.ravel()
                 ohlc = df[["Open","High","Low","Close"]] if all(c in df.columns for c in ["Open","High","Low"]) else pd.DataFrame({"Open":noisy,"High":noisy,"Low":noisy,"Close":noisy}, index=df.index)
                 ticker_full = ticker_code
                 err = None
                 dates = df.index
-                from_cache = True
+            else:
+                from_cache = False
         except Exception:
-            pass
+            from_cache = False
 
-    # 2) 回退：yfinance 拉取（内部自动保存 Parquet）
+    # 2) 回退：yfinance 拉取（内部自动保存归档 Parquet）
     if not from_cache:
         t, noisy, ohlc, ticker_full, err, dates = _fetch_stock(market, ticker_code, tf, n_pts)
+        # 拉取成功后同步到显示目录
+        if not err:
+            _sync_to_display(ticker_code, tf, day_offset, n_pts)
 
     if err: st.error(err); return
 
@@ -897,14 +943,71 @@ def main():
                     cfg = _render_params(f"v{i}", filter_id, dual, filter_id2, DEFAULT_TFS[i])
                     configs.append(cfg)
 
+    # ── 时间窗口导航（按天前移/后移，各周期独立对齐）──
+    st.sidebar.markdown("---")
+    st.sidebar.caption("⏪ 时间窗口（按天移动）")
+    if "_day_offset" not in st.session_state:
+        st.session_state._day_offset = 0
+
+    step_days = st.sidebar.selectbox("移动步长", [1, 3, 5, 10, 20, 30, 60, 90, 180, 365],
+                                      index=4, key="day_step",
+                                      format_func=lambda x: f"{x}天")
+
+    # ── 读取归档数据范围，判断前移/后移是否可用 ──
+    archive_path = Path(__file__).parent.parent / "data" / ticker_code / "日线.parquet"
+    data_start = data_end = None
+    if archive_path.exists():
+        try:
+            df = pd.read_parquet(archive_path)
+            if "Date" in df.columns and len(df) > 0:
+                df["Date"] = pd.to_datetime(df["Date"])
+                data_start = df["Date"].min().date()
+                data_end = df["Date"].max().date()
+        except Exception:
+            pass
+
+    # 计算当前显示窗口
+    cur_offset = st.session_state._day_offset
+    n_pts = configs[0]["n_pts"] if configs else 120
+    if data_end:
+        win_end = data_end - pd.Timedelta(days=cur_offset)
+        win_start = win_end - pd.Timedelta(days=n_pts * 2)  # 粗略估算
+        has_older = data_start and win_start > data_start  # 还有更早数据
+        has_newer = cur_offset > 0  # 可以往后移（回到最新）
+    else:
+        has_older = True
+        has_newer = cur_offset > 0
+
+    c_prev, c_next, c_home = st.sidebar.columns([1, 1, 0.8])
+    with c_prev:
+        disabled = not has_older
+        if st.button("◀ 前移", key="day_prev", use_container_width=True, disabled=disabled,
+                     help="无更早数据" if disabled else f"前移{step_days}天"):
+            st.session_state._day_offset += step_days
+    with c_next:
+        disabled = not has_newer
+        if st.button("后移 ▶", key="day_next", use_container_width=True, disabled=disabled,
+                     help="已是最新" if disabled else f"后移{step_days}天"):
+            st.session_state._day_offset = max(0, st.session_state._day_offset - step_days)
+    with c_home:
+        if st.button("最新", key="day_home", use_container_width=True, disabled=cur_offset == 0,
+                     help="已是最新"):
+            st.session_state._day_offset = 0
+
+    st.sidebar.caption(f"已偏移: {cur_offset} 天")
+    if data_start and data_end:
+        st.sidebar.caption(f"数据范围: {data_start} ~ {data_end}")
+    day_offset = st.session_state._day_offset
+
     # ---- Pass 2: Bottom 2x2 chart views ----
-    
+
     for row_idx in range(2):
         c1, c2 = st.columns(2)
         for col_idx, col in enumerate([c1, c2]):
             i = row_idx * 2 + col_idx
             with col:
-                _render_chart(market, ticker_code, configs[i], f"v{i}", compact=True)
+                _render_chart(market, ticker_code, configs[i], f"v{i}", compact=True,
+                              day_offset=day_offset)
 
     # ── Export (after ALL widgets) ──
     st.sidebar.markdown("---")
