@@ -612,7 +612,7 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     return cfg
 
 
-def _render_chart(market, ticker_code, cfg, key, compact=True, collect_signal=False):
+def _render_chart(market, ticker_code, cfg, key, compact=True, collect_signal=False, slice_to=None):
     """Fetch data + render multi-subplot figure from config."""
     t, noisy, ohlc, ticker_full, err, dates = _fetch_stock(market, ticker_code, cfg["tf"], cfg["n_pts"])
     if err: st.error(err); return
@@ -690,13 +690,38 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, collect_signal=Fa
         _v = np.gradient(filtered, t); _a = np.gradient(_v, t)
         schmitt = _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
 
-    # ── 回测信号收集 ──
+    # ── 回测信号收集（全量数据，信号需完整历史）──
     if collect_signal and schmitt is not None:
         st.session_state._backtest_signals[key] = {
             "sig_t": schmitt["sig"].copy(),
             "close": noisy.copy(),
             "dates": dates,
         }
+
+    # Pre-compute velocity/acceleration on full data (before slicing for display)
+    if not np.all(np.isnan(filtered)):
+        vel = np.gradient(filtered, t)
+        acc = np.gradient(vel, t)
+    else:
+        vel = acc = None
+
+    # ── 回放数据切片（所有计算已完成，仅截断显示数据）──
+    if slice_to is not None and slice_to < len(t):
+        end = slice_to + 1
+        t = t[:end]
+        noisy = noisy[:end]
+        ohlc = ohlc.iloc[:end]
+        dates = dates[:end]
+        if not np.all(np.isnan(filtered)):
+            filtered = filtered[:end]
+        if filtered2 is not None and not np.all(np.isnan(filtered2)):
+            filtered2 = filtered2[:end]
+        if schmitt is not None:
+            schmitt = {k: v[:end] for k, v in schmitt.items()}
+        if vel is not None:
+            vel = vel[:end]
+        if acc is not None:
+            acc = acc[:end]
 
     # Build figure (same as before, compact)
     has_s = schmitt is not None
@@ -727,7 +752,6 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, collect_signal=Fa
         fig.add_trace(go.Scatter(x=t, y=filtered-noisy, mode="lines", name="残差",
             line=dict(color="#5f6c80", width=1.0, dash="dot")), row=rr, col=1)
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=rr, col=1)
-        vel=np.gradient(filtered,t); acc=np.gradient(vel,t)
         fig.add_trace(go.Scatter(x=t, y=vel, mode="lines", name="v",
             line=dict(color=cfg["fc"], width=1.5)), row=vr, col=1)
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=vr, col=1)
@@ -759,6 +783,11 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, collect_signal=Fa
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=ar, col=1)
     fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=1, xref="x", yref="paper",
                    line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"), visible=False)
+    # 回放时间指示线（画在数据截断边界）
+    if slice_to is not None:
+        fig.add_vline(x=t[-1], line=dict(color="#ff4444", width=2, dash="solid"),
+                       annotation_text="NOW", annotation_position="top",
+                       annotation=dict(font=dict(color="#ff4444", size=11)))
     # Date markers: vertical dashed lines at period boundaries
     for pos in marker_positions:
         fig.add_vline(x=pos, line=dict(color="rgba(255,255,255,0.10)", width=0.8, dash="dot"),
@@ -792,6 +821,14 @@ def main():
     for key, default in [
         ("_backtest_mode", False),
         ("_backtest_current_idx", 0),
+        ("_backtest_is_playing", False),      # 新增：自动播放中
+        ("_backtest_is_paused", False),       # 新增：暂停中
+        ("_backtest_speed", 1),               # 新增：播放速度倍率
+        ("_backtest_total_steps", 0),          # 新增：总步数
+        ("_backtest_last_step_time", 0.0),    # 新增：上一步时间
+        ("_backtest_slice_to", None),          # 新增：图表切片索引
+        ("_backtest_equity", None),
+        ("_backtest_metrics", None),
         ("_backtest_signals", {}),
     ]:
         if key not in st.session_state:
@@ -810,14 +847,86 @@ def main():
     # ── 回测控制 ──
     st.sidebar.markdown("---")
     if _HAS_BACKTEST:
-        backtest_mode = st.sidebar.checkbox("🔬 进入回测模式", value=st.session_state._backtest_mode,
-                                             key="_backtest_toggle")
+        # 回测模式开关
+        backtest_mode = st.sidebar.checkbox(
+            "🔬 进入回测模式", value=st.session_state._backtest_mode,
+            key="_backtest_toggle")
         if backtest_mode != st.session_state._backtest_mode:
             st.session_state._backtest_mode = backtest_mode
             if backtest_mode:
                 st.session_state._backtest_current_idx = 0
+                st.session_state._backtest_is_playing = False
+                st.session_state._backtest_is_paused = False
+                st.session_state._backtest_slice_to = None
             else:
                 st.session_state._backtest_signals = {}
+                st.session_state._backtest_is_playing = False
+                st.session_state._backtest_is_paused = False
+                st.session_state._backtest_slice_to = None
+
+        # 回放控制面板（仅在回测模式下显示）
+        if st.session_state._backtest_mode:
+            total = st.session_state._backtest_total_steps
+            idx = st.session_state._backtest_current_idx
+
+            # 播放控制按钮
+            c1, c2, c3, c4, c5, c6 = st.sidebar.columns(6)
+            with c1:
+                if st.button("⏮", key="_bt_first", help="首帧", use_container_width=True):
+                    st.session_state._backtest_current_idx = 0
+                    st.session_state._backtest_slice_to = 0
+                    st.session_state._backtest_is_playing = False
+            with c2:
+                if st.button("⏪", key="_bt_prev", help="退一帧", use_container_width=True):
+                    st.session_state._backtest_current_idx = max(0, idx - 1)
+                    st.session_state._backtest_slice_to = st.session_state._backtest_current_idx
+                    st.session_state._backtest_is_playing = False
+            with c3:
+                is_playing = st.session_state._backtest_is_playing
+                btn_label = "⏸" if is_playing else "▶"
+                if st.button(btn_label, key="_bt_play", help="播放/暂停", use_container_width=True):
+                    st.session_state._backtest_is_playing = not is_playing
+                    st.session_state._backtest_is_paused = is_playing  # 切换
+            with c4:
+                if st.button("⏩", key="_bt_next", help="进一帧", use_container_width=True):
+                    if total > 0:
+                        st.session_state._backtest_current_idx = min(total - 1, idx + 1)
+                    st.session_state._backtest_slice_to = st.session_state._backtest_current_idx
+                    st.session_state._backtest_is_playing = False
+            with c5:
+                if st.button("⏭", key="_bt_last", help="末帧", use_container_width=True):
+                    if total > 0:
+                        st.session_state._backtest_current_idx = total - 1
+                        st.session_state._backtest_slice_to = total - 1
+                    st.session_state._backtest_is_playing = False
+            with c6:
+                if st.button("■", key="_bt_stop", help="停止", use_container_width=True):
+                    st.session_state._backtest_current_idx = 0
+                    st.session_state._backtest_slice_to = None
+                    st.session_state._backtest_is_playing = False
+                    st.session_state._backtest_is_paused = False
+
+            # 速度选择
+            speed = st.sidebar.radio(
+                "播放速度", ["1x", "2x", "5x", "10x"],
+                index=["1x","2x","5x","10x"].index(f"{st.session_state._backtest_speed}x"),
+                horizontal=True, key="_bt_speed",
+                help="每秒推进的K线数")
+            st.session_state._backtest_speed = int(speed.replace("x", ""))
+
+            # 时间轴滑块
+            if total > 0:
+                new_idx = st.sidebar.slider(
+                    "时间轴", 0, total - 1, idx, 1,
+                    key="_bt_slider",
+                    help="拖动跳转到指定位置")
+                if new_idx != idx:
+                    st.session_state._backtest_current_idx = new_idx
+                    st.session_state._backtest_slice_to = new_idx
+                    st.session_state._backtest_is_playing = False
+
+                # 进度显示
+                st.sidebar.caption(f"第 {idx+1} / {total} 步")
     else:
         st.sidebar.caption("⚠️ 回测引擎未安装，pip install vectorbt")
 
@@ -896,7 +1005,8 @@ def main():
             i = row_idx * 2 + col_idx
             with col:
                 _render_chart(market, ticker_code, configs[i], f"v{i}", compact=True,
-                              collect_signal=st.session_state._backtest_mode)
+                              collect_signal=st.session_state._backtest_mode,
+                              slice_to=st.session_state.get("_backtest_slice_to"))
 
     # ── Export (after ALL widgets) ──
     st.sidebar.markdown("---")
@@ -957,6 +1067,19 @@ def main():
                 except Exception as e:
                     st.warning(f"回测计算失败: {e}")
                 break  # Phase 1 只取第一个视图
+
+    # ── 回放时钟 ──
+    if st.session_state._backtest_is_playing and not st.session_state._backtest_is_paused:
+        # 检查是否到达终点
+        if st.session_state._backtest_current_idx >= st.session_state._backtest_total_steps - 1:
+            st.session_state._backtest_is_playing = False
+            st.session_state._backtest_is_paused = False
+        else:
+            time.sleep(1.0 / st.session_state._backtest_speed)
+            st.session_state._backtest_current_idx += 1
+            st.session_state._backtest_slice_to = st.session_state._backtest_current_idx
+            st.session_state._backtest_last_step_time = time.time()
+            st.rerun()
 
     # ── Auto-refresh execution ──
     if auto_refresh:
