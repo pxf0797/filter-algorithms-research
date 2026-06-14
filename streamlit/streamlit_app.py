@@ -865,18 +865,6 @@ def main():
     init_db()
     st.sidebar.title("多周期股票滤波分析")
 
-    # Refresh row: button + auto toggle in one line
-    c_refresh, c_auto = st.sidebar.columns([1, 1.2])
-    with c_refresh:
-        if st.button("刷新数据", use_container_width=True):
-            _fetch_stock.clear()
-            with st.spinner("正在获取全部周期..."):
-                _fetch_all_timeframes(market, ticker_code)
-    with c_auto:
-        auto_refresh = st.checkbox("自动刷新", value=False, key="auto_refresh")
-    if auto_refresh:
-        interval = st.sidebar.slider("刷新间隔(秒)", 10, 600, 60, 10, key="refresh_interval")
-
     # ── Import config (before any widget) ──
     # _import_data stores the MD5 hash of the last successfully applied config.
     # When a file is uploaded, we compare its hash to detect "stale hold"
@@ -933,6 +921,18 @@ def main():
                 if ok > 0:
                     st.sidebar.success(f"已获取 {ok}/8 个周期")
         st.session_state._fetched_ticker = ticker_code
+
+    # Refresh row: button + auto toggle
+    c_refresh, c_auto = st.sidebar.columns([1, 1.2])
+    with c_refresh:
+        if st.button("刷新数据", use_container_width=True):
+            _fetch_stock.clear()
+            with st.spinner("正在获取全部周期..."):
+                _fetch_all_timeframes(market, ticker_code)
+    with c_auto:
+        auto_refresh = st.checkbox("自动刷新", value=False, key="auto_refresh")
+    if auto_refresh:
+        interval = st.sidebar.slider("刷新间隔(秒)", 10, 600, 60, 10, key="refresh_interval")
 
     st.sidebar.markdown("---")
     filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),
