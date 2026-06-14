@@ -2,6 +2,7 @@
 多周期股票滤波分析工具 — 4视图独立配置, 施密特触发器 + 滤波对比
 """
 
+import hashlib
 import json
 import time
 import uuid
@@ -784,25 +785,26 @@ def main():
         interval = st.sidebar.slider("刷新间隔(秒)", 10, 600, 60, 10, key="refresh_interval")
 
     # ── Import config (before any widget) ──
+    # _import_data stores the MD5 hash of the last successfully applied config.
+    # When a file is uploaded, we compare its hash to detect "stale hold"
+    # (same file re-triggering on rerun) vs genuine new uploads.
     if "_import_data" not in st.session_state:
-        st.session_state._import_data = None
+        st.session_state._import_data = None  # None = no config applied yet
+
     uploaded = st.sidebar.file_uploader("导入配置", type=["json"], key="config_import",
                                          label_visibility="collapsed")
-    # Only read file if _import_data is None (fresh upload, not a stale file_uploader hold)
-    if uploaded is not None and st.session_state._import_data is None:
-        try:
-            st.session_state._import_data = json.loads(uploaded.read())
-        except Exception as e:
-            st.sidebar.error(f"导入失败: {e}")
-            st.session_state._import_data = True  # sentinel: prevent re-read on error
-
-    # Apply & mark as done (True = applied, not None = won't re-read stale file)
-    pending = st.session_state.get("_import_data")
-    if isinstance(pending, dict):
-        for k, v in pending.items():
-            st.session_state[k] = v
-        st.session_state._import_data = True  # sentinel: applied, skip re-read
-        st.sidebar.success("配置已加载")
+    if uploaded is not None:
+        raw = uploaded.read()
+        file_hash = hashlib.md5(raw).hexdigest()
+        if st.session_state._import_data != file_hash:  # new or different file
+            try:
+                config = json.loads(raw)
+                for k, v in config.items():
+                    st.session_state[k] = v
+                st.session_state._import_data = file_hash
+                st.sidebar.success("配置已加载")
+            except Exception as e:
+                st.sidebar.error(f"导入失败: {e}")
 
     market = st.sidebar.radio("市场", ["美股 US","A股(沪深)","港股 HK"],
                                horizontal=True, key="market")
