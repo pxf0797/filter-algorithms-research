@@ -4,8 +4,10 @@
 
 import hashlib
 import json
+import os
 import time
 import uuid
+from pathlib import Path
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -481,6 +483,22 @@ def _fetch_stock(market, code, tf, n_pts):
     n = len(data)
     close = data["Close"].values.ravel()
     dates = data.index  # DatetimeIndex for x-axis display
+
+    # ── 保存到本地 Parquet（归档 + 显示缓冲）──
+    try:
+        # 归档：按股票代码分目录
+        archive_dir = Path(__file__).parent.parent / "data" / code
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        save_df = data.copy()
+        save_df.insert(0, "Date", dates)
+        save_df.to_parquet(archive_dir / f"{tf}.parquet", index=False)
+        # 同步到统一显示目录（所有图表从这里读取）
+        display_dir = Path(__file__).parent.parent / "data" / "display"
+        display_dir.mkdir(parents=True, exist_ok=True)
+        save_df.to_parquet(display_dir / f"{tf}.parquet", index=False)
+    except Exception:
+        pass
+
     return np.arange(n, dtype=float), close, data, full, None, dates
 
 
@@ -607,8 +625,37 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
 
 
 def _render_chart(market, ticker_code, cfg, key, compact=True):
-    """Fetch data + render multi-subplot figure from config."""
-    t, noisy, ohlc, ticker_full, err, dates = _fetch_stock(market, ticker_code, cfg["tf"], cfg["n_pts"])
+    """Fetch data + render multi-subplot figure from config.
+    优先从本地CSV读取，不存在时调用yfinance并自动保存CSV。"""
+    tf = cfg["tf"]
+    n_pts = cfg["n_pts"]
+
+    # 1) 尝试从统一显示目录读取 Parquet
+    display_dir = Path(__file__).parent.parent / "data" / "display"
+    parquet_path = display_dir / f"{tf}.parquet"
+    from_cache = False
+    if parquet_path.exists():
+        try:
+            df = pd.read_parquet(parquet_path)
+            if "Date" in df.columns and "Close" in df.columns and len(df) >= 10:
+                df["Date"] = pd.to_datetime(df["Date"])
+                df = df.set_index("Date").sort_index()
+                if len(df) > n_pts:
+                    df = df.iloc[-n_pts:]
+                t = np.arange(len(df), dtype=float)
+                noisy = df["Close"].values.ravel()
+                ohlc = df[["Open","High","Low","Close"]] if all(c in df.columns for c in ["Open","High","Low"]) else pd.DataFrame({"Open":noisy,"High":noisy,"Low":noisy,"Close":noisy}, index=df.index)
+                ticker_full = ticker_code
+                err = None
+                dates = df.index
+                from_cache = True
+        except Exception:
+            pass
+
+    # 2) 回退：yfinance 拉取（内部自动保存 Parquet）
+    if not from_cache:
+        t, noisy, ohlc, ticker_full, err, dates = _fetch_stock(market, ticker_code, tf, n_pts)
+
     if err: st.error(err); return
 
     # ── Date markers: vertical dashed lines + tick labels ──
