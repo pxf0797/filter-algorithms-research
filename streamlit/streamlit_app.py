@@ -16,6 +16,13 @@ from plotly.subplots import make_subplots
 from pandas import DataFrame
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
+# 回测引擎
+try:
+    from backtest_engine import run_backtest
+    _HAS_BACKTEST = True
+except ImportError:
+    _HAS_BACKTEST = False
+
 # ---------------------------------------------------------------------------
 # Page config (must be the first Streamlit command)
 # ---------------------------------------------------------------------------
@@ -605,7 +612,7 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     return cfg
 
 
-def _render_chart(market, ticker_code, cfg, key, compact=True):
+def _render_chart(market, ticker_code, cfg, key, compact=True, collect_signal=False):
     """Fetch data + render multi-subplot figure from config."""
     t, noisy, ohlc, ticker_full, err, dates = _fetch_stock(market, ticker_code, cfg["tf"], cfg["n_pts"])
     if err: st.error(err); return
@@ -682,6 +689,14 @@ def _render_chart(market, ticker_code, cfg, key, compact=True):
     if cfg["show_sch"] and not np.all(np.isnan(filtered)):
         _v = np.gradient(filtered, t); _a = np.gradient(_v, t)
         schmitt = _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
+
+    # ── 回测信号收集 ──
+    if collect_signal and schmitt is not None:
+        st.session_state._backtest_signals[key] = {
+            "sig_t": schmitt["sig"].copy(),
+            "close": noisy.copy(),
+            "dates": dates,
+        }
 
     # Build figure (same as before, compact)
     has_s = schmitt is not None
@@ -773,6 +788,15 @@ def _render_chart(market, ticker_code, cfg, key, compact=True):
 def main():
     st.sidebar.title("多周期股票滤波分析")
 
+    # ── 回测 session state 初始化 ──
+    for key, default in [
+        ("_backtest_mode", False),
+        ("_backtest_current_idx", 0),
+        ("_backtest_signals", {}),
+    ]:
+        if key not in st.session_state:
+            st.session_state[key] = default
+
     # Refresh row: button + auto toggle in one line
     c_refresh, c_auto = st.sidebar.columns([1, 1.2])
     with c_refresh:
@@ -782,6 +806,20 @@ def main():
         auto_refresh = st.checkbox("自动刷新", value=False, key="auto_refresh")
     if auto_refresh:
         interval = st.sidebar.slider("刷新间隔(秒)", 10, 600, 60, 10, key="refresh_interval")
+
+    # ── 回测控制 ──
+    st.sidebar.markdown("---")
+    if _HAS_BACKTEST:
+        backtest_mode = st.sidebar.checkbox("🔬 进入回测模式", value=st.session_state._backtest_mode,
+                                             key="_backtest_toggle")
+        if backtest_mode != st.session_state._backtest_mode:
+            st.session_state._backtest_mode = backtest_mode
+            if backtest_mode:
+                st.session_state._backtest_current_idx = 0
+            else:
+                st.session_state._backtest_signals = {}
+    else:
+        st.sidebar.caption("⚠️ 回测引擎未安装，pip install vectorbt")
 
     # ── Import config (before any widget) ──
     if "_import_data" not in st.session_state:
@@ -849,13 +887,16 @@ def main():
                     configs.append(cfg)
 
     # ---- Pass 2: Bottom 2x2 chart views ----
-    
+    if st.session_state._backtest_mode:
+        st.session_state._backtest_signals = {}
+
     for row_idx in range(2):
         c1, c2 = st.columns(2)
         for col_idx, col in enumerate([c1, c2]):
             i = row_idx * 2 + col_idx
             with col:
-                _render_chart(market, ticker_code, configs[i], f"v{i}", compact=True)
+                _render_chart(market, ticker_code, configs[i], f"v{i}", compact=True,
+                              collect_signal=st.session_state._backtest_mode)
 
     # ── Export (after ALL widgets) ──
     st.sidebar.markdown("---")
@@ -884,6 +925,38 @@ def main():
     st.sidebar.download_button("导出配置", json.dumps(export_data, ensure_ascii=False, indent=2),
         file_name="filter_config.json", mime="application/json",
         use_container_width=True)
+
+    # ── 回测结果 ──
+    if st.session_state._backtest_mode and st.session_state._backtest_signals:
+        st.markdown("---")
+        st.subheader("📊 回测结果")
+
+        # 取第一个有信号的视图做回测（Phase 1 单视图）
+        for view_key, sig_data in st.session_state._backtest_signals.items():
+            sig_t = sig_data.get("sig_t")
+            close = sig_data.get("close")
+            dates = sig_data.get("dates")
+            if sig_t is not None and close is not None:
+                try:
+                    result = run_backtest(close, sig_t, dates)
+                    equity = result["equity"]
+                    metrics = result["metrics"]
+
+                    # 权益曲线 (带日期索引)
+                    if dates is not None and len(dates) == len(equity):
+                        st.line_chart(pd.Series(equity, index=dates), height=200)
+                    else:
+                        st.line_chart(equity, height=200)
+
+                    # 绩效卡片
+                    c1, c2, c3, c4 = st.columns(4)
+                    c1.metric("夏普比率", f"{metrics.get('sharpe_ratio', 0):.2f}")
+                    c2.metric("最大回撤", f"{metrics.get('max_drawdown', 0):.1f}%")
+                    c3.metric("胜率", f"{metrics.get('win_rate', 0):.1f}%")
+                    c4.metric("总收益率", f"{metrics.get('total_return', 0):.1f}%")
+                except Exception as e:
+                    st.warning(f"回测计算失败: {e}")
+                break  # Phase 1 只取第一个视图
 
     # ── Auto-refresh execution ──
     if auto_refresh:
