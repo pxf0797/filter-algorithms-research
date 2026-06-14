@@ -18,6 +18,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pandas import DataFrame
 from statsmodels.nonparametric.smoothers_lowess import lowess
+from db import init_db, upsert_kline, query_kline, get_date_range
 
 # ---------------------------------------------------------------------------
 # Page config (must be the first Streamlit command)
@@ -490,62 +491,33 @@ def _fetch_stock(market, code, tf, n_pts, force_period=None):
 
     data = data[data["Close"].notna()]
 
-    # ── 保存全量到归档目录（不截断，供前移使用）──
+    # ── 全量写入 SQLite ──
     try:
-        archive_dir = Path(__file__).parent.parent / "data" / code
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        save_df = data.copy()
-        save_df.insert(0, "Date", data.index)
-        save_df.to_parquet(archive_dir / f"{tf}.parquet", index=False)
+        upsert_kline(code, tf, data)
     except Exception:
         pass
 
-    # 返回最后 n_pts 条
-    if len(data) > n_pts:
-        data = data.iloc[-n_pts:]
-    n = len(data)
-    close = data["Close"].values.ravel()
-    dates = data.index
-
-    return np.arange(n, dtype=float), close, data, full, None, dates
+    # 从DB返回最后 n_pts 条
+    result_df = query_kline(code, tf, n_pts, day_offset=0)
+    n = len(result_df)
+    if n == 0:
+        return None, None, None, full, "写入成功但查询失败", None
+    close = result_df["Close"].values.ravel()
+    dates = pd.to_datetime(result_df["Date"])
+    result_ohlc = result_df if "Open" in result_df.columns else pd.DataFrame({"Open":close,"High":close,"Low":close,"Close":close}, index=dates)
+    return np.arange(n, dtype=float), close, result_ohlc, full, None, dates
 
 
 def _sync_to_display(code, tf, day_offset, n_pts):
-    """从归档按天偏移复制窗口到显示目录。各周期独立计算bar偏移，保证时间对齐。"""
-    archive_path = Path(__file__).parent.parent / "data" / code / f"{tf}.parquet"
-    if not archive_path.exists():
-        return False, 0
-    try:
-        df = pd.read_parquet(archive_path)
-        if "Date" not in df.columns or len(df) < n_pts:
-            return False, len(df)
-        df["Date"] = pd.to_datetime(df["Date"])
-        df = df.set_index("Date").sort_index()
-        total = len(df)
-        if day_offset <= 0:
-            # 无偏移：取最后 n_pts 条
-            window = df.iloc[-n_pts:]
-        else:
-            # 按天偏移：找到最后一天，往前推 day_offset 天，取该日期之后的 n_pts 条
-            last_date = df.index[-1]
-            cutoff = last_date - pd.Timedelta(days=day_offset)
-            mask = df.index <= cutoff
-            if mask.any():
-                end_idx = mask.sum()  # cutoff 之前的条数
-                start_idx = max(0, end_idx - n_pts)
-                window = df.iloc[start_idx:end_idx]
-            else:
-                window = df.iloc[:n_pts]  # 数据不够，取最早的 n_pts 条
-        if len(window) < 5:
-            return False, len(window)
-        display_dir = Path(__file__).parent.parent / "data" / "display"
-        display_dir.mkdir(parents=True, exist_ok=True)
-        out = window.copy()
-        out.insert(0, "Date", window.index)
-        out.to_parquet(display_dir / f"{tf}.parquet", index=False)
-        return True, len(window)
-    except Exception:
-        return False, 0
+    """从 SQLite 按天偏移查询，写入 display parquet。"""
+    df = query_kline(code, tf, n_pts, day_offset=day_offset)
+    if len(df) < 5:
+        return False, len(df)
+    df["Date"] = pd.to_datetime(df["Date"])
+    display_dir = Path(__file__).parent.parent / "data" / "display"
+    display_dir.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(display_dir / f"{tf}.parquet", index=False)
+    return True, len(df)
 
 
 # ---------------------------------------------------------------------------
@@ -878,6 +850,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
 
 # =====================================================================
 def main():
+    init_db()
     st.sidebar.title("多周期股票滤波分析")
 
     # Refresh row: button + auto toggle in one line
@@ -967,17 +940,11 @@ def main():
                                       format_func=lambda x: f"{x}天")
 
     # ── 读取归档数据范围，判断前移/后移是否可用 ──
-    archive_path = Path(__file__).parent.parent / "data" / ticker_code / "日线.parquet"
     data_start = data_end = None
-    if archive_path.exists():
-        try:
-            df = pd.read_parquet(archive_path)
-            if "Date" in df.columns and len(df) > 0:
-                df["Date"] = pd.to_datetime(df["Date"])
-                data_start = df["Date"].min().date()
-                data_end = df["Date"].max().date()
-        except Exception:
-            pass
+    date_range = get_date_range(ticker_code)
+    if date_range:
+        data_start = pd.Timestamp(date_range[0][:10]).date()
+        data_end = pd.Timestamp(date_range[1][:10]).date()
 
     # 计算当前显示窗口
     cur_offset = st.session_state._day_offset
