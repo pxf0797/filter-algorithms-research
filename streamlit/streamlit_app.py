@@ -18,7 +18,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pandas import DataFrame
 from statsmodels.nonparametric.smoothers_lowess import lowess
-from db import init_db, upsert_kline, query_kline, get_date_range
+from db import init_db, upsert_kline, query_kline, get_date_range, has_data
 
 # ---------------------------------------------------------------------------
 # Page config (must be the first Streamlit command)
@@ -434,6 +434,34 @@ g.hovertext {{ visibility: hidden !important; }}
 # ---------------------------------------------------------------------------
 # Stock data fetcher (module-level for @st.cache_data)
 # ---------------------------------------------------------------------------
+def _fetch_all_timeframes(market, code):
+    """获取某股票全部8个周期的数据，并行写入DB。返回成功/失败统计。"""
+    tf_config = {
+        "1分钟": ("7d",), "5分钟": ("60d",), "15分钟": ("60d",),
+        "60分钟": ("730d",), "日线": ("max",), "周线": ("max",),
+        "月线": ("max",), "季线": ("max",),
+    }
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _fetch_one(tf):
+        force_period = tf_config[tf][0]
+        try:
+            t, close, ohlc, full, err, dates = _fetch_stock(market, code, tf, 99999, force_period=force_period)
+            if err or ohlc is None:
+                return tf, False, err or "无数据"
+            return tf, True, len(ohlc)
+        except Exception as e:
+            return tf, False, str(e)[:80]
+
+    results = {}
+    with ThreadPoolExecutor(max_workers=8) as exec:
+        futures = {exec.submit(_fetch_one, tf): tf for tf in tf_config}
+        for fut in as_completed(futures):
+            tf, ok, detail = fut.result()
+            results[tf] = (ok, detail)
+    return results
+
+
 @st.cache_data(show_spinner=False, ttl=300)
 def _fetch_stock(market, code, tf, n_pts, force_period=None):
     if market == "A股(沪深)":
@@ -648,22 +676,12 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
     tf = cfg["tf"]
     n_pts = cfg["n_pts"]
 
-    # ── 数据同步：按天偏移，各周期独立对齐 ──
-    from_cache = False
-    archive_path = Path(__file__).parent.parent / "data" / ticker_code / f"{tf}.parquet"
-    if archive_path.exists():
-        ok, count = _sync_to_display(ticker_code, tf, day_offset, n_pts)
-        if ok:
-            from_cache = True
-        elif count < 10:
-            pass  # 归档数据不足，回退到 yfinance
-        else:
-            from_cache = True  # sync 可能因窗口太小失败但归档数据本身可用
+    # ── 数据获取：DB → display → 渲染 ──
+    _sync_to_display(ticker_code, tf, day_offset, n_pts)
 
     display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
-
-    # 1) 从显示目录读取（_sync_to_display 已准备好正确窗口）
-    if from_cache and display_path.exists():
+    err = None
+    if display_path.exists():
         try:
             df = pd.read_parquet(display_path)
             if "Date" in df.columns and "Close" in df.columns and len(df) >= 5:
@@ -673,19 +691,13 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
                 noisy = df["Close"].values.ravel()
                 ohlc = df[["Open","High","Low","Close"]] if all(c in df.columns for c in ["Open","High","Low"]) else pd.DataFrame({"Open":noisy,"High":noisy,"Low":noisy,"Close":noisy}, index=df.index)
                 ticker_full = ticker_code
-                err = None
                 dates = df.index
             else:
-                from_cache = False
-        except Exception:
-            from_cache = False
-
-    # 2) 回退：yfinance 拉取（内部自动保存归档 Parquet）
-    if not from_cache:
+                err = "数据不足"
+        except Exception as e:
+            err = str(e)
+    else:
         t, noisy, ohlc, ticker_full, err, dates = _fetch_stock(market, ticker_code, tf, n_pts)
-        # 拉取成功后同步到显示目录
-        if not err:
-            _sync_to_display(ticker_code, tf, day_offset, n_pts)
 
     if err: st.error(err); return
 
@@ -858,6 +870,8 @@ def main():
     with c_refresh:
         if st.button("刷新数据", use_container_width=True):
             _fetch_stock.clear()
+            with st.spinner("正在获取全部周期..."):
+                _fetch_all_timeframes(market, ticker_code)
     with c_auto:
         auto_refresh = st.checkbox("自动刷新", value=False, key="auto_refresh")
     if auto_refresh:
@@ -907,6 +921,18 @@ def main():
             name = _stock_name(market, ticker_code)
             if name:
                 st.caption(f"📌 {name}")
+
+    # 首次加载：DB无数据时自动获取全部周期
+    if "_fetched_ticker" not in st.session_state:
+        st.session_state._fetched_ticker = ""
+    if ticker_code and ticker_code != st.session_state._fetched_ticker:
+        if not has_data(ticker_code):
+            with st.spinner(f"首次获取 {ticker_code} 全部周期数据..."):
+                results = _fetch_all_timeframes(market, ticker_code)
+                ok = sum(1 for ok, _ in results.values() if ok)
+                if ok > 0:
+                    st.sidebar.success(f"已获取 {ok}/8 个周期")
+        st.session_state._fetched_ticker = ticker_code
 
     st.sidebar.markdown("---")
     filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),
@@ -1025,6 +1051,7 @@ def main():
             st.session_state._last_auto_refresh = now
         elif now - last >= interval:
             _fetch_stock.clear()
+            _fetch_all_timeframes(market, ticker_code)
             st.session_state._last_auto_refresh = now
         remaining = interval - (now - st.session_state.get("_last_auto_refresh", now))
         time.sleep(remaining)

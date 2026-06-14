@@ -53,7 +53,7 @@ def upsert_kline(ticker: str, tf: str, df: pd.DataFrame):
         ))
     with get_conn() as conn:
         conn.executemany(
-            """INSERT OR REPLACE INTO kline
+            """INSERT OR IGNORE INTO kline
                (ticker, timeframe, ts, open, high, low, close, volume)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             records,
