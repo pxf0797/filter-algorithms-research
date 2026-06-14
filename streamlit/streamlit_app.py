@@ -404,8 +404,21 @@ g.hovertext {{ visibility: hidden !important; }}
         document.getElementById('{div_id}').addEventListener('mousemove', function(e) {{
             var tip = document.getElementById('custom-tooltip');
             if (tip && tip.style.display === 'block') {{
-                tip.style.left = (e.clientX + 18) + 'px';
-                tip.style.top = (e.clientY - 10) + 'px';
+                // 防遮挡：右侧溢出时自动切到光标左边
+                var tx = e.clientX + 18;
+                var tw = tip.offsetWidth || 200;  // 首次渲染时估算宽度
+                if (tx + tw > window.innerWidth - 10) {{
+                    tx = e.clientX - tw - 18;
+                }}
+                if (tx < 5) tx = 5;
+                tip.style.left = tx + 'px';
+                // 底部溢出时上移
+                var ty = e.clientY - 10;
+                var th = tip.offsetHeight || 60;
+                if (ty + th > window.innerHeight - 10) {{
+                    ty = e.clientY - th - 10;
+                }}
+                tip.style.top = ty + 'px';
             }}
         }});
     }});
