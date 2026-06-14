@@ -52,12 +52,24 @@ def upsert_kline(ticker: str, tf: str, df: pd.DataFrame):
             float(row.get("Volume", 0)) if pd.notna(row.get("Volume", 0)) else 0.0,
         ))
     with get_conn() as conn:
-        conn.executemany(
-            """INSERT OR IGNORE INTO kline
-               (ticker, timeframe, ts, open, high, low, close, volume)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            records,
-        )
+        # 找到该周期最新日期：历史bar用IGNORE（已完成），最新bar用REPLACE（可能未完成需更新）
+        row = conn.execute(
+            "SELECT MAX(ts) FROM kline WHERE ticker=? AND timeframe=?",
+            (ticker, tf)).fetchone()
+        last_ts = row[0] if (row and row[0]) else None
+
+        if last_ts:
+            history = [r for r in records if r[2] < last_ts]
+            recent = [r for r in records if r[2] >= last_ts]
+        else:
+            history, recent = records, []
+
+        if history:
+            conn.executemany(
+                "INSERT OR IGNORE INTO kline VALUES (?,?,?,?,?,?,?,?)", history)
+        for r in recent:
+            conn.execute(
+                "INSERT OR REPLACE INTO kline VALUES (?,?,?,?,?,?,?,?)", r)
 
 
 def query_kline(ticker: str, tf: str, n_pts: int, day_offset: int = 0) -> pd.DataFrame:
