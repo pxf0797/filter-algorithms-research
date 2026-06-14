@@ -9,3 +9,7 @@ build/
 *.log
 .streamlit/
 .DS_Store
+data/*.parquet
+data/*/*.parquet
+data/*-shm
+data/*-wal
