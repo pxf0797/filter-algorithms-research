@@ -613,6 +613,95 @@ def _schmitt_trigger(v, a, ewma_span=60, k_eps=0.15, sigma_min=0.05):
             "eps": eps_t, "sig": sig_t, "dur": dur_t}
 
 
+def _find_last_complete_pair(sig_t):
+    """从后往前扫描 sig_t，找最近两段非零区间。
+    返回 (fit_start, fit_end) — 从较早段起点到数组末尾。
+    找不到则返回 None。"""
+    n = len(sig_t)
+    if n < 3:
+        return None
+
+    i = n - 1
+    segments = []  # [(start, end, val), ...] 按从近到远排列
+
+    while i >= 0 and len(segments) < 2:
+        if sig_t[i] != 0:
+            end = i
+            val = sig_t[i]
+            while i >= 0 and sig_t[i] == val:
+                i -= 1
+            start = i + 1
+            segments.append((start, end, val))
+        else:
+            i -= 1
+
+    if len(segments) < 2:
+        return None
+
+    # segments[1] 是较早的非零段
+    return (segments[1][0], n - 1)
+
+
+def _fit_parabolic(x, y, start, end):
+    """对 y[start:end+1] 做二次多项式拟合。
+    返回 dict {a, b, c, y_fit} 或 None（数据不足）。"""
+    x_seg = x[start:end + 1]
+    y_seg = y[start:end + 1]
+    if len(x_seg) < 3:
+        return None
+    coeffs = np.polyfit(x_seg, y_seg, 2)
+    y_fit = np.polyval(coeffs, x_seg)
+    return {"a": coeffs[0], "b": coeffs[1], "c": coeffs[2], "y_fit": y_fit}
+
+
+def _add_prediction_traces(fig, t, filtered, sig_t, fit_result, fit_start, fit_end, row, n_extend=10):
+    """在 price 子图上添加预测曲线：实线拟合段 + 虚线延伸段 + 半透明填充。
+    row: Plotly subplot row index (价格子图, 通常为 1)。"""
+    current_val = sig_t[fit_end]
+    if current_val not in (1, -1):
+        return
+
+    color = "#3fb950" if current_val == 1 else "#f85149"
+    fill_color = "rgba(63,185,80,0.08)" if current_val == 1 else "rgba(248,81,73,0.08)"
+    name = "预测(多)" if current_val == 1 else "预测(空)"
+
+    a, b, c = fit_result["a"], fit_result["b"], fit_result["c"]
+
+    # 拟合段实线
+    x_fit = t[fit_start:fit_end + 1]
+    y_fit = fit_result["y_fit"]
+    fig.add_trace(go.Scatter(
+        x=x_fit, y=y_fit,
+        mode="lines", name=f"{name}(拟合)",
+        line=dict(color=color, width=2),
+        legendgroup=name,
+        showlegend=True,
+    ), row=row, col=1)
+
+    # 前向延伸虚线
+    n_ext = min(n_extend, len(t) - fit_end - 1)
+    if n_ext > 0:
+        x_ext = np.arange(fit_end, fit_end + n_ext)
+        y_ext = np.polyval((a, b, c), x_ext)
+        fig.add_trace(go.Scatter(
+            x=x_ext, y=y_ext,
+            mode="lines", name=f"{name}(预测)",
+            line=dict(color=color, width=2, dash="dash"),
+            legendgroup=name,
+            showlegend=True,
+        ), row=row, col=1)
+
+        # 延伸段半透明填充
+        fig.add_trace(go.Scatter(
+            x=list(x_ext) + list(x_ext[::-1]),
+            y=list(y_ext) + [filtered[fit_end]] * n_ext + [filtered[fit_end]],
+            fill="toself", fillcolor=fill_color,
+            line=dict(width=0),
+            legendgroup=name,
+            showlegend=False, hoverinfo="skip",
+        ), row=row, col=1)
+
+
 # ---------------------------------------------------------------------------
 # Main app
 # ---------------------------------------------------------------------------
@@ -627,8 +716,8 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     """Ultra-compact parameter panel. Returns config dict."""
     cfg = {"_fid": filter_id, "_dual": dual, "_fid2": filter_id2}
 
-    # Row 1: [周期▼] [N▬] [施密特☑] [k_ε▬] [σ_min▬] [N_EWMA▬]
-    c = st.columns([1.0, 0.8, 0.8, 1.1, 1.1, 1.1])
+    # Row 1: [周期▼] [N▬] [施密特☑] [预测曲线☑] [k_ε▬] [σ_min▬] [N_EWMA▬]
+    c = st.columns([1.0, 0.8, 0.8, 0.8, 1.1, 1.1, 1.1])
     with c[0]:
         cfg["tf"] = st.selectbox("周期", ALL_TFS, index=ALL_TFS.index(tf_default),
             key=f"{key}_tf", label_visibility="collapsed")
@@ -636,13 +725,14 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
         cfg["n_pts"] = st.slider("N", 20, 300, 120, 10, key=f"{key}_n", label_visibility="collapsed")
     with c[2]:
         cfg["show_sch"] = st.checkbox("施密特", value=True, key=f"{key}_sch")
-    cfg["ke"]=0.15; cfg["sm"]=0.05; cfg["ew"]=60
+    cfg["ke"]=0.15; cfg["sm"]=0.05; cfg["ew"]=60; cfg["show_pred"]=False
     if cfg["show_sch"]:
-        with c[3]: cfg["ke"] = st.slider("k_ε",0.01,0.50,0.15,0.05,key=f"{key}_ke",
+        with c[3]: cfg["show_pred"] = st.checkbox("预测曲线", value=True, key=f"{key}_pred")
+        with c[4]: cfg["ke"] = st.slider("k_ε",0.01,0.50,0.15,0.05,key=f"{key}_ke",
             help="灵敏度系数,越小越敏感. ε_t=k_ε·max(σ_t(v),σ_min)")
-        with c[4]: cfg["sm"] = st.slider("σ_min",0.01,0.20,0.05,0.02,key=f"{key}_sm",
+        with c[5]: cfg["sm"] = st.slider("σ_min",0.01,0.20,0.05,0.02,key=f"{key}_sm",
             help="地板保护,防止低波动下ε_t→0")
-        with c[5]: cfg["ew"] = st.slider("N_EWMA",10,120,60,10,key=f"{key}_ew",
+        with c[6]: cfg["ew"] = st.slider("N_EWMA",10,120,60,10,key=f"{key}_ew",
             help="EWMA周期,α=2/(N+1),越大越平滑")
 
     # Row 2: filter 1 params
@@ -774,6 +864,16 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
         _v = np.gradient(filtered, t); _a = np.gradient(_v, t)
         schmitt = _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
 
+    # 预测曲线拟合
+    pred_result = None
+    if cfg.get("show_pred") and schmitt is not None:
+        pair = _find_last_complete_pair(schmitt["sig"])
+        if pair is not None:
+            pred_result = _fit_parabolic(t, filtered, pair[0], pair[1])
+            if pred_result is not None:
+                pred_result["fit_start"] = pair[0]
+                pred_result["fit_end"] = pair[1]
+
     # Build figure (same as before, compact)
     has_s = schmitt is not None
     rows = 5 if has_s else 4
@@ -799,6 +899,12 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
     if cfg["_dual"] and filtered2 is not None and not np.all(np.isnan(filtered2)):
         fig.add_trace(go.Scatter(x=t, y=filtered2, mode="lines", name="滤波2",
             line=dict(color=cfg["fc2"], width=2.0)), row=mr, col=1)
+
+    if pred_result is not None:
+        _add_prediction_traces(fig, t, filtered, schmitt["sig"],
+                               pred_result, pred_result["fit_start"],
+                               pred_result["fit_end"], row=mr)
+
     if not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=filtered-noisy, mode="lines", name="残差",
             line=dict(color="#5f6c80", width=1.0, dash="dot")), row=rr, col=1)
