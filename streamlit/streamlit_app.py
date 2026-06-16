@@ -678,8 +678,8 @@ def _add_prediction_traces(fig, t, filtered, sig_t, fit_result, fit_start, fit_e
         showlegend=True,
     ), row=row, col=1)
 
-    # 前向延伸虚线
-    n_ext = min(n_extend, len(t) - fit_end - 1)
+    # 前向延伸虚线（预测段超出数组范围，无需限制）
+    n_ext = n_extend
     if n_ext > 0:
         x_ext = np.arange(fit_end, fit_end + n_ext)
         y_ext = np.polyval((a, b, c), x_ext)
