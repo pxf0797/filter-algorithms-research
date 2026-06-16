@@ -698,7 +698,7 @@ def _add_prediction_traces(fig, t, filtered, fit_result, fit_start, mid, pred_en
         x=list(x_mid) + list(x_mid[::-1]),
         y=list(y_mid) + [filtered[mid]] * len(x_mid),
         fill="toself", fillcolor=fill_color,
-        line=dict(width=0),
+        mode="lines", line=dict(width=0),
         legendgroup=name,
         showlegend=False, hoverinfo="skip",
     ), row=row, col=1)
@@ -721,7 +721,7 @@ def _add_prediction_traces(fig, t, filtered, fit_result, fit_start, mid, pred_en
             x=list(x_ext) + list(x_ext[::-1]),
             y=list(y_ext) + [filtered[pred_end]] * n_ext,
             fill="toself", fillcolor=fill_color,
-            line=dict(width=0),
+            mode="lines", line=dict(width=0),
             legendgroup=name,
             showlegend=False, hoverinfo="skip",
         ), row=row, col=1)
