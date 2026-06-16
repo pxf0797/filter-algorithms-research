@@ -661,9 +661,9 @@ def _add_prediction_traces(fig, t, filtered, sig_t, fit_result, fit_start, fit_e
     if current_val not in (1, -1):
         return
 
-    color = "#3fb950" if current_val == 1 else "#f85149"
-    fill_color = "rgba(63,185,80,0.08)" if current_val == 1 else "rgba(248,81,73,0.08)"
-    name = "预测(多)" if current_val == 1 else "预测(空)"
+    color = "#a371f7"  # 紫色
+    fill_color = "rgba(163,113,247,0.08)"
+    name = "预测曲线"
 
     a, b, c = fit_result["a"], fit_result["b"], fit_result["c"]
 
@@ -716,8 +716,8 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     """Ultra-compact parameter panel. Returns config dict."""
     cfg = {"_fid": filter_id, "_dual": dual, "_fid2": filter_id2}
 
-    # Row 1: [周期▼] [N▬] [施密特☑] [预测曲线☑] [k_ε▬] [σ_min▬] [N_EWMA▬]
-    c = st.columns([1.0, 0.8, 0.8, 0.8, 1.1, 1.1, 1.1])
+    # Row 1: [周期▼] [N▬] [施密特☑] [预测曲线☑] [预测点▬] [k_ε▬] [σ_min▬] [N_EWMA▬]
+    c = st.columns([1.0, 0.8, 0.8, 0.8, 0.8, 1.1, 1.1, 1.1])
     with c[0]:
         cfg["tf"] = st.selectbox("周期", ALL_TFS, index=ALL_TFS.index(tf_default),
             key=f"{key}_tf", label_visibility="collapsed")
@@ -725,14 +725,16 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
         cfg["n_pts"] = st.slider("N", 20, 300, 120, 10, key=f"{key}_n", label_visibility="collapsed")
     with c[2]:
         cfg["show_sch"] = st.checkbox("施密特", value=True, key=f"{key}_sch")
-    cfg["ke"]=0.15; cfg["sm"]=0.05; cfg["ew"]=60; cfg["show_pred"]=False
+    cfg["ke"]=0.15; cfg["sm"]=0.05; cfg["ew"]=60; cfg["show_pred"]=False; cfg["n_ext"]=10
     if cfg["show_sch"]:
         with c[3]: cfg["show_pred"] = st.checkbox("预测曲线", value=True, key=f"{key}_pred")
-        with c[4]: cfg["ke"] = st.slider("k_ε",0.01,0.50,0.15,0.05,key=f"{key}_ke",
+        if cfg["show_pred"]:
+            with c[4]: cfg["n_ext"] = st.slider("预测点", 1, 50, 10, 1, key=f"{key}_next")
+        with c[5]: cfg["ke"] = st.slider("k_ε",0.01,0.50,0.15,0.05,key=f"{key}_ke",
             help="灵敏度系数,越小越敏感. ε_t=k_ε·max(σ_t(v),σ_min)")
-        with c[5]: cfg["sm"] = st.slider("σ_min",0.01,0.20,0.05,0.02,key=f"{key}_sm",
+        with c[6]: cfg["sm"] = st.slider("σ_min",0.01,0.20,0.05,0.02,key=f"{key}_sm",
             help="地板保护,防止低波动下ε_t→0")
-        with c[6]: cfg["ew"] = st.slider("N_EWMA",10,120,60,10,key=f"{key}_ew",
+        with c[7]: cfg["ew"] = st.slider("N_EWMA",10,120,60,10,key=f"{key}_ew",
             help="EWMA周期,α=2/(N+1),越大越平滑")
 
     # Row 2: filter 1 params
@@ -903,7 +905,8 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
     if pred_result is not None:
         _add_prediction_traces(fig, t, filtered, schmitt["sig"],
                                pred_result, pred_result["fit_start"],
-                               pred_result["fit_end"], row=mr)
+                               pred_result["fit_end"], row=mr,
+                               n_extend=cfg.get("n_ext", 10))
 
     if not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=filtered-noisy, mode="lines", name="残差",
