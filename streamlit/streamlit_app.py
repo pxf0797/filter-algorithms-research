@@ -694,7 +694,7 @@ def _add_prediction_traces(fig, t, filtered, sig_t, fit_result, fit_start, fit_e
         # 延伸段半透明填充
         fig.add_trace(go.Scatter(
             x=list(x_ext) + list(x_ext[::-1]),
-            y=list(y_ext) + [filtered[fit_end]] * n_ext + [filtered[fit_end]],
+            y=list(y_ext) + [filtered[fit_end]] * n_ext,
             fill="toself", fillcolor=fill_color,
             line=dict(width=0),
             legendgroup=name,
