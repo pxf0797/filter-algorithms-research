@@ -665,33 +665,34 @@ def _fit_parabolic(x, y, start, end):
 
 
 def _add_prediction_traces(fig, t, fit_result, fit_start, mid, pred_end, row,
-                          n_extend=10, show_legend=True, is_last=False):
-    """在 price 子图上添加预测曲线：左半拟合实线（橙色）+ 右半预测虚线（紫色）。
-    fit_start .. mid       — 左段拟合，橙色实线
-    mid .. pred_end        — 右段预测，紫色虚线
-    pred_end .. +n_extend  — 前向延伸（仅最后一对），紫色虚线
-    row: Plotly subplot row index (价格子图, 通常为 1)。"""
-    name = "预测曲线"
+                          n_extend=10, show_legend=True, is_last=False, bullish=True):
+    """在 price 子图上添加预测曲线。
+    做多对(-1→+1): 绿色; 做空对(+1→-1): 红色。
+    fit_start .. mid       — 左段拟合实线
+    mid .. pred_end        — 右段预测虚线
+    pred_end .. +n_extend  — 前向延伸（仅最后一对）"""
+    name = "做多" if bullish else "做空"
+    color = "#3fb950" if bullish else "#f85149"  # 绿/红
     a, b, c = fit_result["a"], fit_result["b"], fit_result["c"]
 
-    # 1) 左半段 — 拟合实线（橙色）
+    # 1) 左半段 — 拟合实线
     x_fit = t[fit_start:mid + 1]
     y_fit = fit_result["y_fit"]
     fig.add_trace(go.Scatter(
         x=x_fit, y=y_fit,
         mode="lines", name=f"{name}(拟合)",
-        line=dict(color="#f0a040", width=2),
+        line=dict(color=color, width=2),
         legendgroup=name,
         showlegend=show_legend,
     ), row=row, col=1)
 
-    # 2) 右半段 — 预测虚线（紫色）
+    # 2) 右半段 — 预测虚线
     x_pred = np.arange(mid, pred_end + 1)
     y_pred = np.polyval((a, b, c), x_pred)
     fig.add_trace(go.Scatter(
         x=x_pred, y=y_pred,
         mode="lines", name=f"{name}(预测)",
-        line=dict(color="#a371f7", width=2, dash="dash"),
+        line=dict(color=color, width=2, dash="dash"),
         legendgroup=name,
         showlegend=show_legend,
     ), row=row, col=1)
@@ -703,7 +704,7 @@ def _add_prediction_traces(fig, t, fit_result, fit_start, mid, pred_end, row,
         fig.add_trace(go.Scatter(
             x=x_ext, y=y_ext,
             mode="lines", name=f"{name}(预测)",
-            line=dict(color="#a371f7", width=2, dash="dash"),
+            line=dict(color=color, width=2, dash="dash"),
             legendgroup=name,
             showlegend=False,
         ), row=row, col=1)
@@ -921,12 +922,14 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
 
     n_pairs = len(pred_pairs)
     for i, pp in enumerate(pred_pairs):
+        bullish = schmitt["sig"][pp["fit_start"]] == -1  # -1起始→做多
         _add_prediction_traces(fig, t,
                                pp["fit_result"], pp["fit_start"],
                                pp["mid"], pp["pred_end"], row=mr,
                                n_extend=cfg.get("n_ext", 10),
                                show_legend=(i == 0),
-                               is_last=(i == n_pairs - 1))
+                               is_last=(i == n_pairs - 1),
+                               bullish=bullish)
 
     if not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=filtered-noisy, mode="lines", name="残差",
