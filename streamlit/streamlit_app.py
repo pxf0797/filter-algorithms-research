@@ -881,10 +881,14 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
         _v = np.gradient(filtered, t); _a = np.gradient(_v, t)
         schmitt = _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
 
+    # 多空切换对 — 始终计算（用于预测曲线 + Sig_t 背景标记）
+    all_pairs = []
+    if schmitt is not None:
+        all_pairs = _find_all_pairs(schmitt["sig"])
+
     # 预测曲线 — 窗口中所有多空切换对，左半拟合 + 右半预测
     pred_pairs = []
     if cfg.get("show_pred") and schmitt is not None:
-        all_pairs = _find_all_pairs(schmitt["sig"])
         for pair_start, pair_end in all_pairs:
             mid = (pair_start + pair_end) // 2
             if mid - pair_start >= 3:  # 左段需 ≥3 点才能做二次拟合
@@ -962,6 +966,16 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
                 fig.add_trace(go.Scatter(x=t[msk], y=np.where(msk,state,0),
                     mode="lines", line=dict(width=0), fill="tozeroy",
                     fillcolor=cl, showlegend=False, hoverinfo="skip"), row=ssr, col=1)
+        # 切换对背景色带（交替色区分相邻重叠对）
+        for i, (p_start, p_end) in enumerate(all_pairs):
+            band_color = "rgba(88,166,255,0.07)" if i % 2 == 0 else "rgba(163,113,247,0.07)"
+            fig.add_trace(go.Scatter(
+                x=[p_start, p_end, p_end, p_start],
+                y=[1.5, 1.5, -1.5, -1.5],
+                fill="toself", fillcolor=band_color,
+                mode="lines", line=dict(width=0),
+                showlegend=False, hoverinfo="skip",
+            ), row=ssr, col=1)
     if ar is not None and not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=acc, mode="lines", name="a",
             line=dict(color="#ffa502", width=1.5)), row=ar, col=1)
