@@ -665,10 +665,10 @@ def _fit_parabolic(x, y, start, end):
 
 
 def _add_prediction_traces(fig, t, fit_result, fit_start, pair_end, row,
-                          n_extend=10, show_legend=True, is_last=False):
+                          n_extend=10, show_legend=True):
     """在 price 子图上添加预测曲线。
     fit_start .. pair_end  — 多空对全段拟合（橙色实线）
-    pair_end .. +n_extend  — 前向预测（紫色虚线，仅最后一对）"""
+    pair_end .. +n_extend  — 前向预测（紫色虚线）"""
     name = "预测曲线"
     fit_color = "#f0a040"   # 橙色
     pred_color = "#a371f7"  # 紫色
@@ -685,8 +685,8 @@ def _add_prediction_traces(fig, t, fit_result, fit_start, pair_end, row,
         showlegend=show_legend,
     ), row=row, col=1)
 
-    # 前向延伸 — 紫色虚线（仅最后一对）
-    if is_last and n_extend > 0:
+    # 前向延伸 — 紫色虚线
+    if n_extend > 0:
         x_ext = np.arange(pair_end, pair_end + n_extend)
         y_ext = np.polyval((a, b, c), x_ext)
         fig.add_trace(go.Scatter(
@@ -906,14 +906,12 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
         fig.add_trace(go.Scatter(x=t, y=filtered2, mode="lines", name="滤波2",
             line=dict(color=cfg["fc2"], width=2.0)), row=mr, col=1)
 
-    n_pairs = len(pred_pairs)
     for i, pp in enumerate(pred_pairs):
         _add_prediction_traces(fig, t,
                                pp["fit_result"], pp["fit_start"],
                                pp["pair_end"], row=mr,
                                n_extend=cfg.get("n_ext", 10),
-                               show_legend=(i == 0),
-                               is_last=(i == n_pairs - 1))
+                               show_legend=(i == 0))
 
     if not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=filtered-noisy, mode="lines", name="残差",
