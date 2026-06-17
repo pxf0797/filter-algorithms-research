@@ -639,13 +639,15 @@ def _find_all_pairs(sig_t):
     if len(segments) < 2:
         return []
 
-    # Step 2: 相邻异号段配对（重叠模式，中间段被前后复用）
+    # Step 2: 相邻异号段配对 — 结束于相反信号的入口边缘
+    # 向上对: 0→+1起始 → +1段 → 0区 → 0→-1边缘结束
+    # 向下对: 0→-1起始 → -1段 → 0区 → 0→+1边缘结束
     pairs = []
     for j in range(len(segments) - 1):
         s1, e1, v1 = segments[j]
         s2, e2, v2 = segments[j + 1]
         if v1 != v2:  # 多→空 或 空→多
-            pairs.append((s1, e2))
+            pairs.append((s1, s2))  # 结束于相反信号的入口（边缘）
 
     return pairs
 
