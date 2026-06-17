@@ -659,71 +659,48 @@ def _fit_parabolic(x, y, start, end):
 
 
 def _add_prediction_traces(fig, t, filtered, fit_result, fit_start, mid, pred_end, row,
-                           n_extend=10, show_legend=True):
-    """在 price 子图上添加预测曲线：左半拟合实线 + 右半预测虚线 + 前向延伸虚线。
-    fit_start .. mid     — 左段，用拟合多项式画实线
-    mid .. pred_end      — 右段，多项式外推虚线（与实际数据对比）
-    pred_end .. +n_extend — 前向延伸虚线
+                           n_extend=10, show_legend=True, is_last=False):
+    """在 price 子图上添加预测曲线：左半拟合实线（橙色）+ 右半预测虚线（紫色）。
+    fit_start .. mid     — 左段拟合，橙色实线
+    mid .. pred_end      — 右段预测，紫色虚线
+    pred_end .. +n_extend — 前向延伸（仅最后一对），紫色虚线
     row: Plotly subplot row index (价格子图, 通常为 1)。"""
-    color = "#a371f7"  # 紫色
-    fill_color = "rgba(163,113,247,0.08)"
     name = "预测曲线"
-
     a, b, c = fit_result["a"], fit_result["b"], fit_result["c"]
 
-    # 1) 左半段 — 拟合实线
+    # 1) 左半段 — 拟合实线（橙色）
     x_fit = t[fit_start:mid + 1]
     y_fit = fit_result["y_fit"]
     fig.add_trace(go.Scatter(
         x=x_fit, y=y_fit,
         mode="lines", name=f"{name}(拟合)",
-        line=dict(color=color, width=2),
+        line=dict(color="#f0a040", width=2),
         legendgroup=name,
         showlegend=show_legend,
     ), row=row, col=1)
 
-    # 2) 右半段 — 预测虚线（窗口内验证）
-    x_mid = np.arange(mid, pred_end + 1)
-    y_mid = np.polyval((a, b, c), x_mid)
+    # 2) 右半段 — 预测虚线（紫色）
+    x_pred = np.arange(mid, pred_end + 1)
+    y_pred = np.polyval((a, b, c), x_pred)
     fig.add_trace(go.Scatter(
-        x=x_mid, y=y_mid,
-        mode="lines", name=f"{name}(验证)",
-        line=dict(color=color, width=2, dash="dash"),
+        x=x_pred, y=y_pred,
+        mode="lines", name=f"{name}(预测)",
+        line=dict(color="#a371f7", width=2, dash="dash"),
         legendgroup=name,
         showlegend=show_legend,
     ), row=row, col=1)
 
-    # 右半段填充
-    fig.add_trace(go.Scatter(
-        x=list(x_mid) + list(x_mid[::-1]),
-        y=list(y_mid) + [filtered[mid]] * len(x_mid),
-        fill="toself", fillcolor=fill_color,
-        mode="lines", line=dict(width=0),
-        legendgroup=name,
-        showlegend=False, hoverinfo="skip",
-    ), row=row, col=1)
-
-    # 3) 前向延伸虚线
-    n_ext = n_extend
-    if n_ext > 0:
+    # 3) 前向延伸（仅最后一对）
+    if is_last and n_extend > 0:
+        n_ext = n_extend
         x_ext = np.arange(pred_end, pred_end + n_ext)
         y_ext = np.polyval((a, b, c), x_ext)
         fig.add_trace(go.Scatter(
             x=x_ext, y=y_ext,
-            mode="lines", name=f"{name}(前向)",
-            line=dict(color=color, width=2, dash="dot"),
+            mode="lines", name=f"{name}(预测)",
+            line=dict(color="#a371f7", width=2, dash="dash"),
             legendgroup=name,
-            showlegend=show_legend,
-        ), row=row, col=1)
-
-        # 前向填充
-        fig.add_trace(go.Scatter(
-            x=list(x_ext) + list(x_ext[::-1]),
-            y=list(y_ext) + [filtered[pred_end]] * n_ext,
-            fill="toself", fillcolor=fill_color,
-            mode="lines", line=dict(width=0),
-            legendgroup=name,
-            showlegend=False, hoverinfo="skip",
+            showlegend=False,
         ), row=row, col=1)
 
 
@@ -933,12 +910,14 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
         fig.add_trace(go.Scatter(x=t, y=filtered2, mode="lines", name="滤波2",
             line=dict(color=cfg["fc2"], width=2.0)), row=mr, col=1)
 
+    n_pairs = len(pred_pairs)
     for i, pp in enumerate(pred_pairs):
         _add_prediction_traces(fig, t, filtered,
                                pp["fit_result"], pp["fit_start"],
                                pp["mid"], pp["pred_end"], row=mr,
                                n_extend=cfg.get("n_ext", 10),
-                               show_legend=(i == 0))
+                               show_legend=(i == 0),
+                               is_last=(i == n_pairs - 1))
 
     if not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=filtered-noisy, mode="lines", name="残差",
