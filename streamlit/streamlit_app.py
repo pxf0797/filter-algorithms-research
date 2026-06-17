@@ -615,13 +615,15 @@ def _schmitt_trigger(v, a, ewma_span=60, k_eps=0.15, sigma_min=0.05):
 
 def _find_all_pairs(sig_t):
     """扫描 sig_t，找出窗口中所有多空切换对。
-    每对 = (较早段.start, 较晚段.end)，两段符号必须不同。
+    1. 收集所有非零段
+    2. 合并相邻同号段（中间有0且同号→同一波趋势）
+    3. 相邻异号段配对（重叠模式）
     返回 [(start, end), ...] 或空列表。"""
     n = len(sig_t)
     if n < 3:
         return []
 
-    # Step 1: 收集中所有非零段
+    # Step 1: 收集所有非零段
     segments = []  # [(start, end, val), ...]
     i = 0
     while i < n:
@@ -635,17 +637,25 @@ def _find_all_pairs(sig_t):
         else:
             i += 1
 
-    # Step 2: 相邻异号段组成非重叠对（每段最多用一次）
-    pairs = []
-    j = 0
-    while j < len(segments) - 1:
-        s1, e1, v1 = segments[j]
-        s2, e2, v2 = segments[j + 1]
-        if v1 != v2:  # 多→空 或 空→多
-            pairs.append((s1, e2))
-            j += 2  # 跳过已用的两段
+    if len(segments) < 2:
+        return []
+
+    # Step 2: 合并相邻同号段（+1,0,+1 → 一个连续多头段）
+    merged = [segments[0]]
+    for seg in segments[1:]:
+        last = merged[-1]
+        if seg[2] == last[2]:  # 同号 → 合并
+            merged[-1] = (last[0], seg[1], seg[2])
         else:
-            j += 1
+            merged.append(seg)
+
+    # Step 3: 相邻异号段配对（重叠模式，中间段被复用）
+    pairs = []
+    for j in range(len(merged) - 1):
+        s1, e1, v1 = merged[j]
+        s2, e2, v2 = merged[j + 1]
+        if v1 != v2:
+            pairs.append((s1, e2))
 
     return pairs
 
