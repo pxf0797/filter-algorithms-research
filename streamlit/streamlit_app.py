@@ -664,17 +664,18 @@ def _fit_parabolic(x, y, start, end):
     return {"a": coeffs[0], "b": coeffs[1], "c": coeffs[2], "y_fit": y_fit}
 
 
-def _add_prediction_traces(fig, t, fit_result, fit_start, pair_end, row,
+def _add_prediction_traces(fig, t, filtered, fit_result, fit_start, pair_end, row,
                           n_extend=10, show_legend=True):
-    """在 price 子图上添加预测曲线。
+    """在 price/残差 子图上添加预测曲线。
     fit_start .. pair_end  — 多空对全段拟合（橙色实线）
-    pair_end .. +n_extend  — 前向预测（紫色虚线）"""
+    pair_end .. +n_extend  — 前向预测（紫色虚线）
+    残差(row+1): 拟合段与滤波价格的残差（紫色虚线）"""
     name = "预测曲线"
     fit_color = "#f0a040"   # 橙色
     pred_color = "#a371f7"  # 紫色
     a, b, c = fit_result["a"], fit_result["b"], fit_result["c"]
 
-    # 拟合段 — 橙色实线（覆盖整个多空对）
+    # 拟合段 — 橙色实线（价格子图）
     x_fit = t[fit_start:pair_end + 1]
     y_fit = fit_result["y_fit"]
     fig.add_trace(go.Scatter(
@@ -685,7 +686,17 @@ def _add_prediction_traces(fig, t, fit_result, fit_start, pair_end, row,
         showlegend=show_legend,
     ), row=row, col=1)
 
-    # 前向延伸 — 紫色虚线
+    # 拟合残差 — 紫色虚线（残差子图）
+    residual = fit_result["y_fit"] - filtered[fit_start:pair_end + 1]
+    fig.add_trace(go.Scatter(
+        x=x_fit, y=residual,
+        mode="lines", name=f"{name}(残差)",
+        line=dict(color=pred_color, width=1.5, dash="dash"),
+        legendgroup=name,
+        showlegend=show_legend,
+    ), row=row + 1, col=1)
+
+    # 前向延伸 — 紫色虚线（价格子图）
     if n_extend > 0:
         x_ext = np.arange(pair_end, pair_end + n_extend)
         y_ext = np.polyval((a, b, c), x_ext)
@@ -907,7 +918,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
             line=dict(color=cfg["fc2"], width=2.0)), row=mr, col=1)
 
     for i, pp in enumerate(pred_pairs):
-        _add_prediction_traces(fig, t,
+        _add_prediction_traces(fig, t, filtered,
                                pp["fit_result"], pp["fit_start"],
                                pp["pair_end"], row=mr,
                                n_extend=cfg.get("n_ext", 10),
