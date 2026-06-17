@@ -664,49 +664,37 @@ def _fit_parabolic(x, y, start, end):
     return {"a": coeffs[0], "b": coeffs[1], "c": coeffs[2], "y_fit": y_fit}
 
 
-def _add_prediction_traces(fig, t, fit_result, fit_start, mid, pred_end, row,
-                          n_extend=10, show_legend=True, is_last=False, bullish=True):
+def _add_prediction_traces(fig, t, fit_result, fit_start, pair_end, row,
+                          n_extend=10, show_legend=True, is_last=False):
     """在 price 子图上添加预测曲线。
-    做多对(-1→+1): 绿色; 做空对(+1→-1): 红色。
-    fit_start .. mid       — 左段拟合实线
-    mid .. pred_end        — 右段预测虚线
-    pred_end .. +n_extend  — 前向延伸（仅最后一对）"""
-    name = "做多" if bullish else "做空"
-    color = "#3fb950" if bullish else "#f85149"  # 绿/红
+    fit_start .. pair_end  — 多空对全段拟合（橙色实线）
+    pair_end .. +n_extend  — 前向预测（紫色虚线，仅最后一对）"""
+    name = "预测曲线"
+    fit_color = "#f0a040"   # 橙色
+    pred_color = "#a371f7"  # 紫色
     a, b, c = fit_result["a"], fit_result["b"], fit_result["c"]
 
-    # 1) 左半段 — 拟合实线
-    x_fit = t[fit_start:mid + 1]
+    # 拟合段 — 橙色实线（覆盖整个多空对）
+    x_fit = t[fit_start:pair_end + 1]
     y_fit = fit_result["y_fit"]
     fig.add_trace(go.Scatter(
         x=x_fit, y=y_fit,
         mode="lines", name=f"{name}(拟合)",
-        line=dict(color=color, width=2),
+        line=dict(color=fit_color, width=2),
         legendgroup=name,
         showlegend=show_legend,
     ), row=row, col=1)
 
-    # 2) 右半段 — 预测虚线
-    x_pred = np.arange(mid, pred_end + 1)
-    y_pred = np.polyval((a, b, c), x_pred)
-    fig.add_trace(go.Scatter(
-        x=x_pred, y=y_pred,
-        mode="lines", name=f"{name}(预测)",
-        line=dict(color=color, width=2, dash="dash"),
-        legendgroup=name,
-        showlegend=show_legend,
-    ), row=row, col=1)
-
-    # 3) 前向延伸（仅最后一对）
+    # 前向延伸 — 紫色虚线（仅最后一对）
     if is_last and n_extend > 0:
-        x_ext = np.arange(pred_end, pred_end + n_extend)
+        x_ext = np.arange(pair_end, pair_end + n_extend)
         y_ext = np.polyval((a, b, c), x_ext)
         fig.add_trace(go.Scatter(
             x=x_ext, y=y_ext,
             mode="lines", name=f"{name}(预测)",
-            line=dict(color=color, width=2, dash="dash"),
+            line=dict(color=pred_color, width=2, dash="dash"),
             legendgroup=name,
-            showlegend=False,
+            showlegend=show_legend,
         ), row=row, col=1)
 
 
@@ -879,19 +867,17 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
     if schmitt is not None:
         all_pairs = _find_all_pairs(schmitt["sig"])
 
-    # 预测曲线 — 窗口中所有多空切换对，左半拟合 + 右半预测
+    # 预测曲线 — 窗口中所有多空对，全段拟合 + 末对前向预测
     pred_pairs = []
     if cfg.get("show_pred") and schmitt is not None:
         for pair_start, pair_end in all_pairs:
-            mid = (pair_start + pair_end) // 2
-            if mid - pair_start >= 3:  # 左段需 ≥3 点才能做二次拟合
-                fit_result = _fit_parabolic(t, filtered, pair_start, mid)
+            if pair_end - pair_start >= 3:  # 需 ≥3 点
+                fit_result = _fit_parabolic(t, filtered, pair_start, pair_end)
                 if fit_result is not None:
                     pred_pairs.append({
                         "fit_result": fit_result,
                         "fit_start": pair_start,
-                        "mid": mid,
-                        "pred_end": pair_end,
+                        "pair_end": pair_end,
                     })
 
     # Build figure (same as before, compact)
@@ -922,14 +908,12 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
 
     n_pairs = len(pred_pairs)
     for i, pp in enumerate(pred_pairs):
-        bullish = schmitt["sig"][pp["fit_start"]] == -1  # -1起始→做多
         _add_prediction_traces(fig, t,
                                pp["fit_result"], pp["fit_start"],
-                               pp["mid"], pp["pred_end"], row=mr,
+                               pp["pair_end"], row=mr,
                                n_extend=cfg.get("n_ext", 10),
                                show_legend=(i == 0),
-                               is_last=(i == n_pairs - 1),
-                               bullish=bullish)
+                               is_last=(i == n_pairs - 1))
 
     if not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=filtered-noisy, mode="lines", name="残差",
