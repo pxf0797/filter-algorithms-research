@@ -966,12 +966,14 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
                 fig.add_trace(go.Scatter(x=t[msk], y=np.where(msk,state,0),
                     mode="lines", line=dict(width=0), fill="tozeroy",
                     fillcolor=cl, showlegend=False, hoverinfo="skip"), row=ssr, col=1)
-        # 切换对背景色带（交替色区分相邻重叠对）
+        # 切换对背景色带 — 向上对填充 0~1（多-观），向下对填充 -1~0（观-空）
         for i, (p_start, p_end) in enumerate(all_pairs):
-            band_color = "rgba(88,166,255,0.07)" if i % 2 == 0 else "rgba(163,113,247,0.07)"
+            direction = sig[p_end]  # 对尾段符号：+1 向上(多)，-1 向下(空)
+            y_lo, y_hi = (0, 1) if direction == 1 else (-1, 0)
+            band_color = "rgba(88,166,255,0.10)" if i % 2 == 0 else "rgba(163,113,247,0.10)"
             fig.add_trace(go.Scatter(
                 x=[p_start, p_end, p_end, p_start],
-                y=[1.5, 1.5, -1.5, -1.5],
+                y=[y_hi, y_hi, y_lo, y_lo],
                 fill="toself", fillcolor=band_color,
                 mode="lines", line=dict(width=0),
                 showlegend=False, hoverinfo="skip",
