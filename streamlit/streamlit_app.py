@@ -241,13 +241,15 @@ def compute_metrics(clean, noisy, filtered):
 # Helper: render a slider for each filter parameter
 # ---------------------------------------------------------------------------
 def _compact_slider(label, pmin, pmax, pdefault, pstep=1, key=None, fmt=None, help=None, container=None):
-    """标签与滑块同行紧凑布局：label | ════slider════ value。"""
+    """标签与滑块同行紧凑布局：label ℹ️ | ════slider════ value。"""
     ctx = container if container is not None else st
-    c = ctx.columns([0.35, 0.65])
-    c[0].markdown(f"<small>{label}</small>", unsafe_allow_html=True)
+    c = ctx.columns([0.38, 0.62])
+    if help:
+        c[0].markdown(f"<small>{label}&nbsp;<span title=\"{help}\" style=\"cursor:help\">ⓘ</span></small>", unsafe_allow_html=True)
+    else:
+        c[0].markdown(f"<small>{label}</small>", unsafe_allow_html=True)
     kwargs = dict(min_value=pmin, max_value=pmax, value=pdefault, step=pstep,
                   key=key, label_visibility="collapsed")
-    if help: kwargs["help"] = help
     if fmt: kwargs["format"] = fmt
     return c[1].slider(label, **kwargs)
 
