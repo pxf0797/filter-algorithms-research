@@ -1229,9 +1229,12 @@ def main():
         export_data[f"v{i}_tf"] = cfg["tf"]
         export_data[f"v{i}_n"] = cfg["n_pts"]
         export_data[f"v{i}_sch"] = cfg["show_sch"]
+        export_data[f"v{i}_pred"] = cfg["show_pred"]
         export_data[f"v{i}_ke"] = cfg["ke"]
         export_data[f"v{i}_sm"] = cfg["sm"]
         export_data[f"v{i}_ew"] = cfg["ew"]
+        export_data[f"v{i}_fm"] = cfg["fit_mode"]
+        export_data[f"v{i}_next"] = cfg["n_ext"]
         export_data[f"v{i}_fc"] = cfg["fc"]
         export_data[f"v{i}_fc2"] = cfg["fc2"]
         # Use slider label (Chinese) as key prefix, matching _render_param_slider
