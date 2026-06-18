@@ -745,6 +745,7 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     cfg = {"_fid": filter_id, "_dual": dual, "_fid2": filter_id2}
 
     # Row 1: [周期▼] [N▬] [施密特☑] [预测☑]
+
     c1 = st.columns([1.0, 0.8, 0.8, 0.8])
     with c1[0]:
         cfg["tf"] = st.selectbox("周期", ALL_TFS, index=ALL_TFS.index(tf_default),
@@ -758,21 +759,24 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     if cfg["show_sch"]:
         with c1[3]: cfg["show_pred"] = st.checkbox("预测", value=True, key=f"{key}_pred")
 
-    # Row 2: 施密特+预测合并行 — [k_ε▬] [σ_min▬] [N_EWMA▬] [拟合方式○] [预测点▬]
+    # Schmitt ON → 折叠面板（方案A）
     if cfg["show_sch"]:
-        c2 = st.columns([1.0, 1.0, 1.0, 1.2, 0.8])
-        with c2[0]: cfg["ke"] = st.slider("k_ε",0.01,0.50,0.15,0.05,key=f"{key}_ke",
-            help="灵敏度系数,越小越敏感. ε_t=k_ε·max(σ_t(v),σ_min)")
-        with c2[1]: cfg["sm"] = st.slider("σ_min",0.01,0.20,0.05,0.02,key=f"{key}_sm",
-            help="地板保护,防止低波动下ε_t→0")
-        with c2[2]: cfg["ew"] = st.slider("N_EWMA",10,120,60,10,key=f"{key}_ew",
-            help="EWMA周期,α=2/(N+1),越大越平滑")
+        with st.expander("施密特参数", expanded=True):
+            c2 = st.columns([1.0, 1.0, 1.0])
+            with c2[0]: cfg["ke"] = st.slider("k_ε",0.01,0.50,0.15,0.05,key=f"{key}_ke",
+                help="灵敏度系数,越小越敏感. ε_t=k_ε·max(σ_t(v),σ_min)")
+            with c2[1]: cfg["sm"] = st.slider("σ_min",0.01,0.20,0.05,0.02,key=f"{key}_sm",
+                help="地板保护,防止低波动下ε_t→0")
+            with c2[2]: cfg["ew"] = st.slider("N_EWMA",10,120,60,10,key=f"{key}_ew",
+                help="EWMA周期,α=2/(N+1),越大越平滑")
         if cfg["show_pred"]:
-            with c2[3]: cfg["fit_mode"] = st.radio("拟合",
-                ["poly2", "parabola"], index=0, horizontal=True,
-                format_func=lambda x: "二次" if x=="poly2" else "抛物线",
-                key=f"{key}_fm", label_visibility="collapsed")
-            with c2[4]: cfg["n_ext"] = st.slider("预测点", 1, 50, 10, 1, key=f"{key}_next")
+            with st.expander("预测参数", expanded=True):
+                c3 = st.columns([1.5, 1.0])
+                with c3[0]: cfg["fit_mode"] = st.radio("拟合方式",
+                    ["poly2", "parabola"], index=0, horizontal=True,
+                    format_func=lambda x: "二次多项式" if x=="poly2" else "抛物线拟合",
+                    key=f"{key}_fm")
+                with c3[1]: cfg["n_ext"] = st.slider("预测点数", 1, 50, 10, 1, key=f"{key}_next")
 
     # Row 2: filter 1 params
     sf = FILTERS[filter_id]; cfg["pv"] = {}
