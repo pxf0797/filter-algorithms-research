@@ -830,13 +830,23 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     else:
         cfg["pv2"] = {}; cfg["fc2"] = "#ff6b6b"
 
-    # 从 session_state 读取最终值（导入参数唯一真相源，widget 返回值不可靠）
+    # 从 session_state 读取最终值（导入参数唯一真相源）
     cfg["ke"] = st.session_state.get(f"{key}_ke", cfg["ke"])
     cfg["sm"] = st.session_state.get(f"{key}_sm", cfg["sm"])
     cfg["ew"] = st.session_state.get(f"{key}_ew", cfg["ew"])
     cfg["show_pred"] = st.session_state.get(f"{key}_pred", cfg["show_pred"])
     cfg["fit_mode"] = st.session_state.get(f"{key}_fm", cfg["fit_mode"])
     cfg["n_ext"] = st.session_state.get(f"{key}_next", cfg["n_ext"])
+    # 滤波参数也需保护
+    for pname in f1:
+        label = sf["params"][pname][0]
+        sk = f"{label}_{key}_f1_{filter_id}"
+        cfg["pv"][pname] = st.session_state.get(sk, cfg["pv"].get(pname, 0))
+    if dual and filter_id2:
+        for pname in f2:
+            label = sf2["params"][pname][0]
+            sk = f"{label}_{key}_f2_{filter_id2}"
+            cfg["pv2"][pname] = st.session_state.get(sk, cfg["pv2"].get(pname, 0))
 
     return cfg
 
