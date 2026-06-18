@@ -763,8 +763,12 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
         cfg["n_pts"] = _compact_slider("N", 20, 300, 120, 10, key=f"{key}_n")
     with c1[2]:
         cfg["show_sch"] = st.checkbox("施密特", value=True, key=f"{key}_sch")
-    cfg["ke"]=0.15; cfg["sm"]=0.05; cfg["ew"]=60; cfg["show_pred"]=False
-    cfg["n_ext"]=10; cfg["fit_mode"]="poly2"
+    cfg["ke"] = st.session_state.get(f"{key}_ke", 0.15)
+    cfg["sm"] = st.session_state.get(f"{key}_sm", 0.05)
+    cfg["ew"] = st.session_state.get(f"{key}_ew", 60)
+    cfg["show_pred"] = st.session_state.get(f"{key}_pred", False)
+    cfg["n_ext"] = st.session_state.get(f"{key}_next", 10)
+    cfg["fit_mode"] = st.session_state.get(f"{key}_fm", "poly2")
     if cfg["show_sch"]:
         with c1[3]: cfg["show_pred"] = st.checkbox("预测", value=True, key=f"{key}_pred")
 
