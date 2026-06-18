@@ -769,9 +769,14 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     if cfg["show_sch"]:
         with c1[3]: cfg["show_pred"] = st.checkbox("预测", value=True, key=f"{key}_pred")
 
+    # 全局展开/折叠（所有视图共享状态）
+    if "global_exp_all" not in st.session_state:
+        st.session_state.global_exp_all = False
+    exp_all = st.session_state.global_exp_all
+
     # Schmitt ON → 折叠面板
     if cfg["show_sch"]:
-        with st.expander("施密特参数", expanded=True):
+        with st.expander("施密特参数", expanded=exp_all):
             c2 = st.columns([1.0, 1.0, 1.0])
             with c2[0]: cfg["ke"] = st.slider("k_ε", 0.01, 0.50, 0.15, 0.05, key=f"{key}_ke",
                 help="灵敏度系数,越小越敏感. ε_t=k_ε·max(σ_t(v),σ_min)")
@@ -780,7 +785,7 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
             with c2[2]: cfg["ew"] = st.slider("N_EWMA", 10, 120, 60, 10, key=f"{key}_ew",
                 help="EWMA周期,α=2/(N+1),越大越平滑")
         if cfg["show_pred"]:
-            with st.expander("预测参数", expanded=True):
+            with st.expander("预测参数", expanded=exp_all):
                 c3 = st.columns([1.5, 1.0])
                 with c3[0]: cfg["fit_mode"] = st.radio("拟合方式",
                     ["poly2", "parabola"], index=0, horizontal=True,
@@ -791,7 +796,7 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     # 滤波参数 — 可折叠
     sf = FILTERS[filter_id]; cfg["pv"] = {}
     f1 = list(sf["params"].items())
-    with st.expander(f"滤波参数 · {sf['name']}", expanded=False):
+    with st.expander(f"滤波参数 · {sf['name']}", expanded=exp_all):
         fc1 = st.columns([1]*len(f1) + [0.25])
         for j, (pn, sp) in enumerate(f1):
             with fc1[j]:
@@ -803,7 +808,7 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     if dual and filter_id2:
         sf2 = FILTERS[filter_id2]; cfg["pv2"] = {}
         f2 = list(sf2["params"].items())
-        with st.expander(f"滤波参数2 · {sf2['name']}", expanded=False):
+        with st.expander(f"滤波参数2 · {sf2['name']}", expanded=exp_all):
             fc2 = st.columns([1]*len(f2) + [0.25])
             for j, (pn, sp) in enumerate(f2):
                 with fc2[j]:
@@ -812,6 +817,17 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
                 cfg["fc2"] = st.color_picker("", "#ff6b6b", key=f"{key}_fc2", label_visibility="collapsed")
     else:
         cfg["pv2"] = {}; cfg["fc2"] = "#ff6b6b"
+
+    # 展开/折叠按钮（仅第一个视图渲染，全局生效）
+    if key == "v0":
+        c_btn = st.columns([0.5, 0.5])
+        if c_btn[0].button("▲ 全部展开", use_container_width=True, key="btn_exp_all"):
+            st.session_state.global_exp_all = True
+            st.rerun()
+        if c_btn[1].button("▼ 全部折叠", use_container_width=True, key="btn_col_all"):
+            st.session_state.global_exp_all = False
+            st.rerun()
+
     return cfg
 
 
