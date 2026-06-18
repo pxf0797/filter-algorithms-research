@@ -838,12 +838,12 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     cfg["fit_mode"] = st.session_state.get(f"{key}_fm", cfg["fit_mode"])
     cfg["n_ext"] = st.session_state.get(f"{key}_next", cfg["n_ext"])
     # 滤波参数也需保护
-    for pname in f1:
+    for pname in sf["params"]:
         label = sf["params"][pname][0]
         sk = f"{label}_{key}_f1_{filter_id}"
         cfg["pv"][pname] = st.session_state.get(sk, cfg["pv"].get(pname, 0))
     if dual and filter_id2:
-        for pname in f2:
+        for pname in sf2["params"]:
             label = sf2["params"][pname][0]
             sk = f"{label}_{key}_f2_{filter_id2}"
             cfg["pv2"][pname] = st.session_state.get(sk, cfg["pv2"].get(pname, 0))
