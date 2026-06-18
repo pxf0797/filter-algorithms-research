@@ -702,11 +702,12 @@ def _fit_physics_parabola(x, y, start, end):
     return {"a": a, "b": 0.0, "c": y0, "y_fit": y_fit, "x0": x0}
 
 
-def _add_prediction_traces(fig, t, fit_result, fit_start, pair_end, row,
+def _add_prediction_traces(fig, t, filtered, fit_result, fit_start, pair_end, row,
                           n_extend=10, show_legend=True):
-    """在 price 子图上添加预测曲线。
+    """在 price 子图上添加预测曲线 + 残差子图上的拟合残差。
     fit_start .. pair_end  — 多空对全段拟合（橙色实线）
-    pair_end .. +n_extend  — 前向预测（紫色虚线）"""
+    pair_end .. +n_extend  — 前向预测（紫色虚线）
+    残差(row+1): 拟合值与滤波价格的残差，红=预测向上，绿=预测向下"""
     name = "预测曲线"
     fit_color = "#f0a040"   # 橙色
     pred_color = "#a371f7"  # 紫色
@@ -724,13 +725,14 @@ def _add_prediction_traces(fig, t, fit_result, fit_start, pair_end, row,
     ), row=row, col=1)
 
     # 前向延伸 — 紫色虚线
+    y_ext = None
     if n_extend > 0:
         x_ext = np.arange(pair_end, pair_end + n_extend)
         x0 = fit_result.get("x0", None)
         if x0 is not None:
-            y_ext = np.polyval((a, b, c), x_ext - x0)  # 抛物线: 局部坐标 Δt
+            y_ext = np.polyval((a, b, c), x_ext - x0)
         else:
-            y_ext = np.polyval((a, b, c), x_ext)       # 二次多项式: 全局坐标 x
+            y_ext = np.polyval((a, b, c), x_ext)
         fig.add_trace(go.Scatter(
             x=x_ext, y=y_ext,
             mode="lines", name=f"{name}(预测)",
@@ -738,6 +740,22 @@ def _add_prediction_traces(fig, t, fit_result, fit_start, pair_end, row,
             legendgroup=name,
             showlegend=show_legend,
         ), row=row, col=1)
+
+    # 残差子图 — 拟合值与滤波价格的残差
+    residual = y_fit - filtered[fit_start:pair_end + 1]
+    # 方向判断：预测段向上→红，向下→绿
+    if y_ext is not None and len(y_ext) > 1:
+        upward = y_ext[-1] > y_ext[0]
+    else:
+        upward = y_fit[-1] > y_fit[0]
+    res_color = "#f85149" if upward else "#3fb950"  # 红=向上, 绿=向下
+    fig.add_trace(go.Scatter(
+        x=x_fit, y=residual,
+        mode="lines", name=f"{name}(残差)",
+        line=dict(color=res_color, width=1.5, dash="dot"),
+        legendgroup=name,
+        showlegend=show_legend,
+    ), row=row + 1, col=1)
 
 
 # ---------------------------------------------------------------------------
@@ -1001,7 +1019,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
             line=dict(color=cfg["fc2"], width=2.0)), row=mr, col=1)
 
     for i, pp in enumerate(pred_pairs):
-        _add_prediction_traces(fig, t,
+        _add_prediction_traces(fig, t, filtered,
                                pp["fit_result"], pp["fit_start"],
                                pp["pair_end"], row=mr,
                                n_extend=cfg.get("n_ext", 10),
