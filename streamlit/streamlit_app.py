@@ -830,6 +830,14 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     else:
         cfg["pv2"] = {}; cfg["fc2"] = "#ff6b6b"
 
+    # 从 session_state 读取最终值（导入参数唯一真相源，widget 返回值不可靠）
+    cfg["ke"] = st.session_state.get(f"{key}_ke", cfg["ke"])
+    cfg["sm"] = st.session_state.get(f"{key}_sm", cfg["sm"])
+    cfg["ew"] = st.session_state.get(f"{key}_ew", cfg["ew"])
+    cfg["show_pred"] = st.session_state.get(f"{key}_pred", cfg["show_pred"])
+    cfg["fit_mode"] = st.session_state.get(f"{key}_fm", cfg["fit_mode"])
+    cfg["n_ext"] = st.session_state.get(f"{key}_next", cfg["n_ext"])
+
     return cfg
 
 
