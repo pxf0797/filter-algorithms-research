@@ -665,17 +665,24 @@ def _fit_parabolic(x, y, start, end):
 
 
 def _fit_physics_parabola(x, y, start, end):
-    """抛物线拟合 — 局部坐标 Δt = x - x[end]（锚定转折点/对终点）。
-    返回 dict {a, b, c, y_fit, x0}，参数 y = y₀ + v₀·Δt + ½a₀·Δt²。"""
+    """抛物线拟合 — 锚定对终点为顶点，y = a·(x-x₀)² + y₀。
+    顶点 (x₀,y₀) = (x[end], y[end]) 固定，仅拟合曲率 a。
+    预测段 = 抛物线右半（与左半对称）。"""
     x_seg = x[start:end + 1]
     y_seg = y[start:end + 1]
     if len(x_seg) < 3:
         return None
-    x0 = x_seg[-1]  # 锚定对终点（转折点）
-    dt = x_seg - x0
-    coeffs = np.polyfit(dt, y_seg, 2)  # [½a₀, v₀, y₀]
-    y_fit = np.polyval(coeffs, dt)
-    return {"a": coeffs[0], "b": coeffs[1], "c": coeffs[2], "y_fit": y_fit, "x0": x0}
+    x0 = x_seg[-1]   # 顶点 x（对终点）
+    y0 = y_seg[-1]   # 顶点 y（实际滤波价，固定）
+    dt = x_seg - x0  # ≤0（左半段）
+    dt_sq = dt ** 2
+    dy = y_seg - y0
+    denom = np.sum(dt_sq ** 2)
+    if denom < 1e-12:
+        return None
+    a = np.sum(dt_sq * dy) / denom  # 最小二乘求曲率
+    y_fit = y0 + a * dt_sq
+    return {"a": a, "b": 0.0, "c": y0, "y_fit": y_fit, "x0": x0}
 
 
 def _add_prediction_traces(fig, t, fit_result, fit_start, pair_end, row,
