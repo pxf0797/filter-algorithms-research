@@ -615,8 +615,8 @@ def _schmitt_trigger(v, a, ewma_span=60, k_eps=0.15, sigma_min=0.05):
 
 def _find_all_pairs(sig_t):
     """扫描 sig_t，找出窗口中所有多空切换对。
-    规则：相邻异号原始段直接配对，不合并同号段。
-    +1→0→+1 是两次独立多头信号，不应合并。
+    规则：合并相邻同号段（+1,0,+1 → 一个连续段），异号配对。
+    起始于首次入场边缘，经过中间的同向多次入场+观望，止于相反信号入口。
     返回 [(start, end), ...] 或空列表。"""
     n = len(sig_t)
     if n < 3:
@@ -639,13 +639,20 @@ def _find_all_pairs(sig_t):
     if len(segments) < 2:
         return []
 
-    # Step 2: 相邻异号段配对 — 结束于相反信号的入口边缘
-    # 向上对: 0→+1起始 → +1段 → 0区 → 0→-1边缘结束
-    # 向下对: 0→-1起始 → -1段 → 0区 → 0→+1边缘结束
+    # Step 2: 合并相邻同号段（+1,0,+1 → 一个连续多头段）
+    merged = [segments[0]]
+    for seg in segments[1:]:
+        last = merged[-1]
+        if seg[2] == last[2]:  # 同号 → 合并（含中间观望区）
+            merged[-1] = (last[0], seg[1], seg[2])
+        else:
+            merged.append(seg)
+
+    # Step 3: 相邻异号段配对 — 结束于相反信号的入口边缘
     pairs = []
-    for j in range(len(segments) - 1):
-        s1, e1, v1 = segments[j]
-        s2, e2, v2 = segments[j + 1]
+    for j in range(len(merged) - 1):
+        s1, e1, v1 = merged[j]
+        s2, e2, v2 = merged[j + 1]
         if v1 != v2:  # 多→空 或 空→多
             pairs.append((s1, s2))  # 结束于相反信号的入口（边缘）
 
