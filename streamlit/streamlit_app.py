@@ -376,6 +376,9 @@ g.hovertext {{ visibility: hidden !important; }}
             lines.push('<b>x = ' + xv.toFixed(4) + '</b>');
             for (var t = 0; t < gd.data.length; t++) {{
                 var trace = gd.data[t];
+                // Skip fill/band traces and auto-named traces
+                if (trace.hoverinfo === 'skip') continue;
+                if (trace.showlegend === false && !trace.name) continue;
                 var xArr = trace.x;
                 var yArr = trace.y;
                 if (!xArr || !yArr || xArr.length === 0) continue;
