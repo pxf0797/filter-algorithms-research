@@ -664,6 +664,20 @@ def _fit_parabolic(x, y, start, end):
     return {"a": coeffs[0], "b": coeffs[1], "c": coeffs[2], "y_fit": y_fit}
 
 
+def _fit_physics_parabola(x, y, start, end):
+    """抛物线拟合 — 局部坐标 Δt = x - x[start]。
+    返回 dict {a, b, c, y_fit, x0}，参数 y = y₀ + v₀·Δt + ½a₀·Δt²。"""
+    x_seg = x[start:end + 1]
+    y_seg = y[start:end + 1]
+    if len(x_seg) < 3:
+        return None
+    x0 = x_seg[0]
+    dt = x_seg - x0
+    coeffs = np.polyfit(dt, y_seg, 2)  # [½a₀, v₀, y₀]
+    y_fit = np.polyval(coeffs, dt)
+    return {"a": coeffs[0], "b": coeffs[1], "c": coeffs[2], "y_fit": y_fit, "x0": x0}
+
+
 def _add_prediction_traces(fig, t, fit_result, fit_start, pair_end, row,
                           n_extend=10, show_legend=True):
     """在 price 子图上添加预测曲线。
@@ -688,7 +702,11 @@ def _add_prediction_traces(fig, t, fit_result, fit_start, pair_end, row,
     # 前向延伸 — 紫色虚线
     if n_extend > 0:
         x_ext = np.arange(pair_end, pair_end + n_extend)
-        y_ext = np.polyval((a, b, c), x_ext)
+        x0 = fit_result.get("x0", None)
+        if x0 is not None:
+            y_ext = np.polyval((a, b, c), x_ext - x0)  # 抛物线: 局部坐标 Δt
+        else:
+            y_ext = np.polyval((a, b, c), x_ext)       # 二次多项式: 全局坐标 x
         fig.add_trace(go.Scatter(
             x=x_ext, y=y_ext,
             mode="lines", name=f"{name}(预测)",
@@ -712,8 +730,8 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     """Ultra-compact parameter panel. Returns config dict."""
     cfg = {"_fid": filter_id, "_dual": dual, "_fid2": filter_id2}
 
-    # Row 1: [周期▼] [N▬] [施密特☑] [预测曲线☑] [预测点▬] [k_ε▬] [σ_min▬] [N_EWMA▬]
-    c = st.columns([1.0, 0.8, 0.8, 0.8, 0.8, 1.1, 1.1, 1.1])
+    # Row 1: [周期▼] [N▬] [施密特☑] [预测曲线☑] [拟合方式○] [预测点▬] [k_ε▬] [σ_min▬] [N_EWMA▬]
+    c = st.columns([1.0, 0.8, 0.8, 0.8, 1.2, 0.8, 1.1, 1.1, 1.1])
     with c[0]:
         cfg["tf"] = st.selectbox("周期", ALL_TFS, index=ALL_TFS.index(tf_default),
             key=f"{key}_tf", label_visibility="collapsed")
@@ -721,16 +739,21 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
         cfg["n_pts"] = st.slider("N", 20, 300, 120, 10, key=f"{key}_n", label_visibility="collapsed")
     with c[2]:
         cfg["show_sch"] = st.checkbox("施密特", value=True, key=f"{key}_sch")
-    cfg["ke"]=0.15; cfg["sm"]=0.05; cfg["ew"]=60; cfg["show_pred"]=False; cfg["n_ext"]=10
+    cfg["ke"]=0.15; cfg["sm"]=0.05; cfg["ew"]=60; cfg["show_pred"]=False
+    cfg["n_ext"]=10; cfg["fit_mode"]="poly2"
     if cfg["show_sch"]:
         with c[3]: cfg["show_pred"] = st.checkbox("预测曲线", value=True, key=f"{key}_pred")
         if cfg["show_pred"]:
-            with c[4]: cfg["n_ext"] = st.slider("预测点", 1, 50, 10, 1, key=f"{key}_next")
-        with c[5]: cfg["ke"] = st.slider("k_ε",0.01,0.50,0.15,0.05,key=f"{key}_ke",
+            with c[4]: cfg["fit_mode"] = st.radio("拟合",
+                ["poly2", "parabola"], index=0, horizontal=True,
+                format_func=lambda x: "二次" if x=="poly2" else "抛物线",
+                key=f"{key}_fm", label_visibility="collapsed")
+            with c[5]: cfg["n_ext"] = st.slider("预测点", 1, 50, 10, 1, key=f"{key}_next")
+        with c[6]: cfg["ke"] = st.slider("k_ε",0.01,0.50,0.15,0.05,key=f"{key}_ke",
             help="灵敏度系数,越小越敏感. ε_t=k_ε·max(σ_t(v),σ_min)")
-        with c[6]: cfg["sm"] = st.slider("σ_min",0.01,0.20,0.05,0.02,key=f"{key}_sm",
+        with c[7]: cfg["sm"] = st.slider("σ_min",0.01,0.20,0.05,0.02,key=f"{key}_sm",
             help="地板保护,防止低波动下ε_t→0")
-        with c[7]: cfg["ew"] = st.slider("N_EWMA",10,120,60,10,key=f"{key}_ew",
+        with c[8]: cfg["ew"] = st.slider("N_EWMA",10,120,60,10,key=f"{key}_ew",
             help="EWMA周期,α=2/(N+1),越大越平滑")
 
     # Row 2: filter 1 params
@@ -867,12 +890,13 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
     if schmitt is not None:
         all_pairs = _find_all_pairs(schmitt["sig"])
 
-    # 预测曲线 — 窗口中所有多空对，全段拟合 + 末对前向预测
+    # 预测曲线 — 窗口中所有多空对，全段拟合 + 前向预测
     pred_pairs = []
     if cfg.get("show_pred") and schmitt is not None:
+        fit_func = _fit_physics_parabola if cfg.get("fit_mode") == "parabola" else _fit_parabolic
         for pair_start, pair_end in all_pairs:
             if pair_end - pair_start >= 3:  # 需 ≥3 点
-                fit_result = _fit_parabolic(t, filtered, pair_start, pair_end)
+                fit_result = fit_func(t, filtered, pair_start, pair_end)
                 if fit_result is not None:
                     pred_pairs.append({
                         "fit_result": fit_result,
