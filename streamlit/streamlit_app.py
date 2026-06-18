@@ -665,13 +665,13 @@ def _fit_parabolic(x, y, start, end):
 
 
 def _fit_physics_parabola(x, y, start, end):
-    """抛物线拟合 — 局部坐标 Δt = x - x[start]。
+    """抛物线拟合 — 局部坐标 Δt = x - x[end]（锚定转折点/对终点）。
     返回 dict {a, b, c, y_fit, x0}，参数 y = y₀ + v₀·Δt + ½a₀·Δt²。"""
     x_seg = x[start:end + 1]
     y_seg = y[start:end + 1]
     if len(x_seg) < 3:
         return None
-    x0 = x_seg[0]
+    x0 = x_seg[-1]  # 锚定对终点（转折点）
     dt = x_seg - x0
     coeffs = np.polyfit(dt, y_seg, 2)  # [½a₀, v₀, y₀]
     y_fit = np.polyval(coeffs, dt)
