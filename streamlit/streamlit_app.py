@@ -387,8 +387,8 @@ g.hovertext {{ visibility: hidden !important; }}
                 for (var i = 0; i < xArr.length; i++) {{
                     if (Math.abs(xArr[i] - xv) < Math.abs(xArr[ti] - xv)) ti = i;
                 }}
-                // Skip if cursor is far from this trace's data (no prediction here)
-                if (Math.abs(xArr[ti] - xv) > 1.5) continue;
+                // Skip if cursor is far from this trace's data (e.g. prediction not here)
+                if (Math.abs(xArr[ti] - xv) > 1.0) continue;
                 var yVal = yArr[ti];
                 if (yVal === null || yVal === undefined || isNaN(yVal)) continue;
                 var color = trace.line ? trace.line.color : '#ccc';
