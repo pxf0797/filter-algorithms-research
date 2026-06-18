@@ -240,28 +240,13 @@ def compute_metrics(clean, noisy, filtered):
 # ---------------------------------------------------------------------------
 # Helper: render a slider for each filter parameter
 # ---------------------------------------------------------------------------
-def _compact_slider(label, pmin, pmax, pdefault, pstep=1, key=None, fmt=None, help=None, container=None):
-    """标签与滑块同行紧凑布局：label ℹ️ | ════slider════ value。"""
-    ctx = container if container is not None else st
-    c = ctx.columns([0.38, 0.62])
-    if help:
-        c[0].markdown(f"<small>{label}&nbsp;<span title=\"{help}\" style=\"cursor:help\">ⓘ</span></small>", unsafe_allow_html=True)
-    else:
-        c[0].markdown(f"<small>{label}</small>", unsafe_allow_html=True)
-    kwargs = dict(min_value=pmin, max_value=pmax, value=pdefault, step=pstep,
-                  key=key, label_visibility="collapsed")
-    if fmt: kwargs["format"] = fmt
-    return c[1].slider(label, **kwargs)
-
-
 def _render_param_slider(label, pmin, pmax, pstep, pdefault, key_suffix="", container=None):
-    """标签与滑块同行渲染。container=st 在列上下文中使用。"""
+    """Render an st.slider with appropriate numeric format.
+    If container is None, renders in sidebar (backward compat).
+    Pass container=st to render inline in the current column context.
+    """
     ctx = container if container is not None else st.sidebar
     key = f"{label}_{key_suffix}" if key_suffix else None
-    # Sidebar: use native layout; inline: compact
-    if container is st:
-        fmt = None if isinstance(pstep, int) else ("%.3f" if pstep < 0.01 else "%.2f")
-        return _compact_slider(label, pmin, pmax, pdefault, pstep, key=key, fmt=fmt, container=st)
     if isinstance(pstep, int):
         return ctx.slider(label, pmin, pmax, pdefault, pstep, key=key)
     fmt = "%.3f" if pstep < 0.01 else "%.2f"
@@ -766,7 +751,7 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
         cfg["tf"] = st.selectbox("周期", ALL_TFS, index=ALL_TFS.index(tf_default),
             key=f"{key}_tf", label_visibility="collapsed")
     with c1[1]:
-        cfg["n_pts"] = _compact_slider("N", 20, 300, 120, 10, key=f"{key}_n")
+        cfg["n_pts"] = st.slider("N", 20, 300, 120, 10, key=f"{key}_n", label_visibility="collapsed")
     with c1[2]:
         cfg["show_sch"] = st.checkbox("施密特", value=True, key=f"{key}_sch")
     cfg["ke"]=0.15; cfg["sm"]=0.05; cfg["ew"]=60; cfg["show_pred"]=False
@@ -778,11 +763,11 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     if cfg["show_sch"]:
         with st.expander("施密特参数", expanded=True):
             c2 = st.columns([1.0, 1.0, 1.0])
-            with c2[0]: cfg["ke"] = _compact_slider("k_ε", 0.01, 0.50, 0.15, 0.05, key=f"{key}_ke",
+            with c2[0]: cfg["ke"] = st.slider("k_ε", 0.01, 0.50, 0.15, 0.05, key=f"{key}_ke",
                 help="灵敏度系数,越小越敏感. ε_t=k_ε·max(σ_t(v),σ_min)")
-            with c2[1]: cfg["sm"] = _compact_slider("σ_min", 0.01, 0.20, 0.05, 0.02, key=f"{key}_sm",
+            with c2[1]: cfg["sm"] = st.slider("σ_min", 0.01, 0.20, 0.05, 0.02, key=f"{key}_sm",
                 help="地板保护,防止低波动下ε_t→0")
-            with c2[2]: cfg["ew"] = _compact_slider("N_EWMA", 10, 120, 60, 10, key=f"{key}_ew",
+            with c2[2]: cfg["ew"] = st.slider("N_EWMA", 10, 120, 60, 10, key=f"{key}_ew",
                 help="EWMA周期,α=2/(N+1),越大越平滑")
         if cfg["show_pred"]:
             with st.expander("预测参数", expanded=True):
@@ -791,7 +776,7 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
                     ["poly2", "parabola"], index=0, horizontal=True,
                     format_func=lambda x: "二次多项式" if x=="poly2" else "抛物线拟合",
                     key=f"{key}_fm")
-                with c3[1]: cfg["n_ext"] = _compact_slider("预测点数", 1, 50, 10, 1, key=f"{key}_next")
+                with c3[1]: cfg["n_ext"] = st.slider("预测点数", 1, 50, 10, 1, key=f"{key}_next")
 
     # 滤波参数 — 可折叠
     sf = FILTERS[filter_id]; cfg["pv"] = {}
