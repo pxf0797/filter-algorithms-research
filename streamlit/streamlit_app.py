@@ -707,7 +707,7 @@ def _add_prediction_traces(fig, t, filtered, fit_result, fit_start, pair_end, ro
     """在 price 子图上添加预测曲线 + 残差子图上的拟合残差。
     fit_start .. pair_end  — 多空对全段拟合（橙色实线）
     pair_end .. +n_extend  — 前向预测（紫色虚线）
-    残差(row+1): 拟合值与滤波价格的残差，红=预测向上，绿=预测向下"""
+    残差(row+1): 前向预测段与最后已知价格的残差，红=预测向上，绿=预测向下"""
     name = "预测曲线"
     fit_color = "#f0a040"   # 橙色
     pred_color = "#a371f7"  # 紫色
@@ -741,21 +741,19 @@ def _add_prediction_traces(fig, t, filtered, fit_result, fit_start, pair_end, ro
             showlegend=show_legend,
         ), row=row, col=1)
 
-    # 残差子图 — 拟合值与滤波价格的残差
-    residual = y_fit - filtered[fit_start:pair_end + 1]
-    # 方向判断：预测段向上→红，向下→绿
-    if y_ext is not None and len(y_ext) > 1:
-        upward = y_ext[-1] > y_ext[0]
-    else:
-        upward = y_fit[-1] > y_fit[0]
-    res_color = "#f85149" if upward else "#3fb950"  # 红=向上, 绿=向下
-    fig.add_trace(go.Scatter(
-        x=x_fit, y=residual,
-        mode="lines", name=f"{name}(残差)",
-        line=dict(color=res_color, width=1.5, dash="dot"),
-        legendgroup=name,
-        showlegend=show_legend,
-    ), row=row + 1, col=1)
+    # 残差子图 — 前向预测段与最后已知滤波价格的残差
+    if y_ext is not None and n_extend > 0:
+        baseline = filtered[pair_end]  # 最后已知滤波价
+        residual = y_ext - baseline
+        upward = y_ext[-1] > y_ext[0]  # 方向：向上→红，向下→绿
+        res_color = "#f85149" if upward else "#3fb950"
+        fig.add_trace(go.Scatter(
+            x=x_ext, y=residual,
+            mode="lines", name=f"{name}(残差)",
+            line=dict(color=res_color, width=1.5, dash="dot"),
+            legendgroup=name,
+            showlegend=show_legend,
+        ), row=row + 1, col=1)
 
 
 # ---------------------------------------------------------------------------
