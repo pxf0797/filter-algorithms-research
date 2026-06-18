@@ -360,27 +360,32 @@ g.hovertext {{ visibility: hidden !important; }}
                 Plotly.relayout(gd, update);
             }}
 
-            // 2) Find nearest x-index (all traces share the same t array)
-            var xArr = gd.data[0].x;
-            if (!xArr || xArr.length === 0) return;
-            var idx = 0;
-            for (var i = 0; i < xArr.length; i++) {{
-                if (Math.abs(xArr[i] - xv) < Math.abs(xArr[idx] - xv)) idx = i;
+            // 2) Find nearest x-index in main trace for date display
+            var xArr0 = gd.data[0].x;
+            if (!xArr0 || xArr0.length === 0) return;
+            var idx0 = 0;
+            for (var i = 0; i < xArr0.length; i++) {{
+                if (Math.abs(xArr0[i] - xv) < Math.abs(xArr0[idx0] - xv)) idx0 = i;
             }}
 
-            // 3) Collect y-values from ALL traces across ALL subplots
+            // 3) Collect y-values from ALL traces — each trace uses its own nearest x
             var lines = [];
-            var dateStr = (gd.layout._dates && idx < gd.layout._dates.length)
-                ? gd.layout._dates[idx] : '';
+            var dateStr = (gd.layout._dates && idx0 < gd.layout._dates.length)
+                ? gd.layout._dates[idx0] : '';
             if (dateStr) lines.push('<b>' + dateStr + '</b>');
             lines.push('<b>x = ' + xv.toFixed(4) + '</b>');
             for (var t = 0; t < gd.data.length; t++) {{
                 var trace = gd.data[t];
+                var xArr = trace.x;
                 var yArr = trace.y;
-                if (!yArr || idx >= yArr.length) continue;
-                var yVal = yArr[idx];
+                if (!xArr || !yArr || xArr.length === 0) continue;
+                // Find nearest x in THIS trace's own x-array
+                var ti = 0;
+                for (var i = 0; i < xArr.length; i++) {{
+                    if (Math.abs(xArr[i] - xv) < Math.abs(xArr[ti] - xv)) ti = i;
+                }}
+                var yVal = yArr[ti];
                 if (yVal === null || yVal === undefined || isNaN(yVal)) continue;
-                // Use trace color as indicator dot
                 var color = trace.line ? trace.line.color : '#ccc';
                 var name = trace.name || ('trace ' + t);
                 lines.push('<span style="color:' + color + '">●</span> ' + name + ': ' + yVal.toFixed(5));
