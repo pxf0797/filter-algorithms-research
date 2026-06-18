@@ -778,26 +778,28 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
                     key=f"{key}_fm")
                 with c3[1]: cfg["n_ext"] = st.slider("预测点数", 1, 50, 10, 1, key=f"{key}_next")
 
-    # Row 2: filter 1 params
+    # 滤波参数 — 可折叠
     sf = FILTERS[filter_id]; cfg["pv"] = {}
     f1 = list(sf["params"].items())
-    fc1 = st.columns([1]*len(f1) + [0.25])
-    for j, (pn, sp) in enumerate(f1):
-        with fc1[j]:
-            cfg["pv"][pn] = _render_param_slider(*sp, key_suffix=f"{key}_f1_{filter_id}", container=st)
-    with fc1[-1]:
-        cfg["fc"] = st.color_picker("", "#00d4aa", key=f"{key}_fc", label_visibility="collapsed")
+    with st.expander(f"滤波参数 · {sf['name']}", expanded=False):
+        fc1 = st.columns([1]*len(f1) + [0.25])
+        for j, (pn, sp) in enumerate(f1):
+            with fc1[j]:
+                cfg["pv"][pn] = _render_param_slider(*sp, key_suffix=f"{key}_f1_{filter_id}", container=st)
+        with fc1[-1]:
+            cfg["fc"] = st.color_picker("", "#00d4aa", key=f"{key}_fc", label_visibility="collapsed")
 
-    # Row 3 (optional): filter 2 params
+    # 滤波参数2（可选）
     if dual and filter_id2:
         sf2 = FILTERS[filter_id2]; cfg["pv2"] = {}
         f2 = list(sf2["params"].items())
-        fc2 = st.columns([1]*len(f2) + [0.25])
-        for j, (pn, sp) in enumerate(f2):
-            with fc2[j]:
-                cfg["pv2"][pn] = _render_param_slider(*sp, key_suffix=f"{key}_f2_{filter_id2}", container=st)
-        with fc2[-1]:
-            cfg["fc2"] = st.color_picker("", "#ff6b6b", key=f"{key}_fc2", label_visibility="collapsed")
+        with st.expander(f"滤波参数2 · {sf2['name']}", expanded=False):
+            fc2 = st.columns([1]*len(f2) + [0.25])
+            for j, (pn, sp) in enumerate(f2):
+                with fc2[j]:
+                    cfg["pv2"][pn] = _render_param_slider(*sp, key_suffix=f"{key}_f2_{filter_id2}", container=st)
+            with fc2[-1]:
+                cfg["fc2"] = st.color_picker("", "#ff6b6b", key=f"{key}_fc2", label_visibility="collapsed")
     else:
         cfg["pv2"] = {}; cfg["fc2"] = "#ff6b6b"
     return cfg
