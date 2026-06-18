@@ -754,9 +754,8 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     """Ultra-compact parameter panel. Returns config dict."""
     cfg = {"_fid": filter_id, "_dual": dual, "_fid2": filter_id2}
 
-    # Row 1: [周期▼] [N▬] [施密特☑] [预测☑]
-
-    c1 = st.columns([1.0, 0.8, 0.8, 0.8])
+    # Row 1: [周期▼] [N▬] [施密特☑] [预测☑] [▲▼]
+    c1 = st.columns([1.0, 0.8, 0.8, 0.8, 0.4])
     with c1[0]:
         cfg["tf"] = st.selectbox("周期", ALL_TFS, index=ALL_TFS.index(tf_default),
             key=f"{key}_tf", label_visibility="collapsed")
@@ -769,10 +768,17 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     if cfg["show_sch"]:
         with c1[3]: cfg["show_pred"] = st.checkbox("预测", value=True, key=f"{key}_pred")
 
-    # 全局展开/折叠（所有视图共享状态）
-    if "global_exp_all" not in st.session_state:
-        st.session_state.global_exp_all = False
-    exp_all = st.session_state.global_exp_all
+    # 本视图展开/折叠
+    exp_key = f"{key}_exp_all"
+    if exp_key not in st.session_state:
+        st.session_state[exp_key] = False
+    exp_all = st.session_state[exp_key]
+    with c1[4]:
+        label = "▲" if exp_all else "▼"
+        if st.button(label, key=f"{key}_tgl", help="展开/折叠全部参数",
+                     use_container_width=True):
+            st.session_state[exp_key] = not exp_all
+            st.rerun()
 
     # Schmitt ON → 折叠面板
     if cfg["show_sch"]:
@@ -817,16 +823,6 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
                 cfg["fc2"] = st.color_picker("", "#ff6b6b", key=f"{key}_fc2", label_visibility="collapsed")
     else:
         cfg["pv2"] = {}; cfg["fc2"] = "#ff6b6b"
-
-    # 展开/折叠按钮（仅第一个视图渲染，全局生效）
-    if key == "v0":
-        c_btn = st.columns([0.5, 0.5])
-        if c_btn[0].button("▲ 全部展开", use_container_width=True, key="btn_exp_all"):
-            st.session_state.global_exp_all = True
-            st.rerun()
-        if c_btn[1].button("▼ 全部折叠", use_container_width=True, key="btn_col_all"):
-            st.session_state.global_exp_all = False
-            st.rerun()
 
     return cfg
 
