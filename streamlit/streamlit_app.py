@@ -1028,6 +1028,20 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
             # 策略参数 — 仅在开启预测时可用
             if cfg["show_pred"]:
                 with st.expander("策略参数", expanded=exp_all):
+                    st.markdown("""
+                    <div style="font-size:12px; line-height:1.7; color:#8b949e;
+                    background:rgba(88,166,255,0.06); border-radius:6px; padding:10px 14px;
+                    border-left:3px solid #58a6ff;">
+                    <b>📋 策略规则</b><br>
+                    <b>做多</b> 🟢：多空对结束位置入场 → 预测向上+多头信号<br>
+                    　　　 止损：滤波价跌破预测价×阈值<br>
+                    　　　 止盈：做空信号确立(Sig=-1)<br>
+                    <b>做空</b> 🔴：多空对结束位置入场 → 预测向下+空头信号<br>
+                    　　　 止损：滤波价涨破预测价×阈值<br>
+                    　　　 止盈：做多信号确立(Sig=+1)<br>
+                    <b>曲线</b>：持仓期随价格波动，空仓期水平直线
+                    </div>
+                    """, unsafe_allow_html=True)
                     c_strat = st.columns([1.0, 1.0])
                     strat_key = f"{key}_strat"
                     sl_key = f"{key}_sl"
