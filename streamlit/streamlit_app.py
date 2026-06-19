@@ -1029,17 +1029,19 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
             if cfg["show_pred"]:
                 with st.expander("策略参数", expanded=exp_all):
                     st.markdown("""
-                    <div style="font-size:12px; line-height:1.7; color:#8b949e;
+                    <div style="font-size:12px; line-height:1.8; color:#8b949e;
                     background:rgba(88,166,255,0.06); border-radius:6px; padding:10px 14px;
                     border-left:3px solid #58a6ff;">
                     <b>📋 策略规则</b><br>
-                    <b>做多</b> 🟢：多空对结束位置入场 → 预测向上+多头信号<br>
-                    　　　 止损：滤波价跌破预测价×阈值<br>
-                    　　　 止盈：做空信号确立(Sig=-1)<br>
-                    <b>做空</b> 🔴：多空对结束位置入场 → 预测向下+空头信号<br>
-                    　　　 止损：滤波价涨破预测价×阈值<br>
-                    　　　 止盈：做多信号确立(Sig=+1)<br>
-                    <b>曲线</b>：持仓期随价格波动，空仓期水平直线
+                    <b>入场</b>：entry = pair_end（多空对结束位置=新信号段起点）<br>
+                    　　　 做多需 <code>sig[pair_end]=+1</code> 且预测外推 <code>ŷ<sub>end</sub> &gt; ŷ<sub>0</sub></code><br>
+                    　　　 做空需 <code>sig[pair_end]=-1</code> 且预测外推 <code>ŷ<sub>end</sub> &lt; ŷ<sub>0</sub></code><br>
+                    <b>止损</b>：做多 <code>P<sub>t</sub> &lt; ŷ<sub>t</sub>·(1−s%)</code>　做空 <code>P<sub>t</sub> &gt; ŷ<sub>t</sub>·(1+s%)</code><br>
+                    　　　 s% = 止损阈值, P<sub>t</sub> = 滤波价, ŷ<sub>t</sub> = 预测价<br>
+                    <b>止盈</b>：做多遇 <code>Sig=-1</code> 离场　做空遇 <code>Sig=+1</code> 离场<br>
+                    <b>扫描</b>：入场后逐K线遍历 <code>i ∈ [entry+1, entry+N<sub>ext</sub>]</code><br>
+                    　　　 N<sub>ext</sub> = 预测点数, 止损与止盈先触发者为准<br>
+                    <b>曲线</b>：持仓期 <code>PnL<sub>t</sub>=capital·(1+未实现%)</code>　空仓期水平直线
                     </div>
                     """, unsafe_allow_html=True)
                     c_strat = st.columns([1.0, 1.0])
