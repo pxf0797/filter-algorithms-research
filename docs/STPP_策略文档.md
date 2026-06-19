@@ -109,11 +109,12 @@ y = a·(x - x₀)² + y₀
 
 | 序号 | 条件 | 代码逻辑 | 说明 |
 |------|------|---------|------|
-| 1 | 预测方向向上 | `y_ext[-1] > y_ext[0]` | 抛物线前向预测段末端高于起始端，确认上行趋势 |
-| 2 | 多头Sig段 | `sig[i] == +1` | 施密特触发器确认当前处于多头状态 |
+| 1 | 预测方向向上 | `y_pred[-1] > y_pred[0]` | 外推预测段末端高于起始端，确认上行趋势 |
+| 2 | 第二段为多头 | `sig[pair_end] == +1` | 多空对第二段信号为多头 |
 | 3 | 对段长度足够 | `pair_end - pair_start >= 3` | 至少3个数据点才能做有效拟合 |
 
-> 入场价格 = 满足条件时对应的`filtered[i]`（滤波价格）。入场时机为预测方向确认且Sig为+1的第一个时间点。
+> **入场点**: `entry_idx = pair_end`（多空对的结束位置即为交易起点）。`pair_end` 是多空对中第二段（相反方向）信号的起始边缘。
+> **入场价格**: `entry_price = filtered[pair_end]`（滤波价格）
 
 ### 3.2 止损条件
 
@@ -131,10 +132,10 @@ y = a·(x - x₀)² + y₀
 ### 3.3 止盈条件
 
 ```
-止盈触发条件：sig[t] 从 +1 翻转为 0 或 -1
+止盈触发条件：sig[i] == -1（做空信号确立）
 ```
 
-施密特触发器确认多头趋势耗尽（加速反向突破死区），以信号翻转为确认离场。
+施密特触发器确认做空信号出现，离场止盈。
 
 ### 3.4 退出优先级
 1. 止损（价格保护，优先检查）
@@ -149,22 +150,20 @@ y = a·(x - x₀)² + y₀
 
 | 序号 | 条件 | 代码逻辑 | 说明 |
 |------|------|---------|------|
-| 1 | 预测方向向下 | `y_ext[-1] < y_ext[0]` | 前向预测段末端低于起始端 |
-| 2 | 空头Sig段 | `sig[i] == -1` | 确认当前处于空头状态 |
+| 1 | 预测方向向下 | `y_pred[-1] < y_pred[0]` | 外推预测段末端低于起始端 |
+| 2 | 第二段为空头 | `sig[pair_end] == -1` | 多空对第二段信号为空头 |
 | 3 | 对段长度足够 | `pair_end - pair_start >= 3` | 至少3个数据点 |
 
-### 4.2 止损条件
+> **入场点**: `entry_idx = pair_end`（多空对的结束位置即为交易起点）
 
-```
-止损触发条件：filtered[t] > predicted[t] * (1 + stop_loss_pct)
-```
+### 4.2 止损条件
 
 做空时，实际价格高于预测超过阈值，止损离场。
 
 ### 4.3 止盈条件
 
 ```
-止盈触发条件：sig[t] 从 -1 翻转为 0 或 +1
+止盈触发条件：sig[i] == +1（做多信号确立）
 ```
 
 ### 4.4 退出优先级
@@ -177,7 +176,15 @@ y = a·(x - x₀)² + y₀
 
 ## 五、PnL计算公式
 
-### 5.1 单笔收益率
+### 5.1 双曲线架构
+
+做多和做空收益**完全独立**，分别用两条曲线展示：
+
+- `long_pnl[i]`：做多收益曲线，初始值 100%
+- `short_pnl[i]`：做空收益曲线，初始值 100%
+- `long_capital` / `short_capital`：各自独立追踪已实现本金
+
+### 5.2 单笔收益率
 
 ```python
 # 做多
@@ -188,43 +195,49 @@ short_return = (entry_price - exit_price) / entry_price
 ```
 
 其中：
-- `entry_price = filtered[entry_index]`
-- `exit_price = filtered[exit_index]`
-- `exit_index` = min(止损触发索引, 止盈触发索引, 对段结束索引)
+- `entry_price = filtered[entry_idx]`，`entry_idx = pair_end`（多空对结束位置）
+- `exit_price = filtered[exit_idx]`
+- `exit_idx` = min(止损触发索引, 止盈触发索引, 扫描终点)
 
-### 5.2 累积收益（初始本金100%）
-
-```python
-cumulative_pnl = [100.0]  # 初始本金
-for each trade in trade_records:
-    cumulative_pnl.append(cumulative_pnl[-1] * (1 + trade.return_pct))
-```
-
-### 5.3 逐点PnL曲线（与价格时间轴对齐）
+### 5.3 逐点PnL曲线
 
 ```python
-pnl_curve[t] = 100.0  # 初始值（在所有交易之前）
+long_pnl = np.full(n, 100.0)   # 做多曲线，初始100%
+short_pnl = np.full(n, 100.0)  # 做空曲线，初始100%
+
 for each trade:
-    entry_t = trade.entry_idx
-    exit_t = trade.exit_idx
-    for t in range(entry_t, exit_t + 1):
-        current_price = filtered[t]
-        if trade.is_long:
-            unrealized_return = (current_price - trade.entry_price) / trade.entry_price
-        else:
-            unrealized_return = (trade.entry_price - current_price) / trade.entry_price
-        pnl_curve[t] = 100.0 * (1 + unrealized_return)
+    if trade.is_long:
+        # 持仓期：曲线随滤波价格同步波动
+        for i in range(entry_idx, exit_idx + 1):
+            unrealized = (filtered[i] - entry_price) / entry_price
+            long_pnl[i] = long_capital * (1 + unrealized)
+        # 更新已实现本金
+        long_capital *= (1 + trade_return)
+        # 离场后：水平直线维持已实现值
+        for i in range(exit_idx + 1, n):
+            long_pnl[i] = long_capital
+    else:
+        # 做空同理，方向相反
+        for i in range(entry_idx, exit_idx + 1):
+            unrealized = (entry_price - filtered[i]) / entry_price
+            short_pnl[i] = short_capital * (1 + unrealized)
+        short_capital *= (1 + trade_return)
+        for i in range(exit_idx + 1, n):
+            short_pnl[i] = short_capital
 ```
+
+**关键行为**：
+- **持仓中**：曲线随滤波价格同步波动（未实现盈亏）
+- **非持仓期**：维持水平直线（上一个已实现值不变）
+- **两条曲线完全独立**：做多曲线不受做空交易影响，反之亦然
 
 ### 5.4 关键统计指标
 
 在策略面板中展示：
 - **总交易笔数**：符合入场条件的多空对数量
 - **胜率**：盈利交易 / 总交易
-- **累积收益率**：最终PnL - 100%
-- **最大回撤**：从峰值到谷底的最大跌幅
-- **平均单笔收益**：所有交易的平均return_pct
-- **盈亏比**：平均盈利 / 平均亏损（绝对值）
+- **做多收益 / 做空收益 / 总收益**：分别展示
+- **最大回撤**：做多和做空各自的最大回撤
 
 ---
 
@@ -286,9 +299,13 @@ Row 6 (21%): PnL曲线  ← 新增
 - X轴：与上方子图共享，时间轴对齐
 
 **曲线**：
-- 做多PnL曲线：**绿色实线** (#3fb950)，宽度2px
-- 做空PnL曲线：**红色实线** (#f85149)，宽度2px
-- 按持仓方向分段绘制，空仓时不显示
+- 做多PnL曲线：**绿色实线** (#3fb950)，宽度2px，全时段连续
+  - 做多持仓期：随滤波价格波动，展示未实现盈亏
+  - 非做多持仓期：**水平直线**，维持上一个已实现值不变
+- 做空PnL曲线：**红色实线** (#f85149)，宽度2px，全时段连续
+  - 做空持仓期：随滤波价格波动，展示未实现盈亏
+  - 非做空持仓期：**水平直线**，维持上一个已实现值不变
+- 两条曲线完全独立演进，互不影响
 
 **背景色带**：
 - 盈利区域（PnL>100%）：浅绿色透明填充 `rgba(63,185,80,0.05)`
