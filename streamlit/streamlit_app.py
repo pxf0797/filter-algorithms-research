@@ -766,6 +766,204 @@ def _add_prediction_traces(fig, t, filtered, fit_result, fit_start, pair_end, ro
         ), row=row + 1, col=1)
 
 
+def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
+                          stop_loss_pct, n_extend=10):
+    """基于施密特触发器信号和预测曲线方向计算策略PnL。
+
+    返回两条独立曲线：
+    - long_pnl: 做多收益曲线，非持仓期水平直线
+    - short_pnl: 做空收益曲线，非持仓期水平直线
+
+    Args:
+        t: np.array, 时间索引
+        filtered: np.array, 滤波价格
+        sig_t: np.array, 施密特信号(±1/0)
+        all_pairs: list[(start,end)], 多空切换对
+        pred_pairs: list[dict], 预测曲线数据
+        stop_loss_pct: float, 止损阈值(如2.0表示2%)
+        n_extend: int, 预测延伸点数
+
+    Returns:
+        long_pnl: np.array(len(t)), 做多PnL曲线(100=初始)
+        short_pnl: np.array(len(t)), 做空PnL曲线(100=初始)
+        trade_records: list[dict]
+    """
+    n = len(t)
+
+    # 初始化两条独立曲线
+    long_pnl = np.full(n, 100.0)
+    short_pnl = np.full(n, 100.0)
+
+    long_capital = 100.0   # 做多已实现本金
+    short_capital = 100.0  # 做空已实现本金
+
+    # 空数据保护
+    if len(all_pairs) == 0 or len(pred_pairs) == 0:
+        return long_pnl, short_pnl, []
+
+    # 建立 pred_pairs 索引: pair_end → pred_data
+    pred_map = {}
+    for pp in pred_pairs:
+        pred_map[pp["pair_end"]] = pp
+
+    trade_records = []
+    trade_id = 0
+
+    for pair_start, pair_end in all_pairs:
+        if pair_end not in pred_map:
+            continue
+        pp = pred_map[pair_end]
+        fit_result = pp["fit_result"]
+
+        # ---- 计算外推预测方向 ----
+        a, b, c = fit_result["a"], fit_result["b"], fit_result["c"]
+        x0 = fit_result.get("x0", None)
+
+        x_pred = np.arange(pair_end, pair_end + n_extend)
+        if x0 is not None:
+            y_pred = np.polyval((a, b, c), x_pred - x0)
+        else:
+            y_pred = np.polyval((a, b, c), x_pred)
+
+        if len(y_pred) < 2:
+            continue
+        pred_up = y_pred[-1] > y_pred[0]
+
+        # ---- 判断交易方向 ----
+        v2 = sig_t[pair_end]
+        is_long = (v2 == 1 and pred_up)
+        is_short = (v2 == -1 and not pred_up)
+
+        if not is_long and not is_short:
+            continue
+
+        # ---- 入场 ----
+        entry_idx = pair_end
+        entry_price = filtered[entry_idx]
+        if np.isnan(entry_price) or entry_price <= 0:
+            continue
+
+        # ---- 扫描：分段混合（方案D） ----
+        # 预测保护期 [entry+1, entry+N_ext]：止损 + 止盈 双重保护
+        # 趋势跟踪期 [entry+N_ext+1, ...]：仅 Sig 止盈，让利润奔跑
+        exit_idx = None
+        exit_reason = "take_profit"  # 默认止盈（趋势跟踪期触发或被max_hold截断）
+        protect_end = entry_idx + n_extend  # 预测保护期终点
+        scan_end = n - 1  # 默认扫描到数据末尾
+
+        for i in range(entry_idx + 1, scan_end + 1):
+            cur_price = filtered[i]
+            if np.isnan(cur_price) or cur_price <= 0:
+                continue
+
+            # 预测保护期内：检查止损
+            if i <= protect_end:
+                if x0 is not None:
+                    pred_val = np.polyval((a, b, c), i - x0)
+                else:
+                    pred_val = np.polyval((a, b, c), i)
+
+                if not (np.isnan(pred_val) or pred_val <= 0):
+                    if is_long:
+                        stop_hit = cur_price < pred_val * (1 - stop_loss_pct / 100.0)
+                    else:
+                        stop_hit = cur_price > pred_val * (1 + stop_loss_pct / 100.0)
+
+                    if stop_hit:
+                        exit_idx = i
+                        exit_reason = "stop_loss"
+                        break
+
+            # 全程：检查止盈（Sig 反转）
+            if is_long and sig_t[i] == -1:
+                exit_idx = i
+                exit_reason = "take_profit"
+                break
+            if is_short and sig_t[i] == 1:
+                exit_idx = i
+                exit_reason = "take_profit"
+                break
+
+        # 未触发任何离场条件 → 持有到数据末尾
+        if exit_idx is None:
+            if n - 1 > entry_idx:
+                exit_idx = n - 1
+                exit_reason = "eod"  # end of data
+            else:
+                continue
+
+        exit_price = filtered[exit_idx]
+        if np.isnan(exit_price) or exit_price <= 0:
+            continue
+
+        # ---- 计算收益率 ----
+        if is_long:
+            trade_return = (exit_price - entry_price) / entry_price
+        else:
+            trade_return = (entry_price - exit_price) / entry_price
+
+        trade_id += 1
+
+        # ---- 填充持仓期间的PnL曲线 ----
+        if is_long:
+            # 做多：持仓期间曲线随价格变动
+            for i in range(entry_idx, exit_idx + 1):
+                cur_p = filtered[i]
+                if np.isnan(cur_p) or cur_p <= 0:
+                    continue
+                unrealized = (cur_p - entry_price) / entry_price
+                long_pnl[i] = long_capital * (1 + unrealized)
+            # 更新做多已实现本金
+            long_capital *= (1 + trade_return)
+            # 离场后到数据末尾先填充已实现值（后续交易会覆盖）
+            for i in range(exit_idx + 1, n):
+                long_pnl[i] = long_capital
+        else:
+            # 做空：持仓期间曲线随价格变动
+            for i in range(entry_idx, exit_idx + 1):
+                cur_p = filtered[i]
+                if np.isnan(cur_p) or cur_p <= 0:
+                    continue
+                unrealized = (entry_price - cur_p) / entry_price
+                short_pnl[i] = short_capital * (1 + unrealized)
+            # 更新做空已实现本金
+            short_capital *= (1 + trade_return)
+            # 离场后填充已实现值
+            for i in range(exit_idx + 1, n):
+                short_pnl[i] = short_capital
+
+        # ---- 记录交易 ----
+        trade_records.append({
+            "id": trade_id,
+            "type": "long" if is_long else "short",
+            "entry_idx": int(entry_idx),
+            "exit_idx": int(exit_idx),
+            "entry_price": float(entry_price),
+            "exit_price": float(exit_price),
+            "return_pct": float(trade_return * 100),
+            "exit_reason": exit_reason,
+        })
+
+    # ---- 前向填充：非持仓期维持上一个值不变（水平直线） ----
+    # 做多曲线
+    last_val = 100.0
+    for i in range(n):
+        if long_pnl[i] == 100.0 and i > 0 and last_val != 100.0:
+            long_pnl[i] = last_val
+        if long_pnl[i] != 100.0 or (i == 0):
+            last_val = long_pnl[i]
+
+    # 做空曲线
+    last_val = 100.0
+    for i in range(n):
+        if short_pnl[i] == 100.0 and i > 0 and last_val != 100.0:
+            short_pnl[i] = last_val
+        if short_pnl[i] != 100.0 or (i == 0):
+            last_val = short_pnl[i]
+
+    return long_pnl, short_pnl, trade_records
+
+
 # ---------------------------------------------------------------------------
 # Main app
 # ---------------------------------------------------------------------------
@@ -830,6 +1028,41 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
                     format_func=lambda x: "二次多项式" if x=="poly2" else "抛物线拟合",
                     key=fit_key)
                 with c3[1]: cfg["n_ext"] = st.slider("预测点数", 1, 50, cfg["n_ext"], 1, key=f"{key}_next")
+            # 策略参数 — 仅在开启预测时可用
+            if cfg["show_pred"]:
+                with st.expander("策略参数", expanded=exp_all):
+                    st.markdown("""
+                    <div style="font-size:12px; line-height:1.8; color:#8b949e;
+                    background:rgba(88,166,255,0.06); border-radius:6px; padding:10px 14px;
+                    border-left:3px solid #58a6ff;">
+                    <b>📋 策略规则（分段混合 · 方案D）</b><br>
+                    <b>预测保护期</b> <code>i∈[entry+1, entry+N<sub>ext</sub>]</code><br>
+                    　　　 止损 <code>P<sub>t</sub>&lt;ŷ<sub>t</sub>·(1−s%)</code>（多）/<code>P<sub>t</sub>&gt;ŷ<sub>t</sub>·(1+s%)</code>（空）<br>
+                    　　　 止盈 <code>Sig=-1</code>（多）/<code>Sig=+1</code>（空）<br>
+                    <b>趋势跟踪期</b> <code>i∈[entry+N<sub>ext</sub>+1, …]</code><br>
+                    　　　 仅止盈 <code>Sig</code> 反转离场，止损停用，让利润奔跑<br>
+                    　　　 若始终未触发则持有至数据末尾<br>
+                    <b>入场</b> <code>entry=pair_end</code>　做多需 <code>Sig=+1</code>且<code>ŷ<sub>end</sub>&gt;ŷ<sub>0</sub></code><br>
+                    <b>曲线</b> <code>PnL<sub>t</sub>=capital·(1+未实现%)</code>　空仓期水平直线
+                    </div>
+                    """, unsafe_allow_html=True)
+                    c_strat = st.columns([1.0, 1.0])
+                    strat_key = f"{key}_strat"
+                    sl_key = f"{key}_sl"
+                    with c_strat[0]:
+                        cfg["show_strategy"] = st.checkbox(
+                            "启用策略叠加", value=st.session_state.get(strat_key, False),
+                            key=strat_key,
+                            help="在Sig子图下方显示基于预测曲线+施密特信号的策略PnL")
+                    if cfg["show_strategy"]:
+                        with c_strat[1]:
+                            cfg["stop_loss_pct"] = st.slider(
+                                "止损阈值(%)", 0.5, 10.0,
+                                st.session_state.get(sl_key, 2.0), 0.5,
+                                key=sl_key,
+                                help="预测偏差超过此阈值即止损离场")
+                    else:
+                        cfg["stop_loss_pct"] = st.session_state.get(sl_key, 2.0)
 
     # 滤波参数 — 可折叠
     sf = FILTERS[filter_id]; cfg["pv"] = {}
@@ -873,6 +1106,9 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
             label = sf2["params"][pname][0]
             sk = f"{label}_{key}_f2_{filter_id2}"
             cfg["pv2"][pname] = st.session_state.get(sk, cfg["pv2"].get(pname, 0))
+
+    cfg["show_strategy"] = st.session_state.get(f"{key}_strat", cfg.get("show_strategy", False))
+    cfg["stop_loss_pct"] = st.session_state.get(f"{key}_sl", cfg.get("stop_loss_pct", 2.0))
 
     return cfg
 
@@ -1000,16 +1236,59 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
                         "pair_end": pair_end,
                     })
 
+    # 策略PnL计算（两条独立曲线）
+    long_pnl = None
+    short_pnl = None
+    trade_records = []
+    show_strategy = cfg.get("show_strategy", False)
+    stop_loss_pct = cfg.get("stop_loss_pct", 2.0)
+    if show_strategy and schmitt is not None and len(pred_pairs) > 0:
+        long_pnl, short_pnl, trade_records = _compute_strategy_pnl(
+            t, filtered, schmitt["sig"], all_pairs, pred_pairs, stop_loss_pct,
+            n_extend=cfg.get("n_ext", 10),
+        )
+
+    # 策略统计（取做多/做空最终收益更优者展示）
+    has_strategy = show_strategy and long_pnl is not None and len(trade_records) > 0
+    if has_strategy and trade_records:
+        c4, c5, c6 = st.columns(3)
+        win_trades = sum(1 for tr in trade_records if tr["return_pct"] > 0)
+        long_ret = long_pnl[-1] - 100.0
+        short_ret = short_pnl[-1] - 100.0
+        total_ret = long_ret + short_ret
+        c4.caption(f"交易: {len(trade_records)}笔 | 胜率: {win_trades}/{len(trade_records)}")
+        c5.caption(f"多: {long_ret:+.2f}% | 空: {short_ret:+.2f}% | 总和: {total_ret:+.2f}%")
+        # 做多回撤
+        peak_l = np.maximum.accumulate(long_pnl)
+        drawdown_l = (long_pnl - peak_l) / peak_l * 100
+        max_dd_l = np.min(drawdown_l)
+        # 做空回撤
+        peak_s = np.maximum.accumulate(short_pnl)
+        drawdown_s = (short_pnl - peak_s) / peak_s * 100
+        max_dd_s = np.min(drawdown_s)
+        c6.caption(f"多DD: {max_dd_l:.2f}% | 空DD: {max_dd_s:.2f}%")
+
     # Build figure (same as before, compact)
     has_s = schmitt is not None
-    rows = 5 if has_s else 4
     if has_s:
-        rh = [0.28,0.14,0.18,0.18,0.22]
-        titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t")
-        mr=1;rr=2;vr=3;sar=4;ssr=5;ar=None
+        if has_strategy:
+            rows = 6
+            rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.25]
+            titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)")
+        else:
+            rows = 5
+            rh = [0.28, 0.14, 0.18, 0.18, 0.22]
+            titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t")
+        mr=1;rr=2;vr=3;sar=4;ssr=5
+        if has_strategy:
+            pnl_row = 6
+        else:
+            pnl_row = None
+        ar=None
     else:
+        rows = 4
         rh=[0.40,0.18,0.20,0.22]; titles=("价格&滤波","残差","速度v","加速度a")
-        mr=1;rr=2;vr=3;ar=4;sar=ssr=None
+        mr=1;rr=2;vr=3;ar=4;sar=ssr=pnl_row=None
     fig = make_subplots(rows=rows, cols=1, shared_xaxes=True,
                         vertical_spacing=0.02, row_heights=rh, subplot_titles=titles)
     fig.add_trace(go.Candlestick(x=t, open=ohlc["Open"].values.ravel(),
@@ -1075,6 +1354,86 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
                 mode="lines", line=dict(width=0),
                 showlegend=False, hoverinfo="skip",
             ), row=ssr, col=1)
+    # PnL收益曲线（第6行）— 两条独立曲线
+    if has_strategy:
+        # 做多曲线（绿色）
+        fig.add_trace(go.Scatter(
+            x=t, y=long_pnl,
+            mode="lines", name="做多PnL",
+            line=dict(color="#3fb950", width=1.5, dash="solid"),
+        ), row=pnl_row, col=1)
+
+        # 做空曲线（红色）
+        fig.add_trace(go.Scatter(
+            x=t, y=short_pnl,
+            mode="lines", name="做空PnL",
+            line=dict(color="#f85149", width=1.5, dash="solid"),
+        ), row=pnl_row, col=1)
+
+        # 持仓期间高亮（交易分段覆盖）
+        for trade in trade_records:
+            seg_t = t[trade["entry_idx"]:trade["exit_idx"] + 1]
+            curve = long_pnl if trade["type"] == "long" else short_pnl
+            seg_pnl = curve[trade["entry_idx"]:trade["exit_idx"] + 1]
+            is_long = trade["type"] == "long"
+            color = "#3fb950" if is_long else "#f85149"
+            label_prefix = "多" if is_long else "空"
+            fig.add_trace(go.Scatter(
+                x=seg_t, y=seg_pnl,
+                mode="lines",
+                name=f"{label_prefix}#{trade['id']}",
+                line=dict(color=color, width=3),
+                showlegend=False,
+            ), row=pnl_row, col=1)
+
+            # 入场标记
+            marker_color = "#3fb950" if is_long else "#f85149"
+            fig.add_trace(go.Scatter(
+                x=[seg_t[0]], y=[seg_pnl[0]],
+                mode="markers",
+                marker=dict(color=marker_color, symbol="triangle-up", size=8),
+                showlegend=False,
+            ), row=pnl_row, col=1)
+
+            # 离场标记: 仅真实触发时显示（止损=X红色, 止盈=○绿色）
+            # eod/未触发不画标记, 避免误导
+            if trade["exit_reason"] in ("stop_loss", "take_profit"):
+                exit_marker = "x" if trade["exit_reason"] == "stop_loss" else "circle"
+                exit_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
+                fig.add_trace(go.Scatter(
+                    x=[seg_t[-1]], y=[seg_pnl[-1]],
+                    mode="markers",
+                    marker=dict(color=exit_color, symbol=exit_marker, size=8),
+                    showlegend=False,
+                ), row=pnl_row, col=1)
+
+        # 100%基准线
+        fig.add_hline(y=100, line_dash="dash", line_color="gray",
+                      opacity=0.5, row=pnl_row, col=1)
+
+        # 做多盈利区域填充（浅绿）
+        y_max_l = max(float(np.nanmax(long_pnl)), 100.0) * 1.02
+        fig.add_trace(go.Scatter(
+            x=[t[0], t[-1], t[-1], t[0]],
+            y=[100, 100, y_max_l, y_max_l],
+            fill="toself", fillcolor="rgba(63,185,80,0.04)",
+            mode="lines", line=dict(width=0),
+            showlegend=False, hoverinfo="skip",
+        ), row=pnl_row, col=1)
+        # 做空亏损区域填充（浅红）
+        y_min_s = min(float(np.nanmin(short_pnl)), 100.0) * 0.98
+        fig.add_trace(go.Scatter(
+            x=[t[0], t[-1], t[-1], t[0]],
+            y=[100, 100, y_min_s, y_min_s],
+            fill="toself", fillcolor="rgba(248,81,73,0.04)",
+            mode="lines", line=dict(width=0),
+            showlegend=False, hoverinfo="skip",
+        ), row=pnl_row, col=1)
+
+    if has_strategy:
+        fig.update_yaxes(title_text="PnL(%)", row=pnl_row, col=1,
+                         ticksuffix="%")
+
     if ar is not None and not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=acc, mode="lines", name="a",
             line=dict(color="#ffa502", width=1.5)), row=ar, col=1)
@@ -1287,6 +1646,8 @@ def main():
         export_data[f"v{i}_next"] = cfg["n_ext"]
         export_data[f"v{i}_fc"] = cfg["fc"]
         export_data[f"v{i}_fc2"] = cfg["fc2"]
+        export_data[f"v{i}_strat"] = cfg.get("show_strategy", False)
+        export_data[f"v{i}_sl"] = cfg.get("stop_loss_pct", 2.0)
         # Use slider label (Chinese) as key prefix, matching _render_param_slider
         f1 = FILTERS.get(filter_id, {})
         for pname, pval in cfg.get("pv", {}).items():
