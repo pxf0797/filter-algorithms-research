@@ -843,36 +843,38 @@ def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
         if np.isnan(entry_price) or entry_price <= 0:
             continue
 
-        # ---- 扫描持仓期间 ----
+        # ---- 扫描：分段混合（方案D） ----
+        # 预测保护期 [entry+1, entry+N_ext]：止损 + 止盈 双重保护
+        # 趋势跟踪期 [entry+N_ext+1, ...]：仅 Sig 止盈，让利润奔跑
         exit_idx = None
-        exit_reason = "natural"
-        scan_end = min(entry_idx + n_extend, n - 1)
+        exit_reason = "take_profit"  # 默认止盈（趋势跟踪期触发或被max_hold截断）
+        protect_end = entry_idx + n_extend  # 预测保护期终点
+        scan_end = n - 1  # 默认扫描到数据末尾
 
         for i in range(entry_idx + 1, scan_end + 1):
             cur_price = filtered[i]
             if np.isnan(cur_price) or cur_price <= 0:
                 continue
 
-            if x0 is not None:
-                pred_val = np.polyval((a, b, c), i - x0)
-            else:
-                pred_val = np.polyval((a, b, c), i)
+            # 预测保护期内：检查止损
+            if i <= protect_end:
+                if x0 is not None:
+                    pred_val = np.polyval((a, b, c), i - x0)
+                else:
+                    pred_val = np.polyval((a, b, c), i)
 
-            if np.isnan(pred_val) or pred_val <= 0:
-                continue
+                if not (np.isnan(pred_val) or pred_val <= 0):
+                    if is_long:
+                        stop_hit = cur_price < pred_val * (1 - stop_loss_pct / 100.0)
+                    else:
+                        stop_hit = cur_price > pred_val * (1 + stop_loss_pct / 100.0)
 
-            # 止损
-            if is_long:
-                stop_hit = cur_price < pred_val * (1 - stop_loss_pct / 100.0)
-            else:
-                stop_hit = cur_price > pred_val * (1 + stop_loss_pct / 100.0)
+                    if stop_hit:
+                        exit_idx = i
+                        exit_reason = "stop_loss"
+                        break
 
-            if stop_hit:
-                exit_idx = i
-                exit_reason = "stop_loss"
-                break
-
-            # 止盈
+            # 全程：检查止盈（Sig 反转）
             if is_long and sig_t[i] == -1:
                 exit_idx = i
                 exit_reason = "take_profit"
@@ -882,10 +884,11 @@ def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
                 exit_reason = "take_profit"
                 break
 
+        # 未触发任何离场条件 → 持有到数据末尾
         if exit_idx is None:
-            if scan_end > entry_idx:
-                exit_idx = scan_end
-                exit_reason = "natural"
+            if n - 1 > entry_idx:
+                exit_idx = n - 1
+                exit_reason = "eod"  # end of data
             else:
                 continue
 
@@ -1032,16 +1035,15 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
                     <div style="font-size:12px; line-height:1.8; color:#8b949e;
                     background:rgba(88,166,255,0.06); border-radius:6px; padding:10px 14px;
                     border-left:3px solid #58a6ff;">
-                    <b>📋 策略规则</b><br>
-                    <b>入场</b>：entry = pair_end（多空对结束位置=新信号段起点）<br>
-                    　　　 做多需 <code>sig[pair_end]=+1</code> 且预测外推 <code>ŷ<sub>end</sub> &gt; ŷ<sub>0</sub></code><br>
-                    　　　 做空需 <code>sig[pair_end]=-1</code> 且预测外推 <code>ŷ<sub>end</sub> &lt; ŷ<sub>0</sub></code><br>
-                    <b>止损</b>：做多 <code>P<sub>t</sub> &lt; ŷ<sub>t</sub>·(1−s%)</code>　做空 <code>P<sub>t</sub> &gt; ŷ<sub>t</sub>·(1+s%)</code><br>
-                    　　　 s% = 止损阈值, P<sub>t</sub> = 滤波价, ŷ<sub>t</sub> = 预测价<br>
-                    <b>止盈</b>：做多遇 <code>Sig=-1</code> 离场　做空遇 <code>Sig=+1</code> 离场<br>
-                    <b>扫描</b>：入场后逐K线遍历 <code>i ∈ [entry+1, entry+N<sub>ext</sub>]</code><br>
-                    　　　 N<sub>ext</sub> = 预测点数, 止损与止盈先触发者为准<br>
-                    <b>曲线</b>：持仓期 <code>PnL<sub>t</sub>=capital·(1+未实现%)</code>　空仓期水平直线
+                    <b>📋 策略规则（分段混合 · 方案D）</b><br>
+                    <b>预测保护期</b> <code>i∈[entry+1, entry+N<sub>ext</sub>]</code><br>
+                    　　　 止损 <code>P<sub>t</sub>&lt;ŷ<sub>t</sub>·(1−s%)</code>（多）/<code>P<sub>t</sub>&gt;ŷ<sub>t</sub>·(1+s%)</code>（空）<br>
+                    　　　 止盈 <code>Sig=-1</code>（多）/<code>Sig=+1</code>（空）<br>
+                    <b>趋势跟踪期</b> <code>i∈[entry+N<sub>ext</sub>+1, …]</code><br>
+                    　　　 仅止盈 <code>Sig</code> 反转离场，止损停用，让利润奔跑<br>
+                    　　　 若始终未触发则持有至数据末尾<br>
+                    <b>入场</b> <code>entry=pair_end</code>　做多需 <code>Sig=+1</code>且<code>ŷ<sub>end</sub>&gt;ŷ<sub>0</sub></code><br>
+                    <b>曲线</b> <code>PnL<sub>t</sub>=capital·(1+未实现%)</code>　空仓期水平直线
                     </div>
                     """, unsafe_allow_html=True)
                     c_strat = st.columns([1.0, 1.0])
