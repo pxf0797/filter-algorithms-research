@@ -1395,15 +1395,17 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
                 showlegend=False,
             ), row=pnl_row, col=1)
 
-            # 离场标记: 止损=X, 止盈/自然=circle
-            exit_marker = "x" if trade["exit_reason"] == "stop_loss" else "circle"
-            exit_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
-            fig.add_trace(go.Scatter(
-                x=[seg_t[-1]], y=[seg_pnl[-1]],
-                mode="markers",
-                marker=dict(color=exit_color, symbol=exit_marker, size=8),
-                showlegend=False,
-            ), row=pnl_row, col=1)
+            # 离场标记: 仅真实触发时显示（止损=X红色, 止盈=○绿色）
+            # eod/未触发不画标记, 避免误导
+            if trade["exit_reason"] in ("stop_loss", "take_profit"):
+                exit_marker = "x" if trade["exit_reason"] == "stop_loss" else "circle"
+                exit_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
+                fig.add_trace(go.Scatter(
+                    x=[seg_t[-1]], y=[seg_pnl[-1]],
+                    mode="markers",
+                    marker=dict(color=exit_color, symbol=exit_marker, size=8),
+                    showlegend=False,
+                ), row=pnl_row, col=1)
 
         # 100%基准线
         fig.add_hline(y=100, line_dash="dash", line_color="gray",
