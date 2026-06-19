@@ -770,39 +770,36 @@ def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
                           stop_loss_pct, n_extend=10):
     """基于施密特触发器信号和预测曲线方向计算策略PnL。
 
-    做多: pair第二段为+1(多头) + 预测向上 → pair_end入场
-          止损=滤波价跌破预测价阈值; 止盈=sig确认做空(sig=-1)
-    做空: pair第二段为-1(空头) + 预测向下 → pair_end入场
-          止损=滤波价涨破预测价阈值; 止盈=sig确认做多(sig=+1)
+    返回两条独立曲线：
+    - long_pnl: 做多收益曲线，非持仓期水平直线
+    - short_pnl: 做空收益曲线，非持仓期水平直线
 
     Args:
         t: np.array, 时间索引
         filtered: np.array, 滤波价格
         sig_t: np.array, 施密特信号(±1/0)
-        all_pairs: list[(start,end)], 多空切换对。all_pairs[i]=(s1,s2),
-                   s1=第一段信号起点, s2=第二段(相反)信号起点(边缘)
+        all_pairs: list[(start,end)], 多空切换对
         pred_pairs: list[dict], 预测曲线数据
         stop_loss_pct: float, 止损阈值(如2.0表示2%)
         n_extend: int, 预测延伸点数
 
     Returns:
-        pnl_curve: np.array(len(t)), 累积PnL(100=初始本金), 空仓forward-fill
+        long_pnl: np.array(len(t)), 做多PnL曲线(100=初始)
+        short_pnl: np.array(len(t)), 做空PnL曲线(100=初始)
         trade_records: list[dict]
     """
     n = len(t)
-    pnl_curve = np.full(n, np.nan)
-    pnl_curve[0] = 100.0
+
+    # 初始化两条独立曲线
+    long_pnl = np.full(n, 100.0)
+    short_pnl = np.full(n, 100.0)
+
+    long_capital = 100.0   # 做多已实现本金
+    short_capital = 100.0  # 做空已实现本金
 
     # 空数据保护
     if len(all_pairs) == 0 or len(pred_pairs) == 0:
-        # forward fill
-        last = 100.0
-        for i in range(n):
-            if np.isnan(pnl_curve[i]):
-                pnl_curve[i] = last
-            else:
-                last = pnl_curve[i]
-        return pnl_curve, []
+        return long_pnl, short_pnl, []
 
     # 建立 pred_pairs 索引: pair_end → pred_data
     pred_map = {}
@@ -810,11 +807,9 @@ def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
         pred_map[pp["pair_end"]] = pp
 
     trade_records = []
-    current_capital = 100.0
     trade_id = 0
 
     for pair_start, pair_end in all_pairs:
-        # pair_end 必须有预测数据
         if pair_end not in pred_map:
             continue
         pp = pred_map[pair_end]
@@ -824,28 +819,25 @@ def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
         a, b, c = fit_result["a"], fit_result["b"], fit_result["c"]
         x0 = fit_result.get("x0", None)
 
-        # 从 pair_end 向前外推 n_extend 个点
-        x_pred = np.arange(pair_end, min(pair_end + n_extend, n - 1), dtype=float)
-        if len(x_pred) >= 2:
-            if x0 is not None:
-                y_pred = np.polyval((a, b, c), x_pred - x0)
-            else:
-                y_pred = np.polyval((a, b, c), x_pred)
-            pred_up = y_pred[-1] > y_pred[0]  # 预测末端高于起始=向上
+        x_pred = np.arange(pair_end, pair_end + n_extend)
+        if x0 is not None:
+            y_pred = np.polyval((a, b, c), x_pred - x0)
         else:
-            pred_up = False  # 点数不足时保守处理
+            y_pred = np.polyval((a, b, c), x_pred)
+
+        if len(y_pred) < 2:
+            continue
+        pred_up = y_pred[-1] > y_pred[0]
 
         # ---- 判断交易方向 ----
-        # pair中第二段信号方向决定交易方向
-        v2 = sig_t[pair_end]  # 第二段信号值: +1=多头段, -1=空头段
-
-        is_long = (v2 == 1 and pred_up)    # 多头段 + 预测向上 → 做多
-        is_short = (v2 == -1 and not pred_up)  # 空头段 + 预测向下 → 做空
+        v2 = sig_t[pair_end]
+        is_long = (v2 == 1 and pred_up)
+        is_short = (v2 == -1 and not pred_up)
 
         if not is_long and not is_short:
             continue
 
-        # ---- 入场: pair_end 就是交易起点 ----
+        # ---- 入场 ----
         entry_idx = pair_end
         entry_price = filtered[entry_idx]
         if np.isnan(entry_price) or entry_price <= 0:
@@ -861,7 +853,6 @@ def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
             if np.isnan(cur_price) or cur_price <= 0:
                 continue
 
-            # 该点的预测值
             if x0 is not None:
                 pred_val = np.polyval((a, b, c), i - x0)
             else:
@@ -870,7 +861,7 @@ def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
             if np.isnan(pred_val) or pred_val <= 0:
                 continue
 
-            # 止损检查
+            # 止损
             if is_long:
                 stop_hit = cur_price < pred_val * (1 - stop_loss_pct / 100.0)
             else:
@@ -881,7 +872,7 @@ def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
                 exit_reason = "stop_loss"
                 break
 
-            # 止盈检查: 相反信号确立
+            # 止盈
             if is_long and sig_t[i] == -1:
                 exit_idx = i
                 exit_reason = "take_profit"
@@ -891,7 +882,6 @@ def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
                 exit_reason = "take_profit"
                 break
 
-        # 未触发离场 → 自然到期
         if exit_idx is None:
             if scan_end > entry_idx:
                 exit_idx = scan_end
@@ -909,21 +899,35 @@ def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
         else:
             trade_return = (entry_price - exit_price) / entry_price
 
-        current_capital *= (1 + trade_return)
         trade_id += 1
 
-        # ---- 填充PnL曲线(持仓期间按未实现盈亏) ----
-        for i in range(entry_idx, exit_idx + 1):
-            cur_p = filtered[i]
-            if np.isnan(cur_p) or cur_p <= 0:
-                continue
-            if is_long:
+        # ---- 填充持仓期间的PnL曲线 ----
+        if is_long:
+            # 做多：持仓期间曲线随价格变动
+            for i in range(entry_idx, exit_idx + 1):
+                cur_p = filtered[i]
+                if np.isnan(cur_p) or cur_p <= 0:
+                    continue
                 unrealized = (cur_p - entry_price) / entry_price
-            else:
+                long_pnl[i] = long_capital * (1 + unrealized)
+            # 更新做多已实现本金
+            long_capital *= (1 + trade_return)
+            # 离场后到数据末尾先填充已实现值（后续交易会覆盖）
+            for i in range(exit_idx + 1, n):
+                long_pnl[i] = long_capital
+        else:
+            # 做空：持仓期间曲线随价格变动
+            for i in range(entry_idx, exit_idx + 1):
+                cur_p = filtered[i]
+                if np.isnan(cur_p) or cur_p <= 0:
+                    continue
                 unrealized = (entry_price - cur_p) / entry_price
-            # 还原到该笔交易期间的未实现值
-            capital_at_i = current_capital / (1 + trade_return) * (1 + unrealized)
-            pnl_curve[i] = capital_at_i
+                short_pnl[i] = short_capital * (1 + unrealized)
+            # 更新做空已实现本金
+            short_capital *= (1 + trade_return)
+            # 离场后填充已实现值
+            for i in range(exit_idx + 1, n):
+                short_pnl[i] = short_capital
 
         # ---- 记录交易 ----
         trade_records.append({
@@ -937,15 +941,24 @@ def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
             "exit_reason": exit_reason,
         })
 
-    # ---- 前向填充空仓期 ----
+    # ---- 前向填充：非持仓期维持上一个值不变（水平直线） ----
+    # 做多曲线
     last_val = 100.0
     for i in range(n):
-        if np.isnan(pnl_curve[i]):
-            pnl_curve[i] = last_val
-        else:
-            last_val = pnl_curve[i]
+        if long_pnl[i] == 100.0 and i > 0 and last_val != 100.0:
+            long_pnl[i] = last_val
+        if long_pnl[i] != 100.0 or (i == 0):
+            last_val = long_pnl[i]
 
-    return pnl_curve, trade_records
+    # 做空曲线
+    last_val = 100.0
+    for i in range(n):
+        if short_pnl[i] == 100.0 and i > 0 and last_val != 100.0:
+            short_pnl[i] = last_val
+        if short_pnl[i] != 100.0 or (i == 0):
+            last_val = short_pnl[i]
+
+    return long_pnl, short_pnl, trade_records
 
 
 # ---------------------------------------------------------------------------
@@ -1205,29 +1218,37 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
                         "pair_end": pair_end,
                     })
 
-    # 策略PnL计算
-    pnl_curve = None
+    # 策略PnL计算（两条独立曲线）
+    long_pnl = None
+    short_pnl = None
     trade_records = []
     show_strategy = cfg.get("show_strategy", False)
     stop_loss_pct = cfg.get("stop_loss_pct", 2.0)
     if show_strategy and schmitt is not None and len(pred_pairs) > 0:
-        pnl_curve, trade_records = _compute_strategy_pnl(
+        long_pnl, short_pnl, trade_records = _compute_strategy_pnl(
             t, filtered, schmitt["sig"], all_pairs, pred_pairs, stop_loss_pct,
             n_extend=cfg.get("n_ext", 10),
         )
 
-    # 策略统计
-    has_strategy = show_strategy and pnl_curve is not None
+    # 策略统计（取做多/做空最终收益更优者展示）
+    has_strategy = show_strategy and long_pnl is not None and len(trade_records) > 0
     if has_strategy and trade_records:
         c4, c5, c6 = st.columns(3)
         win_trades = sum(1 for tr in trade_records if tr["return_pct"] > 0)
-        total_return = pnl_curve[-1] - 100.0
+        long_ret = long_pnl[-1] - 100.0
+        short_ret = short_pnl[-1] - 100.0
+        total_ret = long_ret + short_ret
         c4.caption(f"交易: {len(trade_records)}笔 | 胜率: {win_trades}/{len(trade_records)}")
-        c5.caption(f"累积收益: {total_return:+.2f}%")
-        peak = np.maximum.accumulate(pnl_curve)
-        drawdown = (pnl_curve - peak) / peak * 100
-        max_dd = np.min(drawdown)
-        c6.caption(f"最大回撤: {max_dd:.2f}%")
+        c5.caption(f"多: {long_ret:+.2f}% | 空: {short_ret:+.2f}% | 总和: {total_ret:+.2f}%")
+        # 做多回撤
+        peak_l = np.maximum.accumulate(long_pnl)
+        drawdown_l = (long_pnl - peak_l) / peak_l * 100
+        max_dd_l = np.min(drawdown_l)
+        # 做空回撤
+        peak_s = np.maximum.accumulate(short_pnl)
+        drawdown_s = (short_pnl - peak_s) / peak_s * 100
+        max_dd_s = np.min(drawdown_s)
+        c6.caption(f"多DD: {max_dd_l:.2f}% | 空DD: {max_dd_s:.2f}%")
 
     # Build figure (same as before, compact)
     has_s = schmitt is not None
@@ -1315,20 +1336,27 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
                 mode="lines", line=dict(width=0),
                 showlegend=False, hoverinfo="skip",
             ), row=ssr, col=1)
-    # PnL收益曲线（第6行）
+    # PnL收益曲线（第6行）— 两条独立曲线
     if has_strategy:
-        # 完整PnL曲线（灰色底图，连接所有持仓/空仓期）
+        # 做多曲线（绿色）
         fig.add_trace(go.Scatter(
-            x=t, y=pnl_curve,
-            mode="lines", name="PnL",
-            line=dict(color="#8b949e", width=1, dash="solid"),
-            showlegend=False,
+            x=t, y=long_pnl,
+            mode="lines", name="做多PnL",
+            line=dict(color="#3fb950", width=1.5, dash="solid"),
         ), row=pnl_row, col=1)
 
-        # 按持仓方向分段绘制（醒目颜色覆盖）
+        # 做空曲线（红色）
+        fig.add_trace(go.Scatter(
+            x=t, y=short_pnl,
+            mode="lines", name="做空PnL",
+            line=dict(color="#f85149", width=1.5, dash="solid"),
+        ), row=pnl_row, col=1)
+
+        # 持仓期间高亮（交易分段覆盖）
         for trade in trade_records:
             seg_t = t[trade["entry_idx"]:trade["exit_idx"] + 1]
-            seg_pnl = pnl_curve[trade["entry_idx"]:trade["exit_idx"] + 1]
+            curve = long_pnl if trade["type"] == "long" else short_pnl
+            seg_pnl = curve[trade["entry_idx"]:trade["exit_idx"] + 1]
             is_long = trade["type"] == "long"
             color = "#3fb950" if is_long else "#f85149"
             label_prefix = "多" if is_long else "空"
@@ -1336,7 +1364,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
                 x=seg_t, y=seg_pnl,
                 mode="lines",
                 name=f"{label_prefix}#{trade['id']}",
-                line=dict(color=color, width=2),
+                line=dict(color=color, width=3),
                 showlegend=False,
             ), row=pnl_row, col=1)
 
@@ -1363,19 +1391,20 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
         fig.add_hline(y=100, line_dash="dash", line_color="gray",
                       opacity=0.5, row=pnl_row, col=1)
 
-        # 盈亏区域填充（盈利区>100浅绿）
-        y_max = max(float(np.nanmax(pnl_curve)), 100.0) * 1.02
-        y_min = min(float(np.nanmin(pnl_curve)), 100.0) * 0.98
+        # 做多盈利区域填充（浅绿）
+        y_max_l = max(float(np.nanmax(long_pnl)), 100.0) * 1.02
         fig.add_trace(go.Scatter(
             x=[t[0], t[-1], t[-1], t[0]],
-            y=[100, 100, y_max, y_max],
+            y=[100, 100, y_max_l, y_max_l],
             fill="toself", fillcolor="rgba(63,185,80,0.04)",
             mode="lines", line=dict(width=0),
             showlegend=False, hoverinfo="skip",
         ), row=pnl_row, col=1)
+        # 做空亏损区域填充（浅红）
+        y_min_s = min(float(np.nanmin(short_pnl)), 100.0) * 0.98
         fig.add_trace(go.Scatter(
             x=[t[0], t[-1], t[-1], t[0]],
-            y=[100, 100, y_min, y_min],
+            y=[100, 100, y_min_s, y_min_s],
             fill="toself", fillcolor="rgba(248,81,73,0.04)",
             mode="lines", line=dict(width=0),
             showlegend=False, hoverinfo="skip",
