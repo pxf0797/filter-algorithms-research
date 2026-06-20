@@ -1225,6 +1225,7 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
                     c_strat = st.columns([1.0, 1.0])
                     strat_key = f"{key}_strat"
                     sl_key = f"{key}_sl"
+                    cross_key = f"{key}_cross_pnl"
                     with c_strat[0]:
                         cfg["show_strategy"] = st.checkbox(
                             "启用策略叠加", value=st.session_state.get(strat_key, False),
@@ -1238,14 +1239,13 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
                                 key=sl_key,
                                 help="预测偏差超过此阈值即止损离场")
                             # 跨周期PnL参考子图
-                            cross_key = f"{key}_cross_pnl"
                             cfg["show_cross_pnl"] = st.checkbox(
                                 "显示高周期PnL参考", value=st.session_state.get(cross_key, False),
                                 key=cross_key,
                                 help="在本周期PnL下方显示紧邻高周期的交易事件标记和PnL参考线")
                     else:
                         cfg["stop_loss_pct"] = st.session_state.get(sl_key, 2.0)
-                        cfg["show_cross_pnl"] = False
+                        cfg["show_cross_pnl"] = st.session_state.get(cross_key, False)
 
     # 滤波参数 — 可折叠
     sf = FILTERS[filter_id]; cfg["pv"] = {}
