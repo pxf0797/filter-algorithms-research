@@ -1168,44 +1168,105 @@ def _compute_holding_masks(n_bars, entry_markers, exit_markers):
     return long_mask, short_mask
 
 
-def _add_alignment_subplot(fig, t, long_pnl, short_pnl, long_mask, short_mask, row):
-    """同向性判断子图：高周期持仓时显示本周期同向PnL。
+def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
+                           long_mask, short_mask, row):
+    """同向性判断子图：与Row6一致的显示方式，按高周期持仓方向过滤。
 
-    高周期做多持仓 → 显示本周期做多PnL
-    高周期做空持仓 → 显示本周期做空PnL
+    高周期做多持仓 → 复制Row6做多线+交易标记
+    高周期做空持仓 → 复制Row6做空线+交易标记
     无持仓 → 100基准线
     """
     n = len(t)
-    aligned = np.full(n, 100.0)
-    aligned[long_mask] = long_pnl[long_mask]
-    aligned[short_mask] = short_pnl[short_mask]
 
-    # 持仓区段背景
-    for mask, color in [(long_mask, "rgba(63,185,80,0.06)"), (short_mask, "rgba(248,81,73,0.06)")]:
-        if mask.any():
-            changes = np.diff(np.concatenate([[False], mask, [False]]).astype(int))
-            starts = np.where(changes == 1)[0]
-            ends = np.where(changes == -1)[0]
-            for s, e in zip(starts, ends):
-                fig.add_trace(go.Scatter(
-                    x=[t[s], t[e-1], t[e-1], t[s]],
-                    y=[90, 90, 110, 110],
-                    fill="toself", fillcolor=color,
-                    mode="lines", line=dict(width=0),
-                    showlegend=False, hoverinfo="skip",
-                ), row=row, col=1)
-
-    # 同向PnL曲线
+    # 做多曲线（绿色实线，仅在高周期做多持仓区间显示）
+    long_filtered = np.full(n, np.nan)
+    long_filtered[long_mask] = long_pnl[long_mask]
     fig.add_trace(go.Scatter(
-        x=t, y=aligned,
-        mode="lines", name="同向PnL",
-        line=dict(color="#d2991d", width=1.5),
+        x=t, y=long_filtered,
+        mode="lines", name="做多PnL",
+        line=dict(color="#3fb950", width=1.5, dash="solid"),
         showlegend=False,
+    ), row=row, col=1)
+
+    # 做空曲线（红色实线，仅在高周期做空持仓区间显示）
+    short_filtered = np.full(n, np.nan)
+    short_filtered[short_mask] = short_pnl[short_mask]
+    fig.add_trace(go.Scatter(
+        x=t, y=short_filtered,
+        mode="lines", name="做空PnL",
+        line=dict(color="#f85149", width=1.5, dash="solid"),
+        showlegend=False,
+    ), row=row, col=1)
+
+    # 交易分段高亮 + 入场/离场标记（仅在同向持仓区间内）
+    for trade in trade_records:
+        is_long = trade["type"] == "long"
+        mask = long_mask if is_long else short_mask
+        entry_i = trade["entry_idx"]
+        exit_i = trade["exit_idx"]
+        if entry_i >= n or exit_i >= n:
+            continue
+        # 交易段是否与高周期持仓区间有交集
+        seg_range = slice(entry_i, exit_i + 1)
+        if not mask[seg_range].any():
+            continue
+        curve = long_pnl if is_long else short_pnl
+        seg_t = t[seg_range]
+        seg_pnl = curve[seg_range]
+        color = "#3fb950" if is_long else "#f85149"
+
+        # 交易分段高亮
+        fig.add_trace(go.Scatter(
+            x=seg_t, y=seg_pnl,
+            mode="lines",
+            name=f"{'多' if is_long else '空'}#{trade['id']}",
+            line=dict(color=color, width=3),
+            showlegend=False,
+        ), row=row, col=1)
+
+        # 入场标记
+        marker_color = "#3fb950" if is_long else "#f85149"
+        if mask[entry_i]:
+            fig.add_trace(go.Scatter(
+                x=[seg_t[0]], y=[seg_pnl[0]],
+                mode="markers",
+                marker=dict(color=marker_color, symbol="triangle-up", size=8),
+                showlegend=False,
+            ), row=row, col=1)
+
+        # 离场标记
+        if trade["exit_reason"] in ("stop_loss", "take_profit") and mask[exit_i]:
+            exit_marker = "x" if trade["exit_reason"] == "stop_loss" else "circle"
+            exit_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
+            fig.add_trace(go.Scatter(
+                x=[seg_t[-1]], y=[seg_pnl[-1]],
+                mode="markers",
+                marker=dict(color=exit_color, symbol=exit_marker, size=8),
+                showlegend=False,
+            ), row=row, col=1)
+
+    # 盈利区域填充（浅绿，>100，仅做多持仓区）
+    y_max_l = max(float(np.nanmax(long_filtered)), 100.0) * 1.02
+    fig.add_trace(go.Scatter(
+        x=[t[0], t[-1], t[-1], t[0]],
+        y=[100, 100, y_max_l, y_max_l],
+        fill="toself", fillcolor="rgba(63,185,80,0.04)",
+        mode="lines", line=dict(width=0),
+        showlegend=False, hoverinfo="skip",
+    ), row=row, col=1)
+    # 亏损区域填充（浅红，<100，仅做空持仓区）
+    y_min_s = min(float(np.nanmin(short_filtered)), 100.0) * 0.98
+    fig.add_trace(go.Scatter(
+        x=[t[0], t[-1], t[-1], t[0]],
+        y=[100, 100, y_min_s, y_min_s],
+        fill="toself", fillcolor="rgba(248,81,73,0.04)",
+        mode="lines", line=dict(width=0),
+        showlegend=False, hoverinfo="skip",
     ), row=row, col=1)
 
     # 100基准线
     fig.add_hline(y=100, line_dash="dash", line_color="gray",
-                  opacity=0.4, row=row, col=1)
+                  opacity=0.5, row=row, col=1)
 
 
 # ---------------------------------------------------------------------------
@@ -1776,7 +1837,8 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     # 同向性判断子图（row 8）：高周期持仓时显示本周期同向PnL
     if has_alignment and _align_masks is not None and align_row is not None:
         long_mask, short_mask = _align_masks
-        _add_alignment_subplot(fig, t, long_pnl, short_pnl, long_mask, short_mask, row=align_row)
+        _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
+                               long_mask, short_mask, row=align_row)
         fig.update_yaxes(title_text="同向(%)", row=align_row, col=1, ticksuffix="%")
 
     if ar is not None and not np.all(np.isnan(filtered)):
