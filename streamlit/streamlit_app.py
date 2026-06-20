@@ -257,6 +257,8 @@ def _render_param_slider(label, pmin, pmax, pstep, pdefault, key_suffix="", cont
     """
     ctx = container if container is not None else st.sidebar
     key = f"{label}_{key_suffix}" if key_suffix else None
+    if key:
+        pdefault = st.session_state.get(key, st.session_state.get(f"_imp_{key}", pdefault))
     if isinstance(pstep, int):
         return ctx.slider(label, pmin, pmax, pdefault, pstep, key=key)
     fmt = "%.3f" if pstep < 0.01 else "%.2f"
@@ -1280,16 +1282,18 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     cfg["show_pred"] = st.session_state.get(f"{key}_pred", cfg["show_pred"])
     cfg["fit_mode"] = st.session_state.get(f"{key}_fm", cfg["fit_mode"])
     cfg["n_ext"] = st.session_state.get(f"{key}_next", cfg["n_ext"])
-    # 滤波参数也需保护
+    # 滤波参数也需保护（含_imp_备份防rerun丢失）
     for pname in sf["params"]:
         label = sf["params"][pname][0]
         sk = f"{label}_{key}_f1_{filter_id}"
-        cfg["pv"][pname] = st.session_state.get(sk, cfg["pv"].get(pname, 0))
+        cfg["pv"][pname] = st.session_state.get(sk,
+            st.session_state.get(f"_imp_{sk}", cfg["pv"].get(pname, 0)))
     if dual and filter_id2:
         for pname in sf2["params"]:
             label = sf2["params"][pname][0]
             sk = f"{label}_{key}_f2_{filter_id2}"
-            cfg["pv2"][pname] = st.session_state.get(sk, cfg["pv2"].get(pname, 0))
+            cfg["pv2"][pname] = st.session_state.get(sk,
+                st.session_state.get(f"_imp_{sk}", cfg["pv2"].get(pname, 0)))
 
     cfg["show_strategy"] = st.session_state.get(f"{key}_strat",
         st.session_state.get(f"_imp_{key}_strat", cfg.get("show_strategy", False)))
