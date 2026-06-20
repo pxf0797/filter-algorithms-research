@@ -324,6 +324,22 @@ g.hovertext {{ visibility: hidden !important; }}
         modeBarButtonsToRemove: ['lasso2d', 'select2d']
     }};
     Plotly.newPlot('{div_id}', figure.data, figure.layout, config).then(function(gd) {{
+        // Init: add a hidden date annotation at bottom of chart
+        var dateAnno = {{
+            text: '',
+            x: 0,
+            y: 0,
+            xref: 'x', yref: 'paper',
+            showarrow: false,
+            font: {{ size: 11, color: '#c0c0c0', family: 'monospace' }},
+            bgcolor: 'rgba(30,30,44,0.90)',
+            borderpad: 4,
+            visible: false,
+        }};
+        var annos = gd.layout.annotations || [];
+        annos.push(dateAnno);
+        Plotly.relayout(gd, {{ annotations: annos }});
+
         gd.on('plotly_hover', function(evt) {{
             if (!evt.points || evt.points.length === 0) return;
             var xv = evt.points[0].x;
@@ -338,13 +354,32 @@ g.hovertext {{ visibility: hidden !important; }}
                     update['shapes[' + i + '].visible'] = true;
                 }}
             }}
+
+            // Find date string for cursor position
+            var dateStr = '';
+            var xArr0 = gd.data[0].x;
+            if (xArr0 && xArr0.length > 0) {{
+                var idx = 0;
+                for (var i = 0; i < xArr0.length; i++) {{
+                    if (Math.abs(xArr0[i] - xv) < Math.abs(xArr0[idx] - xv)) idx = i;
+                }}
+                if (gd.layout._dates && idx < gd.layout._dates.length) {{
+                    dateStr = gd.layout._dates[idx];
+                }}
+            }}
+            // Update date annotation
+            var lastAnno = gd.layout.annotations.length - 1;
+            update['annotations[' + lastAnno + '].text'] = dateStr ? ' ' + dateStr + ' ' : '';
+            update['annotations[' + lastAnno + '].x'] = xv;
+            update['annotations[' + lastAnno + '].visible'] = dateStr !== '';
+
             if (Object.keys(update).length > 0) {{
                 Plotly.relayout(gd, update);
             }}
         }});
 
         gd.on('plotly_unhover', function() {{
-            // Hide crosshair
+            // Hide crosshair + date annotation
             var shapes = gd.layout.shapes || [];
             var update = {{}};
             for (var i = 0; i < shapes.length; i++) {{
@@ -352,6 +387,9 @@ g.hovertext {{ visibility: hidden !important; }}
                     update['shapes[' + i + '].visible'] = false;
                 }}
             }}
+            var lastAnno = gd.layout.annotations.length - 1;
+            update['annotations[' + lastAnno + '].visible'] = false;
+
             if (Object.keys(update).length > 0) {{
                 Plotly.relayout(gd, update);
             }}
