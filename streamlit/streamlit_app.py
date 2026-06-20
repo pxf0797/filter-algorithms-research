@@ -341,59 +341,64 @@ g.hovertext {{ visibility: hidden !important; }}
         annos.push(dateAnno);
         Plotly.relayout(gd, {{ annotations: annos }});
 
+        // ── Throttled hover: binary search + 45ms gate + skip same-x ──
+        var _lastXv = -Infinity, _pending = false, _pendingXv = null, _THROTTLE_MS = 45;
+        function _nearestIdx(arr, xv) {{
+            var lo = 0, hi = arr.length - 1;
+            if (xv <= arr[lo]) return lo;
+            if (xv >= arr[hi]) return hi;
+            while (lo < hi - 1) {{ var mid = (lo + hi) >> 1; if (arr[mid] <= xv) lo = mid; else hi = mid; }}
+            return (xv - arr[lo] <= arr[hi] - xv) ? lo : hi;
+        }}
+        var _shapeKeys = [];
+        var shapes = gd.layout.shapes || [];
+        for (var i = 0; i < shapes.length; i++) {{
+            if (shapes[i].yref === 'paper' || shapes[i].yref === 'y domain') {{
+                _shapeKeys.push({{ x0: 'shapes[' + i + '].x0', x1: 'shapes[' + i + '].x1', vis: 'shapes[' + i + '].visible' }});
+            }}
+        }}
+        var _annIdx = gd.layout.annotations.length - 1;
+        var _annTK = 'annotations[' + _annIdx + '].text';
+        var _annXK = 'annotations[' + _annIdx + '].x';
+        var _annVK = 'annotations[' + _annIdx + '].visible';
+        var _xArr0 = gd.data[0].x;
+        var _dates = gd.layout._dates;
+        var _hasDates = _dates && _dates.length > 0;
+
+        function _apply(xv) {{
+            _pending = false;
+            var u = {{}};
+            for (var i = 0; i < _shapeKeys.length; i++) {{ var k = _shapeKeys[i]; u[k.x0] = xv; u[k.x1] = xv; u[k.vis] = true; }}
+            var ds = '';
+            if (_hasDates && _xArr0 && _xArr0.length > 0) {{ var idx = _nearestIdx(_xArr0, xv); if (idx < _dates.length) ds = _dates[idx]; }}
+            u[_annTK] = ds ? ' ' + ds + ' ' : '';
+            u[_annXK] = xv;
+            u[_annVK] = ds !== '';
+            Plotly.relayout(gd, u);
+            _lastXv = xv;
+        }}
+
         gd.on('plotly_hover', function(evt) {{
             if (!evt.points || evt.points.length === 0) return;
             var xv = evt.points[0].x;
-
-            // Update crosshair line
-            var shapes = gd.layout.shapes || [];
-            var update = {{}};
-            for (var i = 0; i < shapes.length; i++) {{
-                if (shapes[i].yref === 'paper' || shapes[i].yref === 'y domain') {{
-                    update['shapes[' + i + '].x0'] = xv;
-                    update['shapes[' + i + '].x1'] = xv;
-                    update['shapes[' + i + '].visible'] = true;
-                }}
-            }}
-
-            // Find date string for cursor position
-            var dateStr = '';
-            var xArr0 = gd.data[0].x;
-            if (xArr0 && xArr0.length > 0) {{
-                var idx = 0;
-                for (var i = 0; i < xArr0.length; i++) {{
-                    if (Math.abs(xArr0[i] - xv) < Math.abs(xArr0[idx] - xv)) idx = i;
-                }}
-                if (gd.layout._dates && idx < gd.layout._dates.length) {{
-                    dateStr = gd.layout._dates[idx];
-                }}
-            }}
-            // Update date annotation
-            var lastAnno = gd.layout.annotations.length - 1;
-            update['annotations[' + lastAnno + '].text'] = dateStr ? ' ' + dateStr + ' ' : '';
-            update['annotations[' + lastAnno + '].x'] = xv;
-            update['annotations[' + lastAnno + '].visible'] = dateStr !== '';
-
-            if (Object.keys(update).length > 0) {{
-                Plotly.relayout(gd, update);
+            if (xv === _lastXv) return;
+            if (_pending) {{ _pendingXv = xv; }}
+            else {{
+                _pending = true; _pendingXv = null;
+                _apply(xv);
+                setTimeout(function() {{
+                    if (_pendingXv !== null && _pendingXv !== _lastXv) _apply(_pendingXv);
+                    else _pending = false;
+                }}, _THROTTLE_MS);
             }}
         }});
 
         gd.on('plotly_unhover', function() {{
-            // Hide crosshair + date annotation
-            var shapes = gd.layout.shapes || [];
-            var update = {{}};
-            for (var i = 0; i < shapes.length; i++) {{
-                if (shapes[i].yref === 'paper' || shapes[i].yref === 'y domain') {{
-                    update['shapes[' + i + '].visible'] = false;
-                }}
-            }}
-            var lastAnno = gd.layout.annotations.length - 1;
-            update['annotations[' + lastAnno + '].visible'] = false;
-
-            if (Object.keys(update).length > 0) {{
-                Plotly.relayout(gd, update);
-            }}
+            _pending = false; _pendingXv = null; _lastXv = -Infinity;
+            var u = {{}};
+            for (var i = 0; i < _shapeKeys.length; i++) {{ u[_shapeKeys[i].vis] = false; }}
+            u[_annVK] = false;
+            Plotly.relayout(gd, u);
         }});
     }});
 }})();
