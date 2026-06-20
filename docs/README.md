@@ -17,6 +17,7 @@
 
 | 文档 | 说明 |
 |------|------|
+| [broker/domestic_broker_api_report.md](broker/domestic_broker_api_report.md) | **国内券商+港股通接口综合报告**：A股量化接口全景、港股通量化方案、股股通调查、综合推荐 |
 | [broker/futu_openapi_technical_guide.md](broker/futu_openapi_technical_guide.md) | 富途OpenAPI技术指南：OpenD网关、行情订阅、交易接口、Python集成模板、成本分析 |
 
 ## ⚙️ 实盘执行
