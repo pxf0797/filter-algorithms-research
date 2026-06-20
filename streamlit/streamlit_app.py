@@ -1218,6 +1218,17 @@ def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
                 marker=dict(color=exit_color, symbol=exit_marker, size=8),
                 showlegend=False,
             ), row=row, col=1)
+            # 盈亏百分比标注
+            ret_pct = trade["return_pct"]
+            label_color = "#3fb950" if ret_pct > 0 else "#f85149"
+            fig.add_annotation(
+                x=seg_t[-1], y=seg_pnl[-1],
+                text=f"{ret_pct:+.1f}%",
+                showarrow=False,
+                font=dict(size=8, color=label_color),
+                yshift=12,
+                row=row, col=1,
+            )
 
     # 盈利区域填充
     y_max_l = max(float(np.nanmax(long_filtered)), 100.0) * 1.02
@@ -1637,17 +1648,17 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
             if has_cross:
                 if has_alignment:
                     rows = 8
-                    rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.16, 0.10, 0.08]
+                    rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.24, 0.15, 0.12]
                     titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)",f"{_higher_tf}PnL参考","同向性判断")
                     pnl_row = 6; cross_row = 7; align_row = 8
                 else:
                     rows = 7
-                    rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.18, 0.12]
+                    rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.27, 0.18]
                     titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)",f"{_higher_tf}PnL参考")
                     pnl_row = 6; cross_row = 7; align_row = None
             else:
                 rows = 6
-                rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.25]
+                rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.375]
                 titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)")
                 pnl_row = 6; cross_row = None; align_row = None
         else:
@@ -1778,6 +1789,17 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
                     marker=dict(color=exit_color, symbol=exit_marker, size=8),
                     showlegend=False,
                 ), row=pnl_row, col=1)
+                # 盈亏百分比标注
+                ret_pct = trade["return_pct"]
+                label_color = "#3fb950" if ret_pct > 0 else "#f85149"
+                fig.add_annotation(
+                    x=seg_t[-1], y=seg_pnl[-1],
+                    text=f"{ret_pct:+.1f}%",
+                    showarrow=False,
+                    font=dict(size=8, color=label_color),
+                    yshift=12,
+                    row=pnl_row, col=1,
+                )
 
         # 100%基准线
         fig.add_hline(y=100, line_dash="dash", line_color="gray",
@@ -1829,11 +1851,11 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     for pos in marker_positions:
         fig.add_vline(x=pos, line=dict(color="rgba(255,255,255,0.10)", width=0.8, dash="dot"),
                        layer="below")
-    fh = (540 if has_s else 420) if compact else (880 if has_s else 700)
+    fh = (620 if has_s else 420) if compact else (960 if has_s else 700)
     if has_cross:
-        fh += 80  # 跨周期子图额外高度
+        fh += 120  # 跨周期子图额外高度
     if has_alignment:
-        fh += 50  # 同向性子图额外高度
+        fh += 75  # 同向性子图额外高度
     fig.update_layout(template="plotly_dark", height=fh,
         margin=dict(l=10,r=10,t=25,b=10), hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=9)))
