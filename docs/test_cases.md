@@ -15,6 +15,7 @@
 | UI 交互测试 | 6 | 35 | Streamlit 前端交互：折叠/展开、Checkbox 依赖链、配置导入导出、时间窗口导航、参数滑块边界、周期切换 |
 | 数据计算测试 | 6 | 37 | 10 种滤波算法、Schmitt 触发器、抛物线拟合(2种方法)、PnL 回测引擎、时间对齐模块、边界条件 |
 | 跨周期测试 | 7 | 7 | 周期映射、PnL 数据对齐、渲染顺序、高周期切换、session_state 缓存、多视图共存、边界条件 |
+| 同向性子图测试 | 4 | 4 | 持仓掩码计算、entry/exit配对、同向子图数据、导入导出 |
 
 ### 1.2 测试策略
 
@@ -43,6 +44,7 @@
 | BUG-007 | cross_pnl 依赖链断裂 | TC-UI-02d, TC-UI-03b, CROSS-04 | —（UI 测试，无程序化测试） | 依赖链 + 导入含 cross_pnl 字段正确 |
 | BUG-008 | 极端参数显示异常 | TC-UI-05a~i | `test_extreme_q_does_not_crash`, `test_extreme_r_does_not_crash` | 极值无崩溃、无显示异常 |
 | BUG-009 | 参数滑块越界 | TC-UI-05a~h | —（UI 测试，无程序化测试） | 所有 slider 在 min/max 范围内工作正常 |
+| BUG-010 | stop_loss_pct/fc/fc2 无_imp_备份 | TC-ALIGN-04 | `test_imp_backup_created_on_import` | ✅ |
 
 ---
 
@@ -74,6 +76,10 @@
 | TC-DATA-04.5 | 极端止损 | `test_extreme_stop_loss` | ⚠️ 缺exit_reason |
 | TC-DATA-05.1~3 | 全部对齐用例 | `test_tz_mixed`等3个 | ✅ |
 | TC-DATA-06.1~8 | 边界条件 | `test_empty_array`等 | ⚠️ 06.6缺数值验证 |
+| TC-ALIGN-01 | 持仓掩码计算 | `test_holding_masks_basic` | ✅ |
+| TC-ALIGN-02 | entry/exit配对 | `test_holding_masks_unpaired` | ✅ |
+| TC-ALIGN-03 | 同向子图数据 | `test_alignment_subplot_values` | ✅ |
+| TC-ALIGN-04 | 导入导出alignment | `test_export_dict_structure` | ✅ |
 
 ---
 
@@ -823,6 +829,28 @@
 | TC-DATA-06.6 | 边界 | _fit_parabolic | P2 | 共线数据 |
 | TC-DATA-06.7 | 边界 | _compute_strategy_pnl | P2 | 全NaN filtered |
 | TC-DATA-06.8 | 边界 | _align_pnl_to_current_tf | P1 | 空 higher_dates |
+
+---
+
+## 5. 同向性子图测试 (TC-ALIGN)
+
+### TC-ALIGN-01: 持仓掩码计算
+- 优先级: P1
+- 函数: _compute_holding_masks(n_bars, entry_markers, exit_markers)
+- 验证: entry/exit配对正确, 同类型配对, 按时间顺序
+
+### TC-ALIGN-02: entry/exit不配对处理
+- 优先级: P1
+- 验证: entry多于exit→最后一个用到数据末尾; 空markers→全False
+
+### TC-ALIGN-03: 同向子图数据计算
+- 优先级: P1
+- 函数: _add_alignment_subplot(fig, t, filtered, long_pnl, short_pnl, trade_records, long_mask, short_mask, row)
+- 验证: 做多线从100%开始, 同向期间跟filtered, 非同向持平, 后续累加; 做空线同理
+
+### TC-ALIGN-04: show_alignment 导入导出
+- 优先级: P2
+- 验证: 导出含v{i}_align, 导入后session_state有_imp_v{i}_align
 
 ---
 

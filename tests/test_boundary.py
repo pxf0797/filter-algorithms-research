@@ -214,6 +214,7 @@ class TestExportImportConfig:
             "v0_strat": False,
             "v0_sl": 2.0,
             "v0_cross_pnl": False,
+            "v0_align": False,
             "span_v0_f1_ema": 10,
             "v1_tf": "60分钟",
             "v1_n": 120,
@@ -229,6 +230,7 @@ class TestExportImportConfig:
             "v1_strat": False,
             "v1_sl": 2.0,
             "v1_cross_pnl": False,
+            "v1_align": False,
             "span_v1_f1_ema": 10,
             "v2_tf": "15分钟",
             "v2_n": 120,
@@ -244,6 +246,7 @@ class TestExportImportConfig:
             "v2_strat": False,
             "v2_sl": 2.0,
             "v2_cross_pnl": False,
+            "v2_align": False,
             "span_v2_f1_ema": 10,
             "v3_tf": "5分钟",
             "v3_n": 120,
@@ -259,6 +262,7 @@ class TestExportImportConfig:
             "v3_strat": False,
             "v3_sl": 2.0,
             "v3_cross_pnl": False,
+            "v3_align": False,
             "span_v3_f1_ema": 10,
         }
 
@@ -266,6 +270,7 @@ class TestExportImportConfig:
         required_global = ["market", "ticker", "global_f"]
         required_view = [f"v{i}_tf" for i in range(4)]
         required_view += [f"v{i}_cross_pnl" for i in range(4)]
+        required_view += [f"v{i}_align" for i in range(4)]
 
         for key in required_global + required_view:
             assert key in export_data, f"导出配置缺少必需 key: {key}"
