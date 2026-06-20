@@ -1292,7 +1292,9 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
 
     cfg["show_strategy"] = st.session_state.get(f"{key}_strat", cfg.get("show_strategy", False))
     cfg["stop_loss_pct"] = st.session_state.get(f"{key}_sl", cfg.get("stop_loss_pct", 2.0))
-    cfg["show_cross_pnl"] = st.session_state.get(f"{key}_cross_pnl", cfg.get("show_cross_pnl", False))
+    _cross_val = st.session_state.get(f"{key}_cross_pnl", cfg.get("show_cross_pnl", False))
+    cfg["show_cross_pnl"] = _cross_val
+    st.session_state[f"{key}_cross_pnl"] = _cross_val  # 显式回写防key被清理
     # 颜色值在可折叠面板内，折叠时需从session_state恢复
     cfg["fc"] = st.session_state.get(f"{key}_fc", cfg.get("fc", "#00d4aa"))
     if dual and filter_id2:
