@@ -1451,6 +1451,11 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
             t, filtered, schmitt["sig"], all_pairs, pred_pairs, stop_loss_pct,
             n_extend=cfg.get("n_ext", 10),
         )
+    # DEBUG: 展开/折叠后诊断
+    st.caption(f"🔍 sch={cfg.get('show_sch')} pred={cfg.get('show_pred')} "
+               f"strat={show_strategy} cross={show_cross_pnl} | "
+               f"schmitt={'OK' if schmitt is not None else 'NO'} "
+               f"pairs={len(pred_pairs)} trades={len(trade_records)}")
 
     # 策略统计（取做多/做空最终收益更优者展示）
     has_strategy = show_strategy and long_pnl is not None and len(trade_records) > 0
