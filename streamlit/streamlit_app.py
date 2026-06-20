@@ -309,25 +309,24 @@ html, body {{ width: 100%; height: 100%; overflow: hidden; }}
 #{div_id} {{ width: 100%; height: 100%; }}
 g.hovertext {{ visibility: hidden !important; }}
 .spikeline {{ visibility: hidden !important; }}
-.date-label-{div_id} {{
+#date-tip-{div_id} {{
     display: none;
-    position: absolute;
-    z-index: 10;
-    background: rgba(30,30,44,0.90);
+    position: fixed;
+    z-index: 9999;
+    background: rgba(30,30,44,0.94);
     color: #c0c0c0;
-    padding: 2px 6px;
-    border-radius: 3px;
+    padding: 4px 8px;
+    border-radius: 4px;
     font-family: monospace;
     font-size: 11px;
     pointer-events: none;
     white-space: nowrap;
-    transform: translateX(-50%);
 }}
 </style>
 </head>
 <body>
 <div id="{div_id}"></div>
-<div id="date-label-{div_id}" class="date-label-{div_id}"></div>
+<div id="date-tip-{div_id}"></div>
 <script>
 (function() {{
     var figure = {figure_json};
@@ -338,7 +337,6 @@ g.hovertext {{ visibility: hidden !important; }}
         modeBarButtonsToRemove: ['lasso2d', 'select2d']
     }};
     Plotly.newPlot('{div_id}', figure.data, figure.layout, config).then(function(gd) {{
-        // ── Cached refs ──
         var _lastXv = -Infinity, _pending = false, _pendingXv = null, _THROTTLE_MS = 45;
         function _nearestIdx(arr, xv) {{
             var lo = 0, hi = arr.length - 1;
@@ -357,30 +355,23 @@ g.hovertext {{ visibility: hidden !important; }}
         var _xArr0 = gd.data[0].x;
         var _dates = gd.layout._dates;
         var _hasDates = _dates && _dates.length > 0;
-        var _container = document.getElementById('{div_id}');
-        var _label = document.getElementById('date-label-{div_id}');
+        var _tip = document.getElementById('date-tip-{div_id}');
+        var _dateCache = '';  // cached date string for mousemove
 
         function _apply(xv) {{
             _pending = false;
-            // ── shape-only relayout (no annotation → fast) ──
             var u = {{}};
             for (var i = 0; i < _shapeKeys.length; i++) {{ var k = _shapeKeys[i]; u[k.x0] = xv; u[k.x1] = xv; u[k.vis] = true; }}
             Plotly.relayout(gd, u);
             _lastXv = xv;
-            // ── DOM date label (bypass Plotly text pipeline) ──
             if (_hasDates && _xArr0 && _xArr0.length > 0) {{
                 var idx = _nearestIdx(_xArr0, xv);
-                var ds = (idx < _dates.length) ? _dates[idx] : '';
-                if (ds) {{
-                    var xaxis = gd._fullLayout.xaxis;
-                    var p0 = xaxis.l2p(xv) + xaxis._offset;
-                    var rect = _container.getBoundingClientRect();
-                    _label.textContent = ds;
-                    _label.style.left = (rect.left + p0) + 'px';
-                    _label.style.top = (rect.bottom + 2) + 'px';
-                    _label.style.display = 'block';
+                _dateCache = (idx < _dates.length) ? _dates[idx] : '';
+                if (_dateCache) {{
+                    _tip.textContent = _dateCache;
+                    _tip.style.display = 'block';
                 }} else {{
-                    _label.style.display = 'none';
+                    _tip.style.display = 'none';
                 }}
             }}
         }}
@@ -405,7 +396,20 @@ g.hovertext {{ visibility: hidden !important; }}
             var u = {{}};
             for (var i = 0; i < _shapeKeys.length; i++) {{ u[_shapeKeys[i].vis] = false; }}
             Plotly.relayout(gd, u);
-            _label.style.display = 'none';
+            _tip.style.display = 'none';
+            _dateCache = '';
+        }});
+
+        // Follow mouse — position tooltip at cursor
+        document.getElementById('{div_id}').addEventListener('mousemove', function(e) {{
+            if (_tip.style.display === 'block') {{
+                var tx = e.clientX + 16;
+                var tw = _tip.offsetWidth || 100;
+                if (tx + tw > window.innerWidth - 10) tx = e.clientX - tw - 16;
+                if (tx < 5) tx = 5;
+                _tip.style.left = tx + 'px';
+                _tip.style.top = (e.clientY - 28) + 'px';
+            }}
         }});
     }});
 }})();
