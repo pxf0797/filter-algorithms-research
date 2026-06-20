@@ -1228,12 +1228,14 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
                     cross_key = f"{key}_cross_pnl"
                     with c_strat[0]:
                         cfg["show_strategy"] = st.checkbox(
-                            "启用策略叠加", value=st.session_state.get(strat_key, False),
+                            "启用策略叠加", value=st.session_state.get(strat_key,
+                                st.session_state.get(f"_imp_{strat_key}", False)),
                             key=strat_key,
                             help="在Sig子图下方显示基于预测曲线+施密特信号的策略PnL")
                         # checkbox必须在if/else外始终渲染，否则widget key会被Streamlit清理
                         cfg["show_cross_pnl"] = st.checkbox(
-                            "显示高周期PnL参考", value=st.session_state.get(cross_key, False),
+                            "显示高周期PnL参考", value=st.session_state.get(cross_key,
+                                st.session_state.get(f"_imp_{cross_key}", False)),
                             key=cross_key, disabled=not cfg["show_strategy"],
                             help="在本周期PnL下方显示紧邻高周期的交易事件标记和PnL参考线")
                     if cfg["show_strategy"]:
@@ -1289,9 +1291,11 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
             sk = f"{label}_{key}_f2_{filter_id2}"
             cfg["pv2"][pname] = st.session_state.get(sk, cfg["pv2"].get(pname, 0))
 
-    cfg["show_strategy"] = st.session_state.get(f"{key}_strat", cfg.get("show_strategy", False))
+    cfg["show_strategy"] = st.session_state.get(f"{key}_strat",
+        st.session_state.get(f"_imp_{key}_strat", cfg.get("show_strategy", False)))
     cfg["stop_loss_pct"] = st.session_state.get(f"{key}_sl", cfg.get("stop_loss_pct", 2.0))
-    cfg["show_cross_pnl"] = st.session_state.get(f"{key}_cross_pnl", cfg.get("show_cross_pnl", False))
+    cfg["show_cross_pnl"] = st.session_state.get(f"{key}_cross_pnl",
+        st.session_state.get(f"_imp_{key}_cross_pnl", cfg.get("show_cross_pnl", False)))
     # 颜色值在可折叠面板内，折叠时需从session_state恢复
     cfg["fc"] = st.session_state.get(f"{key}_fc", cfg.get("fc", "#00d4aa"))
     if dual and filter_id2:
@@ -1451,11 +1455,6 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
             t, filtered, schmitt["sig"], all_pairs, pred_pairs, stop_loss_pct,
             n_extend=cfg.get("n_ext", 10),
         )
-    # DEBUG: 展开/折叠后诊断
-    st.caption(f"🔍 sch={cfg.get('show_sch')} pred={cfg.get('show_pred')} "
-               f"strat={show_strategy} cross={show_cross_pnl} | "
-               f"schmitt={'OK' if schmitt is not None else 'NO'} "
-               f"pairs={len(pred_pairs)} trades={len(trade_records)}")
 
     # 策略统计（取做多/做空最终收益更优者展示）
     has_strategy = show_strategy and long_pnl is not None and len(trade_records) > 0
@@ -1720,6 +1719,7 @@ def main():
                 config = json.loads(raw)
                 for k, v in config.items():
                     st.session_state[k] = v
+                    st.session_state[f"_imp_{k}"] = v  # 非widget备份，防rerun丢失
                 st.session_state._import_data = file_hash
                 st.sidebar.success("配置已加载")
             except Exception as e:
