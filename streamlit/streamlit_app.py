@@ -307,13 +307,27 @@ def _render_plotly(fig, height=750, dates=None):
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 html, body {{ width: 100%; height: 100%; overflow: hidden; }}
 #{div_id} {{ width: 100%; height: 100%; }}
-/* 隐藏 Plotly 原生 hover 标签和 spike，仅保留十字光标 */
 g.hovertext {{ visibility: hidden !important; }}
 .spikeline {{ visibility: hidden !important; }}
+.date-label-{div_id} {{
+    display: none;
+    position: absolute;
+    z-index: 10;
+    background: rgba(30,30,44,0.90);
+    color: #c0c0c0;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: monospace;
+    font-size: 11px;
+    pointer-events: none;
+    white-space: nowrap;
+    transform: translateX(-50%);
+}}
 </style>
 </head>
 <body>
 <div id="{div_id}"></div>
+<div id="date-label-{div_id}" class="date-label-{div_id}"></div>
 <script>
 (function() {{
     var figure = {figure_json};
@@ -324,24 +338,7 @@ g.hovertext {{ visibility: hidden !important; }}
         modeBarButtonsToRemove: ['lasso2d', 'select2d']
     }};
     Plotly.newPlot('{div_id}', figure.data, figure.layout, config).then(function(gd) {{
-        // Init: add a hidden date annotation at bottom of chart
-        var dateAnno = {{
-            text: '',
-            x: 0,
-            y: -0.02,
-            xref: 'x', yref: 'paper',
-            yanchor: 'top',
-            showarrow: false,
-            font: {{ size: 11, color: '#c0c0c0', family: 'monospace' }},
-            bgcolor: 'rgba(30,30,44,0.90)',
-            borderpad: 4,
-            visible: false,
-        }};
-        var annos = gd.layout.annotations || [];
-        annos.push(dateAnno);
-        Plotly.relayout(gd, {{ annotations: annos }});
-
-        // ── Throttled hover: binary search + 45ms gate + skip same-x ──
+        // ── Cached refs ──
         var _lastXv = -Infinity, _pending = false, _pendingXv = null, _THROTTLE_MS = 45;
         function _nearestIdx(arr, xv) {{
             var lo = 0, hi = arr.length - 1;
@@ -357,25 +354,35 @@ g.hovertext {{ visibility: hidden !important; }}
                 _shapeKeys.push({{ x0: 'shapes[' + i + '].x0', x1: 'shapes[' + i + '].x1', vis: 'shapes[' + i + '].visible' }});
             }}
         }}
-        var _annIdx = gd.layout.annotations.length - 1;
-        var _annTK = 'annotations[' + _annIdx + '].text';
-        var _annXK = 'annotations[' + _annIdx + '].x';
-        var _annVK = 'annotations[' + _annIdx + '].visible';
         var _xArr0 = gd.data[0].x;
         var _dates = gd.layout._dates;
         var _hasDates = _dates && _dates.length > 0;
+        var _container = document.getElementById('{div_id}');
+        var _label = document.getElementById('date-label-{div_id}');
 
         function _apply(xv) {{
             _pending = false;
+            // ── shape-only relayout (no annotation → fast) ──
             var u = {{}};
             for (var i = 0; i < _shapeKeys.length; i++) {{ var k = _shapeKeys[i]; u[k.x0] = xv; u[k.x1] = xv; u[k.vis] = true; }}
-            var ds = '';
-            if (_hasDates && _xArr0 && _xArr0.length > 0) {{ var idx = _nearestIdx(_xArr0, xv); if (idx < _dates.length) ds = _dates[idx]; }}
-            u[_annTK] = ds ? ' ' + ds + ' ' : '';
-            u[_annXK] = xv;
-            u[_annVK] = ds !== '';
             Plotly.relayout(gd, u);
             _lastXv = xv;
+            // ── DOM date label (bypass Plotly text pipeline) ──
+            if (_hasDates && _xArr0 && _xArr0.length > 0) {{
+                var idx = _nearestIdx(_xArr0, xv);
+                var ds = (idx < _dates.length) ? _dates[idx] : '';
+                if (ds) {{
+                    var xaxis = gd._fullLayout.xaxis;
+                    var p0 = xaxis.l2p(xv) + xaxis._offset;
+                    var rect = _container.getBoundingClientRect();
+                    _label.textContent = ds;
+                    _label.style.left = (rect.left + p0) + 'px';
+                    _label.style.top = (rect.bottom + 2) + 'px';
+                    _label.style.display = 'block';
+                }} else {{
+                    _label.style.display = 'none';
+                }}
+            }}
         }}
 
         gd.on('plotly_hover', function(evt) {{
@@ -397,8 +404,8 @@ g.hovertext {{ visibility: hidden !important; }}
             _pending = false; _pendingXv = null; _lastXv = -Infinity;
             var u = {{}};
             for (var i = 0; i < _shapeKeys.length; i++) {{ u[_shapeKeys[i].vis] = false; }}
-            u[_annVK] = false;
             Plotly.relayout(gd, u);
+            _label.style.display = 'none';
         }});
     }});
 }})();
