@@ -1135,6 +1135,79 @@ def _add_cross_pnl_subplot(fig, t, aligned, row, higher_tf=""):
                   opacity=0.4, row=row, col=1)
 
 
+def _compute_holding_masks(n_bars, entry_markers, exit_markers):
+    """从高周期入场/离场marker计算持仓区间掩码。
+
+    Args:
+        n_bars: 当前周期bar数
+        entry_markers: [(bar_idx, trade_type, pnl_val), ...]
+        exit_markers: [(bar_idx, trade_type, pnl_val, return_pct, exit_reason), ...]
+
+    Returns:
+        long_mask: np.array(bool), 高周期做多持仓区间
+        short_mask: np.array(bool), 高周期做空持仓区间
+    """
+    long_mask = np.zeros(n_bars, dtype=bool)
+    short_mask = np.zeros(n_bars, dtype=bool)
+
+    long_entries = [(b, t) for b, t, _ in entry_markers if t == "long"]
+    short_entries = [(b, t) for b, t, _ in entry_markers if t == "short"]
+    long_exits = [(b, t) for b, t, _, _, _ in exit_markers if t == "long"]
+    short_exits = [(b, t) for b, t, _, _, _ in exit_markers if t == "short"]
+
+    for i, (e_bar, _) in enumerate(long_entries):
+        x_bar = long_exits[i][0] if i < len(long_exits) else n_bars - 1
+        if e_bar < n_bars:
+            long_mask[e_bar:min(x_bar + 1, n_bars)] = True
+
+    for i, (e_bar, _) in enumerate(short_entries):
+        x_bar = short_exits[i][0] if i < len(short_exits) else n_bars - 1
+        if e_bar < n_bars:
+            short_mask[e_bar:min(x_bar + 1, n_bars)] = True
+
+    return long_mask, short_mask
+
+
+def _add_alignment_subplot(fig, t, long_pnl, short_pnl, long_mask, short_mask, row):
+    """同向性判断子图：高周期持仓时显示本周期同向PnL。
+
+    高周期做多持仓 → 显示本周期做多PnL
+    高周期做空持仓 → 显示本周期做空PnL
+    无持仓 → 100基准线
+    """
+    n = len(t)
+    aligned = np.full(n, 100.0)
+    aligned[long_mask] = long_pnl[long_mask]
+    aligned[short_mask] = short_pnl[short_mask]
+
+    # 持仓区段背景
+    for mask, color in [(long_mask, "rgba(63,185,80,0.06)"), (short_mask, "rgba(248,81,73,0.06)")]:
+        if mask.any():
+            changes = np.diff(np.concatenate([[False], mask, [False]]).astype(int))
+            starts = np.where(changes == 1)[0]
+            ends = np.where(changes == -1)[0]
+            for s, e in zip(starts, ends):
+                fig.add_trace(go.Scatter(
+                    x=[t[s], t[e-1], t[e-1], t[s]],
+                    y=[90, 90, 110, 110],
+                    fill="toself", fillcolor=color,
+                    mode="lines", line=dict(width=0),
+                    showlegend=False, hoverinfo="skip",
+                ), row=row, col=1)
+
+    # 同向PnL曲线
+    fig.add_trace(go.Scatter(
+        x=t, y=aligned,
+        mode="lines", name="同向PnL",
+        line=dict(color="#d2991d", width=1.5),
+        showlegend=False,
+    ), row=row, col=1)
+
+    # 100基准线
+    fig.add_hline(y=100, line_dash="dash", line_color="gray",
+                  opacity=0.4, row=row, col=1)
+
+
 # ---------------------------------------------------------------------------
 # Main app
 # ---------------------------------------------------------------------------
@@ -1242,6 +1315,14 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
                                 st.session_state.get(f"_imp_{cross_key}", False)),
                             key=cross_key, disabled=not cfg["show_strategy"],
                             help="在本周期PnL下方显示紧邻高周期的交易事件标记和PnL参考线")
+                        # 同向性判断子图：高周期持仓时，本周期PnL按同向显示
+                        align_key = f"{key}_align"
+                        cfg["show_alignment"] = st.checkbox(
+                            "显示同向性判断", value=st.session_state.get(align_key,
+                                st.session_state.get(f"_imp_{align_key}", False)),
+                            key=align_key,
+                            disabled=not (cfg["show_strategy"] and cfg["show_cross_pnl"]),
+                            help="高周期做多/空持仓时，本周期同向PnL才在子图体现，否则维持不变")
                     if cfg["show_strategy"]:
                         with c_strat[1]:
                             cfg["stop_loss_pct"] = st.slider(
@@ -1308,6 +1389,8 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     cfg["stop_loss_pct"] = st.session_state.get(f"{key}_sl", cfg.get("stop_loss_pct", 2.0))
     cfg["show_cross_pnl"] = st.session_state.get(f"{key}_cross_pnl",
         st.session_state.get(f"_imp_{key}_cross_pnl", cfg.get("show_cross_pnl", False)))
+    cfg["show_alignment"] = st.session_state.get(f"{key}_align",
+        st.session_state.get(f"_imp_{key}_align", cfg.get("show_alignment", False)))
     # 颜色值在可折叠面板内，折叠时需从session_state恢复
     cfg["fc"] = st.session_state.get(f"{key}_fc", cfg.get("fc", "#00d4aa"))
     if dual and filter_id2:
@@ -1461,6 +1544,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     trade_records = []
     show_strategy = cfg.get("show_strategy", False)
     show_cross_pnl = cfg.get("show_cross_pnl", False)
+    show_alignment = cfg.get("show_alignment", False)
     stop_loss_pct = cfg.get("stop_loss_pct", 2.0)
     if show_strategy and schmitt is not None and len(pred_pairs) > 0:
         long_pnl, short_pnl, trade_records = _compute_strategy_pnl(
@@ -1502,29 +1586,42 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     has_cross = (show_cross_pnl and higher_pnl is not None and
                  (len(higher_pnl.get("entry_markers", [])) > 0 or
                   len(higher_pnl.get("exit_markers", [])) > 0))
+    # 同向性判断子图：高周期PnL数据可用 + 本周期有策略PnL
+    _align_masks = None
+    if show_alignment and has_cross and has_strategy and long_pnl is not None:
+        _align_masks = _compute_holding_masks(
+            len(t), higher_pnl["entry_markers"], higher_pnl["exit_markers"])
+    has_alignment = (_align_masks is not None and
+                     (_align_masks[0].any() or _align_masks[1].any()))
     if has_s:
         if has_strategy:
             if has_cross:
-                rows = 7
-                rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.18, 0.12]
-                titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)",f"{_higher_tf}PnL参考")
-                pnl_row = 6; cross_row = 7
+                if has_alignment:
+                    rows = 8
+                    rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.16, 0.10, 0.08]
+                    titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)",f"{_higher_tf}PnL参考","同向性判断")
+                    pnl_row = 6; cross_row = 7; align_row = 8
+                else:
+                    rows = 7
+                    rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.18, 0.12]
+                    titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)",f"{_higher_tf}PnL参考")
+                    pnl_row = 6; cross_row = 7; align_row = None
             else:
                 rows = 6
                 rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.25]
                 titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)")
-                pnl_row = 6; cross_row = None
+                pnl_row = 6; cross_row = None; align_row = None
         else:
             rows = 5
             rh = [0.28, 0.14, 0.18, 0.18, 0.22]
             titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t")
-            pnl_row = None; cross_row = None
+            pnl_row = None; cross_row = None; align_row = None
         mr=1;rr=2;vr=3;sar=4;ssr=5
         ar=None
     else:
         rows = 4
         rh=[0.40,0.18,0.20,0.22]; titles=("价格&滤波","残差","速度v","加速度a")
-        mr=1;rr=2;vr=3;ar=4;sar=ssr=pnl_row=cross_row=None
+        mr=1;rr=2;vr=3;ar=4;sar=ssr=pnl_row=cross_row=align_row=None
     fig = make_subplots(rows=rows, cols=1, shared_xaxes=True,
                         vertical_spacing=0.02, row_heights=rh, subplot_titles=titles)
     fig.add_trace(go.Candlestick(x=t, open=ohlc["Open"].values.ravel(),
@@ -1676,6 +1773,12 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         fig.update_yaxes(title_text=f"{_higher_tf}(%)", row=cross_row, col=1,
                          ticksuffix="%")
 
+    # 同向性判断子图（row 8）：高周期持仓时显示本周期同向PnL
+    if has_alignment and _align_masks is not None and align_row is not None:
+        long_mask, short_mask = _align_masks
+        _add_alignment_subplot(fig, t, long_pnl, short_pnl, long_mask, short_mask, row=align_row)
+        fig.update_yaxes(title_text="同向(%)", row=align_row, col=1, ticksuffix="%")
+
     if ar is not None and not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=acc, mode="lines", name="a",
             line=dict(color="#ffa502", width=1.5)), row=ar, col=1)
@@ -1689,6 +1792,8 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     fh = (540 if has_s else 420) if compact else (880 if has_s else 700)
     if has_cross:
         fh += 80  # 跨周期子图额外高度
+    if has_alignment:
+        fh += 50  # 同向性子图额外高度
     fig.update_layout(template="plotly_dark", height=fh,
         margin=dict(l=10,r=10,t=25,b=10), hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=9)))
@@ -1902,6 +2007,7 @@ def main():
         export_data[f"v{i}_strat"] = cfg.get("show_strategy", False)
         export_data[f"v{i}_sl"] = cfg.get("stop_loss_pct", 2.0)
         export_data[f"v{i}_cross_pnl"] = cfg.get("show_cross_pnl", False)
+        export_data[f"v{i}_align"] = cfg.get("show_alignment", False)
         # Use slider label (Chinese) as key prefix, matching _render_param_slider
         f1 = FILTERS.get(filter_id, {})
         for pname, pval in cfg.get("pv", {}).items():
