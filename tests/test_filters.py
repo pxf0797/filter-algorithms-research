@@ -138,6 +138,27 @@ class TestNoiseReduction:
             f"Butterworth: orig_mse={orig_mse:.4f}, filt_mse={filt_mse:.4f}"
         )
 
+    def test_wma_denoise(self, noisy_sine, clean_sine, time_index):
+        """TC-DATA-01.4: WMA对含噪正弦波的平滑效果"""
+        result = apply_wma(noisy_sine, time_index, window=3)
+        orig_mse = np.mean((noisy_sine - clean_sine)**2)
+        result_mse = np.mean((result - clean_sine)**2)
+        assert result_mse < orig_mse, f"WMA should reduce noise: {result_mse} >= {orig_mse}"
+
+    def test_butterworth_nyquist_clamp(self, noisy_sine, time_index):
+        """TC-DATA-01.9: Butterworth cutoff>=Nyquist时自动钳制"""
+        # cutoff=0.5 (Nyquist) 不应崩溃
+        result = apply_butterworth(noisy_sine, time_index, order=4, cutoff=0.5)
+        assert len(result) == len(noisy_sine)
+        assert not np.all(np.isnan(result))
+
+    def test_median_impulse_removal(self):
+        """TC-DATA-01.10: Median window=3 脉冲去除"""
+        signal = np.array([1.0, 100.0, 2.0, 1.0, 2.0], dtype=float)
+        result = apply_median(signal, np.arange(len(signal)), window=3)
+        # 中值滤波后 100 应被平滑
+        assert result[1] < 50, f"Median should suppress impulse, got {result[1]}"
+
 
 # ===================================================================
 # SECTION 3 — Edge cases

@@ -8,6 +8,7 @@ import pytest
 from streamlit_app import (
     _compute_strategy_pnl, _find_all_pairs, _align_pnl_to_current_tf,
     _fit_parabolic, _fit_physics_parabola, _schmitt_trigger,
+    TF_HIERARCHY, ALL_TFS,
 )
 
 
@@ -137,6 +138,18 @@ class TestFitBoundary:
         y = np.array([100.0, 101.0, 102.0])
         result = _fit_physics_parabola(x, y, 0, 2)
         assert result is None, "denom≈0 → None"
+
+    @pytest.mark.slow
+    def test_collinear_parabolic_fit_values(self):
+        """TC-DATA-06.6: 共线数据抛物线拟合 → a~0, b~1, c~1"""
+        x = np.arange(10, dtype=float)
+        y = x + 1.0  # y = x + 1 (完全线性)
+        result = _fit_parabolic(x, y, 0, 9)
+        assert result is not None
+        a, b, c = result["a"], result["b"], result["c"]
+        assert abs(a) < 0.01, f"Linear data should have a~0, got a={a}"
+        assert abs(b - 1.0) < 0.15, f"Linear data should have b~1, got b={b}"
+        assert abs(c - 1.0) < 0.5, f"Linear data should have c~1, got c={c}"
 
 
 # =========================================================================
@@ -399,3 +412,24 @@ class TestAlignPnlBoundary:
         assert result["exit_markers"] == []
         # PnL 对齐依然应正常
         assert not np.all(np.isnan(result["aligned_long"]))
+
+
+# =========================================================================
+# CROSS-01: TF_HIERARCHY 链完整性验证
+# =========================================================================
+
+class TestCrossTfHierarchy:
+
+    def test_tf_hierarchy_chain(self):
+        """CROSS-01: 验证8周期映射链完整性"""
+        assert TF_HIERARCHY["1分钟"] == "5分钟"
+        assert TF_HIERARCHY["5分钟"] == "15分钟"
+        assert TF_HIERARCHY["15分钟"] == "60分钟"
+        assert TF_HIERARCHY["60分钟"] == "日线"
+        assert TF_HIERARCHY["日线"] == "周线"
+        assert TF_HIERARCHY["周线"] == "月线"
+        assert TF_HIERARCHY["月线"] == "季线"
+        assert TF_HIERARCHY["季线"] is None
+        # 验证所有key都存在
+        for tf in ALL_TFS:
+            assert tf in TF_HIERARCHY, f"Missing TF_HIERARCHY entry for {tf}"

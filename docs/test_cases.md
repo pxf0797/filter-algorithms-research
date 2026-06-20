@@ -32,17 +32,48 @@
 
 ### 1.4 Bug 回归矩阵
 
-| Bug ID | 描述 | 关联 TC | 验证通过标准 |
-|--------|------|---------|------------|
-| BUG-001 | 页面崩溃/无响应 | TC-UI-04, TC-UI-06, TC-DATA-01.6~7 | 前移/周期切换/空数据无崩溃 |
-| BUG-002 | 时间窗口计算错误 | TC-UI-04d, TC-UI-06f, TC-DATA-05.1~3 | 所有8周期时间窗口正确，时区对齐无误 |
-| BUG-003 | Checkbox 级联状态异常 | TC-UI-02a~e | 16种组合全部验证，disabled 状态正确 |
-| BUG-004 | 配置导入导出失败 | TC-UI-03a~e | 往返测试通过，边界条件处理正确 |
-| BUG-005 | 折叠后颜色/参数丢失 | TC-UI-01d, TC-UI-03d | 折叠后所有参数值(含颜色)保留 |
-| BUG-006 | 折叠/展开滤波参数漂移 | TC-UI-01e | slider 极值折叠后不漂移 |
-| BUG-007 | cross_pnl 依赖链断裂 | TC-UI-02d, TC-UI-03b, CROSS-04 | 依赖链 + 导入含 cross_pnl 字段正确 |
-| BUG-008 | 极端参数显示异常 | TC-UI-05a~i | 极值无崩溃、无显示异常 |
-| BUG-009 | 参数滑块越界 | TC-UI-05a~h | 所有 slider 在 min/max 范围内工作正常 |
+| Bug ID | 描述 | 关联 TC | 程序化测试函数 | 验证通过标准 |
+|--------|------|---------|---------------|------------|
+| BUG-001 | 页面崩溃/无响应 | TC-UI-04, TC-UI-06, TC-DATA-01.6~7 | `test_empty_array_raises`, `test_all_nan` | 前移/周期切换/空数据无崩溃 |
+| BUG-002 | 时间窗口计算错误 | TC-UI-04d, TC-UI-06f, TC-DATA-05.1~3 | `test_tz_mixed_hkt_naive`, `test_no_time_overlap`, `test_higher_shorter_than_current` | 所有8周期时间窗口正确，时区对齐无误 |
+| BUG-003 | Checkbox 级联状态异常 | TC-UI-02a~e | —（UI 测试，无程序化测试） | 16种组合全部验证，disabled 状态正确 |
+| BUG-004 | 配置导入导出失败 | TC-UI-03a~e | `test_export_dict_structure`, `test_imp_backup_created_on_import` | 往返测试通过，边界条件处理正确 |
+| BUG-005 | 折叠后颜色/参数丢失 | TC-UI-01d, TC-UI-03d | —（UI 测试，无程序化测试） | 折叠后所有参数值(含颜色)保留 |
+| BUG-006 | 折叠/展开滤波参数漂移 | TC-UI-01e | —（UI 测试，无程序化测试） | slider 极值折叠后不漂移 |
+| BUG-007 | cross_pnl 依赖链断裂 | TC-UI-02d, TC-UI-03b, CROSS-04 | —（UI 测试，无程序化测试） | 依赖链 + 导入含 cross_pnl 字段正确 |
+| BUG-008 | 极端参数显示异常 | TC-UI-05a~i | `test_extreme_q_does_not_crash`, `test_extreme_r_does_not_crash` | 极值无崩溃、无显示异常 |
+| BUG-009 | 参数滑块越界 | TC-UI-05a~h | —（UI 测试，无程序化测试） | 所有 slider 在 min/max 范围内工作正常 |
+
+---
+
+## 4. 程序化测试覆盖状态
+
+| TC编号 | 规格用例 | 测试函数 | 状态 |
+|--------|---------|---------|------|
+| TC-DATA-01.1 | SMA常量信号 | `test_sma_constant` | ✅ |
+| TC-DATA-01.2 | window>len | `test_large_window_vs_signal_length` | ✅ |
+| TC-DATA-01.3 | EMA常量信号 | `test_ema_constant` | ✅ |
+| TC-DATA-01.4 | WMA噪声平滑 | — | ❌ 待补充 |
+| TC-DATA-01.5 | window=1 | `test_window_1` | ✅ |
+| TC-DATA-01.6 | 空数组 | `test_empty_array_raises` | ✅ |
+| TC-DATA-01.7 | 全NaN | `test_all_nan` | ✅ |
+| TC-DATA-01.8 | Kalman收敛 | `test_constant_signal_convergence` | ✅ |
+| TC-DATA-01.9 | Butterworth Nyquist | — | ❌ 待补充 |
+| TC-DATA-01.10 | Median脉冲 | — | ❌ 待补充 |
+| TC-DATA-02.1 | 死区验证 | `test_deadzone_no_accel` | ✅ |
+| TC-DATA-02.2 | 做多触发 | `test_long_trigger` | ✅ |
+| TC-DATA-02.3 | 滞回验证 | `test_hysteresis` | ✅ |
+| TC-DATA-02.4 | 短序列→None | `test_short_sequence_returns_none` | ✅ |
+| TC-DATA-02.5 | NaN传播 | `test_nan_propagation` | ✅ |
+| TC-DATA-02.6 | v=0,a=0 | `test_constant_velocity` | ⚠️ 输入不精确 |
+| TC-DATA-03.1~5 | 全部拟合用例 | `test_exact_quadratic`等5个 | ✅ |
+| TC-DATA-04.1 | 空pairs | `test_empty_pairs` | ✅ |
+| TC-DATA-04.2 | 做多止盈 | `test_long_trade` | ⚠️ 缺exit_reason |
+| TC-DATA-04.3 | 止损触发 | `test_stop_loss_trigger` | ⚠️ 缺exit_idx |
+| TC-DATA-04.4 | 连续交易 | `test_independent_capital_pools` | ⚠️ 非连续 |
+| TC-DATA-04.5 | 极端止损 | `test_extreme_stop_loss` | ⚠️ 缺exit_reason |
+| TC-DATA-05.1~3 | 全部对齐用例 | `test_tz_mixed`等3个 | ✅ |
+| TC-DATA-06.1~8 | 边界条件 | `test_empty_array`等 | ⚠️ 06.6缺数值验证 |
 
 ---
 
@@ -1037,7 +1068,18 @@
 21. INT-02（4视图同时运行稳定性）
 22. INT-03（跨周期+时间窗口+周期切换联合）
 
-### D. 已知风险
+### D. 测试运行命令
+
+```bash
+cd /Users/xfpan/claude/filter_research
+python3 -m pytest tests/ -v              # 全部86个测试
+python3 -m pytest tests/ -m filter -v    # 仅滤波器
+python3 -m pytest tests/ -m signal -v    # 仅信号
+python3 -m pytest tests/ -m strategy -v  # 仅策略
+python3 -m pytest tests/ -m alignment -v # 仅对齐
+```
+
+### E. 已知风险
 
 - **st.rerun() 限流**: 快速连击折叠按钮可能触发 Streamlit 的 rerun 限流，操作时应间隔 1-2 秒
 - **Yahoo Finance API 速率限制**: n_pts 切换后需等待数据重新获取，快速切换可能触发 TTL 缓存

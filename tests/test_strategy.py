@@ -8,6 +8,7 @@ import pytest
 from streamlit_app import (
     _fit_parabolic, _fit_physics_parabola,
     _compute_strategy_pnl, _add_prediction_traces,
+    _find_all_pairs,
 )
 
 
@@ -241,6 +242,8 @@ class TestComputeStrategyPnL:
         )
         assert len(trades) >= 1, "Expected at least 1 trade"
         assert trades[0]["type"] == "long"
+        assert trades[0]["exit_reason"] in ("take_profit", "eod"), f"Expected take_profit or eod, got {trades[0]['exit_reason']}"
+        assert trades[0]["return_pct"] > 0, "Long trade should have positive return"
 
     @pytest.mark.strategy
     def test_short_trade(self):
@@ -283,6 +286,11 @@ class TestComputeStrategyPnL:
                 assert tr["return_pct"] < 0, (
                     f"Stop-loss trade had positive return: {tr['return_pct']}"
                 )
+            # 验证止损发生在保护期内 (n_extend=10)
+            n_extend_val = 10
+            for t_ in stop_trades:
+                assert t_["exit_idx"] <= t_["entry_idx"] + n_extend_val + 1, \
+                    f"Stop-loss should happen in protection period, exit={t_['exit_idx']}, entry={t_['entry_idx']}"
 
     @pytest.mark.strategy
     def test_independent_capital_pools(self):
@@ -339,6 +347,38 @@ class TestComputeStrategyPnL:
         assert trades2[0]["type"] == "short"
 
     @pytest.mark.strategy
+    def test_sequential_trades(self):
+        """TC-DATA-04.4: 连续多笔交易序列，long后接short"""
+        n = 80
+        t = np.arange(n, dtype=float)
+        # 构造先涨后跌的价格序列
+        filtered = np.concatenate([
+            np.linspace(100, 130, 40),   # 上涨段 (long)
+            np.linspace(130, 95, 40),    # 下跌段 (short)
+        ])
+        # 构造信号: 前段+1(做多), 后段-1(做空)
+        sig_t = np.zeros(n, dtype=int)
+        sig_t[5:35] = 1   # long signal
+        sig_t[45:75] = -1  # short signal
+
+        all_pairs = _find_all_pairs(sig_t)
+        # 为每个pair构造预测数据
+        pred_pairs = []
+        for ps, pe in all_pairs:
+            if pe - ps >= 3:
+                fr = _fit_physics_parabola(t, filtered, ps, pe)
+                if fr is not None:
+                    pred_pairs.append({"fit_result": fr, "fit_start": ps, "pair_end": pe})
+
+        long_pnl, short_pnl, trades = _compute_strategy_pnl(
+            t, filtered, sig_t, all_pairs, pred_pairs, stop_loss_pct=5.0, n_extend=10
+        )
+
+        assert len(trades) >= 1, f"Expected at least 1 trade, got {len(trades)}"
+        # 验证long和short PnL独立
+        assert not np.allclose(long_pnl, short_pnl), "Long and short PnL should differ"
+
+    @pytest.mark.strategy
     def test_extreme_stop_loss(self):
         """Very tight stop (0.5%) should trigger easily; loose (1000%) should not.
 
@@ -367,13 +407,17 @@ class TestComputeStrategyPnL:
             t, filtered, sig_t, all_pairs, pred_pairs.copy(), 1000.0, 10
         )
 
-        tight_sl = sum(1 for tr in trades_tight if tr["exit_reason"] == "stop_loss")
-        loose_sl = sum(1 for tr in trades_loose if tr["exit_reason"] == "stop_loss")
+        tight_sl_trades = [t_ for t_ in trades_tight if t_["exit_reason"] == "stop_loss"]
+        loose_sl_trades = [t_ for t_ in trades_loose if t_["exit_reason"] == "stop_loss"]
+        tight_sl = len(tight_sl_trades)
+        loose_sl = len(loose_sl_trades)
 
         # Tight stop should have more stop-loss triggers than loose
         assert tight_sl >= loose_sl, (
             f"Tight({tight_sl}) should have >= stop-losses vs loose({loose_sl})"
         )
+        assert len(tight_sl_trades) >= len(loose_sl_trades), \
+            "Tighter stop-loss should trigger more stop exits"
 
 
 # ============================================================================

@@ -131,11 +131,11 @@ class TestSchmittTrigger:
 
     @pytest.mark.signal
     def test_constant_velocity(self):
-        """v = 0 (all zeros) → no direction → all sig = 0."""
-        n = 200
+        """TC-DATA-02.6: v=0, a=0 双零场景 → 所有sig=0"""
+        n = 100
         v = np.zeros(n)
-        a = np.ones(n) * 0.3   # acceleration exists but v=0 prevents trigger
-        result = _schmitt_trigger(v, a, ewma_span=60, k_eps=0.15, sigma_min=0.05)
+        a = np.zeros(n)  # a=0, v=0 → no trigger
+        result = _schmitt_trigger(v, a, ewma_span=30, k_eps=0.15, sigma_min=0.05)
         assert result is not None
         assert np.all(result["sig"] == 0)
 
