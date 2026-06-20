@@ -1231,6 +1231,11 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
                             "启用策略叠加", value=st.session_state.get(strat_key, False),
                             key=strat_key,
                             help="在Sig子图下方显示基于预测曲线+施密特信号的策略PnL")
+                        # checkbox必须在if/else外始终渲染，否则widget key会被Streamlit清理
+                        cfg["show_cross_pnl"] = st.checkbox(
+                            "显示高周期PnL参考", value=st.session_state.get(cross_key, False),
+                            key=cross_key, disabled=not cfg["show_strategy"],
+                            help="在本周期PnL下方显示紧邻高周期的交易事件标记和PnL参考线")
                     if cfg["show_strategy"]:
                         with c_strat[1]:
                             cfg["stop_loss_pct"] = st.slider(
@@ -1238,14 +1243,8 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
                                 st.session_state.get(sl_key, 2.0), 0.5,
                                 key=sl_key,
                                 help="预测偏差超过此阈值即止损离场")
-                            # 跨周期PnL参考子图
-                            cfg["show_cross_pnl"] = st.checkbox(
-                                "显示高周期PnL参考", value=st.session_state.get(cross_key, False),
-                                key=cross_key,
-                                help="在本周期PnL下方显示紧邻高周期的交易事件标记和PnL参考线")
                     else:
                         cfg["stop_loss_pct"] = st.session_state.get(sl_key, 2.0)
-                        cfg["show_cross_pnl"] = st.session_state.get(cross_key, False)
 
     # 滤波参数 — 可折叠
     sf = FILTERS[filter_id]; cfg["pv"] = {}
@@ -1292,9 +1291,7 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
 
     cfg["show_strategy"] = st.session_state.get(f"{key}_strat", cfg.get("show_strategy", False))
     cfg["stop_loss_pct"] = st.session_state.get(f"{key}_sl", cfg.get("stop_loss_pct", 2.0))
-    _cross_val = st.session_state.get(f"{key}_cross_pnl", cfg.get("show_cross_pnl", False))
-    cfg["show_cross_pnl"] = _cross_val
-    st.session_state[f"{key}_cross_pnl"] = _cross_val  # 显式回写防key被清理
+    cfg["show_cross_pnl"] = st.session_state.get(f"{key}_cross_pnl", cfg.get("show_cross_pnl", False))
     # 颜色值在可折叠面板内，折叠时需从session_state恢复
     cfg["fc"] = st.session_state.get(f"{key}_fc", cfg.get("fc", "#00d4aa"))
     if dual and filter_id2:
