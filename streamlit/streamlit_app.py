@@ -993,9 +993,18 @@ def _align_pnl_to_current_tf(higher_dates, higher_pnl_long, higher_pnl_short,
         return {"aligned_long": aligned_long, "aligned_short": aligned_short,
                 "entry_markers": entry_markers, "exit_markers": exit_markers}
 
-    # 将高周期日期转为 numpy datetime64 数组便于比较
-    hd = np.array(higher_dates, dtype="datetime64[ns]")
-    cd = np.array(current_dates, dtype="datetime64[ns]")
+    # 统一时区：日内数据带时区(HKT)，日线/周线无时区
+    # np.datetime64 无法直接比较 tz-aware 和 tz-naive，需先归一化
+    def _normalize_dates(dates):
+        """去掉时区信息，按各自字面值比较（日期级对齐）"""
+        result = pd.DatetimeIndex(dates)
+        if result.tz is not None:
+            # tz-aware → 保持本地时间字面值，去掉时区标记
+            result = result.tz_localize(None)
+        return np.array(result, dtype="datetime64[ns]")
+
+    hd = _normalize_dates(higher_dates)
+    cd = _normalize_dates(current_dates)
 
     # 对当前周期的每个bar，找 ≤ 该时间戳的最近高周期bar（前向填充）
     for i in range(n):
@@ -1042,7 +1051,7 @@ def _align_pnl_to_current_tf(higher_dates, higher_pnl_long, higher_pnl_short,
     }
 
 
-def _add_cross_pnl_subplot(fig, t, aligned, row):
+def _add_cross_pnl_subplot(fig, t, aligned, row, higher_tf=""):
     """在指定row添加高周期PnL参考子图（事件标记+参考线+盈亏标注）。
 
     Args:
@@ -1050,17 +1059,19 @@ def _add_cross_pnl_subplot(fig, t, aligned, row):
         t: np.array, 当前周期的bar index
         aligned: dict, _align_pnl_to_current_tf 的返回值
         row: int, 子图行号
+        higher_tf: str, 高周期名称（如"日线"）
     """
     color_long = "#3fb950"
     color_short = "#f85149"
     marker_color = "#d2991d"  # 金色，高周期标记统一色
+    tf_label = higher_tf or "高周期"
 
     # 高周期做多PnL参考线（虚线）
     mask_long = ~np.isnan(aligned["aligned_long"])
     if mask_long.any():
         fig.add_trace(go.Scatter(
             x=t[mask_long], y=aligned["aligned_long"][mask_long],
-            mode="lines", name="高周期多",
+            mode="lines", name=f"{tf_label}多",
             line=dict(color=color_long, width=1.2, dash="dot"),
             showlegend=False,
         ), row=row, col=1)
@@ -1070,7 +1081,7 @@ def _add_cross_pnl_subplot(fig, t, aligned, row):
     if mask_short.any():
         fig.add_trace(go.Scatter(
             x=t[mask_short], y=aligned["aligned_short"][mask_short],
-            mode="lines", name="高周期空",
+            mode="lines", name=f"{tf_label}空",
             line=dict(color=color_short, width=1.2, dash="dot"),
             showlegend=False,
         ), row=row, col=1)
@@ -1084,7 +1095,7 @@ def _add_cross_pnl_subplot(fig, t, aligned, row):
                 marker=dict(color=marker_color, symbol="triangle-up", size=9,
                             line=dict(width=1, color="rgba(0,0,0,0.3)")),
                 showlegend=False,
-                hovertext=f"高周期入场 {'多' if trade_type == 'long' else '空'}",
+                hovertext=f"{tf_label}入场 {'多' if trade_type == 'long' else '空'}",
                 hoverinfo="text",
             ), row=row, col=1)
 
@@ -1102,7 +1113,7 @@ def _add_cross_pnl_subplot(fig, t, aligned, row):
             marker=dict(color=marker_color, symbol=sym, size=9,
                         line=dict(width=1, color=ec)),
             showlegend=False,
-            hovertext=f"高周期离场 {'多' if trade_type == 'long' else '空'} | {ret_pct:+.2f}%",
+            hovertext=f"{tf_label}离场 {'多' if trade_type == 'long' else '空'} | {ret_pct:+.2f}%",
             hoverinfo="text",
         ), row=row, col=1)
 
@@ -1476,7 +1487,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
             if has_cross:
                 rows = 7
                 rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.18, 0.12]
-                titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)","高周期PnL参考")
+                titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)",f"{_higher_tf}PnL参考")
                 pnl_row = 6; cross_row = 7
             else:
                 rows = 6
@@ -1641,8 +1652,8 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
 
     # 跨周期PnL参考子图（row 7）
     if has_cross and higher_pnl is not None:
-        _add_cross_pnl_subplot(fig, t, higher_pnl, row=cross_row)
-        fig.update_yaxes(title_text="高周期(%)", row=cross_row, col=1,
+        _add_cross_pnl_subplot(fig, t, higher_pnl, row=cross_row, higher_tf=_higher_tf)
+        fig.update_yaxes(title_text=f"{_higher_tf}(%)", row=cross_row, col=1,
                          ticksuffix="%")
 
     if ar is not None and not np.all(np.isnan(filtered)):
