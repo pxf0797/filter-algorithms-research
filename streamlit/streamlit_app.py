@@ -1165,12 +1165,12 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
         cfg["n_pts"] = _compact_slider("N", 20, 300, 120, 10, key=f"{key}_n")
     with c1[2]:
         cfg["show_sch"] = st.checkbox("施密特", value=True, key=f"{key}_sch")
-    cfg["ke"] = st.session_state.get(f"{key}_ke", 0.15)
-    cfg["sm"] = st.session_state.get(f"{key}_sm", 0.05)
-    cfg["ew"] = st.session_state.get(f"{key}_ew", 60)
-    cfg["show_pred"] = st.session_state.get(f"{key}_pred", False)
-    cfg["n_ext"] = st.session_state.get(f"{key}_next", 10)
-    cfg["fit_mode"] = st.session_state.get(f"{key}_fm", "poly2")
+    cfg["ke"] = st.session_state.get(f"{key}_ke", st.session_state.get(f"_imp_{key}_ke", 0.15))
+    cfg["sm"] = st.session_state.get(f"{key}_sm", st.session_state.get(f"_imp_{key}_sm", 0.05))
+    cfg["ew"] = st.session_state.get(f"{key}_ew", st.session_state.get(f"_imp_{key}_ew", 60))
+    cfg["show_pred"] = st.session_state.get(f"{key}_pred", st.session_state.get(f"_imp_{key}_pred", True))
+    cfg["n_ext"] = st.session_state.get(f"{key}_next", st.session_state.get(f"_imp_{key}_next", 8))
+    cfg["fit_mode"] = st.session_state.get(f"{key}_fm", st.session_state.get(f"_imp_{key}_fm", "parabola"))
     if cfg["show_sch"]:
         with c1[3]: cfg["show_pred"] = st.checkbox("预测", value=True, key=f"{key}_pred")
 
@@ -1200,7 +1200,9 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
             with st.expander("预测参数", expanded=exp_all):
                 c3 = st.columns([1.5, 1.0])
                 fit_key = f"{key}_fm"
-                fit_idx = 1 if st.session_state.get(fit_key, "poly2") == "parabola" else 0
+                _fm_val = st.session_state.get(fit_key,
+                    st.session_state.get(f"_imp_{fit_key}", "parabola"))
+                fit_idx = 1 if _fm_val == "parabola" else 0
                 with c3[0]: cfg["fit_mode"] = st.radio("拟合方式",
                     ["poly2", "parabola"], index=fit_idx, horizontal=True,
                     format_func=lambda x: "二次多项式" if x=="poly2" else "抛物线拟合",
@@ -1275,13 +1277,19 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     else:
         cfg["pv2"] = {}; cfg["fc2"] = "#ff6b6b"
 
-    # 从 session_state 读取最终值（导入参数唯一真相源）
-    cfg["ke"] = st.session_state.get(f"{key}_ke", cfg["ke"])
-    cfg["sm"] = st.session_state.get(f"{key}_sm", cfg["sm"])
-    cfg["ew"] = st.session_state.get(f"{key}_ew", cfg["ew"])
-    cfg["show_pred"] = st.session_state.get(f"{key}_pred", cfg["show_pred"])
-    cfg["fit_mode"] = st.session_state.get(f"{key}_fm", cfg["fit_mode"])
-    cfg["n_ext"] = st.session_state.get(f"{key}_next", cfg["n_ext"])
+    # 从 session_state 读取最终值（导入参数唯一真相源，含_imp_备份防rerun丢失）
+    cfg["ke"] = st.session_state.get(f"{key}_ke",
+        st.session_state.get(f"_imp_{key}_ke", cfg["ke"]))
+    cfg["sm"] = st.session_state.get(f"{key}_sm",
+        st.session_state.get(f"_imp_{key}_sm", cfg["sm"]))
+    cfg["ew"] = st.session_state.get(f"{key}_ew",
+        st.session_state.get(f"_imp_{key}_ew", cfg["ew"]))
+    cfg["show_pred"] = st.session_state.get(f"{key}_pred",
+        st.session_state.get(f"_imp_{key}_pred", cfg["show_pred"]))
+    cfg["fit_mode"] = st.session_state.get(f"{key}_fm",
+        st.session_state.get(f"_imp_{key}_fm", cfg["fit_mode"]))
+    cfg["n_ext"] = st.session_state.get(f"{key}_next",
+        st.session_state.get(f"_imp_{key}_next", cfg["n_ext"]))
     # 滤波参数也需保护（含_imp_备份防rerun丢失）
     for pname in sf["params"]:
         label = sf["params"][pname][0]
