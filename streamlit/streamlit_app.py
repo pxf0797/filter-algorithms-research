@@ -1659,7 +1659,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
                          ticksuffix="%")
 
     # 跨周期PnL参考子图（row 7）
-    if has_cross and higher_pnl is not None:
+    if has_cross and higher_pnl is not None and cross_row is not None:
         _add_cross_pnl_subplot(fig, t, higher_pnl, row=cross_row, higher_tf=_higher_tf)
         fig.update_yaxes(title_text=f"{_higher_tf}(%)", row=cross_row, col=1,
                          ticksuffix="%")
