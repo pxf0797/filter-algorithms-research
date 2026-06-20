@@ -1087,10 +1087,11 @@ def _add_cross_pnl_subplot(fig, t, aligned, row, higher_tf=""):
         ), row=row, col=1)
 
         # 盈亏数字标注
-        label_color = color_long if ret_pct > 0 else color_short
+        label_color = "#f85149" if exit_reason == "stop_loss" else "#3fb950"
+        arrow = "↑" if trade_type == "long" else "↓"
         fig.add_annotation(
             x=t[bar_idx], y=pnl_val,
-            text=f"{ret_pct:+.1f}%",
+            text=f"{arrow}{ret_pct:+.1f}%",
             showarrow=False,
             font=dict(size=8, color=label_color),
             yshift=12,
@@ -1220,10 +1221,11 @@ def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
             ), row=row, col=1)
             # 盈亏百分比标注
             ret_pct = trade["return_pct"]
-            label_color = "#3fb950" if ret_pct > 0 else "#f85149"
+            label_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
+            arrow = "↑" if trade["type"] == "long" else "↓"
             fig.add_annotation(
                 x=seg_t[-1], y=seg_pnl[-1],
-                text=f"{ret_pct:+.1f}%",
+                text=f"{arrow}{ret_pct:+.1f}%",
                 showarrow=False,
                 font=dict(size=8, color=label_color),
                 yshift=12,
@@ -1791,10 +1793,11 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
                 ), row=pnl_row, col=1)
                 # 盈亏百分比标注
                 ret_pct = trade["return_pct"]
-                label_color = "#3fb950" if ret_pct > 0 else "#f85149"
+                label_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
+                arrow = "↑" if trade["type"] == "long" else "↓"
                 fig.add_annotation(
                     x=seg_t[-1], y=seg_pnl[-1],
-                    text=f"{ret_pct:+.1f}%",
+                    text=f"{arrow}{ret_pct:+.1f}%",
                     showarrow=False,
                     font=dict(size=8, color=label_color),
                     yshift=12,
