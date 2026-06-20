@@ -1662,7 +1662,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         rh=[0.40,0.18,0.20,0.22]; titles=("价格&滤波","残差","速度v","加速度a")
         mr=1;rr=2;vr=3;ar=4;sar=ssr=pnl_row=cross_row=align_row=None
     fig = make_subplots(rows=rows, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.02, row_heights=rh, subplot_titles=titles)
+                        vertical_spacing=0.01, row_heights=rh, subplot_titles=titles)
     fig.add_trace(go.Candlestick(x=t, open=ohlc["Open"].values.ravel(),
         high=ohlc["High"].values.ravel(), low=ohlc["Low"].values.ravel(),
         close=ohlc["Close"].values.ravel(), name="K",
