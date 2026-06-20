@@ -1394,11 +1394,13 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
                         with c_strat[1]:
                             cfg["stop_loss_pct"] = st.slider(
                                 "止损阈值(%)", 0.5, 10.0,
-                                st.session_state.get(sl_key, 2.0), 0.5,
+                                st.session_state.get(sl_key,
+                                    st.session_state.get(f"_imp_{sl_key}", 2.0)), 0.5,
                                 key=sl_key,
                                 help="预测偏差超过此阈值即止损离场")
                     else:
-                        cfg["stop_loss_pct"] = st.session_state.get(sl_key, 2.0)
+                        cfg["stop_loss_pct"] = st.session_state.get(sl_key,
+                            st.session_state.get(f"_imp_{sl_key}", 2.0))
 
     # 滤波参数 — 可折叠
     sf = FILTERS[filter_id]; cfg["pv"] = {}
@@ -1453,15 +1455,18 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
 
     cfg["show_strategy"] = st.session_state.get(f"{key}_strat",
         st.session_state.get(f"_imp_{key}_strat", cfg.get("show_strategy", False)))
-    cfg["stop_loss_pct"] = st.session_state.get(f"{key}_sl", cfg.get("stop_loss_pct", 2.0))
+    cfg["stop_loss_pct"] = st.session_state.get(f"{key}_sl",
+        st.session_state.get(f"_imp_{key}_sl", cfg.get("stop_loss_pct", 2.0)))
     cfg["show_cross_pnl"] = st.session_state.get(f"{key}_cross_pnl",
         st.session_state.get(f"_imp_{key}_cross_pnl", cfg.get("show_cross_pnl", False)))
     cfg["show_alignment"] = st.session_state.get(f"{key}_align",
         st.session_state.get(f"_imp_{key}_align", cfg.get("show_alignment", False)))
     # 颜色值在可折叠面板内，折叠时需从session_state恢复
-    cfg["fc"] = st.session_state.get(f"{key}_fc", cfg.get("fc", "#00d4aa"))
+    cfg["fc"] = st.session_state.get(f"{key}_fc",
+        st.session_state.get(f"_imp_{key}_fc", cfg.get("fc", "#00d4aa")))
     if dual and filter_id2:
-        cfg["fc2"] = st.session_state.get(f"{key}_fc2", cfg.get("fc2", "#ff6b6b"))
+        cfg["fc2"] = st.session_state.get(f"{key}_fc2",
+            st.session_state.get(f"_imp_{key}_fc2", cfg.get("fc2", "#ff6b6b")))
 
     return cfg
 
