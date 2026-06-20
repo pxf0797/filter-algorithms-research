@@ -1182,13 +1182,13 @@ def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
     """
     n = len(t)
 
-    # 做多曲线：sample-and-hold
+    # 做多曲线：独立累积，同向期间跟随Row6涨跌幅，非同向hold
     long_filtered = np.full(n, 100.0)
-    for i in range(n):
-        if long_mask[i]:
-            long_filtered[i] = long_pnl[i]
+    for i in range(1, n):
+        if long_mask[i] and long_pnl[i - 1] != 0:
+            long_filtered[i] = long_filtered[i - 1] * (long_pnl[i] / long_pnl[i - 1])
         else:
-            long_filtered[i] = long_filtered[i - 1] if i > 0 else 100.0
+            long_filtered[i] = long_filtered[i - 1]
     fig.add_trace(go.Scatter(
         x=t, y=long_filtered,
         mode="lines", name="做多PnL",
@@ -1196,13 +1196,13 @@ def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
         showlegend=False,
     ), row=row, col=1)
 
-    # 做空曲线：sample-and-hold
+    # 做空曲线：独立累积，同向期间跟随Row6涨跌幅，非同向hold
     short_filtered = np.full(n, 100.0)
-    for i in range(n):
-        if short_mask[i]:
-            short_filtered[i] = short_pnl[i]
+    for i in range(1, n):
+        if short_mask[i] and short_pnl[i - 1] != 0:
+            short_filtered[i] = short_filtered[i - 1] * (short_pnl[i] / short_pnl[i - 1])
         else:
-            short_filtered[i] = short_filtered[i - 1] if i > 0 else 100.0
+            short_filtered[i] = short_filtered[i - 1]
     fig.add_trace(go.Scatter(
         x=t, y=short_filtered,
         mode="lines", name="做空PnL",
@@ -1221,7 +1221,7 @@ def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
         seg_range = slice(entry_i, exit_i + 1)
         if not mask[seg_range].any():
             continue
-        curve = long_pnl if is_long else short_pnl
+        curve = long_filtered if is_long else short_filtered
         seg_t = t[seg_range]
         seg_pnl = curve[seg_range]
         color = "#3fb950" if is_long else "#f85149"
