@@ -328,8 +328,9 @@ g.hovertext {{ visibility: hidden !important; }}
         var dateAnno = {{
             text: '',
             x: 0,
-            y: 0,
+            y: -0.02,
             xref: 'x', yref: 'paper',
+            yanchor: 'top',
             showarrow: false,
             font: {{ size: 11, color: '#c0c0c0', family: 'monospace' }},
             bgcolor: 'rgba(30,30,44,0.90)',
