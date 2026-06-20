@@ -1292,6 +1292,7 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
 
     cfg["show_strategy"] = st.session_state.get(f"{key}_strat", cfg.get("show_strategy", False))
     cfg["stop_loss_pct"] = st.session_state.get(f"{key}_sl", cfg.get("stop_loss_pct", 2.0))
+    cfg["show_cross_pnl"] = st.session_state.get(f"{key}_cross_pnl", cfg.get("show_cross_pnl", False))
 
     return cfg
 
@@ -1880,6 +1881,7 @@ def main():
         export_data[f"v{i}_fc2"] = cfg["fc2"]
         export_data[f"v{i}_strat"] = cfg.get("show_strategy", False)
         export_data[f"v{i}_sl"] = cfg.get("stop_loss_pct", 2.0)
+        export_data[f"v{i}_cross_pnl"] = cfg.get("show_cross_pnl", False)
         # Use slider label (Chinese) as key prefix, matching _render_param_slider
         f1 = FILTERS.get(filter_id, {})
         for pname, pval in cfg.get("pv", {}).items():
