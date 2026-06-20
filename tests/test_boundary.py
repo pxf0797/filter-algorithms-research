@@ -275,6 +275,16 @@ class TestExportImportConfig:
         for key in required_global + required_view:
             assert key in export_data, f"导出配置缺少必需 key: {key}"
 
+        # 显式验证 show_alignment 参数: export key 为 v{i}_align，
+        # 对应 streamlit 内部 cfg["show_alignment"]
+        for i in range(4):
+            align_key = f"v{i}_align"
+            assert align_key in export_data, (
+                f"导出配置缺少 show_alignment 参数: {align_key} "
+                f"(widget key 格式为 {align_key}, "
+                f"streamlit 内部 cfg['show_alignment'])"
+            )
+
     @pytest.mark.slow
     def test_imp_backup_created_on_import(self):
         """验证 _imp_ 备份 key 在导入时被正确创建 (模拟 main() 导入逻辑)."""
@@ -285,6 +295,8 @@ class TestExportImportConfig:
             "v0_tf": "日线",
             "v0_ke": 0.20,
             "v0_sm": 0.08,
+            "v0_cross_pnl": True,
+            "v0_align": True,
             "span_v0_f1_sma": 21,
         }
 
@@ -304,6 +316,14 @@ class TestExportImportConfig:
         # 验证备份不会被随机覆盖
         assert session_state["_imp_market"] == "美股 US"
         assert session_state["_imp_ticker"] == "NVDA"
+
+        # 验证 alignment 和 cross_pnl 的 _imp_ 备份
+        assert session_state["_imp_v0_cross_pnl"] is True, (
+            f"cross_pnl _imp_ 备份值错误: {session_state['_imp_v0_cross_pnl']}"
+        )
+        assert session_state["_imp_v0_align"] is True, (
+            f"align _imp_ 备份值错误: {session_state['_imp_v0_align']}"
+        )
 
 
 # =========================================================================
