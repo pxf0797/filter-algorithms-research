@@ -269,11 +269,7 @@ def _render_param_slider(label, pmin, pmax, pstep, pdefault, key_suffix="", cont
 # Plotly cross-subplot crosshair helper
 # ---------------------------------------------------------------------------
 def _render_plotly(fig, height=750, dates=None):
-    """Render Plotly chart with cross-subplot crosshair + custom tooltip.
-
-    If dates is provided (list of Timestamps), the tooltip will display the
-    date at the hovered position.
-    """
+    """Render Plotly chart with cross-subplot crosshair (no value tooltip)."""
     fig_dict = {"data": [], "layout": fig.layout.to_plotly_json()}
     if dates is not None:
         # Store date strings in layout for JS tooltip
@@ -311,29 +307,13 @@ def _render_plotly(fig, height=750, dates=None):
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 html, body {{ width: 100%; height: 100%; overflow: hidden; }}
 #{div_id} {{ width: 100%; height: 100%; }}
-/* 隐藏 Plotly 原生 hover 标签和 spike，由自定义 tooltip + 十字光标替代 */
+/* 隐藏 Plotly 原生 hover 标签和 spike，仅保留十字光标 */
 g.hovertext {{ visibility: hidden !important; }}
 .spikeline {{ visibility: hidden !important; }}
-#custom-tooltip {{
-    display: none;
-    position: fixed;
-    z-index: 9999;
-    background: rgba(30, 30, 44, 0.94);
-    color: #e0e0e0;
-    padding: 8px 12px;
-    border-radius: 6px;
-    border: 1px solid rgba(200, 200, 200, 0.25);
-    font-family: monospace;
-    font-size: 12px;
-    line-height: 1.6;
-    pointer-events: none;
-    white-space: nowrap;
-}}
 </style>
 </head>
 <body>
 <div id="{div_id}"></div>
-<div id="custom-tooltip"></div>
 <script>
 (function() {{
     var figure = {figure_json};
@@ -348,7 +328,7 @@ g.hovertext {{ visibility: hidden !important; }}
             if (!evt.points || evt.points.length === 0) return;
             var xv = evt.points[0].x;
 
-            // 1) Update crosshair line
+            // Update crosshair line
             var shapes = gd.layout.shapes || [];
             var update = {{}};
             for (var i = 0; i < shapes.length; i++) {{
@@ -360,49 +340,6 @@ g.hovertext {{ visibility: hidden !important; }}
             }}
             if (Object.keys(update).length > 0) {{
                 Plotly.relayout(gd, update);
-            }}
-
-            // 2) Find nearest x-index in main trace for date display
-            var xArr0 = gd.data[0].x;
-            if (!xArr0 || xArr0.length === 0) return;
-            var idx0 = 0;
-            for (var i = 0; i < xArr0.length; i++) {{
-                if (Math.abs(xArr0[i] - xv) < Math.abs(xArr0[idx0] - xv)) idx0 = i;
-            }}
-
-            // 3) Collect y-values from ALL traces — each trace uses its own nearest x
-            var lines = [];
-            var dateStr = (gd.layout._dates && idx0 < gd.layout._dates.length)
-                ? gd.layout._dates[idx0] : '';
-            if (dateStr) lines.push('<b>' + dateStr + '</b>');
-            lines.push('<b>x = ' + xv.toFixed(4) + '</b>');
-            for (var t = 0; t < gd.data.length; t++) {{
-                var trace = gd.data[t];
-                // Skip fill/band traces and auto-named traces
-                if (trace.hoverinfo === 'skip') continue;
-                if (trace.showlegend === false && !trace.name) continue;
-                var xArr = trace.x;
-                var yArr = trace.y;
-                if (!xArr || !yArr || xArr.length === 0) continue;
-                // Find nearest x in THIS trace's own x-array
-                var ti = 0;
-                for (var i = 0; i < xArr.length; i++) {{
-                    if (Math.abs(xArr[i] - xv) < Math.abs(xArr[ti] - xv)) ti = i;
-                }}
-                // Skip if cursor is far from this trace's data (e.g. prediction not here)
-                if (Math.abs(xArr[ti] - xv) > 1.0) continue;
-                var yVal = yArr[ti];
-                if (yVal === null || yVal === undefined || isNaN(yVal)) continue;
-                var color = trace.line ? trace.line.color : '#ccc';
-                var name = trace.name || ('trace ' + t);
-                lines.push('<span style="color:' + color + '">●</span> ' + name + ': ' + yVal.toFixed(5));
-            }}
-
-            // 4) Show custom tooltip
-            var tip = document.getElementById('custom-tooltip');
-            if (tip && lines.length > 1) {{
-                tip.innerHTML = lines.join('<br>');
-                tip.style.display = 'block';
             }}
         }});
 
@@ -417,31 +354,6 @@ g.hovertext {{ visibility: hidden !important; }}
             }}
             if (Object.keys(update).length > 0) {{
                 Plotly.relayout(gd, update);
-            }}
-            // Hide custom tooltip
-            var tip = document.getElementById('custom-tooltip');
-            if (tip) tip.style.display = 'none';
-        }});
-
-        // Follow mouse
-        document.getElementById('{div_id}').addEventListener('mousemove', function(e) {{
-            var tip = document.getElementById('custom-tooltip');
-            if (tip && tip.style.display === 'block') {{
-                // 防遮挡：右侧溢出时自动切到光标左边
-                var tx = e.clientX + 18;
-                var tw = tip.offsetWidth || 200;  // 首次渲染时估算宽度
-                if (tx + tw > window.innerWidth - 10) {{
-                    tx = e.clientX - tw - 18;
-                }}
-                if (tx < 5) tx = 5;
-                tip.style.left = tx + 'px';
-                // 底部溢出时上移
-                var ty = e.clientY - 10;
-                var th = tip.offsetHeight || 60;
-                if (ty + th > window.innerHeight - 10) {{
-                    ty = e.clientY - th - 10;
-                }}
-                tip.style.top = ty + 'px';
             }}
         }});
     }});
