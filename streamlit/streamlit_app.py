@@ -1150,18 +1150,23 @@ def _compute_holding_masks(n_bars, entry_markers, exit_markers):
     long_mask = np.zeros(n_bars, dtype=bool)
     short_mask = np.zeros(n_bars, dtype=bool)
 
-    long_entries = [(b, t) for b, t, _ in entry_markers if t == "long"]
-    short_entries = [(b, t) for b, t, _ in entry_markers if t == "short"]
-    long_exits = [(b, t) for b, t, _, _, _ in exit_markers if t == "long"]
-    short_exits = [(b, t) for b, t, _, _, _ in exit_markers if t == "short"]
+    # 按类型分组，按bar_idx排序
+    long_entries = sorted([b for b, t, _ in entry_markers if t == "long"])
+    short_entries = sorted([b for b, t, _ in entry_markers if t == "short"])
+    long_exits = sorted([b for b, t, _, _, _ in exit_markers if t == "long"])
+    short_exits = sorted([b for b, t, _, _, _ in exit_markers if t == "short"])
 
-    for i, (e_bar, _) in enumerate(long_entries):
-        x_bar = long_exits[i][0] if i < len(long_exits) else n_bars - 1
+    # 配对：每个entry找下一个同类型exit（时间上最近的）
+    for e_bar in long_entries:
+        # 找 > e_bar 的第一个exit
+        later_exits = [x for x in long_exits if x > e_bar]
+        x_bar = later_exits[0] if later_exits else n_bars - 1
         if e_bar < n_bars:
             long_mask[e_bar:min(x_bar + 1, n_bars)] = True
 
-    for i, (e_bar, _) in enumerate(short_entries):
-        x_bar = short_exits[i][0] if i < len(short_exits) else n_bars - 1
+    for e_bar in short_entries:
+        later_exits = [x for x in short_exits if x > e_bar]
+        x_bar = later_exits[0] if later_exits else n_bars - 1
         if e_bar < n_bars:
             short_mask[e_bar:min(x_bar + 1, n_bars)] = True
 
@@ -1178,9 +1183,9 @@ def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
     """
     n = len(t)
 
-    # 做多曲线（绿色实线，仅在高周期做多持仓区间显示）
-    long_filtered = np.full(n, np.nan)
-    long_filtered[long_mask] = long_pnl[long_mask]
+    # 做多曲线（绿色实线）：高周期做多持仓段=本周期做多PnL，其余=100
+    long_filtered = long_pnl.copy()
+    long_filtered[~long_mask] = 100.0
     fig.add_trace(go.Scatter(
         x=t, y=long_filtered,
         mode="lines", name="做多PnL",
@@ -1188,9 +1193,9 @@ def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
         showlegend=False,
     ), row=row, col=1)
 
-    # 做空曲线（红色实线，仅在高周期做空持仓区间显示）
-    short_filtered = np.full(n, np.nan)
-    short_filtered[short_mask] = short_pnl[short_mask]
+    # 做空曲线（红色实线）：高周期做空持仓段=本周期做空PnL，其余=100
+    short_filtered = short_pnl.copy()
+    short_filtered[~short_mask] = 100.0
     fig.add_trace(go.Scatter(
         x=t, y=short_filtered,
         mode="lines", name="做空PnL",
