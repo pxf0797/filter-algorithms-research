@@ -995,22 +995,30 @@ def _align_pnl_to_current_tf(higher_dates, higher_pnl_long, higher_pnl_short,
         entry_time = hd[entry_j]
         exit_time = hd[exit_j]
 
-        # 找到当前周期中 ≤ entry_time 的最近bar
-        entry_mask = cd <= entry_time
+        # 找到当前周期中 ≥ entry_time 的第一根bar（entry发生在高周期bar的开盘）
+        entry_mask = cd >= entry_time
         if entry_mask.any():
-            entry_bar = int(np.max(np.where(entry_mask)[0]))
+            entry_bar = int(np.min(np.where(entry_mask)[0]))
             pnl_at_entry = aligned_long[entry_bar] if trade["type"] == "long" else aligned_short[entry_bar]
             entry_markers.append((entry_bar, trade["type"], pnl_at_entry if not np.isnan(pnl_at_entry) else 100.0))
 
-        # 离场：≤ exit_time 的最近bar
-        exit_mask = cd <= exit_time
-        if exit_mask.any():
-            exit_bar = int(np.max(np.where(exit_mask)[0]))
-            pnl_at_exit = aligned_long[exit_bar] if trade["type"] == "long" else aligned_short[exit_bar]
-            exit_markers.append((exit_bar, trade["type"],
-                                 pnl_at_exit if not np.isnan(pnl_at_exit) else 100.0,
-                                 trade.get("return_pct", 0.0),
-                                 trade.get("exit_reason", "")))
+        # 离场：exit_time 所在日历日的最后一根当前周期bar（高周期离场发生在bar收盘）
+        exit_date = exit_time.astype('datetime64[D]')
+        exit_day_mask = cd.astype('datetime64[D]') == exit_date
+        if exit_day_mask.any():
+            exit_bar = int(np.max(np.where(exit_day_mask)[0]))
+        else:
+            # 离场日无当前周期bar（如周末），取离场日之后第一根bar
+            after_exit = cd.astype('datetime64[D]') >= exit_date
+            if after_exit.any():
+                exit_bar = int(np.min(np.where(after_exit)[0]))
+            else:
+                continue
+        pnl_at_exit = aligned_long[exit_bar] if trade["type"] == "long" else aligned_short[exit_bar]
+        exit_markers.append((exit_bar, trade["type"],
+                             pnl_at_exit if not np.isnan(pnl_at_exit) else 100.0,
+                             trade.get("return_pct", 0.0),
+                             trade.get("exit_reason", "")))
 
     return {
         "aligned_long": aligned_long,
