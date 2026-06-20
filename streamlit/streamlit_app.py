@@ -964,6 +964,164 @@ def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
     return long_pnl, short_pnl, trade_records
 
 
+def _align_pnl_to_current_tf(higher_dates, higher_pnl_long, higher_pnl_short,
+                              higher_trades, current_dates):
+    """将高周期PnL数据按时间戳前向填充对齐到当前周期时间轴。
+
+    Args:
+        higher_dates: pd.DatetimeIndex, 高周期的日期索引
+        higher_pnl_long: np.array, 高周期做多PnL曲线
+        higher_pnl_short: np.array, 高周期做空PnL曲线
+        higher_trades: list[dict], 高周期交易记录（含entry_idx/exit_idx/return_pct/type/exit_reason）
+        current_dates: pd.DatetimeIndex, 当前周期的日期索引
+
+    Returns:
+        dict: {
+            "aligned_long": np.array(len(current_dates)),
+            "aligned_short": np.array(len(current_dates)),
+            "entry_markers": [(bar_idx, trade_type, pnl_val), ...],
+            "exit_markers": [(bar_idx, trade_type, pnl_val, return_pct, exit_reason), ...],
+        }
+    """
+    n = len(current_dates)
+    aligned_long = np.full(n, np.nan)
+    aligned_short = np.full(n, np.nan)
+    entry_markers = []
+    exit_markers = []
+
+    if higher_dates is None or len(higher_dates) == 0:
+        return {"aligned_long": aligned_long, "aligned_short": aligned_short,
+                "entry_markers": entry_markers, "exit_markers": exit_markers}
+
+    # 将高周期日期转为 numpy datetime64 数组便于比较
+    hd = np.array(higher_dates, dtype="datetime64[ns]")
+    cd = np.array(current_dates, dtype="datetime64[ns]")
+
+    # 对当前周期的每个bar，找 ≤ 该时间戳的最近高周期bar（前向填充）
+    for i in range(n):
+        mask = hd <= cd[i]
+        if not mask.any():
+            continue
+        j = int(np.argmax(mask))  # 最后一个True的位置...
+        # argmax on boolean array returns first True. We want last True.
+        j = np.max(np.where(mask)[0])
+        aligned_long[i] = higher_pnl_long[j]
+        aligned_short[i] = higher_pnl_short[j]
+
+    # 映射交易事件到当前周期bar index
+    for trade in higher_trades:
+        entry_j = trade["entry_idx"]
+        exit_j = trade["exit_idx"]
+        if entry_j >= len(hd) or exit_j >= len(hd):
+            continue
+        entry_time = hd[entry_j]
+        exit_time = hd[exit_j]
+
+        # 找到当前周期中 ≤ entry_time 的最近bar
+        entry_mask = cd <= entry_time
+        if entry_mask.any():
+            entry_bar = int(np.max(np.where(entry_mask)[0]))
+            pnl_at_entry = aligned_long[entry_bar] if trade["type"] == "long" else aligned_short[entry_bar]
+            entry_markers.append((entry_bar, trade["type"], pnl_at_entry if not np.isnan(pnl_at_entry) else 100.0))
+
+        # 离场：≤ exit_time 的最近bar
+        exit_mask = cd <= exit_time
+        if exit_mask.any():
+            exit_bar = int(np.max(np.where(exit_mask)[0]))
+            pnl_at_exit = aligned_long[exit_bar] if trade["type"] == "long" else aligned_short[exit_bar]
+            exit_markers.append((exit_bar, trade["type"],
+                                 pnl_at_exit if not np.isnan(pnl_at_exit) else 100.0,
+                                 trade.get("return_pct", 0.0),
+                                 trade.get("exit_reason", "")))
+
+    return {
+        "aligned_long": aligned_long,
+        "aligned_short": aligned_short,
+        "entry_markers": entry_markers,
+        "exit_markers": exit_markers,
+    }
+
+
+def _add_cross_pnl_subplot(fig, t, aligned, row):
+    """在指定row添加高周期PnL参考子图（事件标记+参考线+盈亏标注）。
+
+    Args:
+        fig: plotly figure
+        t: np.array, 当前周期的bar index
+        aligned: dict, _align_pnl_to_current_tf 的返回值
+        row: int, 子图行号
+    """
+    color_long = "#3fb950"
+    color_short = "#f85149"
+    marker_color = "#d2991d"  # 金色，高周期标记统一色
+
+    # 高周期做多PnL参考线（虚线）
+    mask_long = ~np.isnan(aligned["aligned_long"])
+    if mask_long.any():
+        fig.add_trace(go.Scatter(
+            x=t[mask_long], y=aligned["aligned_long"][mask_long],
+            mode="lines", name="高周期多",
+            line=dict(color=color_long, width=1.2, dash="dot"),
+            showlegend=False,
+        ), row=row, col=1)
+
+    # 高周期做空PnL参考线（点线）
+    mask_short = ~np.isnan(aligned["aligned_short"])
+    if mask_short.any():
+        fig.add_trace(go.Scatter(
+            x=t[mask_short], y=aligned["aligned_short"][mask_short],
+            mode="lines", name="高周期空",
+            line=dict(color=color_short, width=1.2, dash="dot"),
+            showlegend=False,
+        ), row=row, col=1)
+
+    # 入场标记（▲三角形）
+    for bar_idx, trade_type, pnl_val in aligned["entry_markers"]:
+        if 0 <= bar_idx < len(t):
+            fig.add_trace(go.Scatter(
+                x=[t[bar_idx]], y=[pnl_val],
+                mode="markers",
+                marker=dict(color=marker_color, symbol="triangle-up", size=9,
+                            line=dict(width=1, color="rgba(0,0,0,0.3)")),
+                showlegend=False,
+                hovertext=f"高周期入场 {'多' if trade_type == 'long' else '空'}",
+                hoverinfo="text",
+            ), row=row, col=1)
+
+    # 离场标记 + 盈亏标注
+    for bar_idx, trade_type, pnl_val, ret_pct, exit_reason in aligned["exit_markers"]:
+        if not (0 <= bar_idx < len(t)):
+            continue
+        # 离场符号：止损=X，止盈=○
+        is_sl = exit_reason == "stop_loss"
+        sym = "x" if is_sl else "circle"
+        ec = color_short if is_sl else color_long
+        fig.add_trace(go.Scatter(
+            x=[t[bar_idx]], y=[pnl_val],
+            mode="markers",
+            marker=dict(color=marker_color, symbol=sym, size=9,
+                        line=dict(width=1, color=ec)),
+            showlegend=False,
+            hovertext=f"高周期离场 {'多' if trade_type == 'long' else '空'} | {ret_pct:+.2f}%",
+            hoverinfo="text",
+        ), row=row, col=1)
+
+        # 盈亏数字标注
+        label_color = color_long if ret_pct > 0 else color_short
+        fig.add_annotation(
+            x=t[bar_idx], y=pnl_val,
+            text=f"{ret_pct:+.1f}%",
+            showarrow=False,
+            font=dict(size=8, color=label_color),
+            yshift=12,
+            row=row, col=1,
+        )
+
+    # 100基准线
+    fig.add_hline(y=100, line_dash="dash", line_color="gray",
+                  opacity=0.4, row=row, col=1)
+
+
 # ---------------------------------------------------------------------------
 # Main app
 # ---------------------------------------------------------------------------
@@ -973,6 +1131,13 @@ def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
 # ---------------------------------------------------------------------------
 DEFAULT_TFS = ["日线", "60分钟", "15分钟", "5分钟"]
 ALL_TFS = ["1分钟","5分钟","15分钟","60分钟","日线","周线","月线","季线"]
+
+# 紧邻高周期映射：本周期 → 高周期（用于跨周期PnL参考子图）
+TF_HIERARCHY = {
+    "1分钟": "5分钟", "5分钟": "15分钟", "15分钟": "60分钟",
+    "60分钟": "日线", "日线": "周线", "周线": "月线",
+    "月线": "季线", "季线": None,
+}
 
 def _render_params(key, filter_id, dual, filter_id2, tf_default):
     """Ultra-compact parameter panel. Returns config dict."""
@@ -1061,8 +1226,15 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
                                 st.session_state.get(sl_key, 2.0), 0.5,
                                 key=sl_key,
                                 help="预测偏差超过此阈值即止损离场")
+                            # 跨周期PnL参考子图
+                            cross_key = f"{key}_cross_pnl"
+                            cfg["show_cross_pnl"] = st.checkbox(
+                                "显示高周期PnL参考", value=st.session_state.get(cross_key, False),
+                                key=cross_key,
+                                help="在本周期PnL下方显示紧邻高周期的交易事件标记和PnL参考线")
                     else:
                         cfg["stop_loss_pct"] = st.session_state.get(sl_key, 2.0)
+                        cfg["show_cross_pnl"] = False
 
     # 滤波参数 — 可折叠
     sf = FILTERS[filter_id]; cfg["pv"] = {}
@@ -1113,11 +1285,18 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     return cfg
 
 
-def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
+def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None):
     """Fetch data + render multi-subplot figure from config.
-    优先从本地 Parquet 读取；day_offset=向历史前移N天（各周期独立对齐）。"""
+    优先从本地 Parquet 读取；day_offset=向历史前移N天（各周期独立对齐）。
+    higher_pnl: 高周期PnL数据（来自 _align_pnl_to_current_tf 的输出），非空时新增row 7子图。"""
     tf = cfg["tf"]
     n_pts = cfg["n_pts"]
+
+    # 查找紧邻高周期tf，尝试从session_state获取其PnL数据
+    _higher_tf = TF_HIERARCHY.get(tf)
+    _raw_higher = None
+    if higher_pnl is None and _higher_tf is not None:
+        _raw_higher = st.session_state.get(f"_pnl_{_higher_tf}")
 
     # ── 数据获取：DB → display → 渲染 ──
     _sync_to_display(ticker_code, tf, day_offset, n_pts)
@@ -1190,6 +1369,15 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
 
     marker_positions, marker_labels = _date_markers(dates, cfg["tf"])
 
+    # 高周期PnL数据对齐（从session_state获取的原始数据，需要时间戳对齐）
+    if _raw_higher is not None and dates is not None:
+        higher_pnl = _align_pnl_to_current_tf(
+            _raw_higher["dates"], _raw_higher["long_pnl"], _raw_higher["short_pnl"],
+            _raw_higher["trade_records"], dates,
+        )
+    elif higher_pnl is None:
+        higher_pnl = None
+
     sf = FILTERS[cfg["_fid"]]
     try:
         filtered = sf["func"](noisy, t, **cfg["pv"])
@@ -1241,6 +1429,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
     short_pnl = None
     trade_records = []
     show_strategy = cfg.get("show_strategy", False)
+    show_cross_pnl = cfg.get("show_cross_pnl", False)
     stop_loss_pct = cfg.get("stop_loss_pct", 2.0)
     if show_strategy and schmitt is not None and len(pred_pairs) > 0:
         long_pnl, short_pnl, trade_records = _compute_strategy_pnl(
@@ -1268,27 +1457,43 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
         max_dd_s = np.min(drawdown_s)
         c6.caption(f"多DD: {max_dd_l:.2f}% | 空DD: {max_dd_s:.2f}%")
 
+        # 缓存本周期PnL数据到session_state，供低周期视图的跨周期子图使用
+        if has_strategy and trade_records:
+            st.session_state[f"_pnl_{tf}"] = {
+                "dates": dates, "t": t,
+                "long_pnl": long_pnl, "short_pnl": short_pnl,
+                "trade_records": trade_records,
+            }
+
     # Build figure (same as before, compact)
     has_s = schmitt is not None
+    # 跨周期PnL子图：用户开启 + 有对齐数据 + 有交易事件时显示
+    has_cross = (show_cross_pnl and higher_pnl is not None and
+                 (len(higher_pnl.get("entry_markers", [])) > 0 or
+                  len(higher_pnl.get("exit_markers", [])) > 0))
     if has_s:
         if has_strategy:
-            rows = 6
-            rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.25]
-            titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)")
+            if has_cross:
+                rows = 7
+                rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.18, 0.12]
+                titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)","高周期PnL参考")
+                pnl_row = 6; cross_row = 7
+            else:
+                rows = 6
+                rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.25]
+                titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)")
+                pnl_row = 6; cross_row = None
         else:
             rows = 5
             rh = [0.28, 0.14, 0.18, 0.18, 0.22]
             titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t")
+            pnl_row = None; cross_row = None
         mr=1;rr=2;vr=3;sar=4;ssr=5
-        if has_strategy:
-            pnl_row = 6
-        else:
-            pnl_row = None
         ar=None
     else:
         rows = 4
         rh=[0.40,0.18,0.20,0.22]; titles=("价格&滤波","残差","速度v","加速度a")
-        mr=1;rr=2;vr=3;ar=4;sar=ssr=pnl_row=None
+        mr=1;rr=2;vr=3;ar=4;sar=ssr=pnl_row=cross_row=None
     fig = make_subplots(rows=rows, cols=1, shared_xaxes=True,
                         vertical_spacing=0.02, row_heights=rh, subplot_titles=titles)
     fig.add_trace(go.Candlestick(x=t, open=ohlc["Open"].values.ravel(),
@@ -1434,6 +1639,12 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
         fig.update_yaxes(title_text="PnL(%)", row=pnl_row, col=1,
                          ticksuffix="%")
 
+    # 跨周期PnL参考子图（row 7）
+    if has_cross and higher_pnl is not None:
+        _add_cross_pnl_subplot(fig, t, higher_pnl, row=cross_row)
+        fig.update_yaxes(title_text="高周期(%)", row=cross_row, col=1,
+                         ticksuffix="%")
+
     if ar is not None and not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=acc, mode="lines", name="a",
             line=dict(color="#ffa502", width=1.5)), row=ar, col=1)
@@ -1445,6 +1656,8 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0):
         fig.add_vline(x=pos, line=dict(color="rgba(255,255,255,0.10)", width=0.8, dash="dot"),
                        layer="below")
     fh = (540 if has_s else 420) if compact else (880 if has_s else 700)
+    if has_cross:
+        fh += 80  # 跨周期子图额外高度
     fig.update_layout(template="plotly_dark", height=fh,
         margin=dict(l=10,r=10,t=25,b=10), hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=9)))
@@ -1619,14 +1832,22 @@ def main():
     day_offset = st.session_state._day_offset
 
     # ---- Pass 2: Bottom 2x2 chart views ----
+    # 按时间框架从高到低排序渲染，确保低周期视图能获取高周期PnL缓存
+    # 先创建2×2网格容器，再按高周期优先顺序填充
 
+    grid_cols = []
     for row_idx in range(2):
         c1, c2 = st.columns(2)
-        for col_idx, col in enumerate([c1, c2]):
-            i = row_idx * 2 + col_idx
-            with col:
-                _render_chart(market, ticker_code, configs[i], f"v{i}", compact=True,
-                              day_offset=day_offset)
+        grid_cols.append((c1, c2))
+
+    sorted_views = sorted(enumerate(configs),
+                          key=lambda x: ALL_TFS.index(x[1]["tf"]), reverse=True)
+    for orig_i, cfg in sorted_views:
+        row_idx = orig_i // 2
+        col_idx = orig_i % 2
+        with grid_cols[row_idx][col_idx]:
+            _render_chart(market, ticker_code, cfg, f"v{orig_i}", compact=True,
+                          day_offset=day_offset)
 
     # ── Export (after ALL widgets) ──
     st.sidebar.markdown("---")
