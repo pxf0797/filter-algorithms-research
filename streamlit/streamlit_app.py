@@ -1269,6 +1269,12 @@ def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
 # ---------------------------------------------------------------------------
 DEFAULT_TFS = ["日线", "60分钟", "15分钟", "5分钟"]
 ALL_TFS = ["1分钟","5分钟","15分钟","60分钟","日线","周线","月线","季线"]
+# (interval, period) for yfinance download
+TF_PERIOD = {
+    "1分钟": ("1m", "7d"), "5分钟": ("5m", "60d"), "15分钟": ("15m", "60d"),
+    "60分钟": ("1h", "730d"), "日线": ("1d", "max"), "周线": ("1wk", "max"),
+    "月线": ("1mo", "max"), "季线": ("3mo", "max"),
+}
 
 # 紧邻高周期映射：本周期 → 高周期（用于跨周期PnL参考子图）
 TF_HIERARCHY = {
@@ -1990,8 +1996,8 @@ def main():
         st.caption("对比数据库与 yfinance，发现历史数据修正")
         c_v1, c_v2 = st.columns([1, 1])
         with c_v1:
-            val_tf = st.selectbox("周期", list(TFS.keys()), key="val_tf",
-                                  format_func=lambda x: f"{x} ({TFS[x][1]})")
+            val_tf = st.selectbox("周期", list(TF_PERIOD.keys()), key="val_tf",
+                                  format_func=lambda x: f"{x} ({TF_PERIOD[x][1]})")
         with c_v2:
             val_n = st.number_input("对比行数", 50, 2000, 200, 50, key="val_n")
 
@@ -2011,7 +2017,7 @@ def main():
                                     "60分钟": "1h", "日线": "1d", "周线": "1wk",
                                     "月线": "1mo", "季线": "3mo"}
                     interval = interval_map[val_tf]
-                    period = TFS[val_tf][1]
+                    period = TF_PERIOD[val_tf][1]
 
                     data = yf.download(full_code, period=period, interval=interval,
                                        progress=False)
