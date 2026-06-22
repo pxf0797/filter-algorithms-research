@@ -328,6 +328,109 @@ def clear_display_cache():
                 pass
 
 
+# ---------------------------------------------------------------------------
+# 数据校验：DB vs 数据源 对比 & 更新
+# ---------------------------------------------------------------------------
+
+def compare_with_db(ticker, tf, df_fetched):
+    """Compare a freshly-fetched DataFrame against DB for one (ticker, tf).
+
+    df_fetched: yfinance DataFrame with DatetimeIndex, columns Open/High/Low/Close/Volume.
+
+    Returns dict:
+        db_count, yf_count, overlap_count,
+        db_start, db_end, yf_start, yf_end,
+        fingerprint_match: bool,
+        diffs: [(ts, db_close, yf_close), ...]  # overlapping timestamps with diff > 1e-6
+        only_db: int, only_yf: int,
+        status: 'ok' | 'update_available' | 'conflict'
+    """
+    import hashlib as _hashlib
+
+    with get_conn() as conn:
+        db_rows = conn.execute(
+            "SELECT ts, close FROM kline WHERE ticker=? AND timeframe=? ORDER BY ts",
+            (ticker, tf),
+        ).fetchall()
+
+    db_dict = {r[0]: r[1] for r in db_rows}
+    db_ts = set(db_dict.keys())
+
+    yf_dict = {}
+    for idx, row in df_fetched.iterrows():
+        ts = idx.isoformat() if hasattr(idx, "isoformat") else str(idx)
+        close_val = float(row["Close"].iloc[0]) if hasattr(row["Close"], "iloc") else float(row["Close"])
+        yf_dict[ts] = close_val
+    yf_ts = set(yf_dict.keys())
+
+    common = sorted(db_ts & yf_ts)
+
+    # Fingerprint over overlapping timestamps
+    fp_db = _hashlib.md5(
+        "".join(f"{ts}:{db_dict[ts]:.4f}" for ts in common).encode()
+    ).hexdigest()
+    fp_yf = _hashlib.md5(
+        "".join(f"{ts}:{yf_dict[ts]:.4f}" for ts in common).encode()
+    ).hexdigest()
+
+    # Detailed diffs on overlapping timestamps
+    diffs = []
+    for ts in common:
+        delta = abs(db_dict[ts] - yf_dict[ts])
+        if delta > 1e-6:
+            diffs.append((ts, round(db_dict[ts], 4), round(yf_dict[ts], 4)))
+
+    # Status
+    if fp_db == fp_yf and len(yf_ts - db_ts) == 0:
+        status = "ok"
+    elif fp_db == fp_yf:
+        status = "update_available"
+    else:
+        status = "conflict"
+
+    # Date range strings
+    db_start = min(db_ts)[:10] if db_ts else "-"
+    db_end = max(db_ts)[:10] if db_ts else "-"
+    yf_start = min(yf_ts)[:10] if yf_ts else "-"
+    yf_end = max(yf_ts)[:10] if yf_ts else "-"
+
+    return {
+        "status": status,
+        "db_count": len(db_rows), "yf_count": len(yf_dict),
+        "overlap_count": len(common),
+        "db_start": db_start, "db_end": db_end,
+        "yf_start": yf_start, "yf_end": yf_end,
+        "fingerprint_match": fp_db == fp_yf,
+        "diffs": diffs,
+        "only_db": len(db_ts - yf_ts),
+        "only_yf": len(yf_ts - db_ts),
+    }
+
+
+def force_update_kline(ticker, tf, df):
+    """Replace DB data for overlapping timestamps with fetched data.
+
+    Strategy: DELETE rows where ts is in the fetched DataFrame, then INSERT all
+    fetched rows. This updates corrected historical bars AND adds new bars.
+    Non-overlapping historical bars (only in DB) are preserved.
+    """
+    records = []
+    for idx, row in df.iterrows():
+        ts = idx.isoformat() if hasattr(idx, "isoformat") else str(idx)
+        records.append((ts,))
+
+    with get_conn() as conn:
+        # Delete overlapping timestamps
+        for (ts,) in records:
+            conn.execute(
+                "DELETE FROM kline WHERE ticker=? AND timeframe=? AND ts=?",
+                (ticker, tf, ts),
+            )
+
+    # Now use normal upsert to insert all fetched rows
+    upsert_kline(ticker, tf, df)
+
+
 if __name__ == "__main__":
     init_db()
     print("DB initialized:", DB_PATH)

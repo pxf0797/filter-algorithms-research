@@ -22,7 +22,8 @@ from statsmodels.nonparametric.smoothers_lowess import lowess
 from db import (init_db, upsert_kline, query_kline, get_date_range, has_data,
                 check_data_health, get_db_size_mb, snapshot_db, list_snapshots,
                 restore_snapshot, prune_snapshots, clear_display_cache,
-                checkpoint_wal, validate_db, DB_PATH)
+                checkpoint_wal, validate_db, compare_with_db, force_update_kline,
+                DB_PATH)
 
 # ---------------------------------------------------------------------------
 # Page config (must be the first Streamlit command)
@@ -1983,6 +1984,87 @@ def main():
                 detail_df = pd.DataFrame(report["details"])
                 st.dataframe(detail_df, use_container_width=True, hide_index=True,
                              height=min(35 * len(detail_df) + 38, 300))
+
+    # ── 数据校验：DB vs 数据源 ──
+    with st.sidebar.expander("📋 数据校验", expanded=False):
+        st.caption("对比数据库与 yfinance，发现历史数据修正")
+        c_v1, c_v2 = st.columns([1, 1])
+        with c_v1:
+            val_tf = st.selectbox("周期", list(TFS.keys()), key="val_tf",
+                                  format_func=lambda x: f"{x} ({TFS[x][1]})")
+        with c_v2:
+            val_n = st.number_input("对比行数", 50, 2000, 200, 50, key="val_n")
+
+        if st.button("校验", key="val_btn", use_container_width=True) and ticker_code:
+            with st.spinner(f"拉取 {ticker_code} {val_tf} 数据..."):
+                fetched = None
+                try:
+                    # Build ticker symbol (same logic as _fetch_stock)
+                    if market == "A股(沪深)":
+                        full_code = ticker_code + (".SS" if ticker_code[0] == "6" else ".SZ")
+                    elif market == "港股 HK":
+                        full_code = ticker_code.zfill(4) + ".HK"
+                    else:
+                        full_code = ticker_code.upper()
+
+                    interval_map = {"1分钟": "1m", "5分钟": "5m", "15分钟": "15m",
+                                    "60分钟": "1h", "日线": "1d", "周线": "1wk",
+                                    "月线": "1mo", "季线": "3mo"}
+                    interval = interval_map[val_tf]
+                    period = TFS[val_tf][1]
+
+                    data = yf.download(full_code, period=period, interval=interval,
+                                       progress=False)
+                    if not data.empty:
+                        data = data[data["Close"].notna()]
+                        fetched = data
+                except Exception as e:
+                    st.error(f"拉取失败: {e}")
+
+            if fetched is not None and len(fetched) >= 5:
+                report = compare_with_db(ticker_code, val_tf, fetched)
+                fp_icon = "✅" if report["fingerprint_match"] else "❌"
+                st.markdown(
+                    f"**:blue[DB: {report['db_count']}条 ({report['db_start']} ~ {report['db_end']})]**"
+                )
+                st.markdown(
+                    f"**:green[yf: {report['db_count']}条 → {report['yf_count']}条 ({report['yf_start']} ~ {report['yf_end']})]**"
+                )
+                st.markdown(
+                    f"**重叠 {report['overlap_count']}条 | 指纹 {fp_icon}**"
+                )
+                st.caption(
+                    f"仅DB: {report['only_db']}条 | 仅yf: {report['only_yf']}条"
+                )
+
+                if report["diffs"]:
+                    st.warning(f"发现 {len(report['diffs'])} 处价格差异")
+                    diff_lines = []
+                    for ts, db_v, yf_v in report["diffs"][:10]:
+                        diff_lines.append(
+                            f"{ts[:19]} | DB={db_v:.4f} → yf={yf_v:.4f} | "
+                            f"Δ={abs(db_v - yf_v):.4f}"
+                        )
+                    st.code("\n".join(diff_lines), language=None)
+                    if len(report["diffs"]) > 10:
+                        st.caption(f"... 共 {len(report['diffs'])} 处，仅显示前10")
+
+                # Action buttons
+                status = report.get("status", "ok")
+                if status in ("update_available", "conflict"):
+                    if st.button("⚠️ 更新此周期（用yfinance数据覆盖DB）",
+                                 key="force_update_btn", use_container_width=True):
+                        try:
+                            force_update_kline(ticker_code, val_tf, fetched)
+                            _fetch_stock.clear()
+                            clear_display_cache()
+                            st.success(f"{ticker_code} {val_tf} 已更新，页面将刷新")
+                            time.sleep(0.5)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"更新失败: {e}")
+                elif status == "ok":
+                    st.success("数据一致，无需更新")
 
     filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),
         format_func=lambda x: FILTERS[x]["name"], key="global_f")
