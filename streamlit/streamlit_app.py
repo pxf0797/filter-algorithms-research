@@ -1991,86 +1991,107 @@ def main():
                 st.dataframe(detail_df, use_container_width=True, hide_index=True,
                              height=min(35 * len(detail_df) + 38, 300))
 
-    # ── 数据校验：DB vs 数据源 ──
+    # ── 数据校验：DB vs 数据源（全部周期） ──
     with st.sidebar.expander("📋 数据校验", expanded=False):
-        st.caption("对比数据库与 yfinance，发现历史数据修正")
-        c_v1, c_v2 = st.columns([1, 1])
-        with c_v1:
-            val_tf = st.selectbox("周期", list(TF_PERIOD.keys()), key="val_tf",
-                                  format_func=lambda x: f"{x} ({TF_PERIOD[x][1]})")
-        with c_v2:
-            val_n = st.number_input("对比行数", 50, 2000, 200, 50, key="val_n")
+        st.caption("对比数据库与 yfinance 全部周期，发现历史数据修正")
 
-        if st.button("校验", key="val_btn", use_container_width=True) and ticker_code:
-            with st.spinner(f"拉取 {ticker_code} {val_tf} 数据..."):
-                fetched = None
-                try:
-                    # Build ticker symbol (same logic as _fetch_stock)
-                    if market == "A股(沪深)":
-                        full_code = ticker_code + (".SS" if ticker_code[0] == "6" else ".SZ")
-                    elif market == "港股 HK":
-                        full_code = ticker_code.zfill(4) + ".HK"
-                    else:
-                        full_code = ticker_code.upper()
+        if st.button("校验全部周期", key="val_btn", use_container_width=True) and ticker_code:
+            # Build ticker symbol once
+            if market == "A股(沪深)":
+                full_code = ticker_code + (".SS" if ticker_code[0] == "6" else ".SZ")
+            elif market == "港股 HK":
+                full_code = ticker_code.zfill(4) + ".HK"
+            else:
+                full_code = ticker_code.upper()
 
-                    interval_map = {"1分钟": "1m", "5分钟": "5m", "15分钟": "15m",
-                                    "60分钟": "1h", "日线": "1d", "周线": "1wk",
-                                    "月线": "1mo", "季线": "3mo"}
-                    interval = interval_map[val_tf]
-                    period = TF_PERIOD[val_tf][1]
+            rows = []
+            has_conflict = False
+            has_update = False
 
-                    data = yf.download(full_code, period=period, interval=interval,
-                                       progress=False)
-                    if not data.empty:
+            for tf in ALL_TFS:
+                interval, period = TF_PERIOD[tf]
+                with st.spinner(f"校验 {tf} ..."):
+                    try:
+                        data = yf.download(full_code, period=period, interval=interval,
+                                           progress=False)
+                        if data.empty or len(data[data["Close"].notna()]) < 5:
+                            rows.append({"周期": tf, "DB": "-", "yf": "-", "重叠": "-",
+                                         "指纹": "⚠️ 数据不足", "仅DB": "-", "仅yf": "-", "操作": ""})
+                            continue
                         data = data[data["Close"].notna()]
-                        fetched = data
-                except Exception as e:
-                    st.error(f"拉取失败: {e}")
+                        report = compare_with_db(ticker_code, tf, data)
+                    except Exception as e:
+                        rows.append({"周期": tf, "DB": "-", "yf": "-", "重叠": "-",
+                                     "指纹": f"❌ {str(e)[:30]}", "仅DB": "-", "仅yf": "-", "操作": ""})
+                        continue
 
-            if fetched is not None and len(fetched) >= 5:
-                report = compare_with_db(ticker_code, val_tf, fetched)
-                fp_icon = "✅" if report["fingerprint_match"] else "❌"
-                st.markdown(
-                    f"**:blue[DB: {report['db_count']}条 ({report['db_start']} ~ {report['db_end']})]**"
-                )
-                st.markdown(
-                    f"**:green[yf: {report['db_count']}条 → {report['yf_count']}条 ({report['yf_start']} ~ {report['yf_end']})]**"
-                )
-                st.markdown(
-                    f"**重叠 {report['overlap_count']}条 | 指纹 {fp_icon}**"
-                )
-                st.caption(
-                    f"仅DB: {report['only_db']}条 | 仅yf: {report['only_yf']}条"
-                )
+                db_c = report["db_count"]
+                yf_c = report["yf_count"]
+                fp = "✅" if report["fingerprint_match"] else "❌"
+                status = report["status"]
 
-                if report["diffs"]:
-                    st.warning(f"发现 {len(report['diffs'])} 处价格差异")
-                    diff_lines = []
-                    for ts, db_v, yf_v in report["diffs"][:10]:
-                        diff_lines.append(
-                            f"{ts[:19]} | DB={db_v:.4f} → yf={yf_v:.4f} | "
-                            f"Δ={abs(db_v - yf_v):.4f}"
-                        )
-                    st.code("\n".join(diff_lines), language=None)
-                    if len(report["diffs"]) > 10:
-                        st.caption(f"... 共 {len(report['diffs'])} 处，仅显示前10")
+                if status == "conflict":
+                    has_conflict = True
+                elif status == "update_available":
+                    has_update = True
 
-                # Action buttons
-                status = report.get("status", "ok")
-                if status in ("update_available", "conflict"):
-                    if st.button("⚠️ 更新此周期（用yfinance数据覆盖DB）",
-                                 key="force_update_btn", use_container_width=True):
-                        try:
-                            force_update_kline(ticker_code, val_tf, fetched)
+                rows.append({
+                    "周期": tf,
+                    "DB": db_c,
+                    "yf": yf_c,
+                    "重叠": report["overlap_count"],
+                    "指纹": fp,
+                    "仅DB": report["only_db"],
+                    "仅yf": report["only_yf"],
+                    "操作": status,  # temp store for button logic
+                })
+
+            # Summary table
+            if rows:
+                import pandas as _pd
+                df = _pd.DataFrame(rows)
+                # Color-code rows
+                def _row_style(r):
+                    if r["操作"] == "conflict":
+                        return ["background-color: #fff3cd"] * len(r)
+                    elif r["操作"] == "update_available":
+                        return ["background-color: #d4edda"] * len(r)
+                    return [""] * len(r)
+
+                styled = df.drop(columns=["操作"]).style.apply(_row_style, axis=1)
+                st.dataframe(styled, use_container_width=True, hide_index=True,
+                             height=min(35 * len(df) + 38, 350))
+
+                # Legend
+                st.caption("🟡 黄底 = 历史数据被修正 | 🟢 绿底 = 有新增数据")
+
+                # Batch update button if any conflicts or updates
+                if has_conflict or has_update:
+                    if st.button("⚠️ 更新全部有差异的周期", key="force_update_all",
+                                 use_container_width=True):
+                        updated = 0
+                        for _, r in df.iterrows():
+                            s = r["操作"]
+                            if s in ("conflict", "update_available"):
+                                tf = r["周期"]
+                                try:
+                                    interval, period = TF_PERIOD[tf]
+                                    data = yf.download(full_code, period=period,
+                                                       interval=interval, progress=False)
+                                    if not data.empty:
+                                        data = data[data["Close"].notna()]
+                                        force_update_kline(ticker_code, tf, data)
+                                        updated += 1
+                                except Exception:
+                                    pass
+                        if updated > 0:
                             _fetch_stock.clear()
                             clear_display_cache()
-                            st.success(f"{ticker_code} {val_tf} 已更新，页面将刷新")
+                            st.success(f"已更新 {updated} 个周期，页面将刷新")
                             time.sleep(0.5)
                             st.rerun()
-                        except Exception as e:
-                            st.error(f"更新失败: {e}")
-                elif status == "ok":
-                    st.success("数据一致，无需更新")
+                        else:
+                            st.warning("没有周期被更新")
 
     filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),
         format_func=lambda x: FILTERS[x]["name"], key="global_f")
