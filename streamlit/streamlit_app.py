@@ -2050,15 +2050,21 @@ def main():
             if rows:
                 import pandas as _pd
                 df = _pd.DataFrame(rows)
-                # Color-code rows
+                # Color-code rows based on status
                 def _row_style(r):
-                    if r["操作"] == "conflict":
+                    s = r["差异"]
+                    if s == "conflict":
                         return ["background-color: #fff3cd"] * len(r)
-                    elif r["操作"] == "update_available":
+                    elif s == "update_available":
                         return ["background-color: #d4edda"] * len(r)
                     return [""] * len(r)
 
-                styled = df.drop(columns=["操作"]).style.apply(_row_style, axis=1)
+                df_display = df.rename(columns={"操作": "差异"})
+                df_display["差异"] = df_display["差异"].replace({
+                    "conflict": "⚠️ 数据冲突", "update_available": "有新数据",
+                    "ok": "✅ 一致",
+                })
+                styled = df_display.style.apply(_row_style, axis=1)
                 st.dataframe(styled, use_container_width=True, hide_index=True,
                              height=min(35 * len(df) + 38, 350))
 
