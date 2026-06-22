@@ -35,6 +35,12 @@
 | [tests/data_computation_test_cases.md](tests/data_computation_test_cases.md) | 数据计算测试用例 |
 | [tests/ui_test_cases.md](tests/ui_test_cases.md) | UI 测试用例 |
 
+## 🗄️ 数据处理
+
+| 文档 | 说明 |
+|------|------|
+| [**data_processing.md**](data_processing.md) | **数据处理说明**：数据架构、拉取策略、写入机制、健康检查、数据校验、备份恢复、导入导出 |
+
 ## 🗄️ 归档
 
 | 文档 | 说明 |
