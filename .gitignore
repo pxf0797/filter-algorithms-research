@@ -13,3 +13,4 @@ data/*.parquet
 data/*/*.parquet
 data/*-shm
 data/*-wal
+data/snapshots/

@@ -5,6 +5,7 @@
 import hashlib
 import json
 import os
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -18,7 +19,10 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pandas import DataFrame
 from statsmodels.nonparametric.smoothers_lowess import lowess
-from db import init_db, upsert_kline, query_kline, get_date_range, has_data
+from db import (init_db, upsert_kline, query_kline, get_date_range, has_data,
+                check_data_health, get_db_size_mb, snapshot_db, list_snapshots,
+                restore_snapshot, prune_snapshots, clear_display_cache,
+                checkpoint_wal, validate_db, DB_PATH)
 
 # ---------------------------------------------------------------------------
 # Page config (must be the first Streamlit command)
@@ -1963,6 +1967,23 @@ def main():
         interval = st.sidebar.slider("刷新间隔(秒)", 10, 600, 60, 10, key="refresh_interval")
 
     st.sidebar.markdown("---")
+    # ── 数据健康检查 ──
+    with st.sidebar.expander("🩺 数据健康检查", expanded=False):
+        if st.button("运行检查", key="health_btn", use_container_width=True) and ticker_code:
+            with st.spinner("检查数据完整性..."):
+                report = check_data_health(ticker_code)
+            status = report.get("status", "ok")
+            color_map = {"ok": "green", "warn": "orange", "error": "red"}
+            color = color_map.get(status, "gray")
+            st.markdown(f"**:{color}[状态: {report.get('summary', status)}]**")
+            if report.get("issues"):
+                for issue in report["issues"]:
+                    st.warning(issue)
+            if report.get("details"):
+                detail_df = pd.DataFrame(report["details"])
+                st.dataframe(detail_df, use_container_width=True, hide_index=True,
+                             height=min(35 * len(detail_df) + 38, 300))
+
     filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),
         format_func=lambda x: FILTERS[x]["name"], key="global_f")
     dual = st.sidebar.checkbox("双滤波对比", value=False, key="global_dual")
@@ -2033,6 +2054,54 @@ def main():
         st.sidebar.caption(f"数据范围: {data_start} ~ {data_end}")
     day_offset = st.session_state._day_offset
 
+    # ── 数据备份与恢复 ──
+    with st.sidebar.expander("💾 数据备份与恢复", expanded=False):
+        db_size = get_db_size_mb()
+        st.caption(f"数据库: {DB_PATH.name} ({db_size:.1f} MB)")
+
+        c_s1, c_s2 = st.columns([1, 1])
+        with c_s1:
+            if st.button("创建备份", key="snap_btn", use_container_width=True):
+                try:
+                    path = snapshot_db()
+                    prune_snapshots(max_keep=5)
+                    st.success(f"已创建: {Path(path).name}")
+                except Exception as e:
+                    st.error(f"备份失败: {e}")
+
+        snapshots = list_snapshots()
+        with c_s2:
+            snap_count = len(snapshots)
+            st.caption(f"共 {snap_count} 个备份" if snap_count else "暂无备份")
+
+        if snapshots:
+            snap_labels = [s[3] for s in snapshots]
+            selected_idx = st.selectbox(
+                "选择备份", range(len(snap_labels)),
+                format_func=lambda i: snap_labels[i],
+                key="restore_select"
+            )
+            c_r1, c_r2 = st.columns([1, 1])
+            with c_r1:
+                if st.button("恢复到此备份", key="restore_btn", use_container_width=True):
+                    try:
+                        restore_snapshot(snapshots[selected_idx][0])
+                        _fetch_stock.clear()
+                        clear_display_cache()
+                        st.session_state._fetched_ticker = ""
+                        st.success("已恢复，页面将刷新")
+                        time.sleep(0.5)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"恢复失败: {e}")
+            with c_r2:
+                if st.button("删除此备份", key="del_snap_btn", use_container_width=True):
+                    try:
+                        os.remove(snapshots[selected_idx][0])
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"删除失败: {e}")
+
     # ---- Pass 2: Bottom 2x2 chart views ----
     # 按时间框架从高到低排序渲染，确保低周期视图能获取高周期PnL缓存
     # 先创建2×2网格容器，再按高周期优先顺序填充
@@ -2085,6 +2154,61 @@ def main():
     st.sidebar.download_button("导出配置", json.dumps(export_data, ensure_ascii=False, indent=2),
         file_name="filter_config.json", mime="application/json",
         use_container_width=True)
+
+    # ── 数据库导入/导出 ──
+    st.sidebar.markdown("---")
+    with st.sidebar.expander("📦 数据库导入/导出", expanded=False):
+        st.caption("导出整个数据库到文件，可在其他设备导入")
+
+        # Export
+        try:
+            checkpoint_wal()
+        except Exception:
+            pass
+        try:
+            db_bytes = DB_PATH.read_bytes()
+            st.download_button(
+                "导出数据库", db_bytes,
+                file_name="market.db", mime="application/octet-stream",
+                use_container_width=True,
+                help=f"文件大小: {len(db_bytes) / 1024 / 1024:.1f} MB"
+            )
+        except Exception as e:
+            st.error(f"导出失败: {e}")
+
+        # Import
+        uploaded_db = st.file_uploader(
+            "导入数据库", type=["db"],
+            key="db_import", label_visibility="collapsed"
+        )
+        if uploaded_db is not None:
+            raw = uploaded_db.read()
+            file_hash = hashlib.md5(raw).hexdigest()
+            if st.session_state.get("_db_import_hash") != file_hash:
+                with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+                    tmp.write(raw)
+                    tmp_path = tmp.name
+                valid, err_msg = validate_db(tmp_path)
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+
+                if not valid:
+                    st.error(f"无效的数据库文件: {err_msg}")
+                else:
+                    DB_PATH.write_bytes(raw)
+                    for suffix in ["-wal", "-shm"]:
+                        p = str(DB_PATH) + suffix
+                        if os.path.exists(p):
+                            os.remove(p)
+                    _fetch_stock.clear()
+                    clear_display_cache()
+                    st.session_state._fetched_ticker = ""
+                    st.session_state._db_import_hash = file_hash
+                    st.success(f"数据库已导入 ({len(raw) / 1024 / 1024:.1f} MB)，页面将刷新")
+                    time.sleep(0.5)
+                    st.rerun()
 
     # ── Auto-refresh execution ──
     if auto_refresh:

@@ -3,12 +3,16 @@ streamlit/db.py — SQLite 数据层
 统一管理所有股票多周期K线数据。
 """
 
+import os
 import sqlite3
+import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 import pandas as pd
 
 DB_PATH = Path(__file__).parent.parent / "data" / "market.db"
+SNAPSHOT_DIR = DB_PATH.parent / "snapshots"
 
 
 def get_conn() -> sqlite3.Connection:
@@ -122,6 +126,206 @@ def has_data(ticker: str) -> bool:
     with get_conn() as conn:
         row = conn.execute("SELECT 1 FROM kline WHERE ticker=? LIMIT 1", (ticker,)).fetchone()
     return row is not None
+
+
+# ---------------------------------------------------------------------------
+# 数据可靠性：健康检查 / 快照 / 导入导出
+# ---------------------------------------------------------------------------
+
+def checkpoint_wal():
+    """Force WAL checkpoint so all data is in the main DB file."""
+    with get_conn() as conn:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+
+def check_data_health(ticker=None):
+    """Return structured health report for one ticker or all tickers.
+
+    Checks: row count, date range, NULL close count, gap detection (via SQL
+    LAG window), and staleness for daily bars (>7 days without new data).
+
+    Returns dict with keys: status, summary, details, issues.
+    """
+    with get_conn() as conn:
+        if ticker:
+            tickers = [ticker]
+        else:
+            rows = conn.execute("SELECT DISTINCT ticker FROM kline").fetchall()
+            tickers = [r[0] for r in rows]
+
+        if not tickers:
+            return {"status": "error", "summary": "数据库为空",
+                    "details": [], "issues": ["没有任何数据"]}
+
+        # Expected interval in days for gap detection (skip 周/月/季)
+        interval_days = {
+            "1分钟": 1/1440, "5分钟": 5/1440, "15分钟": 15/1440,
+            "60分钟": 1/24, "日线": 1,
+        }
+
+        details = []
+        issues = []
+        warn_count = 0
+        error_count = 0
+
+        for t in tickers:
+            tfs = conn.execute(
+                "SELECT DISTINCT timeframe FROM kline WHERE ticker=? ORDER BY timeframe",
+                (t,)).fetchall()
+
+            for (tf,) in tfs:
+                # Row count & date range
+                r = conn.execute(
+                    "SELECT COUNT(*), MIN(date(ts)), MAX(date(ts)), "
+                    "SUM(CASE WHEN close IS NULL THEN 1 ELSE 0 END) "
+                    "FROM kline WHERE ticker=? AND timeframe=?",
+                    (t, tf)).fetchone()
+                cnt, start_d, end_d, nulls = r[0], r[1], r[2], r[3]
+
+                status = "✅ 正常"
+                item_issues = []
+
+                if cnt == 0:
+                    status = "❌ 无数据"
+                    error_count += 1
+                    item_issues.append(f"{t} {tf}: 无数据")
+                if nulls > 0:
+                    item_issues.append(f"{t} {tf}: {nulls}处空值")
+                    if "✅" in status:
+                        status = f"⚠️ 有{nulls}处空值"
+                        warn_count += 1
+
+                # Gap detection for regular-interval timeframes
+                gaps = 0
+                if tf in interval_days:
+                    threshold = interval_days[tf] * 3
+                    gap_row = conn.execute(
+                        "SELECT COUNT(*) FROM ("
+                        " SELECT julianday(ts)-julianday(LAG(ts) OVER ("
+                        "   PARTITION BY ticker, timeframe ORDER BY ts)) as gap "
+                        " FROM kline WHERE ticker=? AND timeframe=?"
+                        ") WHERE gap > ?",
+                        (t, tf, threshold)).fetchone()
+                    gaps = gap_row[0] if gap_row else 0
+                    if gaps > 0:
+                        item_issues.append(f"{t} {tf}: {gaps}处异常缺口")
+                        if "✅" in status:
+                            status = f"⚠️ 有{gaps}处缺口"
+                            warn_count += 1
+
+                # Staleness: daily bars older than 7 days
+                if tf == "日线" and end_d:
+                    stale = conn.execute(
+                        "SELECT julianday('now') - julianday(?)", (end_d,)
+                    ).fetchone()[0]
+                    if stale > 7:
+                        item_issues.append(f"{t} 日线: 最新数据{end_d}，已过期{int(stale)}天")
+                        status = "⚠️ 数据过期"
+                        warn_count += 1
+
+                details.append({
+                    "股票": t, "周期": tf, "行数": cnt,
+                    "起始": start_d or "-", "最新": end_d or "-",
+                    "空值": nulls, "缺口": gaps, "状态": status,
+                })
+
+            issues.extend(item_issues)
+
+        total_tickers = len(tickers)
+        total_tfs = len(details)
+        if error_count > 0:
+            overall = "error"
+            summary = f"{total_tickers}只股票{total_tfs}个周期，{error_count}个异常"
+        elif warn_count > 0:
+            overall = "warn"
+            summary = f"{total_tickers}只股票{total_tfs}个周期，{warn_count}个需关注"
+        else:
+            overall = "ok"
+            summary = f"{total_tickers}只股票{total_tfs}个周期，全部正常"
+
+        return {"status": overall, "summary": summary,
+                "details": details, "issues": issues}
+
+
+def get_db_size_mb():
+    """Return DB file size in megabytes."""
+    try:
+        return os.path.getsize(str(DB_PATH)) / (1024 * 1024)
+    except OSError:
+        return 0.0
+
+
+def validate_db(db_path=None):
+    """Check that a DB file has the kline table. Returns (bool, error_msg)."""
+    path = db_path or str(DB_PATH)
+    try:
+        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='kline'"
+        ).fetchone()
+        conn.close()
+        if not row:
+            return False, "缺少 kline 表"
+        return True, ""
+    except sqlite3.DatabaseError as e:
+        return False, f"无效的 SQLite 文件: {e}"
+
+
+def snapshot_db():
+    """Create timestamped copy of market.db. Returns path."""
+    checkpoint_wal()
+    SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    dest = SNAPSHOT_DIR / f"market_{ts}.db"
+    shutil.copy2(str(DB_PATH), str(dest))
+    return str(dest)
+
+
+def list_snapshots():
+    """Return [(path_str, mtime, size_mb, label), ...] newest first."""
+    if not SNAPSHOT_DIR.exists():
+        return []
+    files = sorted(
+        SNAPSHOT_DIR.glob("market_*.db"),
+        key=lambda f: f.stat().st_mtime, reverse=True)
+    result = []
+    for f in files:
+        st = f.stat()
+        ts = datetime.fromtimestamp(st.st_mtime).strftime("%m/%d %H:%M")
+        size_mb = st.st_size / (1024 * 1024)
+        label = f"{f.name} ({size_mb:.1f}MB, {ts})"
+        result.append((str(f), st.st_mtime, size_mb, label))
+    return result
+
+
+def restore_snapshot(snapshot_path):
+    """Restore DB from snapshot. Delete WAL/SHM afterwards."""
+    shutil.copy2(str(snapshot_path), str(DB_PATH))
+    for suffix in ["-wal", "-shm"]:
+        p = str(DB_PATH) + suffix
+        if os.path.exists(p):
+            os.remove(p)
+
+
+def prune_snapshots(max_keep=5):
+    """Keep only the most recent N snapshots, delete the rest."""
+    snapshots = list_snapshots()
+    for path_str, _, _, _ in snapshots[max_keep:]:
+        try:
+            os.remove(path_str)
+        except OSError:
+            pass
+
+
+def clear_display_cache():
+    """Delete all .parquet files in data/display/."""
+    display_dir = DB_PATH.parent / "display"
+    if display_dir.exists():
+        for f in display_dir.glob("*.parquet"):
+            try:
+                f.unlink()
+            except OSError:
+                pass
 
 
 if __name__ == "__main__":
