@@ -1323,7 +1323,7 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
             c2 = st.columns([1.0, 1.0, 1.0])
             with c2[0]: cfg["ke"] = st.slider("k_ε", 0.01, 0.50, cfg["ke"], 0.01, key=f"{key}_ke",
                 help="灵敏度系数,越小越敏感. ε_t=k_ε·max(σ_t(v),σ_min)")
-            with c2[1]: cfg["sm"] = st.slider("σ_min", 0.001, 0.20, cfg["sm"], 0.001, key=f"{key}_sm",
+            with c2[1]: cfg["sm"] = st.slider("σ_min", 0.001, 0.20, cfg["sm"], 0.001, key=f"{key}_sm", format="%.3f",
                 help="地板保护,防止低波动下ε_t→0")
             with c2[2]: cfg["ew"] = st.slider("N_EWMA", 10, 120, cfg["ew"], 1, key=f"{key}_ew",
                 help="EWMA周期,α=2/(N+1),越大越平滑")
