@@ -1321,11 +1321,11 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     if cfg["show_sch"]:
         with st.expander("施密特参数", expanded=exp_all):
             c2 = st.columns([1.0, 1.0, 1.0])
-            with c2[0]: cfg["ke"] = st.slider("k_ε", 0.01, 0.50, cfg["ke"], 0.05, key=f"{key}_ke",
+            with c2[0]: cfg["ke"] = st.slider("k_ε", 0.01, 0.50, cfg["ke"], 0.01, key=f"{key}_ke",
                 help="灵敏度系数,越小越敏感. ε_t=k_ε·max(σ_t(v),σ_min)")
-            with c2[1]: cfg["sm"] = st.slider("σ_min", 0.01, 0.20, cfg["sm"], 0.02, key=f"{key}_sm",
+            with c2[1]: cfg["sm"] = st.slider("σ_min", 0.001, 0.20, cfg["sm"], 0.001, key=f"{key}_sm", format="%.3f",
                 help="地板保护,防止低波动下ε_t→0")
-            with c2[2]: cfg["ew"] = st.slider("N_EWMA", 10, 120, cfg["ew"], 10, key=f"{key}_ew",
+            with c2[2]: cfg["ew"] = st.slider("N_EWMA", 10, 120, cfg["ew"], 1, key=f"{key}_ew",
                 help="EWMA周期,α=2/(N+1),越大越平滑")
         if cfg["show_pred"]:
             with st.expander("预测参数", expanded=exp_all):
@@ -1386,7 +1386,7 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
                             cfg["stop_loss_pct"] = st.slider(
                                 "止损阈值(%)", 0.5, 10.0,
                                 st.session_state.get(sl_key,
-                                    st.session_state.get(f"_imp_{sl_key}", 2.0)), 0.5,
+                                    st.session_state.get(f"_imp_{sl_key}", 2.0)), 0.1,
                                 key=sl_key,
                                 help="预测偏差超过此阈值即止损离场")
                     else:
