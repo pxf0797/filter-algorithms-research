@@ -27,7 +27,7 @@
   "v1_sch": true,
   "v1_pred": true,
   "v1_ke": 0.15,
-  "v1_sm": 0.05,
+  "v1_sm": 0.021,
   "v1_ew": 60,
   "v1_fm": "parabola",
   "v1_next": 8,
