@@ -511,6 +511,24 @@ def _fetch_stock(market, code, tf, n_pts, force_period=None):
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.droplevel(1)
 
+    # ── 日线 Close 回退：Yahoo 日线 API 最后一条 bar 的 Close 偶尔未结算(nan)，
+    #    但 Yahoo 周线 API 已通过实时行情计算出本周 Close。
+    #    用周线 Close 回填日线，解决 A 股/港股收盘价 1-2 天延迟问题。
+    #    详见 docs/data-freshness.md
+    if interval == "1d" and len(data) > 0:
+        last_close = data["Close"].iloc[-1]
+        if pd.isna(last_close):
+            try:
+                w = yf.download(full, period="5d", interval="1wk", progress=False)
+                if len(w) > 0:
+                    if isinstance(w.columns, pd.MultiIndex):
+                        w.columns = w.columns.droplevel(1)
+                    w_close = w["Close"].iloc[-1]
+                    if not pd.isna(w_close):
+                        data.loc[data.index[-1], "Close"] = float(w_close)
+            except Exception:
+                pass  # 回退失败不影响主流程，后续 nan 行仍会被丢弃
+
     data = data[data["Close"].notna()]
 
     # ── 全量写入 SQLite ──
