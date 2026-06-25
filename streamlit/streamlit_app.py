@@ -1344,7 +1344,8 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
             with c2[1]: cfg["sm"] = st.slider("σ_min", 0.001, 0.20, cfg["sm"], 0.001, key=f"{key}_sm", format="%.3f",
                 help="地板保护,防止低波动下ε_t→0")
             with c2[2]: cfg["ew"] = st.slider("N_EWMA", 10, 120, cfg["ew"], 1, key=f"{key}_ew",
-                help="EWMA周期,α=2/(N+1),越大越平滑")
+                help="EWMA周期,α=2/(N+1),越大越平滑。⚠️ 实际bar数(N)必须≥此值,否则无信号。"
+                     "σ(v)估计精度≈1/√(2×N)。20 bar下建议N_EWMA≤15, 60 bar默认60")
         if cfg["show_pred"]:
             with st.expander("预测参数", expanded=exp_all):
                 c3 = st.columns([1.5, 1.0])
@@ -1599,6 +1600,11 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     if cfg["show_sch"] and not np.all(np.isnan(filtered)):
         _v = np.gradient(filtered, t); _a = np.gradient(_v, t)
         schmitt = _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
+
+    # 约束检查：bar数不足时提示用户
+    if cfg["show_sch"] and schmitt is None and len(t) > 0:
+        st.warning(f"⚠️ 施密特信号不可用：bar数({len(t)}) < N_EWMA({cfg['ew']})。"
+                   f"请降低 N_EWMA 至 ≤{len(t)} 或增加数据点数(N)。")
 
     # 多空切换对 — 始终计算（用于预测曲线 + Sig_t 背景标记）
     all_pairs = []
