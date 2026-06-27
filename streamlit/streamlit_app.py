@@ -2005,6 +2005,9 @@ def main():
 
     # ── 配置方案预设选择器 ──
     st.sidebar.markdown("---")
+    # 删除或重命名后清除 session_state 中的旧选择值，避免 selectbox 显示已删除项
+    if st.session_state.pop("_reset_preset_selector", False):
+        st.session_state.pop("preset_selector", None)
     presets = list_presets()
     preset_names = ["(不选择)"] + [f"[{p['category']}] {p['name']}" for p in presets]
     selected_label = st.sidebar.selectbox("📋 配置方案", preset_names, key="preset_selector")
@@ -2053,6 +2056,7 @@ def main():
                     if new_name.strip() and new_name.strip() != p["name"]:
                         rename_preset(p["preset_id"], new_name.strip())
                         st.success(f"已重命名: {p['name']} → {new_name.strip()}")
+                        st.session_state._reset_preset_selector = True
                         st.rerun()
                     elif new_name.strip() == p["name"]:
                         st.warning("名称未变化")
@@ -2066,6 +2070,7 @@ def main():
                 if st.button("确认删除", key="delete_preset_confirm", use_container_width=True):
                     delete_preset(p["preset_id"])
                     st.success(f"已删除: {p['name']}")
+                    st.session_state._reset_preset_selector = True
                     st.rerun()
 
     # 保存当前为预设
@@ -2089,6 +2094,9 @@ def main():
                             description=new_desc.strip() if not overwrite else
                             selected_preset.get("description", ""))
                 st.success(f"已保存: {target_name}")
+                if not overwrite:
+                    # 新预设：自动跳转到新选项
+                    st.session_state.preset_selector = f"[通用] {target_name}"
                 st.rerun()
             else:
                 st.error("请输入预设名称")
