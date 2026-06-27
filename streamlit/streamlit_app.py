@@ -19,6 +19,9 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from pandas import DataFrame
 from statsmodels.nonparametric.smoothers_lowess import lowess
+from config_db import (init_config_tables, list_presets, apply_preset,
+                        save_preset, save_ticker_config, record_history, get_history,
+                        import_json_files_as_presets)
 from db import (init_db, upsert_kline, query_kline, get_date_range, has_data,
                 check_data_health, get_db_size_mb, snapshot_db, list_snapshots,
                 restore_snapshot, prune_snapshots, clear_display_cache,
@@ -1917,6 +1920,8 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
 # =====================================================================
 def main():
     init_db()
+    init_config_tables()
+    import_json_files_as_presets()  # 首次运行导入已有 JSON
     st.sidebar.title("多周期股票滤波分析")
 
     # ── Import config (before any widget) ──
@@ -1996,6 +2001,48 @@ def main():
         auto_refresh = st.checkbox("自动刷新", value=False, key="auto_refresh")
     if auto_refresh:
         interval = st.sidebar.slider("刷新间隔(秒)", 10, 600, 60, 10, key="refresh_interval")
+
+    # ── 配置方案预设选择器 ──
+    st.sidebar.markdown("---")
+    presets = list_presets()
+    preset_names = ["(不选择)"] + [f"[{p['category']}] {p['name']}" for p in presets]
+    selected_label = st.sidebar.selectbox("📋 配置方案", preset_names, key="preset_selector")
+
+    if selected_label != "(不选择)":
+        # 提取预设名
+        preset_name = selected_label.split("] ", 1)[1] if "] " in selected_label else selected_label
+        preset = next((p for p in presets if p["name"] == preset_name), None)
+        if preset:
+            st.sidebar.caption(f"💡 {preset['description']}")
+            c_apply, c_save = st.sidebar.columns([1, 1])
+            with c_apply:
+                if st.button("✅ 应用", key="apply_preset", use_container_width=True):
+                    params = apply_preset(preset["preset_id"])
+                    if params:
+                        for k, v in params.items():
+                            st.session_state[k] = v
+                            st.session_state[f"_imp_{k}"] = v
+                        st.session_state._import_data = "preset"
+                        st.sidebar.success(f"已应用: {preset_name}")
+                        st.rerun()
+
+    # 保存当前为预设
+    with st.sidebar.expander("💾 保存当前为预设", expanded=False):
+        new_name = st.text_input("预设名称", key="new_preset_name", placeholder="如: 我的港股配置")
+        new_desc = st.text_input("描述(可选)", key="new_preset_desc", placeholder="港股·短线·savgol")
+        if st.button("保存", key="save_preset_btn", use_container_width=True):
+            if new_name.strip():
+                # 收集当前参数
+                from config_db import collect_current_params
+                import json as _json
+                params = collect_current_params()
+                save_preset(new_name.strip(),
+                            _json.dumps(params, ensure_ascii=False),
+                            description=new_desc.strip())
+                st.success(f"已保存: {new_name.strip()}")
+                st.rerun()
+            else:
+                st.error("请输入预设名称")
 
     st.sidebar.markdown("---")
     # ── 数据健康检查 ──
@@ -2293,6 +2340,19 @@ def main():
     st.sidebar.download_button("导出配置", json.dumps(export_data, ensure_ascii=False, indent=2),
         file_name="filter_config.json", mime="application/json",
         use_container_width=True)
+
+    # ── 配置历史 ──
+    if ticker_code:
+        st.sidebar.markdown("---")
+        with st.sidebar.expander("📜 配置历史", expanded=False):
+            records = get_history(ticker_code, variant="single", limit=10)
+            if records:
+                for rec in records:
+                    source_icon = {"ui": "✏️", "import": "📥", "preset_apply": "📋", "rollback": "↩️"}
+                    icon = source_icon.get(rec.get("source", ""), "📌")
+                    st.caption(f"{icon} {rec['changed_at']} — {rec.get('preset_name') or rec['source']}")
+            else:
+                st.caption("暂无记录")
 
     # ── 数据库导入/导出 ──
     st.sidebar.markdown("---")
