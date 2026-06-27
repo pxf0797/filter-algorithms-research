@@ -2009,7 +2009,6 @@ def main():
     preset_names = ["(不选择)"] + [f"[{p['category']}] {p['name']}" for p in presets]
 
     # 基于选项列表内容生成动态 key — 数据变了 key 自动变，widget 自然重置
-    import hashlib
     _hash = hashlib.md5("|".join(preset_names).encode()).hexdigest()[:8]
     selected_label = st.sidebar.selectbox("📋 配置方案", preset_names,
                                           key=f"preset_sel_{_hash}")
