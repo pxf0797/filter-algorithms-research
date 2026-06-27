@@ -18,7 +18,7 @@ REQUIRED_PER_VIEW_KEYS = [
 
 REQUIRED_GLOBAL_KEYS = ["market", "ticker", "global_f", "global_dual", "global_f2"]
 
-CONFIG_PATH = "/Users/xfpan/claude/filter_research/config/3690_HK.json"
+CONFIG_PATH = "/Users/xfpan/claude/filter_research/config/3690_HK_DP.json"
 
 
 class TestExportCompleteness:
@@ -248,7 +248,7 @@ class TestExpandCollapseParameterRecovery:
             "v0_align": True,
             "v0_strat": True,
             "v0_ke": 0.1,
-            "v0_sm": 0.05,
+            "v0_sm": 0.03,
             "v0_ew": 40,
         }
 
