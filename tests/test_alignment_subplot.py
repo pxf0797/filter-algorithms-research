@@ -173,14 +173,16 @@ class TestAlignmentSubplot:
         assert sf[2] > 100.0   # short_pnl涨到102
 
     def test_no_crash_with_empty_data(self):
-        """空数据不崩溃"""
+        """空 trade_records: 仅生成做多/做空曲线 + 填充区域 (无交易分段)."""
         fig = make_subplots(rows=1, cols=1)
         _add_alignment_subplot(fig, np.arange(5, dtype=float),
                                np.ones(5) * 100, np.ones(5) * 100,
                                [],
                                np.zeros(5, dtype=bool), np.zeros(5, dtype=bool),
                                row=1)
-        assert len(fig.data) >= 3  # 至少两条曲线 + 基准线区域
+        # long curve + short curve + 2 fill regions (no trade segment traces)
+        assert len(fig.data) == 4, \
+            f"Expected 4 traces (long+short+2 fills), got {len(fig.data)}"
 
     def test_trade_records_with_masks(self):
         """trade_records传入同向段高亮"""

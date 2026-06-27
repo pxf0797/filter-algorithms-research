@@ -159,53 +159,28 @@ class TestFitComparison:
 # _compute_strategy_pnl
 # ============================================================================
 
-def _make_long_scenario():
-    """Helper: construct data for a long trade scenario.
+def _make_trade_scenario(direction="long"):
+    """Helper: construct data for a long or short trade scenario.
 
-    Uses _fit_parabolic (3-DOF) so monotonic rise produces upward prediction.
+    Uses _fit_parabolic (3-DOF). Monotonic rise→long (upward prediction),
+    monotonic fall→short (downward prediction).
 
     Returns (t, filtered, sig_t, all_pairs, pred_pairs, stop_loss_pct, n_extend).
     """
     n = 100
     t = np.arange(n, dtype=float)
-    # Filtered price: monotonic rise (quadratic, so poly2 fits well)
-    filtered = 100.0 + 0.02 * t ** 2
-    # Signal: zeros initially, then +1 from index 50 onward
+    if direction == "long":
+        filtered = 100.0 + 0.02 * t ** 2
+        sig_val = 1
+    else:
+        filtered = 150.0 - 0.005 * t ** 2  # min at t=99: 101.0
+        sig_val = -1
     sig_t = np.zeros(n, dtype=int)
-    sig_t[50:] = 1
-    # One pair covering the +1 segment. pair_end must match pred_pairs.
-    fit_end = 70
-    all_pairs = [(50, fit_end)]
-    # Use _fit_parabolic (3-DOF) — monotonic rise → upward extrapolation
-    fit_result = _fit_parabolic(
-        t, filtered, 50, fit_end
-    )
-    assert fit_result is not None, "Failed to fit long parabola"
-    pred_pairs = [{
-        "fit_result": fit_result,
-        "fit_start": 50,
-        "pair_end": fit_end,
-    }]
-    return t, filtered, sig_t, all_pairs, pred_pairs, 2.0, 10
-
-
-def _make_short_scenario():
-    """Helper: construct data for a short trade scenario.
-
-    Uses _fit_parabolic (3-DOF) so monotonic fall produces downward prediction.
-    filtered stays > 0 throughout.
-    """
-    n = 100
-    t = np.arange(n, dtype=float)
-    # Filtered price: monotonic fall, stays positive
-    filtered = 150.0 - 0.005 * t ** 2  # min at t=99: 150-0.005*9801=101.0
-    # Signal: zeros initially, then -1 from index 50 onward
-    sig_t = np.zeros(n, dtype=int)
-    sig_t[50:] = -1
+    sig_t[50:] = sig_val
     fit_end = 70
     all_pairs = [(50, fit_end)]
     fit_result = _fit_parabolic(t, filtered, 50, fit_end)
-    assert fit_result is not None, "Failed to fit short parabola"
+    assert fit_result is not None, f"Failed to fit {direction} parabola"
     pred_pairs = [{
         "fit_result": fit_result,
         "fit_start": 50,
@@ -233,7 +208,7 @@ class TestComputeStrategyPnL:
     @pytest.mark.strategy
     def test_long_trade(self):
         """Known long trade → long_pnl[-1] > 100, at least 1 trade, type='long'."""
-        t, filtered, sig_t, all_pairs, pred_pairs, sl, n_ext = _make_long_scenario()
+        t, filtered, sig_t, all_pairs, pred_pairs, sl, n_ext = _make_trade_scenario("long")
         long_pnl, short_pnl, trades = _compute_strategy_pnl(
             t, filtered, sig_t, all_pairs, pred_pairs, sl, n_ext
         )
@@ -248,7 +223,7 @@ class TestComputeStrategyPnL:
     @pytest.mark.strategy
     def test_short_trade(self):
         """Known short trade → short_pnl[-1] > 100, at least 1 trade, type='short'."""
-        t, filtered, sig_t, all_pairs, pred_pairs, sl, n_ext = _make_short_scenario()
+        t, filtered, sig_t, all_pairs, pred_pairs, sl, n_ext = _make_trade_scenario("short")
         long_pnl, short_pnl, trades = _compute_strategy_pnl(
             t, filtered, sig_t, all_pairs, pred_pairs, sl, n_ext
         )
@@ -425,7 +400,7 @@ class TestComputeStrategyPnL:
 # ============================================================================
 
 class TestAddPredictionTraces:
-    """_add_prediction_traces — verify function does not crash."""
+    """_add_prediction_traces — 验证 trace 结构正确性."""
 
     @pytest.fixture
     def subplot_fig(self):
@@ -434,49 +409,49 @@ class TestAddPredictionTraces:
         return make_subplots(rows=2, cols=1)
 
     @pytest.mark.strategy
-    def test_no_crash_poly2(self, subplot_fig):
-        """Should not raise with poly2 fit result."""
+    def test_poly2_adds_fit_and_prediction_traces(self, subplot_fig):
+        """poly2 拟合应生成 3 条 trace: 拟合线 + 预测线 + 残差线."""
         fig = subplot_fig
         t = np.arange(50, dtype=float)
         filtered = np.sin(t / 5.0)
         fit_result = _fit_parabolic(t, filtered, 10, 40)
         assert fit_result is not None, "Fit failed"
-        try:
-            _add_prediction_traces(
-                fig, t, filtered, fit_result,
-                fit_start=10, pair_end=40, row=1, n_extend=10,
-            )
-        except Exception as e:
-            pytest.fail(f"_add_prediction_traces raised: {e}")
+        n_before = len(fig.data)
+        _add_prediction_traces(
+            fig, t, filtered, fit_result,
+            fit_start=10, pair_end=40, row=1, n_extend=10,
+        )
+        assert len(fig.data) == n_before + 3, \
+            f"Expected 3 new traces (fit + pred + residual), got {len(fig.data) - n_before}"
 
     @pytest.mark.strategy
-    def test_no_crash_physics_fit(self, subplot_fig):
-        """Should not crash when using physics fit result."""
+    def test_physics_fit_uses_vertex_anchor(self, subplot_fig):
+        """抛物线拟合 trace 应锚定终点为顶点 (x0 field 存在)."""
         fig = subplot_fig
         t = np.arange(50, dtype=float)
         filtered = np.sin(t / 5.0)
         fit_result = _fit_physics_parabola(t, filtered, 10, 40)
         assert fit_result is not None, "Fit failed"
-        try:
-            _add_prediction_traces(
-                fig, t, filtered, fit_result,
-                fit_start=10, pair_end=40, row=1, n_extend=10,
-            )
-        except Exception as e:
-            pytest.fail(f"_add_prediction_traces raised: {e}")
+        assert "x0" in fit_result, "physics parabola must have x0 (vertex anchor)"
+        n_before = len(fig.data)
+        _add_prediction_traces(
+            fig, t, filtered, fit_result,
+            fit_start=10, pair_end=40, row=1, n_extend=10,
+        )
+        assert len(fig.data) == n_before + 3
 
     @pytest.mark.strategy
-    def test_no_crash_no_extend(self, subplot_fig):
-        """Should not crash when n_extend=0."""
+    def test_no_extend_adds_only_fit_trace(self, subplot_fig):
+        """n_extend=0 时仅生成 1 条拟合 trace (无预测/残差)."""
         fig = subplot_fig
         t = np.arange(50, dtype=float)
         filtered = np.sin(t / 5.0)
         fit_result = _fit_parabolic(t, filtered, 10, 40)
         assert fit_result is not None, "Fit failed"
-        try:
-            _add_prediction_traces(
-                fig, t, filtered, fit_result,
-                fit_start=10, pair_end=40, row=1, n_extend=0,
-            )
-        except Exception as e:
-            pytest.fail(f"_add_prediction_traces raised: {e}")
+        n_before = len(fig.data)
+        _add_prediction_traces(
+            fig, t, filtered, fit_result,
+            fit_start=10, pair_end=40, row=1, n_extend=0,
+        )
+        assert len(fig.data) == n_before + 1, \
+            f"n_extend=0 should add only fit trace, got {len(fig.data) - n_before}"

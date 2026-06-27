@@ -20,7 +20,7 @@ with patch("streamlit.warning"):
         apply_sma, apply_ema, apply_wma, apply_alma,
         apply_savgol, apply_kalman, apply_butterworth,
         apply_gaussian, apply_median, apply_lowess,
-        compute_metrics,
+        compute_metrics, FILTERS,
     )
 
 pytestmark = pytest.mark.filter
@@ -31,63 +31,30 @@ pytestmark = pytest.mark.filter
 # ===================================================================
 
 class TestConstantSignal:
-    """每个滤波器对常量信号应返回≈常量值."""
+    """每个滤波器对常量信号应返回≈常量值 (parametrized)."""
 
-    def test_sma_constant(self, constant_signal, time_index):
-        t = time_index[:len(constant_signal)]
-        result = apply_sma(constant_signal, t, window=11)
-        # convolve(mode="same") has edge effects at boundaries;
-        # interior should converge to 1.0
-        interior = result[10:-10]
-        assert np.allclose(interior, 1.0, atol=1e-6)
+    CONSTANT_CASES = [
+        # (filter_key, params, check_slice, atol, description)
+        ("sma",         {"window": 11},                             slice(10, -10), 1e-6, "SMA 窗口11"),
+        ("ema",         {"span": 10},                               slice(None),    1e-6, "EMA span=10"),
+        ("wma",         {"window": 11},                             slice(10, -10), 1e-6, "WMA 窗口11"),
+        ("alma",        {"window": 11, "offset": 0.85, "sigma": 6.0}, slice(10, -10), 1e-6, "ALMA 窗口11"),
+        ("savgol",      {"window": 11, "order": 2},                slice(None),    1e-6, "SavGol 窗口11"),
+        ("kalman",      {"Q": 0.01, "R": 1.0},                     slice(-20, None), 1e-3, "Kalman 收敛"),
+        ("butterworth", {"order": 4, "cutoff": 10.0},              slice(10, -10), 1e-6, "Butterworth 4阶"),
+        ("gaussian",    {"sigma": 3.0},                             slice(None),    1e-6, "Gaussian σ=3"),
+        ("median",      {"window": 11},                             slice(None),    1e-6, "Median 窗口11"),
+        ("lowess",      {"frac": 0.1},                              slice(None),    1e-5, "LOWESS frac=0.1"),
+    ]
 
-    def test_ema_constant(self, constant_signal, time_index):
+    @pytest.mark.parametrize("filter_key,params,check_slice,atol,_desc", CONSTANT_CASES)
+    def test_constant_signal(self, constant_signal, time_index,
+                             filter_key, params, check_slice, atol, _desc):
         t = time_index[:len(constant_signal)]
-        result = apply_ema(constant_signal, t, span=10)
-        assert np.allclose(result, 1.0, atol=1e-6)
-
-    def test_wma_constant(self, constant_signal, time_index):
-        t = time_index[:len(constant_signal)]
-        result = apply_wma(constant_signal, t, window=11)
-        interior = result[10:-10]
-        assert np.allclose(interior, 1.0, atol=1e-6)
-
-    def test_alma_constant(self, constant_signal, time_index):
-        t = time_index[:len(constant_signal)]
-        result = apply_alma(constant_signal, t, window=11, offset=0.85, sigma=6.0)
-        interior = result[10:-10]
-        assert np.allclose(interior, 1.0, atol=1e-6)
-
-    def test_savgol_constant(self, constant_signal, time_index):
-        t = time_index[:len(constant_signal)]
-        result = apply_savgol(constant_signal, t, window=11, order=2)
-        assert np.allclose(result, 1.0, atol=1e-6)
-
-    def test_kalman_constant(self, constant_signal, time_index):
-        t = time_index[:len(constant_signal)]
-        result = apply_kalman(constant_signal, t, Q=0.01, R=1.0)
-        # Kalman converges to true value over time
-        assert np.allclose(result[-20:], 1.0, atol=1e-3)
-
-    def test_butterworth_constant(self, constant_signal, time_index):
-        t = time_index[:len(constant_signal)]
-        result = apply_butterworth(constant_signal, t, order=4, cutoff=10.0)
-        assert np.allclose(result[10:-10], 1.0, atol=1e-6)
-
-    def test_gaussian_constant(self, constant_signal, time_index):
-        t = time_index[:len(constant_signal)]
-        result = apply_gaussian(constant_signal, t, sigma=3.0)
-        assert np.allclose(result, 1.0, atol=1e-6)
-
-    def test_median_constant(self, constant_signal, time_index):
-        t = time_index[:len(constant_signal)]
-        result = apply_median(constant_signal, t, window=11)
-        assert np.allclose(result, 1.0, atol=1e-6)
-
-    def test_lowess_constant(self, constant_signal, time_index):
-        t = time_index[:len(constant_signal)]
-        result = apply_lowess(constant_signal, t, frac=0.1)
-        assert np.allclose(result, 1.0, atol=1e-5)
+        func = FILTERS[filter_key]["func"]
+        result = func(constant_signal, t, **params)
+        assert np.allclose(result[check_slice], 1.0, atol=atol), \
+            f"{_desc}: interior not constant"
 
 
 # ===================================================================
