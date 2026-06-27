@@ -171,14 +171,14 @@ pytest -v --tb=short
 | `test_list_presets_sorted_by_category_then_name` | 分类+名称排序 |
 | `test_uniqueness_constraint_violation_triggers_update` | UNIQUE 冲突触发 UPDATE |
 
-**Selectbox 刷新 — `_selected_preset` + `index` 模式 (5):**
+**Selectbox 刷新 — hash-based 动态 key 模式 (5):**
 | 测试 | 说明 |
 |:--|:--|
-| `test_delete_clears_selection` | 删除后 `_selected_preset='(不选择)'`，selectbox 归零 |
-| `test_rename_updates_selection` | 重命名后 `_selected_preset` 指向新名 |
-| `test_stale_value_falls_back_to_first` | 幽灵值不在选项中 → 自动回退第0项 |
-| `test_apply_preset_keeps_selection` | 应用预设保持选中状态 |
-| `test_save_new_targets_new_preset` | 保存新预设自动跳到新项 |
+| `test_delete_changes_hash_resets_widget` | 删除后选项列表变 → hash 变 → key 变 → widget 自动重置 |
+| `test_rename_changes_hash` | 重命名后选项列表变 → hash 变 |
+| `test_save_new_changes_hash` | 保存新预设后 hash 变 |
+| `test_no_change_same_hash` | 无操作时 hash 不变 → widget 状态保持 |
+| `test_apply_preset_does_not_change_hash` | 纯读操作 hash 不变 |
 
 **增删改连续操作 (5):**
 | 测试 | 说明 |
@@ -243,7 +243,7 @@ pytest -v --tb=short
 功能                         单元测试    集成测试    总计
 ─────────────────────────────────────────────────────
 预设 CRUD (增删改查)          11          4         15
-Selectbox 刷新 (index模式)     —          5          5
+Selectbox 刷新 (hash key)      —          5          5
 增删改连续操作                  —          5          5
 Session State 交互             5          7         12
 JSON 导入导出                  5          6         11
