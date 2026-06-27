@@ -20,7 +20,8 @@ from plotly.subplots import make_subplots
 from pandas import DataFrame
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from config_db import (init_config_tables, list_presets, apply_preset,
-                        save_preset, save_ticker_config, record_history, get_history,
+                        save_preset, delete_preset, rename_preset,
+                        save_ticker_config, record_history, get_history,
                         import_json_files_as_presets)
 from db import (init_db, upsert_kline, query_kline, get_date_range, has_data,
                 check_data_health, get_db_size_mb, snapshot_db, list_snapshots,
@@ -2008,38 +2009,86 @@ def main():
     preset_names = ["(不选择)"] + [f"[{p['category']}] {p['name']}" for p in presets]
     selected_label = st.sidebar.selectbox("📋 配置方案", preset_names, key="preset_selector")
 
+    selected_preset = None
     if selected_label != "(不选择)":
-        # 提取预设名
         preset_name = selected_label.split("] ", 1)[1] if "] " in selected_label else selected_label
-        preset = next((p for p in presets if p["name"] == preset_name), None)
-        if preset:
-            st.sidebar.caption(f"💡 {preset['description']}")
-            c_apply, c_save = st.sidebar.columns([1, 1])
-            with c_apply:
-                if st.button("✅ 应用", key="apply_preset", use_container_width=True):
-                    params = apply_preset(preset["preset_id"])
-                    if params:
-                        for k, v in params.items():
-                            st.session_state[k] = v
-                            st.session_state[f"_imp_{k}"] = v
-                        st.session_state._import_data = "preset"
-                        st.sidebar.success(f"已应用: {preset_name}")
+        selected_preset = next((p for p in presets if p["name"] == preset_name), None)
+
+    if selected_preset:
+        p = selected_preset
+        st.sidebar.caption(f"💡 {p['description']}  [{p['category']}]")
+
+        # 按钮行：应用 + 更新 + 重命名 + 删除
+        c1, c2, c3, c4 = st.sidebar.columns([1.2, 1, 1, 0.8])
+        with c1:
+            if st.button("✅ 应用", key="apply_preset", use_container_width=True):
+                params = apply_preset(p["preset_id"])
+                if params:
+                    for k, v in params.items():
+                        st.session_state[k] = v
+                        st.session_state[f"_imp_{k}"] = v
+                    st.session_state._import_data = "preset"
+                    st.sidebar.success(f"已应用: {p['name']}")
+                    st.rerun()
+
+        with c2:
+            with st.popover("📝 更新", use_container_width=True):
+                st.caption(f"将当前参数覆盖到 **{p['name']}**")
+                st.caption("这会替换该预设的全部参数值。")
+                if st.button("确认覆盖", key="update_preset_confirm", use_container_width=True):
+                    from config_db import collect_current_params
+                    import json as _json
+                    params = collect_current_params()
+                    save_preset(p["name"],
+                                _json.dumps(params, ensure_ascii=False),
+                                description=p.get("description", ""),
+                                category=p.get("category", "通用"))
+                    st.success(f"已更新: {p['name']}")
+                    st.rerun()
+
+        with c3:
+            with st.popover("✏️ 重命名", use_container_width=True):
+                new_name = st.text_input("新名称", value=p["name"], key="rename_input")
+                if st.button("确认重命名", key="rename_confirm", use_container_width=True):
+                    if new_name.strip() and new_name.strip() != p["name"]:
+                        rename_preset(p["preset_id"], new_name.strip())
+                        st.success(f"已重命名: {p['name']} → {new_name.strip()}")
                         st.rerun()
+                    elif new_name.strip() == p["name"]:
+                        st.warning("名称未变化")
+                    else:
+                        st.error("名称不能为空")
+
+        with c4:
+            with st.popover("🗑️", use_container_width=True):
+                st.warning(f"删除 **{p['name']}**？")
+                st.caption("此操作不可恢复。")
+                if st.button("确认删除", key="delete_preset_confirm", use_container_width=True):
+                    delete_preset(p["preset_id"])
+                    st.success(f"已删除: {p['name']}")
+                    st.rerun()
 
     # 保存当前为预设
-    with st.sidebar.expander("💾 保存当前为预设", expanded=False):
-        new_name = st.text_input("预设名称", key="new_preset_name", placeholder="如: 我的港股配置")
-        new_desc = st.text_input("描述(可选)", key="new_preset_desc", placeholder="港股·短线·savgol")
-        if st.button("保存", key="save_preset_btn", use_container_width=True):
+    with st.sidebar.expander("💾 保存 / 另存为预设", expanded=False):
+        default_name = selected_preset["name"] + "_副本" if selected_preset else ""
+        new_name = st.text_input("预设名称", key="new_preset_name",
+                                 value=default_name, placeholder="如: 我的港股配置")
+        new_desc = st.text_input("描述(可选)", key="new_preset_desc",
+                                 placeholder="港股·短线·savgol")
+        overwrite = False
+        if selected_preset:
+            overwrite = st.checkbox(f"覆盖「{selected_preset['name']}」", key="overwrite_preset")
+        if st.button("💾 保存", key="save_preset_btn", use_container_width=True):
             if new_name.strip():
-                # 收集当前参数
                 from config_db import collect_current_params
                 import json as _json
                 params = collect_current_params()
-                save_preset(new_name.strip(),
+                target_name = selected_preset["name"] if overwrite and selected_preset else new_name.strip()
+                save_preset(target_name,
                             _json.dumps(params, ensure_ascii=False),
-                            description=new_desc.strip())
-                st.success(f"已保存: {new_name.strip()}")
+                            description=new_desc.strip() if not overwrite else
+                            selected_preset.get("description", ""))
+                st.success(f"已保存: {target_name}")
                 st.rerun()
             else:
                 st.error("请输入预设名称")

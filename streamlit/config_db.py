@@ -119,6 +119,13 @@ def delete_preset(preset_id: int):
         conn.execute("DELETE FROM config_presets WHERE preset_id=?", (preset_id,))
 
 
+def rename_preset(preset_id: int, new_name: str):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE config_presets SET name=?, updated_at=datetime('now','localtime') WHERE preset_id=?",
+            (new_name, preset_id))
+
+
 def apply_preset(preset_id: int) -> Optional[Dict[str, Any]]:
     """解析 preset 的 params_json 为 dict。"""
     p = get_preset(preset_id)
