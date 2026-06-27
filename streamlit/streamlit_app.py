@@ -2005,12 +2005,20 @@ def main():
 
     # ── 配置方案预设选择器 ──
     st.sidebar.markdown("---")
-    # 删除或重命名后清除 session_state 中的旧选择值，避免 selectbox 显示已删除项
-    if st.session_state.pop("_reset_preset_selector", False):
-        st.session_state.pop("preset_selector", None)
     presets = list_presets()
     preset_names = ["(不选择)"] + [f"[{p['category']}] {p['name']}" for p in presets]
-    selected_label = st.sidebar.selectbox("📋 配置方案", preset_names, key="preset_selector")
+
+    # 用 index 管理选中状态，避免 key= 绑定导致删除后残留旧值
+    prev = st.session_state.get("_selected_preset", "(不选择)")
+    try:
+        idx = preset_names.index(prev) if prev in preset_names else 0
+    except ValueError:
+        idx = 0
+    selected_label = st.sidebar.selectbox("📋 配置方案", preset_names, index=idx,
+                                          key="_preset_selectbox")
+    st.session_state._selected_preset = selected_label
+    # 清除旧 key（兼容之前用 key="preset_selector" 的遗留 session_state）
+    st.session_state.pop("preset_selector", None)
 
     selected_preset = None
     if selected_label != "(不选择)":
@@ -2056,7 +2064,7 @@ def main():
                     if new_name.strip() and new_name.strip() != p["name"]:
                         rename_preset(p["preset_id"], new_name.strip())
                         st.success(f"已重命名: {p['name']} → {new_name.strip()}")
-                        st.session_state._reset_preset_selector = True
+                        st.session_state._selected_preset = "(不选择)"
                         st.rerun()
                     elif new_name.strip() == p["name"]:
                         st.warning("名称未变化")
@@ -2070,7 +2078,7 @@ def main():
                 if st.button("确认删除", key="delete_preset_confirm", use_container_width=True):
                     delete_preset(p["preset_id"])
                     st.success(f"已删除: {p['name']}")
-                    st.session_state._reset_preset_selector = True
+                    st.session_state._selected_preset = "(不选择)"
                     st.rerun()
 
     # 保存当前为预设
@@ -2096,7 +2104,7 @@ def main():
                 st.success(f"已保存: {target_name}")
                 if not overwrite:
                     # 新预设：自动跳转到新选项
-                    st.session_state.preset_selector = f"[通用] {target_name}"
+                    st.session_state._selected_preset = f"[通用] {target_name}"
                 st.rerun()
             else:
                 st.error("请输入预设名称")

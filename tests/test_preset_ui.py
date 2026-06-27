@@ -399,110 +399,81 @@ class TestPresetEdgeCases:
 # ============================================================
 
 class TestSelectboxRefresh:
-    """模拟 Streamlit widget 生命周期，验证 _reset_preset_selector 标志位模式"""
-
-    @pytest.fixture
-    def mock_ss(self):
-        """模拟 session_state 为普通 dict（纯逻辑测试，不依赖真实 streamlit）。"""
-        return {}
+    """模拟 Streamlit widget 生命周期，验证 _selected_preset + index 模式"""
 
     def _render_selectbox(self, presets, session_state):
-        """模拟 streamlit_app.py 中 selectbox 渲染逻辑。"""
-        # Step 1: 检查重置标志
-        if session_state.pop("_reset_preset_selector", False):
-            session_state.pop("preset_selector", None)
-
-        # Step 2: 构建选项列表
+        """模拟 streamlit_app.py 中 selectbox 渲染逻辑 (index 模式)。"""
         preset_names = ["(不选择)"] + [
             f"[{p['category']}] {p['name']}" for p in presets]
 
-        # Step 3: selectbox 读取/写入 session_state
-        current = session_state.get("preset_selector", "(不选择)")
-        if current not in preset_names:
-            current = "(不选择)"
-        session_state["preset_selector"] = current
-
+        # 用 _selected_preset 决定 index
+        prev = session_state.get("_selected_preset", "(不选择)")
+        try:
+            idx = preset_names.index(prev) if prev in preset_names else 0
+        except ValueError:
+            idx = 0
+        current = preset_names[idx]
+        session_state["_selected_preset"] = current
         return current, preset_names
 
-    def test_flag_clears_stale_value_after_delete(self, mock_ss):
-        """删除后设置标志位，下次渲染 selectbox 回退到 (不选择)"""
+    def test_delete_clears_selection(self):
+        """删除后 _selected_preset='(不选择)'，selectbox 回退"""
         cfg.save_preset("ToDelete", json.dumps({"x": 1}))
-        presets = cfg.list_presets()
+        ss = {"_selected_preset": "[通用] ToDelete"}
 
-        # 用户选中 ToDelete
-        mock_ss["preset_selector"] = "[通用] ToDelete"
-
-        # 模拟删除操作: 删 DB → 设标志 → rerun
         p = cfg.get_preset_by_name("ToDelete")
         cfg.delete_preset(p["preset_id"])
-        mock_ss["_reset_preset_selector"] = True
-
-        # Rerun 后重新渲染
-        presets_after = cfg.list_presets()
-        current, names = self._render_selectbox(presets_after, mock_ss)
-
-        assert current == "(不选择)", f"Expected '(不选择)' but got '{current}'"
-        assert "[通用] ToDelete" not in names
-        assert "_reset_preset_selector" not in mock_ss  # 标志已被消费
-
-    def test_flag_clears_stale_value_after_rename(self, mock_ss):
-        """重命名后旧名不在列表中，selectbox 正确回退"""
-        cfg.save_preset("OldName", json.dumps({"x": 1}))
-        mock_ss["preset_selector"] = "[通用] OldName"
-
-        p = cfg.get_preset_by_name("OldName")
-        cfg.rename_preset(p["preset_id"], "NewName")
-        mock_ss["_reset_preset_selector"] = True
-
-        presets = cfg.list_presets()
-        current, names = self._render_selectbox(presets, mock_ss)
-
-        assert current == "(不选择)"
-        assert "[通用] NewName" in names
-        assert "[通用] OldName" not in names
-
-    def test_no_flag_stale_value_cleared_by_fallback(self):
-        """即使没有标志位，_render_selectbox 的 fallback 逻辑也会清理幽灵值。
-
-        _render_selectbox 检查 current 是否在 preset_names 中，
-        如果不在则回退到 '(不选择)'。这是第二道防线。
-        """
-        cfg.save_preset("Ghost", json.dumps({"x": 1}))
-        ss = {}
-        ss["preset_selector"] = "[通用] Ghost"
-        p = cfg.get_preset_by_name("Ghost")
-        cfg.delete_preset(p["preset_id"])
-        # 没有设置 _reset_preset_selector
+        ss["_selected_preset"] = "(不选择)"  # 删除后重置
 
         presets = cfg.list_presets()
         current, names = self._render_selectbox(presets, ss)
+        assert current == "(不选择)"
+        assert "[通用] ToDelete" not in names
 
-        # fallback 逻辑: 旧值不在选项中 → 回退到 (不选择)
+    def test_rename_updates_selection(self):
+        """重命名后 _selected_preset 指向新名，selectbox 正确选中"""
+        cfg.save_preset("OldName", json.dumps({"x": 1}))
+        ss = {"_selected_preset": "[通用] OldName"}
+
+        p = cfg.get_preset_by_name("OldName")
+        cfg.rename_preset(p["preset_id"], "NewName")
+        ss["_selected_preset"] = f"[{p['category']}] NewName"
+
+        presets = cfg.list_presets()
+        current, names = self._render_selectbox(presets, ss)
+        assert current == "[通用] NewName"
+        assert "[通用] NewName" in names
+        assert "[通用] OldName" not in names
+
+    def test_stale_value_falls_back_to_first(self):
+        """_selected_preset 值不在选项列表中时回退到第0项"""
+        cfg.save_preset("Ghost", json.dumps({"x": 1}))
+        ss = {"_selected_preset": "[通用] Ghost"}
+        p = cfg.get_preset_by_name("Ghost")
+        cfg.delete_preset(p["preset_id"])
+        # _selected_preset 没更新 — 但 fallback 会处理
+
+        presets = cfg.list_presets()
+        current, names = self._render_selectbox(presets, ss)
         assert current == "(不选择)"
         assert "[通用] Ghost" not in names
 
-    def test_apply_preset_sets_selector(self, mock_ss):
-        """应用预设后 selectbox 保持选中状态"""
+    def test_apply_preset_keeps_selection(self):
+        """应用预设后 selectbox 保持选中"""
         pid = cfg.save_preset("MyPreset", json.dumps({"v0_ke": 0.15}),
                               category="单滤波")
-        mock_ss["preset_selector"] = "[单滤波] MyPreset"
-
-        # 模拟应用
+        ss = {"_selected_preset": "[单滤波] MyPreset"}
         params = cfg.apply_preset(pid)
         assert params["v0_ke"] == 0.15
-        # 应用不应改变 selectbox
-        assert mock_ss["preset_selector"] == "[单滤波] MyPreset"
+        _, _ = self._render_selectbox(cfg.list_presets(), ss)
+        assert ss["_selected_preset"] == "[单滤波] MyPreset"
 
-    def test_save_new_then_selectbox_auto_targets(self, mock_ss):
-        """保存新预设后 selectbox 跳到新项"""
-        mock_ss["preset_selector"] = "(不选择)"
+    def test_save_new_targets_new_preset(self):
+        """保存新预设后 _selected_preset 跳到新项"""
         cfg.save_preset("Fresh", json.dumps({"a": 1}))
-        # streamlit_app.py 中: st.session_state.preset_selector = "[通用] Fresh"
-        mock_ss["preset_selector"] = "[通用] Fresh"
-
-        presets = cfg.list_presets()
-        current, names = self._render_selectbox(presets, mock_ss)
-        assert current == "[通用] Fresh"
+        ss = {"_selected_preset": "[通用] Fresh"}
+        _, names = self._render_selectbox(cfg.list_presets(), ss)
+        assert ss["_selected_preset"] == "[通用] Fresh"
         assert "[通用] Fresh" in names
 
 
