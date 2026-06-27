@@ -14,4 +14,5 @@ data/*/*.parquet
 data/*-shm
 data/*-wal
 data/snapshots/
+data/config.db
 .gstack/
