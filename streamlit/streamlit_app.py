@@ -1922,7 +1922,9 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
 def main():
     init_db()
     init_config_tables()
-    import_json_files_as_presets()  # 首次运行导入已有 JSON
+    if not st.session_state.get("_config_initialized"):
+        import_json_files_as_presets()  # 首次运行导入已有 JSON
+        st.session_state._config_initialized = True
     st.sidebar.title("多周期股票滤波分析")
 
     # ── Import config (before any widget) ──

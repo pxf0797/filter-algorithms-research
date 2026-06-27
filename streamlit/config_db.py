@@ -179,10 +179,25 @@ def save_preset(name: str, params_json: str,
 
 
 def delete_preset(preset_id: int) -> bool:
-    """删除预设。返回 True 表示成功删除了记录，False 表示记录不存在。"""
+    """删除预设。返回 True 表示成功删除了记录，False 表示记录不存在。
+    同时删除对应的 JSON 配置文件（如果存在），防止下次启动时被重新导入。"""
     with _get_conn() as conn:
+        # 先获取名称，以便同步删除 JSON 文件
+        row = conn.execute(
+            "SELECT name FROM config_presets WHERE preset_id=?", (preset_id,)
+        ).fetchone()
+        if row is None:
+            return False  # P1-1: 返回 bool 让调用者能区分成功/不存在/失败
+
         cur = conn.execute("DELETE FROM config_presets WHERE preset_id=?", (preset_id,))
-        return cur.rowcount > 0  # P1-1: 返回 bool 让调用者能区分成功/不存在/失败
+        if cur.rowcount > 0:
+            # 同步删除对应的 JSON 配置文件，防止下次启动时被 import_json_files_as_presets 重新导入
+            json_path = _CONFIG_DIR / f"{row['name']}.json"
+            if json_path.exists():
+                json_path.unlink()
+                logger.info("delete_preset: 已同步删除 JSON 文件 %s", json_path)
+            return True
+        return False
 
 
 def rename_preset(preset_id: int, new_name: str) -> Optional[str]:
