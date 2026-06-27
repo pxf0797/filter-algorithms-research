@@ -193,7 +193,7 @@ class TestAlignmentSubplot:
         short_mask = np.zeros(n, dtype=bool)
         trades = [
             {"id": 1, "type": "long", "entry_idx": 5, "exit_idx": 15,
-             "exit_reason": "take_profit", "pnl": 5.0},
+             "exit_reason": "take_profit", "return_pct": 5.0},
         ]
 
         fig = make_subplots(rows=1, cols=1)
@@ -213,7 +213,7 @@ class TestAlignmentSubplot:
         short_mask = np.zeros(n, dtype=bool)
         trades = [
             {"id": 1, "type": "long", "entry_idx": 3, "exit_idx": 8,
-             "exit_reason": "take_profit", "pnl": 5.0},
+             "exit_reason": "take_profit", "return_pct": 5.0},
         ]
 
         fig = make_subplots(rows=1, cols=1)
@@ -233,7 +233,7 @@ class TestAlignmentSubplot:
         short_mask = np.zeros(n, dtype=bool)
         trades = [
             {"id": 1, "type": "long", "entry_idx": 20, "exit_idx": 25,
-             "exit_reason": "take_profit", "pnl": 5.0},
+             "exit_reason": "take_profit", "return_pct": 5.0},
         ]
 
         fig = make_subplots(rows=1, cols=1)

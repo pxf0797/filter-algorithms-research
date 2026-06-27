@@ -2006,17 +2006,16 @@ def main():
     # ── 配置方案预设选择器 ──
     st.sidebar.markdown("---")
     presets = list_presets()
-    preset_names = ["(不选择)"] + [f"[{p['category']}] {p['name']}" for p in presets]
+    preset_labels = ["(不选择)"] + [f"[{p['category']}] {p['name']}" for p in presets]
+    # P1-3: 使用完整 label (含分类) 做 key，避免同名不同类预设匹配错误
+    preset_map = {f"[{p['category']}] {p['name']}": p for p in presets}
 
     # 基于选项列表内容生成动态 key — 数据变了 key 自动变，widget 自然重置
-    _hash = hashlib.md5("|".join(preset_names).encode()).hexdigest()[:8]
-    selected_label = st.sidebar.selectbox("📋 配置方案", preset_names,
+    _hash = hashlib.md5("|".join(preset_labels).encode()).hexdigest()[:8]
+    selected_label = st.sidebar.selectbox("📋 配置方案", preset_labels,
                                           key=f"preset_sel_{_hash}")
 
-    selected_preset = None
-    if selected_label != "(不选择)":
-        preset_name = selected_label.split("] ", 1)[1] if "] " in selected_label else selected_label
-        selected_preset = next((p for p in presets if p["name"] == preset_name), None)
+    selected_preset = preset_map.get(selected_label)
 
     if selected_preset:
         p = selected_preset
@@ -2032,67 +2031,133 @@ def main():
                         st.session_state[k] = v
                         st.session_state[f"_imp_{k}"] = v
                     st.session_state._import_data = "preset"
-                    st.sidebar.success(f"已应用: {p['name']}")
+                    st.toast(f"已应用: {p['name']}")
                     st.rerun()
 
+        # P0-1: 用 session_state 标志替代 st.popover，避免 rerun 后 popover 关闭
+        # 导致按钮从不触发的问题。
         with c2:
-            with st.popover("📝 更新", use_container_width=True):
-                st.caption(f"将当前参数覆盖到 **{p['name']}**")
-                st.caption("这会替换该预设的全部参数值。")
-                if st.button("确认覆盖", key="update_preset_confirm", use_container_width=True):
+            if st.button("📝 更新", key="update_preset_btn", use_container_width=True):
+                st.session_state._preset_action = "update"
+                st.session_state._preset_action_id = p["preset_id"]
+        with c3:
+            if st.button("✏️ 重命名", key="rename_preset_btn", use_container_width=True):
+                st.session_state._preset_action = "rename"
+                st.session_state._preset_action_id = p["preset_id"]
+        with c4:
+            if st.button("🗑️ 删除", key="delete_preset_btn", use_container_width=True):
+                st.session_state._preset_action = "delete"
+                st.session_state._preset_action_id = p["preset_id"]
+
+    # P0-1: 确认操作 UI（在按钮行外部渲染，不受 popover 生命周期影响）
+    _action = st.session_state.get("_preset_action")
+    _action_id = st.session_state.get("_preset_action_id")
+    if _action and _action_id is not None:
+        target = next((p for p in presets if p["preset_id"] == _action_id), None)
+        if target is None:
+            # 预设已被删除或不存在，清除标志
+            st.session_state.pop("_preset_action", None)
+            st.session_state.pop("_preset_action_id", None)
+            st.rerun()
+        elif _action == "update":
+            st.sidebar.warning(f"将当前参数覆盖到 **{target['name']}**？")
+            st.sidebar.caption("这会将当前所有参数写入该预设。")
+            cc1, cc2 = st.sidebar.columns(2)
+            with cc1:
+                if st.button("确认覆盖", key="update_confirm_btn", use_container_width=True):
                     from config_db import collect_current_params
                     import json as _json
                     params = collect_current_params()
-                    save_preset(p["name"],
+                    save_preset(target["name"],
                                 _json.dumps(params, ensure_ascii=False),
-                                description=p.get("description", ""),
-                                category=p.get("category", "通用"))
-                    st.success(f"已更新: {p['name']}")
+                                description=target.get("description", ""),
+                                category=target.get("category", "通用"))
+                    st.toast(f"已更新: {target['name']}")
+                    st.session_state.pop("_preset_action", None)
+                    st.session_state.pop("_preset_action_id", None)
                     st.rerun()
-
-        with c3:
-            with st.popover("✏️ 重命名", use_container_width=True):
-                new_name = st.text_input("新名称", value=p["name"], key="rename_input")
-                if st.button("确认重命名", key="rename_confirm", use_container_width=True):
-                    if new_name.strip() and new_name.strip() != p["name"]:
-                        rename_preset(p["preset_id"], new_name.strip())
-                        st.success(f"已重命名: {p['name']} → {new_name.strip()}")
+            with cc2:
+                if st.button("取消", key="update_cancel_btn", use_container_width=True):
+                    st.session_state.pop("_preset_action", None)
+                    st.session_state.pop("_preset_action_id", None)
+                    st.rerun()
+        elif _action == "rename":
+            st.sidebar.caption(f"重命名 **{target['name']}**")
+            new_name = st.sidebar.text_input("新名称", value=target["name"],
+                                             key="rename_input_val")
+            cc1, cc2 = st.sidebar.columns(2)
+            with cc1:
+                if st.button("确认重命名", key="rename_confirm_btn", use_container_width=True):
+                    if new_name.strip() and new_name.strip() != target["name"]:
+                        rename_preset(target["preset_id"], new_name.strip())
+                        st.toast(f"已重命名: {target['name']} → {new_name.strip()}")
+                        st.session_state.pop("_preset_action", None)
+                        st.session_state.pop("_preset_action_id", None)
                         st.rerun()
-                    elif new_name.strip() == p["name"]:
+                    elif new_name.strip() == target["name"]:
                         st.warning("名称未变化")
                     else:
                         st.error("名称不能为空")
-
-        with c4:
-            with st.popover("🗑️", use_container_width=True):
-                st.warning(f"删除 **{p['name']}**？")
-                st.caption("此操作不可恢复。")
-                if st.button("确认删除", key="delete_preset_confirm", use_container_width=True):
-                    delete_preset(p["preset_id"])
-                    st.success(f"已删除: {p['name']}")
+            with cc2:
+                if st.button("取消", key="rename_cancel_btn", use_container_width=True):
+                    st.session_state.pop("_preset_action", None)
+                    st.session_state.pop("_preset_action_id", None)
+                    st.rerun()
+        elif _action == "delete":
+            st.sidebar.error(f"确认删除 **{target['name']}**？此操作不可恢复。")
+            cc1, cc2 = st.sidebar.columns(2)
+            with cc1:
+                if st.button("确认删除", key="delete_confirm_btn", use_container_width=True):
+                    delete_preset(target["preset_id"])
+                    st.toast(f"已删除: {target['name']}")
+                    st.session_state.pop("_preset_action", None)
+                    st.session_state.pop("_preset_action_id", None)
+                    st.rerun()
+            with cc2:
+                if st.button("取消", key="delete_cancel_btn", use_container_width=True):
+                    st.session_state.pop("_preset_action", None)
+                    st.session_state.pop("_preset_action_id", None)
                     st.rerun()
 
     # 保存当前为预设
     with st.sidebar.expander("💾 保存 / 另存为预设", expanded=False):
-        default_name = selected_preset["name"] + "_副本" if selected_preset else ""
+        # P0-2: 在 text_input 渲染前同步 session_state 值，
+        # 避免静态 key 导致 value= 参数在预设切换后被忽略。
+        if "_last_sel_name" not in st.session_state:
+            st.session_state._last_sel_name = ""
+        curr_sel_name = selected_preset["name"] if selected_preset else ""
+        if st.session_state._last_sel_name != curr_sel_name:
+            st.session_state.new_preset_name = (
+                curr_sel_name + "_副本" if curr_sel_name else "")
+            st.session_state._last_sel_name = curr_sel_name
+
         new_name = st.text_input("预设名称", key="new_preset_name",
-                                 value=default_name, placeholder="如: 我的港股配置")
+                                 placeholder="如: 我的港股配置")
         new_desc = st.text_input("描述(可选)", key="new_preset_desc",
                                  placeholder="港股·短线·savgol")
         overwrite = False
         if selected_preset:
-            overwrite = st.checkbox(f"覆盖「{selected_preset['name']}」", key="overwrite_preset")
+            overwrite = st.checkbox(f"覆盖「{selected_preset['name']}」",
+                                    key="overwrite_preset")
         if st.button("💾 保存", key="save_preset_btn", use_container_width=True):
             if new_name.strip():
                 from config_db import collect_current_params
                 import json as _json
                 params = collect_current_params()
-                target_name = selected_preset["name"] if overwrite and selected_preset else new_name.strip()
+                target_name = (selected_preset["name"]
+                               if overwrite and selected_preset
+                               else new_name.strip())
+                # P1-2: 补充 category 参数，覆盖时保留原分类
+                cat = (selected_preset.get("category", "通用")
+                       if overwrite and selected_preset else "通用")
                 save_preset(target_name,
                             _json.dumps(params, ensure_ascii=False),
-                            description=new_desc.strip() if not overwrite else
-                            selected_preset.get("description", ""))
-                st.success(f"已保存: {target_name}")
+                            description=(new_desc.strip() if not overwrite
+                                         else selected_preset.get("description", "")),
+                            category=cat)
+                st.toast(f"已保存: {target_name}")
+                # P2-1: 保存成功后清除 overwrite checkbox 状态残留
+                st.session_state.overwrite_preset = False
                 st.rerun()
             else:
                 st.error("请输入预设名称")

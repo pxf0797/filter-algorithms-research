@@ -180,10 +180,9 @@ class TestApplyPresetSessionState:
         assert result == {}
 
     def test_apply_preset_invalid_json_returns_none(self):
-        """params_json 为非法 JSON 时返回 None"""
-        pid = cfg.save_preset("BadJSON", "{invalid json}")
-        result = cfg.apply_preset(pid)
-        assert result is None
+        """非法 JSON 在 save_preset 阶段即被拒绝（P1-5 修复）。"""
+        with pytest.raises(ValueError, match="有效的 JSON"):
+            cfg.save_preset("BadJSON", "{invalid json}")
 
     def test_apply_nonexistent_preset_returns_none(self):
         """不存在的 preset_id 返回 None"""
@@ -245,7 +244,7 @@ class TestImportJsonAsPresets:
             json.dumps({"ticker": "TEST", "market": "US"}, ensure_ascii=False)
         )
 
-        count = cfg.import_json_files_as_presets()
+        count, _ = cfg.import_json_files_as_presets()
         assert count == 1
 
         presets = cfg.list_presets()
@@ -261,7 +260,7 @@ class TestImportJsonAsPresets:
         # 先手动创建同名预设
         cfg.save_preset("EXIST", json.dumps({"manual": True}), category="单滤波")
 
-        count = cfg.import_json_files_as_presets(force=False)
+        count, _ = cfg.import_json_files_as_presets(force=False)
         assert count == 0  # 跳过
 
         p = cfg.get_preset_by_name("EXIST")
@@ -276,7 +275,7 @@ class TestImportJsonAsPresets:
         )
 
         cfg.save_preset("EXIST", json.dumps({"manual": True}))
-        count = cfg.import_json_files_as_presets(force=True)
+        count, _ = cfg.import_json_files_as_presets(force=True)
 
         assert count == 1
         p = cfg.get_preset_by_name("EXIST")
@@ -285,7 +284,7 @@ class TestImportJsonAsPresets:
 
     def test_import_empty_config_dir(self, isolate_db):
         """空 config 目录导入 0 条"""
-        count = cfg.import_json_files_as_presets()
+        count, _ = cfg.import_json_files_as_presets()
         assert count == 0
 
     def test_import_categorizes_by_suffix(self, isolate_db):
@@ -306,7 +305,7 @@ class TestImportJsonAsPresets:
         config_dir = isolate_db / "config"
         (config_dir / "BAD.json").write_text("this is not json")
 
-        count = cfg.import_json_files_as_presets()
+        count, _ = cfg.import_json_files_as_presets()
         assert count == 0
 
 
@@ -362,11 +361,9 @@ class TestPresetEdgeCases:
     """边界条件和异常场景"""
 
     def test_preset_name_empty_string(self):
-        """名称空字符串仍然可以保存（数据库约束不阻止空串）"""
-        pid = cfg.save_preset("", "{}")
-        assert pid > 0
-        p = cfg.get_preset(pid)
-        assert p["name"] == ""
+        """名称空字符串被拒绝（P1-5 修复后入口校验空名称）。"""
+        with pytest.raises(ValueError, match="名称不能为空"):
+            cfg.save_preset("", "{}")
 
     def test_large_params_json(self):
         """大量参数的 JSON 可以正常保存和读取"""
@@ -528,7 +525,7 @@ class TestPresetCrudCycle:
         # 创建模拟 JSON 文件来"重新导入"
         (cfg._CONFIG_DIR / "C_US.json").write_text(
             json.dumps({"market": "美股 US", "ticker": "C"}))
-        n = cfg.import_json_files_as_presets()
+        n, _ = cfg.import_json_files_as_presets()
         assert n == 1
         presets = cfg.list_presets()
         assert len(presets) == 1
@@ -693,3 +690,164 @@ class TestLargeScale:
         p = cfg.get_preset(new_pid)
         assert p is not None
         assert json.loads(p["params_json"])["n"] == 999
+
+
+# ============================================================
+# 14. save_preset 分类保留
+# ============================================================
+
+class TestSavePresetWithCategory:
+    """save_preset 覆盖时保留原分类，新建时使用默认分类 '通用'"""
+
+    def test_overwrite_explicit_category_preserved(self):
+        """覆盖保存时显式传相同分类，分类不变"""
+        pid = cfg.save_preset("CatPreset", json.dumps({"v": 1}), category="双滤波")
+        # 覆盖保存，传相同分类
+        cfg.save_preset("CatPreset", json.dumps({"v": 2}), category="双滤波")
+        p = cfg.get_preset(pid)
+        assert p["category"] == "双滤波"
+        assert json.loads(p["params_json"])["v"] == 2
+
+    def test_new_preset_uses_default_category(self):
+        """新建预设不传分类时使用默认分类 '通用'"""
+        pid = cfg.save_preset("DefaultCat", json.dumps({"x": 1}))
+        p = cfg.get_preset(pid)
+        assert p["category"] == "通用"
+
+    def test_overwrite_with_different_category_updates(self):
+        """覆盖保存时传不同分类，分类应更新为新值"""
+        pid = cfg.save_preset("ChangeCat", json.dumps({"v": 1}), category="单滤波")
+        cfg.save_preset("ChangeCat", json.dumps({"v": 2}), category="快速")
+        p = cfg.get_preset(pid)
+        assert p["category"] == "快速"
+        assert json.loads(p["params_json"])["v"] == 2
+
+
+# ============================================================
+# 15. collect_current_params 完整性
+# ============================================================
+
+class TestCollectParamsCompleteness:
+    """验证 collect_current_params 收集所有必要 key，不遗漏不混杂"""
+
+    def setup_method(self):
+        import streamlit as st
+        st.session_state = {}
+
+    def _ss(self):
+        import streamlit as st
+        return st.session_state
+
+    def test_collects_all_global_keys(self):
+        """收集所有全局参数 key"""
+        ss = self._ss()
+        global_keys = ["market", "ticker", "global_f", "global_dual", "global_f2"]
+        for k in global_keys:
+            ss[k] = f"val_{k}"
+        params = cfg.collect_current_params()
+        for k in global_keys:
+            assert k in params, f"缺少全局 key: {k}"
+            assert params[k] == f"val_{k}"
+
+    def test_collects_all_view_keys_for_four_views(self):
+        """收集 v0~v3 全部视图参数的完整 pk 集合"""
+        ss = self._ss()
+        view_pks = ["tf", "n", "sch", "pred", "ke", "sm", "ew",
+                    "fm", "next", "fc", "fc2", "strat", "sl",
+                    "cross_pnl", "align"]
+        for vi in range(4):
+            for pk in view_pks:
+                ss[f"v{vi}_{pk}"] = f"val_{vi}_{pk}"
+        params = cfg.collect_current_params()
+        for vi in range(4):
+            for pk in view_pks:
+                k = f"v{vi}_{pk}"
+                assert k in params, f"缺少视图 key: {k}"
+                assert params[k] == f"val_{vi}_{pk}"
+
+    def test_collects_all_chinese_filter_prefixes(self):
+        """收集所有中文滤波器参数前缀"""
+        ss = self._ss()
+        filter_keys = {
+            "窗口大小_test": 10,
+            "跨度_test": 5,
+            "偏移量_test": 0.5,
+            "标准差_test": 2.0,
+            "多项式阶数_test": 3,
+            "过程噪声": 0.01,
+            "测量噪声": 0.1,
+            "滤波器阶数_test": 4,
+            "截止频率_test": 0.3,
+            "平滑比例_test": 0.8,
+        }
+        for k, v in filter_keys.items():
+            ss[k] = v
+        params = cfg.collect_current_params()
+        for k, v in filter_keys.items():
+            assert k in params, f"缺少滤波器 key: {k}"
+            assert params[k] == v
+
+    def test_unrelated_keys_not_collected(self):
+        """session_state 中无关 key 不被收集"""
+        ss = self._ss()
+        ss["market"] = "US"
+        ss["ticker"] = "AAPL"
+        ss["_internal"] = "secret"
+        ss["sidebar_state"] = "open"
+        params = cfg.collect_current_params()
+        assert "market" in params
+        assert "ticker" in params
+        assert "_internal" not in params
+        assert "sidebar_state" not in params
+
+
+# ============================================================
+# 16. 通过 preset_id 区分不同预设
+# ============================================================
+
+class TestPresetMapLookup:
+    """验证通过 preset_id 精确区分不同分类/名称的预设"""
+
+    def test_different_presets_distinct_by_id(self):
+        """不同预设拥有不同 preset_id，可通过 ID 精确查找"""
+        pid1 = cfg.save_preset("AAPL_US", json.dumps({"ticker": "AAPL"}),
+                               category="单滤波")
+        pid2 = cfg.save_preset("TSLA_US", json.dumps({"ticker": "TSLA"}),
+                               category="双滤波")
+
+        p1 = cfg.get_preset(pid1)
+        p2 = cfg.get_preset(pid2)
+        assert p1["name"] == "AAPL_US"
+        assert p1["category"] == "单滤波"
+        assert p2["name"] == "TSLA_US"
+        assert p2["category"] == "双滤波"
+        assert pid1 != pid2
+
+    def test_list_presets_ordered_by_category_then_name(self):
+        """list_presets 按分类排序，同分类按名称排序"""
+        cfg.save_preset("Z", json.dumps({}), category="快速")
+        cfg.save_preset("A", json.dumps({}), category="双滤波")
+        cfg.save_preset("M", json.dumps({}), category="快速")
+
+        presets = cfg.list_presets()
+        # 按 category 排序: 双滤波 < 快速, 同 category 内按 name 排序
+        assert [p["category"] for p in presets] == ["双滤波", "快速", "快速"]
+        assert [p["name"] for p in presets] == ["A", "M", "Z"]
+
+    def test_same_name_overwrites_not_creates_duplicate(self):
+        """同名预设触发 UPSERT，不创建重复记录（UNIQUE 约束）"""
+        pid1 = cfg.save_preset("SameName", json.dumps({"v": 1}), category="单滤波")
+        # 同名覆盖
+        pid2 = cfg.save_preset("SameName", json.dumps({"v": 2}), category="双滤波")
+        assert pid1 == pid2
+        p = cfg.get_preset(pid2)
+        assert p["category"] == "双滤波"  # category 被覆盖为新值
+        assert len(cfg.list_presets()) == 1
+
+    def test_get_preset_by_name_retrieves_unique(self):
+        """get_preset_by_name 精确返回唯一匹配（名称唯一）"""
+        cfg.save_preset("Unique", json.dumps({"a": 1}))
+        p = cfg.get_preset_by_name("Unique")
+        assert p is not None
+        assert p["name"] == "Unique"
+        assert cfg.get_preset_by_name("Nonexistent") is None

@@ -151,12 +151,12 @@ class TestPresetCRUD:
         assert "old_name" not in names
 
     def test_rename_to_existing_name(self, temp_config_db, sample_params_json):
-        """重名应报错（UNIQUE 约束）。"""
+        """重名应返回 None（名称唯一性检查，P1-2 修复后不再抛异常）。"""
         import config_db
         config_db.save_preset("first", sample_params_json)
         pid2 = config_db.save_preset("second", sample_params_json)
-        with pytest.raises(sqlite3.IntegrityError):
-            config_db.rename_preset(pid2, "first")
+        result = config_db.rename_preset(pid2, "first")
+        assert result is None  # 名称冲突，返回 None
 
     def test_apply_preset(self, temp_config_db):
         """apply_preset 返回解析后的 dict。"""
@@ -167,10 +167,11 @@ class TestPresetCRUD:
         assert result == params
 
     def test_apply_preset_invalid_json(self, temp_config_db):
-        """非法 JSON 返回 None。"""
+        """非法 JSON 在 save_preset 阶段即被拒绝（P1-5 修复）。"""
         import config_db
-        pid = config_db.save_preset("bad_json", "{not valid}")
-        assert config_db.apply_preset(pid) is None
+        import pytest
+        with pytest.raises(ValueError, match="有效的 JSON"):
+            config_db.save_preset("bad_json", "{not valid}")
 
     def test_apply_preset_not_found(self, temp_config_db):
         """不存在的 preset 返回 None。"""
@@ -296,7 +297,7 @@ class TestImportJSONFiles:
                 json.dumps({"ticker": "0700", "market": "HK", "rsi": 14}))
 
             with patch("config_db._CONFIG_DIR", cfg_dir):
-                n = config_db.import_json_files_as_presets()
+                n, _ = config_db.import_json_files_as_presets()
 
         assert n == 3
         presets = config_db.list_presets()
@@ -322,7 +323,7 @@ class TestImportJSONFiles:
                 json.dumps({"ticker": "N", "market": "US", "new": True}))
 
             with patch("config_db._CONFIG_DIR", cfg_dir):
-                n = config_db.import_json_files_as_presets(force=False)
+                n, _ = config_db.import_json_files_as_presets(force=False)
 
         assert n == 0  # 跳过了
         p = config_db.get_preset_by_name("EXISTING")
@@ -341,7 +342,7 @@ class TestImportJSONFiles:
                 json.dumps({"ticker": "N", "market": "US", "new": True}))
 
             with patch("config_db._CONFIG_DIR", cfg_dir):
-                n = config_db.import_json_files_as_presets(force=True)
+                n, _ = config_db.import_json_files_as_presets(force=True)
 
         assert n == 1
         p = config_db.get_preset_by_name("OVERWRITE_ME")
@@ -355,7 +356,7 @@ class TestImportJSONFiles:
         import config_db
 
         with patch("config_db._CONFIG_DIR", Path("/nonexistent_dir_xyz")):
-            n = config_db.import_json_files_as_presets()
+            n, _ = config_db.import_json_files_as_presets()
         assert n == 0
 
     def test_import_skips_bad_json(self, temp_config_db):
@@ -370,7 +371,7 @@ class TestImportJSONFiles:
             (cfg_dir / "empty.json").write_text("")
 
             with patch("config_db._CONFIG_DIR", cfg_dir):
-                n = config_db.import_json_files_as_presets()
+                n, _ = config_db.import_json_files_as_presets()
 
         assert n == 1  # 只导入了一个
         assert config_db.get_preset_by_name("good") is not None
@@ -474,3 +475,192 @@ class TestCollectCurrentParams:
         import config_db
         params = config_db.collect_current_params()
         assert params == {}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 7. TestSavePresetValidation
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestSavePresetValidation:
+    """save_preset 入口校验：空名称、无效 JSON 抛出 ValueError。"""
+
+    def test_empty_name_raises_value_error(self, temp_config_db):
+        """空字符串或纯空白名称抛出 ValueError。"""
+        import config_db
+        with pytest.raises(ValueError, match="名称不能为空"):
+            config_db.save_preset("", "{}")
+        with pytest.raises(ValueError, match="名称不能为空"):
+            config_db.save_preset("   ", "{}")
+
+    def test_invalid_json_raises_value_error(self, temp_config_db):
+        """无效 JSON 字符串抛出 ValueError（P1-5 修复）。"""
+        import config_db
+        with pytest.raises(ValueError, match="有效的 JSON"):
+            config_db.save_preset("bad_json", "{invalid")
+        with pytest.raises(ValueError, match="有效的 JSON"):
+            config_db.save_preset("bad_json2", "not json")
+
+    def test_valid_save_returns_int(self, temp_config_db, sample_params_json):
+        """正常保存返回 int 类型的 preset_id。"""
+        import config_db
+        pid = config_db.save_preset("valid_test", sample_params_json)
+        assert isinstance(pid, int)
+        assert pid > 0
+
+    def test_overwrite_returns_same_preset_id(self, temp_config_db, sample_params_json):
+        """覆盖已有名称返回相同 preset_id，内容更新。"""
+        import config_db
+        pid1 = config_db.save_preset("overwrite_v", sample_params_json)
+        pid2 = config_db.save_preset("overwrite_v", json.dumps({"new": "data"}))
+        assert pid1 == pid2
+        p = config_db.get_preset(pid1)
+        assert json.loads(p["params_json"]) == {"new": "data"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 8. TestDeletePresetReturnValue
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestDeletePresetReturnValue:
+    """delete_preset 返回 bool 表示是否删除了记录（P1-1 修复）。"""
+
+    def test_delete_existing_returns_true(self, temp_config_db, sample_params_json):
+        """删除存在预设返回 True，且记录消失。"""
+        import config_db
+        pid = config_db.save_preset("del_me", sample_params_json)
+        result = config_db.delete_preset(pid)
+        assert result is True
+        assert config_db.get_preset(pid) is None
+
+    def test_delete_nonexistent_returns_false(self, temp_config_db):
+        """删除不存在预设返回 False。"""
+        import config_db
+        result = config_db.delete_preset(99999)
+        assert result is False
+
+    def test_delete_referenced_preset_sets_null(self, temp_config_db, sample_params_json):
+        """删除被 ticker 引用的预设，外键 ON DELETE SET NULL 生效（P0-2 修复）。"""
+        import config_db
+        pid = config_db.save_preset("fk_test", sample_params_json)
+        config_db.save_ticker_config("AAPL", "US", "single",
+                                     params_json="{}", preset_id=pid)
+
+        ticker_row = config_db.load_ticker_config("AAPL")
+        assert ticker_row["preset_id"] == pid
+
+        result = config_db.delete_preset(pid)
+        assert result is True
+
+        # 删除后 ticker 的 preset_id 被置为 NULL，而非级联删除
+        ticker_row = config_db.load_ticker_config("AAPL")
+        assert ticker_row is not None
+        assert ticker_row["preset_id"] is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 9. TestRenamePresetValidation
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestRenamePresetValidation:
+    """rename_preset 校验：名称冲突、空名称、不存在 ID 均返回 None。"""
+
+    def test_rename_to_existing_name_returns_none(self, temp_config_db, sample_params_json):
+        """重命名为已存在名称返回 None（P1-2 唯一性检查）。"""
+        import config_db
+        config_db.save_preset("first", sample_params_json)
+        pid2 = config_db.save_preset("second", sample_params_json)
+        result = config_db.rename_preset(pid2, "first")
+        assert result is None
+        # 原名称未被篡改
+        p = config_db.get_preset(pid2)
+        assert p["name"] == "second"
+
+    def test_rename_to_empty_string_returns_none(self, temp_config_db, sample_params_json):
+        """重命名为空字符串返回 None（P1-6 空名称校验）。"""
+        import config_db
+        pid = config_db.save_preset("valid", sample_params_json)
+        result = config_db.rename_preset(pid, "")
+        assert result is None
+        result2 = config_db.rename_preset(pid, "   ")
+        assert result2 is None
+        # 原名称保持不变
+        p = config_db.get_preset(pid)
+        assert p["name"] == "valid"
+
+    def test_rename_nonexistent_preset_returns_none(self, temp_config_db):
+        """重命名不存在的 preset_id 返回 None。"""
+        import config_db
+        result = config_db.rename_preset(99999, "anything")
+        assert result is None
+
+    def test_rename_success_returns_new_name(self, temp_config_db, sample_params_json):
+        """重命名成功返回新名称字符串。"""
+        import config_db
+        pid = config_db.save_preset("old", sample_params_json)
+        result = config_db.rename_preset(pid, "new_name")
+        assert result == "new_name"
+        p = config_db.get_preset(pid)
+        assert p["name"] == "new_name"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 10. TestImportJsonFilesReturnValue
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestImportJsonFilesReturnValue:
+    """import_json_files_as_presets 返回 (count, errors) 元组（P0-1 修复）。"""
+
+    def test_returns_tuple_of_count_and_errors(self, temp_config_db):
+        """验证返回 (int, list) 元组结构。"""
+        import config_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg_dir = Path(tmpdir)
+            (cfg_dir / "good.json").write_text(
+                json.dumps({"ticker": "AAPL", "market": "US"}))
+
+            with patch("config_db._CONFIG_DIR", cfg_dir):
+                result = config_db.import_json_files_as_presets()
+
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        count, errors = result
+        assert isinstance(count, int)
+        assert isinstance(errors, list)
+        assert count == 1
+        assert errors == []
+
+    def test_invalid_json_in_errors_not_raised(self, temp_config_db):
+        """无效 JSON 文件不抛异常，出现在 errors 列表中（P0-1 错误收集）。"""
+        import config_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg_dir = Path(tmpdir)
+            (cfg_dir / "bad.json").write_text("this is not json!!")
+
+            with patch("config_db._CONFIG_DIR", cfg_dir):
+                count, errors = config_db.import_json_files_as_presets()
+
+        assert count == 0
+        assert len(errors) == 1
+        assert "bad" in errors[0]
+        assert "解析失败" in errors[0] or "失败" in errors[0]
+
+    def test_mixed_valid_and_invalid(self, temp_config_db):
+        """混合有效和无效文件，count 只计成功，errors 列出失败。"""
+        import config_db
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg_dir = Path(tmpdir)
+            (cfg_dir / "ok.json").write_text(
+                json.dumps({"ticker": "OK", "market": "US"}))
+            (cfg_dir / "broken.json").write_text("{{{broken")
+            (cfg_dir / "also_ok.json").write_text(
+                json.dumps({"ticker": "T2", "market": "HK"}))
+
+            with patch("config_db._CONFIG_DIR", cfg_dir):
+                count, errors = config_db.import_json_files_as_presets()
+
+        assert count == 2
+        assert len(errors) == 1
+        assert "broken" in errors[0]

@@ -5,23 +5,36 @@ streamlit/config_db.py — 配置管理数据层 (独立 SQLite)
 """
 
 import json
+import logging
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 _CONFIG_DB_PATH = Path(__file__).parent.parent / "data" / "config.db"
 _CONFIG_DIR = Path(__file__).parent.parent / "config"
 
 
+@contextmanager
 def _get_conn() -> sqlite3.Connection:
-    """获取配置数据库连接（独立于 market.db）。"""
+    """获取配置数据库连接上下文（独立于 market.db）。
+    退出时自动提交/回滚并关闭连接。"""
     conn = sqlite3.connect(str(_CONFIG_DB_PATH))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.execute("PRAGMA foreign_keys=ON")
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+        conn.commit()  # 显式提交，确保关闭前写入
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()  # P1-7: sqlite3 Connection 的 __exit__ 不关闭连接，必须显式 close()
 
 # ═══════════════════════════════════════════════════════════
 # Schema init
@@ -42,12 +55,15 @@ CREATE TABLE IF NOT EXISTS config_ticker (
     ticker       TEXT    NOT NULL,
     variant      TEXT    NOT NULL DEFAULT 'single',
     market       TEXT    DEFAULT '',
-    preset_id    INTEGER REFERENCES config_presets(preset_id),
+    preset_id    INTEGER REFERENCES config_presets(preset_id) ON DELETE SET NULL,
     params_json  TEXT    DEFAULT '',
     updated_at   TEXT    DEFAULT (datetime('now','localtime')),
     PRIMARY KEY (ticker, variant)
 );
+"""  # P0-2: 外键添加 ON DELETE SET NULL，删除 preset 时自动置空引用而非抛异常
 
+# config_history 单独创建，因为其 FOREIGN KEY 引用 config_ticker，需要表已存在
+_HISTORY_SCHEMA = """
 CREATE TABLE IF NOT EXISTS config_history (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker       TEXT    NOT NULL,
@@ -65,10 +81,40 @@ CREATE INDEX IF NOT EXISTS idx_history_lookup
 
 
 def init_config_tables():
-    """确保配置表存在。在 db.init_db() 之后调用。"""
+    """确保配置表存在并迁移旧 schema。在 db.init_db() 之后调用。"""
     with _get_conn() as conn:
         conn.executescript(_SCHEMA)
-        conn.execute("PRAGMA foreign_keys=ON")
+        conn.executescript(_HISTORY_SCHEMA)
+
+        # P0-2: 迁移已有 config_ticker 表 — SQLite 不支持 ALTER COLUMN 改 FK，
+        # 需重建表来添加 ON DELETE SET NULL。检查现有 FK 是否缺少 ON DELETE 子句。
+        fk_list = conn.execute("PRAGMA foreign_key_list('config_ticker')").fetchall()
+        needs_migration = any(
+            fk["from"] == "preset_id" and (fk["on_delete"] or "") == ""
+            for fk in fk_list
+        )
+        if needs_migration:
+            logger.info("init_config_tables: 检测到旧版 FK（无 ON DELETE），开始迁移 config_ticker 表")
+            # 禁用 FK 后重建 config_ticker 表
+            conn.execute("PRAGMA foreign_keys=OFF")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS config_ticker_new (
+                    ticker       TEXT    NOT NULL,
+                    variant      TEXT    NOT NULL DEFAULT 'single',
+                    market       TEXT    DEFAULT '',
+                    preset_id    INTEGER REFERENCES config_presets(preset_id) ON DELETE SET NULL,
+                    params_json  TEXT    DEFAULT '',
+                    updated_at   TEXT    DEFAULT (datetime('now','localtime')),
+                    PRIMARY KEY (ticker, variant)
+                )
+            """)
+            conn.execute(
+                "INSERT INTO config_ticker_new SELECT * FROM config_ticker"
+            )
+            conn.execute("DROP TABLE config_ticker")
+            conn.execute("ALTER TABLE config_ticker_new RENAME TO config_ticker")
+            conn.execute("PRAGMA foreign_keys=ON")
+            logger.info("init_config_tables: config_ticker 表迁移完成")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -106,45 +152,80 @@ def get_preset_by_name(name: str) -> Optional[Dict[str, Any]]:
 
 def save_preset(name: str, params_json: str,
                 description: str = "", category: str = "通用") -> int:
-    """INSERT or UPDATE preset. Returns preset_id."""
+    """INSERT or UPSERT preset. Returns preset_id.
+    Raises ValueError on invalid input."""
+    # P1-5: 入口校验 — 空名称或无效 JSON 直接拒绝
+    if not name or not name.strip():
+        raise ValueError("预设名称不能为空")
+    try:
+        json.loads(params_json)
+    except (json.JSONDecodeError, TypeError) as e:
+        raise ValueError(f"params_json 不是有效的 JSON: {e}")
+
     with _get_conn() as conn:
-        cur = conn.execute("SELECT preset_id FROM config_presets WHERE name=?", (name,))
-        existing = cur.fetchone()
+        # P0-3: 使用原子 UPSERT 避免 SELECT-then-UPDATE 竞态条件
+        row = conn.execute(
+            """INSERT INTO config_presets(name, description, category, params_json)
+               VALUES(?,?,?,?)
+               ON CONFLICT(name) DO UPDATE SET
+                   params_json=excluded.params_json,
+                   description=excluded.description,
+                   category=excluded.category,
+                   updated_at=datetime('now','localtime')
+               RETURNING preset_id""",
+            (name.strip(), description, category, params_json)
+        ).fetchone()
+        return row[0]
+
+
+def delete_preset(preset_id: int) -> bool:
+    """删除预设。返回 True 表示成功删除了记录，False 表示记录不存在。"""
+    with _get_conn() as conn:
+        cur = conn.execute("DELETE FROM config_presets WHERE preset_id=?", (preset_id,))
+        return cur.rowcount > 0  # P1-1: 返回 bool 让调用者能区分成功/不存在/失败
+
+
+def rename_preset(preset_id: int, new_name: str) -> Optional[str]:
+    """重命名预设。成功返回新名称，名称冲突返回 None，预设不存在返回 None。
+    调用者应区分：冲突返回 None（名称已被占用），不存在也返回 None（追加日志判断）。"""
+    # P1-6: 空名称校验
+    if not new_name or not new_name.strip():
+        logger.warning("rename_preset: 拒绝空名称 (preset_id=%s)", preset_id)
+        return None
+
+    new_name = new_name.strip()
+    with _get_conn() as conn:
+        # P1-2: 重名前检查名称唯一性，避免 UNIQUE 约束触发异常
+        existing = conn.execute(
+            "SELECT preset_id FROM config_presets WHERE name=? AND preset_id!=?",
+            (new_name, preset_id)
+        ).fetchone()
         if existing:
-            conn.execute(
-                """UPDATE config_presets
-                   SET params_json=?, description=?, category=?,
-                       updated_at=datetime('now','localtime')
-                   WHERE preset_id=?""",
-                (params_json, description, category, existing[0]))
-            return existing[0]
-        else:
-            conn.execute(
-                "INSERT INTO config_presets(name,description,category,params_json) VALUES(?,?,?,?)",
-                (name, description, category, params_json))
-            return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            logger.warning("rename_preset: 名称 '%s' 已被 preset_id=%s 占用", new_name, existing[0])
+            return None
 
-
-def delete_preset(preset_id: int):
-    with _get_conn() as conn:
-        conn.execute("DELETE FROM config_presets WHERE preset_id=?", (preset_id,))
-
-
-def rename_preset(preset_id: int, new_name: str):
-    with _get_conn() as conn:
-        conn.execute(
+        cur = conn.execute(
             "UPDATE config_presets SET name=?, updated_at=datetime('now','localtime') WHERE preset_id=?",
             (new_name, preset_id))
+        if cur.rowcount == 0:
+            logger.warning("rename_preset: preset_id=%s 不存在", preset_id)
+            return None
+        return new_name
 
 
 def apply_preset(preset_id: int) -> Optional[Dict[str, Any]]:
-    """解析 preset 的 params_json 为 dict。"""
+    """解析 preset 的 params_json 为 dict。
+    Returns: 解析后的 dict，或 None（预设不存在 / JSON 损坏）。
+    """
     p = get_preset(preset_id)
     if not p:
+        logger.warning("apply_preset: preset_id=%s 不存在", preset_id)  # P1-3: 日志区分
         return None
     try:
         return json.loads(p["params_json"])
-    except (json.JSONDecodeError, TypeError):
+    except (json.JSONDecodeError, TypeError) as e:
+        logger.error("apply_preset: preset_id=%s (%s) JSON 解析失败: %s",
+                     preset_id, p.get("name", "?"), e)  # P1-3: 日志区分
         return None
 
 
@@ -164,6 +245,12 @@ def load_ticker_config(ticker: str, variant: str = "single") -> Optional[Dict[st
 
 def save_ticker_config(ticker: str, market: str, variant: str,
                        params_json: str, preset_id: Optional[int] = None):
+    # P1-4: 校验 preset_id 存在性，避免 FK 引用不存在的预设
+    if preset_id is not None:
+        if get_preset(preset_id) is None:
+            logger.warning("save_ticker_config: preset_id=%s 不存在，设为 NULL", preset_id)
+            preset_id = None
+
     with _get_conn() as conn:
         conn.execute(
             """INSERT OR REPLACE INTO config_ticker
@@ -208,12 +295,15 @@ def import_json_files_as_presets(force: bool = False):
     """首次运行时将 config/*.json 导入为预设。
     Args:
         force: True 时覆盖同名预设
+    Returns:
+        (imported_count, errors_list) — errors_list 每项为 (filename, error_message)
     """
     if not _CONFIG_DIR.exists():
-        return 0
+        return 0, []
 
     existing_names = {p["name"] for p in list_presets()}
     imported = 0
+    errors: List[str] = []  # P0-1: 收集错误而非静默吞掉
 
     for fpath in sorted(_CONFIG_DIR.glob("*.json")):
         name = fpath.stem  # e.g. "AAPL_US", "2382_HK_DP"
@@ -221,6 +311,10 @@ def import_json_files_as_presets(force: bool = False):
             continue
         try:
             params = json.loads(fpath.read_text())
+        except Exception as e:
+            errors.append(f"{fpath.stem}: 文件读取/解析失败 — {e}")
+            continue
+        try:
             # 推断分类
             if name.endswith("_DP"):
                 category = "双滤波"
@@ -235,10 +329,14 @@ def import_json_files_as_presets(force: bool = False):
             save_preset(name, json.dumps(params, ensure_ascii=False),
                         description=desc, category=category)
             imported += 1
-        except Exception:
-            pass
+        except Exception as e:
+            errors.append(f"{fpath.stem}: 存入数据库失败 — {e}")
+            logger.warning("import_json_files_as_presets: %s 导入失败: %s", fpath, e)
 
-    return imported
+    if errors:
+        logger.warning("import_json_files_as_presets: 完成 %d 个，%d 个错误 — %s",
+                       imported, len(errors), errors)
+    return imported, errors
 
 
 # ═══════════════════════════════════════════════════════════
@@ -285,8 +383,10 @@ if __name__ == "__main__":
     init_db()
     init_config_tables()
 
-    n = import_json_files_as_presets(force=True)
+    n, errs = import_json_files_as_presets(force=True)
     print(f"Imported {n} JSON files as presets")
+    if errs:
+        print(f"Errors: {errs}")
 
     presets = list_presets()
     print(f"\nPresets ({len(presets)} total):")
