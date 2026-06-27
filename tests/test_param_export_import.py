@@ -247,9 +247,9 @@ class TestExpandCollapseParameterRecovery:
             "v0_cross_pnl": True,
             "v0_align": True,
             "v0_strat": True,
-            "v0_ke": 0.15,
+            "v0_ke": 0.1,
             "v0_sm": 0.05,
-            "v0_ew": 60,
+            "v0_ew": 40,
         }
 
         session_state = {}
