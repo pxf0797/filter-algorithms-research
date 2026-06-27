@@ -9,7 +9,7 @@ tests/
 ├── README.md                    # 本文档
 ├── test_config_db.py            # config_db 模块单元测试（45 tests，10 个测试类）
 ├── test_preset_ui.py            # 预设管理集成测试 — 逻辑层（60 tests，16 个测试类）
-├── test_preset_ui_actions.py    # 预设管理 UI 行为测试 — session_state 标志、同步、反馈（35 tests，5 个测试类）
+├── test_preset_ui_actions.py    # 预设管理 UI 行为测试 — session_state 标志、同步、反馈、widget 冲突防御（41 tests，7 个测试类）
 ├── test_filters.py              # 10 种滤波函数 + compute_metrics 测试（32 tests，6 个测试类）
 ├── test_signals.py              # Schmitt 触发器信号 + _find_all_pairs 测试（17 tests，2 个测试类）
 ├── test_strategy.py             # 策略 PnL 计算 + 抛物线拟合测试（17 tests，5 个测试类）
@@ -26,7 +26,7 @@ tests/
 | `conftest.py` | 共享 pytest fixtures：mock `streamlit` 模块（`MagicMock`）、信号数据（`constant_signal`、`linear_signal`、`noisy_sine`、`clean_sine`、`random_walk`、`time_index`）、OHLC DataFrame、日期序列（日线/分钟/周线） | 无 |
 | `test_config_db.py` | `config_db` 模块完整单元测试：表初始化、预设 CRUD、ticker 配置、历史记录、JSON 导入、参数收集、入口校验、返回值验证、外键约束 | `conftest.py` |
 | `test_preset_ui.py` | 预设管理集成测试（逻辑层）：完整生命周期、删除、重命名、应用填充 session_state、覆盖保存、JSON 导入、空列表、同名处理、边界条件、hash-based selectbox 刷新、连续操作、session_state 边界、大规模数据、category 保留、参数收集完整性、preset_map 查表 | `conftest.py` |
-| `test_preset_ui_actions.py` | 预设管理 UI 新行为测试（无 Streamlit 运行时依赖）：`_preset_action` / `_preset_action_id` 标志状态机、`new_preset_name` 自动同步、`preset_map` 字典查表、category 参数补全、toast 反馈机制模拟 | `conftest.py` |
+| `test_preset_ui_actions.py` | 预设管理 UI 新行为测试（无 Streamlit 运行时依赖）：`_preset_action` / `_preset_action_id` 标志状态机、`new_preset_name` 自动同步、`preset_map` 字典查表、category 参数补全、toast 反馈机制模拟、widget 绑定冲突检测与防御 | `conftest.py` |
 | `test_filters.py` | 10 种滤波函数测试：SMA、EMA、WMA、ALMA、Savitzky-Golay、Kalman、Butterworth、Gaussian、Median、LOWESS + `compute_metrics`。覆盖常量信号、降噪效果、边界条件 | `conftest.py` |
 | `test_signals.py` | `_schmitt_trigger` 和 `_find_all_pairs` 单元测试：滞回验证、做多/做空触发、sigma_min 地板、NaN 传播、信号段配对、同号合并 | 无（直接 import） |
 | `test_strategy.py` | `_fit_parabolic`、`_fit_physics_parabola`、`_compute_strategy_pnl`、`_add_prediction_traces` 测试：抛物线拟合精度、多空交易 PnL、止损触发、独立资金池、连续交易、极端止损 | 无（直接 import） |
@@ -155,7 +155,7 @@ tests/
 | UI-59 | TestPresetMapLookup | `test_same_name_overwrites_not_creates_duplicate` | 同名 UPSERT 不创建重复 | isolate_db | pid1==pid2，category 更新，总数==1 |
 | UI-60 | TestPresetMapLookup | `test_get_preset_by_name_retrieves_unique` | get_preset_by_name 精确返回唯一匹配 | isolate_db | 存在返回非 None，不存在返回 None |
 
-### 2.3 test_preset_ui_actions.py — 预设管理 UI 行为测试（35 tests）
+### 2.3 test_preset_ui_actions.py — 预设管理 UI 行为测试（41 tests）
 
 | 用例ID | 测试类 | 测试方法 | 描述 | 前置条件 | 预期结果 |
 |:--|:--|:--|:--|:--|:--|
@@ -190,8 +190,15 @@ tests/
 | ACT-29 | TestToastFeedback | `test_rename_preset_returns_new_name` | rename_preset 成功返回新名称 | isolate_db | result=="AfterRename" |
 | ACT-30 | TestToastFeedback | `test_delete_preset_returns_true_on_success` | delete_preset 成功返回 True | isolate_db | result is True |
 | ACT-31 | TestToastFeedback | `test_delete_preset_returns_false_on_missing` | delete_preset 不存在返回 False | isolate_db | result is False |
-| ACT-32 | TestToastFeedback | `test_simulate_apply_then_toast` | 模拟应用预设后的完整 feedback 路径 | isolate_db + MockSessionState | session_state 数据就绪 |
-| ACT-33 | TestToastFeedback | `test_simulate_save_then_toast` | 模拟保存预设后的完整 feedback 路径 | isolate_db + MockSessionState | 保存后 overwrite_preset 标志被重置 |
+| ACT-32 | TestToastFeedback | `test_simulate_apply_via_deferred_mechanism` | 模拟延迟应用机制：button callback 设 _pending_apply_params，rerun 顶部应用 | isolate_db + MockSessionState | widget key 不在 callback 中直接设置，deferred 应用后正确 |
+| ACT-33 | TestToastFeedback | `test_deferred_apply_preserves_non_widget_internal_keys` | 延迟应用不污染内部管理 key（_preset_action 等） | isolate_db + MockSessionState | _preset_action 值未被覆盖 |
+| ACT-34 | TestToastFeedback | `test_simulate_save_then_toast` | 模拟保存预设后的完整 feedback 路径 | isolate_db + MockSessionState | 保存后 overwrite_preset 标志被重置 |
+| ACT-35 | TestWidgetKeyConflictPrevention | `test_collect_params_returns_only_widget_bound_keys` | 验证 collect_current_params 返回的 key 全部是 widget 绑定的 | mock session_state with widget keys + internal keys | 内部 key 不被收集，所有收集 key 属于已知 widget 集合 |
+| ACT-36 | TestWidgetKeyConflictPrevention | `test_all_collected_keys_require_deferred_apply` | 验证 100% 收集 key 都需要延迟应用（无非 widget key） | mock session_state | widget_bound_count == total |
+| ACT-37 | TestWidgetKeyConflictPrevention | `test_deferred_mechanism_isolates_widget_keys` | button callback 中只设 _pending_apply_params，不直接改 widget key | 空 session_state | widget key 不在 callback 阶段的 session_state 中 |
+| ACT-38 | TestWidgetKeyConflictPrevention | `test_deferred_apply_handles_extra_keys_gracefully` | 旧预设含已废弃 key 时延迟应用不崩溃 | mock params with deprecated key | 所有 key 被正常应用 |
+| ACT-39 | TestWidgetKeyConflictPrevention | `test_deferred_apply_handles_missing_keys` | 旧预设缺少新版本 key 时已有值不被覆盖 | preset 不含新 key 的 session_state | 新 key 保持原值 |
+| ACT-40 | TestWidgetKeyConflictPrevention | `test_file_import_uses_direct_set_before_widgets` | 文件导入在 widget 创建前直接设置 session_state 是安全的 | 空 session_state | 直接设置成功，无 _pending_apply_params |
 
 ### 2.4 test_filters.py — 滤波函数测试（32 tests）
 
@@ -455,6 +462,14 @@ open htmlcov/index.html
 |:--|:--|:--|
 | P0-2 | 删除被 ticker 引用的预设时级联删除或报错，而非 SET NULL | CDB-39 — `test_delete_referenced_preset_sets_null`：删除后 ticker 的 preset_id 变为 None，ticker 记录保留 |
 
+### 4.8 widget 绑定冲突防御
+
+| 修复项 | 问题 | 覆盖测试 |
+|:--|:--|:--|
+| — | 预设应用时直接设置 widget 绑定的 session_state key 导致 StreamlitAPIException | ACT-32~ACT-33, ACT-35~ACT-40 — `TestWidgetKeyConflictPrevention` + `TestToastFeedback`：验证延迟应用机制（_pending_apply_params），隔离 widget 创建前后的操作，旧/新预设 key 不匹配时优雅降级，文件导入直接设置的正确性 |
+| — | `collect_current_params` 可能误收集内部管理 key（`_` 前缀） | ACT-35 — 验证所有收集 key 都是 widget 绑定的而非内部 key |
+| — | widget 冲突难以在单元测试中发现 | ACT-35~ACT-40 — 通过分析已知 widget key 全集 + 模拟 deferred apply 流程，在逻辑层捕获冲突 |
+
 ---
 
 ## 5. 已知问题和限制
@@ -507,7 +522,7 @@ open htmlcov/index.html
 |:--|--:|--:|:--|
 | `test_config_db.py` | 10 | 46 | — |
 | `test_preset_ui.py` | 16 | 60 | — |
-| `test_preset_ui_actions.py` | 5 | 33 | — |
+| `test_preset_ui_actions.py` | 7 | 41 | — |
 | `test_filters.py` | 6 | 32 | `filter` |
 | `test_signals.py` | 2 | 16 | `signal` |
 | `test_strategy.py` | 5 | 18 | `strategy` |
@@ -515,4 +530,4 @@ open htmlcov/index.html
 | `test_alignment.py` | 1 | 6 | `alignment` |
 | `test_alignment_subplot.py` | 2 | 14 | — |
 | `test_param_export_import.py` | 5 | 13 | — |
-| **总计** | **61** | **259** | — |
+| **总计** | **61** | **265** | — |
