@@ -1,16 +1,27 @@
 """
-streamlit/config_db.py — 配置管理数据层 (SQLite)
+streamlit/config_db.py — 配置管理数据层 (独立 SQLite)
 管理预设模板、标的配置快照、变更历史。
-复用 db.py 的 DB_PATH 和 get_conn()。
+存储于 data/config.db，与股票数据 data/market.db 分离。
 """
 
 import json
+import sqlite3
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from db import DB_PATH, get_conn
-
+_CONFIG_DB_PATH = Path(__file__).parent.parent / "data" / "config.db"
 _CONFIG_DIR = Path(__file__).parent.parent / "config"
+
+
+def _get_conn() -> sqlite3.Connection:
+    """获取配置数据库连接（独立于 market.db）。"""
+    conn = sqlite3.connect(str(_CONFIG_DB_PATH))
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.row_factory = sqlite3.Row
+    return conn
 
 # ═══════════════════════════════════════════════════════════
 # Schema init
@@ -55,7 +66,7 @@ CREATE INDEX IF NOT EXISTS idx_history_lookup
 
 def init_config_tables():
     """确保配置表存在。在 db.init_db() 之后调用。"""
-    with get_conn() as conn:
+    with _get_conn() as conn:
         conn.executescript(_SCHEMA)
         conn.execute("PRAGMA foreign_keys=ON")
 
@@ -65,7 +76,7 @@ def init_config_tables():
 # ═══════════════════════════════════════════════════════════
 
 def list_presets(category: Optional[str] = None) -> List[Dict[str, Any]]:
-    with get_conn() as conn:
+    with _get_conn() as conn:
         if category:
             rows = conn.execute(
                 "SELECT * FROM config_presets WHERE category=? ORDER BY name", (category,)
@@ -78,7 +89,7 @@ def list_presets(category: Optional[str] = None) -> List[Dict[str, Any]]:
 
 
 def get_preset(preset_id: int) -> Optional[Dict[str, Any]]:
-    with get_conn() as conn:
+    with _get_conn() as conn:
         row = conn.execute(
             "SELECT * FROM config_presets WHERE preset_id=?", (preset_id,)
         ).fetchone()
@@ -86,7 +97,7 @@ def get_preset(preset_id: int) -> Optional[Dict[str, Any]]:
 
 
 def get_preset_by_name(name: str) -> Optional[Dict[str, Any]]:
-    with get_conn() as conn:
+    with _get_conn() as conn:
         row = conn.execute(
             "SELECT * FROM config_presets WHERE name=?", (name,)
         ).fetchone()
@@ -96,7 +107,7 @@ def get_preset_by_name(name: str) -> Optional[Dict[str, Any]]:
 def save_preset(name: str, params_json: str,
                 description: str = "", category: str = "通用") -> int:
     """INSERT or UPDATE preset. Returns preset_id."""
-    with get_conn() as conn:
+    with _get_conn() as conn:
         cur = conn.execute("SELECT preset_id FROM config_presets WHERE name=?", (name,))
         existing = cur.fetchone()
         if existing:
@@ -115,12 +126,12 @@ def save_preset(name: str, params_json: str,
 
 
 def delete_preset(preset_id: int):
-    with get_conn() as conn:
+    with _get_conn() as conn:
         conn.execute("DELETE FROM config_presets WHERE preset_id=?", (preset_id,))
 
 
 def rename_preset(preset_id: int, new_name: str):
-    with get_conn() as conn:
+    with _get_conn() as conn:
         conn.execute(
             "UPDATE config_presets SET name=?, updated_at=datetime('now','localtime') WHERE preset_id=?",
             (new_name, preset_id))
@@ -142,7 +153,7 @@ def apply_preset(preset_id: int) -> Optional[Dict[str, Any]]:
 # ═══════════════════════════════════════════════════════════
 
 def load_ticker_config(ticker: str, variant: str = "single") -> Optional[Dict[str, Any]]:
-    with get_conn() as conn:
+    with _get_conn() as conn:
         row = conn.execute(
             "SELECT * FROM config_ticker WHERE ticker=? AND variant=?",
             (ticker, variant)).fetchone()
@@ -153,7 +164,7 @@ def load_ticker_config(ticker: str, variant: str = "single") -> Optional[Dict[st
 
 def save_ticker_config(ticker: str, market: str, variant: str,
                        params_json: str, preset_id: Optional[int] = None):
-    with get_conn() as conn:
+    with _get_conn() as conn:
         conn.execute(
             """INSERT OR REPLACE INTO config_ticker
                (ticker, variant, market, preset_id, params_json, updated_at)
@@ -169,7 +180,7 @@ def record_history(ticker: str, variant: str,
                    old_json: str, new_json: str,
                    preset_id: Optional[int] = None,
                    source: str = "ui"):
-    with get_conn() as conn:
+    with _get_conn() as conn:
         conn.execute(
             """INSERT INTO config_history(ticker,variant,preset_id,old_json,new_json,source)
                VALUES(?,?,?,?,?,?)""",
@@ -178,7 +189,7 @@ def record_history(ticker: str, variant: str,
 
 def get_history(ticker: str, variant: str = "single",
                 limit: int = 20) -> List[Dict[str, Any]]:
-    with get_conn() as conn:
+    with _get_conn() as conn:
         rows = conn.execute(
             """SELECT h.*, p.name as preset_name
                FROM config_history h
