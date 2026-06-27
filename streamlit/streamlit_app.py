@@ -2052,6 +2052,8 @@ def main():
                 if st.button("确认重命名", key="rename_confirm", use_container_width=True):
                     if new_name.strip() and new_name.strip() != p["name"]:
                         rename_preset(p["preset_id"], new_name.strip())
+                        # 更新 selectbox 的值指向新名称
+                        st.session_state.preset_selector = f"[{p['category']}] {new_name.strip()}"
                         st.success(f"已重命名: {p['name']} → {new_name.strip()}")
                         st.rerun()
                     elif new_name.strip() == p["name"]:
@@ -2065,6 +2067,7 @@ def main():
                 st.caption("此操作不可恢复。")
                 if st.button("确认删除", key="delete_preset_confirm", use_container_width=True):
                     delete_preset(p["preset_id"])
+                    st.session_state.preset_selector = "(不选择)"
                     st.success(f"已删除: {p['name']}")
                     st.rerun()
 
