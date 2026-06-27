@@ -229,7 +229,8 @@ def check_data_health(ticker=None):
                     "空值": nulls, "缺口": gaps, "状态": status,
                 })
 
-            issues.extend(item_issues)
+                if item_issues:
+                    issues.extend(item_issues)
 
         total_tickers = len(tickers)
         total_tfs = len(details)

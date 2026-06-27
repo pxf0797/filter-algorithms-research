@@ -8,11 +8,10 @@ build/
 .DS_Store
 *.log
 .streamlit/
-.DS_Store
 data/*.parquet
 data/*/*.parquet
 data/*-shm
 data/*-wal
 data/snapshots/
-data/config.db
+data/*.db
 .gstack/

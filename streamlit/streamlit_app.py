@@ -301,10 +301,25 @@ def _render_plotly(fig, height=750, dates=None):
             if isinstance(obj, (np.integer,)):
                 return int(obj)
             if isinstance(obj, (np.floating,)):
+                if np.isnan(obj) or np.isinf(obj):
+                    return None
                 return float(obj)
             return super().default(obj)
 
-    figure_json = json.dumps(fig_dict, cls=_NpEncoder)
+    def _sanitize_for_json(obj):
+        """递归替换 NaN/Inf 为 None (JSON null)，避免 json.dumps 输出非法 NaN 字符串导致浏览器 JSON.parse 白屏。"""
+        if isinstance(obj, dict):
+            return {k: _sanitize_for_json(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_sanitize_for_json(v) for v in obj]
+        if isinstance(obj, float):
+            if np.isnan(obj) or np.isinf(obj):
+                return None
+        if isinstance(obj, np.ndarray):
+            return _sanitize_for_json(obj.tolist())
+        return obj
+
+    figure_json = json.dumps(_sanitize_for_json(fig_dict), cls=_NpEncoder)
     div_id = f"plot-{uuid.uuid4().hex[:8]}"
 
     html = """<!DOCTYPE html>
@@ -2539,6 +2554,7 @@ def main():
                     st.rerun()
 
     # ── Auto-refresh execution ──
+    # 非阻塞等待：每次最多 sleep 1 秒，避免长时间阻塞 UI 交互
     if auto_refresh:
         now = time.time()
         last = st.session_state.get("_last_auto_refresh")
@@ -2548,9 +2564,12 @@ def main():
             _fetch_stock.clear()
             _fetch_all_timeframes(market, ticker_code)
             st.session_state._last_auto_refresh = now
-        remaining = interval - (now - st.session_state.get("_last_auto_refresh", now))
-        time.sleep(remaining)
-        st.rerun()
+            st.rerun()
+        remaining = max(0, interval - (now - st.session_state.get("_last_auto_refresh", now)))
+        if remaining > 0:
+            st.caption(f"⏱️ {int(remaining)}s 后自动刷新")
+            time.sleep(min(remaining, 1.0))
+            st.rerun()
 
 if __name__ == "__main__":
     main()
