@@ -2161,6 +2161,11 @@ def main():
                                  placeholder="如: 我的港股配置")
         new_desc = st.text_input("描述(可选)", key="new_preset_desc",
                                  placeholder="港股·短线·savgol")
+        # P2-1: 消耗延迟重置标志 — 在 checkbox widget 创建前应用，
+        # 避免 StreamlitAPIException: widget key 实例化后不可修改。
+        if st.session_state.pop("_pending_reset_overwrite", False):
+            st.session_state.overwrite_preset = False
+
         overwrite = False
         if selected_preset:
             overwrite = st.checkbox(f"覆盖「{selected_preset['name']}」",
@@ -2182,8 +2187,9 @@ def main():
                                          else selected_preset.get("description", "")),
                             category=cat)
                 st.toast(f"已保存: {target_name}")
-                # P2-1: 保存成功后清除 overwrite checkbox 状态残留
-                st.session_state.overwrite_preset = False
+                # P2-1: 通过延迟标志清除 overwrite checkbox 状态 —
+                # 在下次 rerun 的 widget 创建前消费，避免 widget-key 冲突。
+                st.session_state._pending_reset_overwrite = True
                 st.rerun()
             else:
                 st.error("请输入预设名称")

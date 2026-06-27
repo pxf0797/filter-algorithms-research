@@ -703,3 +703,133 @@ class TestWidgetKeyConflictPrevention:
         assert ss["ticker"] == "NVDA"
         assert ss["_imp_ticker"] == "NVDA"
         assert ss["_import_data"] == "md5hash"
+
+    def test_overwrite_preset_key_excluded_from_collect(self, monkeypatch):
+        """验证 overwrite_preset 不在 collect_current_params 返回中。
+
+        它是 UI 状态 key, 不是配置参数, 不应被保存到预设中。"""
+        import streamlit
+        ss = self._mock_session_state_with_params()
+        # 模拟 UI 状态 key — 不应出现在配置导出中
+        ss["overwrite_preset"] = True
+        monkeypatch.setattr(streamlit, "session_state", ss)
+
+        from config_db import collect_current_params
+        params = collect_current_params()
+        assert "overwrite_preset" not in params
+
+
+# ---------------------------------------------------------------------------
+# Widget-Aware 测试 — 验证 Streamlit widget 生命周期约束
+# ---------------------------------------------------------------------------
+
+class _WidgetKeyModifiedAfterInstantiationError(Exception):
+    """模拟 StreamlitAPIException: widget 实例化后不可修改其绑定 key."""
+
+
+class _WidgetAwareSessionState(dict):
+    """dict-like session_state，增加 widget 生命周期约束。
+
+    模拟 Streamlit 规则：所有 widget 创建完成后 (lock)，
+    禁止直接修改 widget 绑定的 session_state key。
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._widget_keys: set = set()
+        self._locked: bool = False
+
+    def register_widget(self, key: str):
+        """标记 key 为 widget 绑定。"""
+        self._widget_keys.add(key)
+
+    def lock(self):
+        """标记所有 widget 已创建完成，进入回调阶段。
+
+        此后任何对 widget key 的直接赋值将触发异常。
+        """
+        self._locked = True
+
+    def begin_rerun(self):
+        """模拟 st.rerun() 后的新执行周期：解锁并清除 widget 注册。"""
+        self._locked = False
+        self._widget_keys.clear()
+
+    def __setitem__(self, key, value):
+        if self._locked and key in self._widget_keys:
+            raise _WidgetKeyModifiedAfterInstantiationError(
+                f"st.session_state.{key} cannot be modified after the widget "
+                f"with key '{key}' is instantiated."
+            )
+        super().__setitem__(key, value)
+
+
+class TestOverwriteCheckboxResetFlow:
+    """验证保存成功后 overwrite_preset checkbox 的正确重置流程。
+
+    使用 _WidgetAwareSessionState 模拟 Streamlit widget 生命周期。
+    """
+
+    def setup_method(self):
+        self.ss = _WidgetAwareSessionState()
+        self.SSE = _WidgetKeyModifiedAfterInstantiationError
+
+    def test_direct_reset_after_widget_instantiation_raises(self):
+        """验证: widget 创建后直接设置其 session_state key 触发异常。
+
+        模拟修复前 line 2186 的 bug 路径:
+        1. checkbox widget 已渲染 (register + lock)
+        2. 保存按钮回调中直接 st.session_state.overwrite_preset = False → 崩溃
+        """
+        self.ss.register_widget("overwrite_preset")
+        self.ss.lock()  # 所有 widget 创建完毕，进入回调阶段
+        with pytest.raises(self.SSE):
+            self.ss["overwrite_preset"] = False
+
+    def test_deferred_reset_avoids_widget_conflict(self):
+        """验证: _pending_reset_overwrite 延迟标志可安全重置。
+
+        模拟: save → rerun → 在 widget 创建前消费标志 → 安全赋值。
+        """
+        # ---- 阶段1: 按钮回调 (widget 已 lock，不能直接改 widget key) ----
+        self.ss.register_widget("overwrite_preset")
+        self.ss.lock()
+
+        # 保存成功: 设延迟标志 (非 widget key，始终安全)
+        self.ss["_pending_reset_overwrite"] = True
+        # st.rerun() 触发
+
+        # ---- 阶段2: 新脚本执行, widget 尚未创建 ----
+        self.ss.begin_rerun()
+
+        # 消费延迟标志 — 对应 streamlit_app.py 中 checkbox 前的代码
+        if self.ss.pop("_pending_reset_overwrite", False):
+            self.ss["overwrite_preset"] = False  # widget 未 lock，安全
+
+        assert self.ss["overwrite_preset"] is False
+        assert "_pending_reset_overwrite" not in self.ss
+
+    def test_deferred_reset_only_when_flag_present(self):
+        """验证: 无 _pending_reset_overwrite 时不误修改。"""
+        self.ss.begin_rerun()
+
+        original = self.ss.get("overwrite_preset", True)
+        if self.ss.pop("_pending_reset_overwrite", False):
+            self.ss["overwrite_preset"] = False
+
+        assert self.ss.get("overwrite_preset", True) == original
+
+    def test_rerun_resets_lock_and_widget_registry(self):
+        """验证: begin_rerun() 清除 lock 和 widget 注册，允许新周期安全赋值。"""
+        # 上一轮: widget 注册 + lock + set _pending flag
+        self.ss.register_widget("overwrite_preset")
+        self.ss.lock()
+        self.ss["_pending_reset_overwrite"] = True
+
+        # 新周期: 解锁 + 清除注册
+        self.ss.begin_rerun()
+
+        # 消费标志 + 设置 widget key → 不应抛异常
+        self.ss.pop("_pending_reset_overwrite")
+        self.ss["overwrite_preset"] = False
+        assert self.ss["overwrite_preset"] is False

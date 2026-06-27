@@ -31,6 +31,62 @@ import pandas as pd
 import pytest
 
 
+# ---------------------------------------------------------------------------
+# Widget-aware session_state mock — 模拟 Streamlit widget 生命周期约束
+# ---------------------------------------------------------------------------
+
+class WidgetKeyModifiedAfterInstantiationError(Exception):
+    """模拟 StreamlitAPIException: widget 实例化后不可修改其绑定 key."""
+
+
+class WidgetAwareSessionState(dict):
+    """dict-like session_state，增加 widget 生命周期约束检测。
+
+    模拟 Streamlit 规则：所有 widget 创建完成后 (lock)，禁止直接修改
+    widget 绑定的 session_state key。非 widget key 始终安全。
+
+    用法:
+        ss = WidgetAwareSessionState()
+        ss.register_widget("my_checkbox")     # widget 创建
+        ss.lock()                             # 所有 widget 就绪，进入回调阶段
+        ss["my_checkbox"] = True              # ❌ 抛出 WidgetKeyModifiedAfterInstantiationError
+        ss["_pending_flag"] = True            # ✅ 非 widget key 始终安全
+
+        # rerun 周期
+        ss.begin_rerun()                      # 解锁 + 清除 widget 注册
+        ss["my_checkbox"] = False             # ✅ widget 重新创建前安全
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._widget_keys: set = set()
+        self._locked: bool = False
+
+    def register_widget(self, key: str):
+        """标记 key 为 widget 绑定。模拟 st.checkbox(... key=...) 等。"""
+        self._widget_keys.add(key)
+
+    def lock(self):
+        """标记所有 widget 已创建完成，进入回调阶段。
+
+        此后任何对 widget key 的直接赋值将触发异常。
+        """
+        self._locked = True
+
+    def begin_rerun(self):
+        """模拟 st.rerun() 后的新执行周期：解锁并清除 widget 注册。"""
+        self._locked = False
+        self._widget_keys.clear()
+
+    def __setitem__(self, key, value):
+        if self._locked and key in self._widget_keys:
+            raise WidgetKeyModifiedAfterInstantiationError(
+                f"st.session_state.{key} cannot be modified after the widget "
+                f"with key '{key}' is instantiated."
+            )
+        super().__setitem__(key, value)
+
+
 # ---- Signal / data fixtures -----------------------------------------------
 
 @pytest.fixture
