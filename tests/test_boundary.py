@@ -18,7 +18,6 @@ from streamlit_app import (
 
 class TestComputeStrategyPnlBoundary:
 
-    @pytest.mark.slow
     def test_filtered_all_nan(self):
         """filtered 全 NaN 不应崩溃."""
         t = np.arange(50, dtype=float)
@@ -43,7 +42,6 @@ class TestComputeStrategyPnlBoundary:
         assert short_pnl.shape == (50,), "short_pnl 长度应匹配 t"
         assert trades == [], "filtered 全 NaN 时不应有交易"
 
-    @pytest.mark.slow
     def test_short_sequence(self):
         """t 长度 < 5 时不应崩溃."""
         t = np.arange(4, dtype=float)
@@ -67,7 +65,6 @@ class TestComputeStrategyPnlBoundary:
 
 class TestFindAllPairsBoundary:
 
-    @pytest.mark.slow
     def test_zero_gap_merged(self):
         """含 0 间隔: [+1, +1, 0, 0, +1, +1] → 同号合并为一个段."""
         sig_t = np.array([1, 1, 0, 0, 1, 1, -1, -1], dtype=int)
@@ -77,14 +74,12 @@ class TestFindAllPairsBoundary:
         # 配对边界应为 (0, 6): 多头段起点 → 空头段入口
         assert pairs[0] == (0, 6), "0 间隔同号段应合并"
 
-    @pytest.mark.slow
     def test_single_bar_signal(self):
         """仅一个非零 bar: [0, +1, 0] → 无 pair (段数 < 2)."""
         sig_t = np.array([0, 1, 0], dtype=int)
         pairs = _find_all_pairs(sig_t)
         assert pairs == [], "单个非零信号不应产生 pair"
 
-    @pytest.mark.slow
     def test_frequent_alternation(self):
         """正负交替频繁: 每 2 个 bar 换方向 → 生成多对."""
         sig_t = np.zeros(20, dtype=int)
@@ -93,14 +88,12 @@ class TestFindAllPairsBoundary:
         pairs = _find_all_pairs(sig_t)
         assert len(pairs) >= 1, "频繁交替应生成 pairs"
 
-    @pytest.mark.slow
     def test_all_zero(self):
         """全 0 信号 → 空列表."""
         sig_t = np.zeros(10, dtype=int)
         pairs = _find_all_pairs(sig_t)
         assert pairs == []
 
-    @pytest.mark.slow
     def test_short_signal(self):
         """len < 3 → 空列表."""
         assert _find_all_pairs(np.array([1, 0])) == []
@@ -114,7 +107,6 @@ class TestFindAllPairsBoundary:
 
 class TestFitBoundary:
 
-    @pytest.mark.slow
     def test_fit_parabolic_short_segment(self):
         """fit 段长度 < 3 → 返回 None."""
         x = np.arange(5, dtype=float)
@@ -122,7 +114,6 @@ class TestFitBoundary:
         assert _fit_parabolic(x, y, 0, 1) is None, "len<3 → None"
         assert _fit_physics_parabola(x, y, 0, 1) is None, "len<3 → None"
 
-    @pytest.mark.slow
     def test_fit_parabolic_normal(self):
         """正常 5 点拟合返回 dict."""
         x = np.arange(5, dtype=float)
@@ -131,7 +122,6 @@ class TestFitBoundary:
         assert result is not None
         assert "a" in result and "b" in result and "c" in result
 
-    @pytest.mark.slow
     def test_fit_physics_denom_zero(self):
         """denom ≈ 0 → 返回 None."""
         x = np.array([0.0, 0.0, 0.0])
@@ -139,7 +129,6 @@ class TestFitBoundary:
         result = _fit_physics_parabola(x, y, 0, 2)
         assert result is None, "denom≈0 → None"
 
-    @pytest.mark.slow
     def test_collinear_parabolic_fit_values(self):
         """TC-DATA-06.6: 共线数据抛物线拟合 → a~0, b~1, c~1"""
         x = np.arange(10, dtype=float)
@@ -158,21 +147,18 @@ class TestFitBoundary:
 
 class TestSchmittTriggerBoundary:
 
-    @pytest.mark.slow
     def test_n_less_than_span(self):
         """n < ewma_span → 返回 None."""
         v = np.array([0.1, 0.2, 0.3])
         a = np.array([0.01, 0.02, 0.03])
         assert _schmitt_trigger(v, a, ewma_span=60) is None
 
-    @pytest.mark.slow
     def test_empty_v(self):
         """空数组 → 返回 None (n=0 < span)."""
         v = np.array([])
         a = np.array([])
         assert _schmitt_trigger(v, a) is None
 
-    @pytest.mark.slow
     def test_normal_output_shape(self):
         """正常输入返回完整 dict."""
         v = np.random.randn(100)
@@ -190,7 +176,6 @@ class TestSchmittTriggerBoundary:
 
 class TestExportImportConfig:
 
-    @pytest.mark.slow
     def test_export_dict_structure(self):
         """验证导出 config dict 包含必需 key."""
         # 模拟一个完整的导出配置
@@ -285,7 +270,6 @@ class TestExportImportConfig:
                 f"streamlit 内部 cfg['show_alignment'])"
             )
 
-    @pytest.mark.slow
     def test_imp_backup_created_on_import(self):
         """验证 _imp_ 备份 key 在导入时被正确创建 (模拟 main() 导入逻辑)."""
         config = {
@@ -332,7 +316,6 @@ class TestExportImportConfig:
 
 class TestEmptyDataDegradation:
 
-    @pytest.mark.slow
     def test_schmitt_none_degrades_gracefully(self):
         """schmitt_trigger 返回 None → all_pairs=[] → PnL 返回初始值."""
         t = np.arange(10, dtype=float)
@@ -357,7 +340,6 @@ class TestEmptyDataDegradation:
 
 class TestNumericalStability:
 
-    @pytest.mark.slow
     def test_extreme_prices(self):
         """极端价格值不应导致 PnL 溢出.
 
@@ -386,7 +368,6 @@ class TestNumericalStability:
         assert not np.any(np.isinf(long_pnl)), "极小价格不应产生 inf"
         assert long_pnl[-1] > 100.0, "上涨交易应产生 > 100 的收益"
 
-    @pytest.mark.slow
     def test_negative_price(self):
         """负价格应被正确处理（跳过该交易）. Negative price is common bug path in finance code."""
         t = np.arange(30, dtype=float)
@@ -420,7 +401,6 @@ class TestNumericalStability:
 
 class TestAlignPnlBoundary:
 
-    @pytest.mark.slow
     def test_higher_trades_empty(self, sample_dates_daily, sample_dates_intraday):
         """交易列表为空 → 无 markers."""
         higher_dates = sample_dates_daily[:5]

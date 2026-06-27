@@ -40,13 +40,6 @@ def constant_signal():
 
 
 @pytest.fixture
-def linear_signal():
-    """线性信号: y = 0.1*x"""
-    x = np.arange(100, dtype=float)
-    return x * 0.1
-
-
-@pytest.fixture
 def noisy_sine():
     """含噪正弦波: sin(x/5) + N(0, 0.1)"""
     np.random.seed(42)
@@ -62,32 +55,9 @@ def clean_sine():
 
 
 @pytest.fixture
-def random_walk():
-    """随机游走: 200步"""
-    np.random.seed(42)
-    return np.cumsum(np.random.randn(200) * 0.1) + 100.0
-
-
-@pytest.fixture
 def time_index():
     """时间索引数组"""
     return np.arange(200, dtype=float)
-
-
-# ---- DataFrame fixtures ----------------------------------------------------
-
-@pytest.fixture
-def ohlc_df():
-    """模拟OHLC DataFrame"""
-    np.random.seed(42)
-    n = 100
-    close = np.cumsum(np.random.randn(n) * 0.5) + 100
-    return pd.DataFrame({
-        "Open": close - 0.1,
-        "High": close + 0.3,
-        "Low": close - 0.3,
-        "Close": close,
-    })
 
 
 # ---- Datetime fixtures -----------------------------------------------------
@@ -102,9 +72,3 @@ def sample_dates_daily():
 def sample_dates_intraday():
     """60分钟日期 (tz-aware HKT)"""
     return pd.date_range("2026-06-01 09:30", periods=120, freq="h", tz="Asia/Hong_Kong")
-
-
-@pytest.fixture
-def sample_dates_weekly():
-    """周线日期 (tz-naive)"""
-    return pd.date_range("2024-01-01", periods=90, freq="W")
