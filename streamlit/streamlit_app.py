@@ -1932,6 +1932,15 @@ def main():
     if "_import_data" not in st.session_state:
         st.session_state._import_data = None  # None = no config applied yet
 
+    # 预设应用延迟机制：按钮回调在 widget 渲染后触发，不能直接修改
+    # 已绑定的 widget key（如 market/ticker）。在 widget 创建前应用。
+    if "_pending_apply_params" in st.session_state:
+        params = st.session_state.pop("_pending_apply_params")
+        for k, v in params.items():
+            st.session_state[k] = v
+            st.session_state[f"_imp_{k}"] = v
+        st.session_state._import_data = "preset"
+
     uploaded = st.sidebar.file_uploader("导入配置", type=["json"], key="config_import",
                                          label_visibility="collapsed")
     if uploaded is not None:
@@ -2027,10 +2036,10 @@ def main():
             if st.button("✅ 应用", key="apply_preset", use_container_width=True):
                 params = apply_preset(p["preset_id"])
                 if params:
-                    for k, v in params.items():
-                        st.session_state[k] = v
-                        st.session_state[f"_imp_{k}"] = v
-                    st.session_state._import_data = "preset"
+                    # 延迟应用：不能在此处直接设置 widget 绑定的 session_state key
+                    # (market/ticker 等 widget 已渲染)，传入 _pending_apply_params
+                    # 在下次 rerun 时 widget 创建前应用。
+                    st.session_state._pending_apply_params = params
                     st.toast(f"已应用: {p['name']}")
                     st.rerun()
 
