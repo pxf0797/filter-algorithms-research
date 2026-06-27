@@ -399,82 +399,70 @@ class TestPresetEdgeCases:
 # ============================================================
 
 class TestSelectboxRefresh:
-    """模拟 Streamlit widget 生命周期，验证 _selected_preset + index 模式"""
+    """验证 hash-based 动态 key 模式：选项数据变了，key 自动变，widget 自然重置"""
 
-    def _render_selectbox(self, presets, session_state):
-        """模拟 streamlit_app.py 中 selectbox 渲染逻辑 (index 模式)。"""
+    def _render_selectbox(self, presets):
+        """模拟 selectbox 渲染 (hash key 模式)。"""
+        import hashlib
         preset_names = ["(不选择)"] + [
             f"[{p['category']}] {p['name']}" for p in presets]
+        # 基于选项内容生成 key — 数据变了 key 就变
+        key_hash = hashlib.md5("|".join(preset_names).encode()).hexdigest()[:8]
+        # 新 key → Streamlit 视为新 widget → 默认选中第0项
+        return preset_names[0], preset_names, key_hash
 
-        # 用 _selected_preset 决定 index
-        prev = session_state.get("_selected_preset", "(不选择)")
-        try:
-            idx = preset_names.index(prev) if prev in preset_names else 0
-        except ValueError:
-            idx = 0
-        current = preset_names[idx]
-        session_state["_selected_preset"] = current
-        return current, preset_names
-
-    def test_delete_clears_selection(self):
-        """删除后 _selected_preset='(不选择)'，selectbox 回退"""
+    def test_delete_changes_hash_resets_widget(self):
+        """删除后选项列表变了，hash 变化，widget 自动重置到 (不选择)"""
         cfg.save_preset("ToDelete", json.dumps({"x": 1}))
-        ss = {"_selected_preset": "[通用] ToDelete"}
+        before = self._render_selectbox(cfg.list_presets())
 
         p = cfg.get_preset_by_name("ToDelete")
         cfg.delete_preset(p["preset_id"])
-        ss["_selected_preset"] = "(不选择)"  # 删除后重置
+        after = self._render_selectbox(cfg.list_presets())
 
-        presets = cfg.list_presets()
-        current, names = self._render_selectbox(presets, ss)
-        assert current == "(不选择)"
-        assert "[通用] ToDelete" not in names
+        # hash 变了 → 新 widget
+        assert before[2] != after[2]
+        # 新 widget 默认选中第0项
+        assert after[0] == "(不选择)"
+        assert "[通用] ToDelete" not in after[1]
 
-    def test_rename_updates_selection(self):
-        """重命名后 _selected_preset 指向新名，selectbox 正确选中"""
+    def test_rename_changes_hash(self):
+        """重命名后选项列表变了，hash 变化"""
         cfg.save_preset("OldName", json.dumps({"x": 1}))
-        ss = {"_selected_preset": "[通用] OldName"}
+        before = self._render_selectbox(cfg.list_presets())
 
         p = cfg.get_preset_by_name("OldName")
         cfg.rename_preset(p["preset_id"], "NewName")
-        ss["_selected_preset"] = f"[{p['category']}] NewName"
+        after = self._render_selectbox(cfg.list_presets())
 
-        presets = cfg.list_presets()
-        current, names = self._render_selectbox(presets, ss)
-        assert current == "[通用] NewName"
-        assert "[通用] NewName" in names
-        assert "[通用] OldName" not in names
+        assert before[2] != after[2]
+        assert "[通用] NewName" in after[1]
+        assert "[通用] OldName" not in after[1]
 
-    def test_stale_value_falls_back_to_first(self):
-        """_selected_preset 值不在选项列表中时回退到第0项"""
-        cfg.save_preset("Ghost", json.dumps({"x": 1}))
-        ss = {"_selected_preset": "[通用] Ghost"}
-        p = cfg.get_preset_by_name("Ghost")
-        cfg.delete_preset(p["preset_id"])
-        # _selected_preset 没更新 — 但 fallback 会处理
-
-        presets = cfg.list_presets()
-        current, names = self._render_selectbox(presets, ss)
-        assert current == "(不选择)"
-        assert "[通用] Ghost" not in names
-
-    def test_apply_preset_keeps_selection(self):
-        """应用预设后 selectbox 保持选中"""
-        pid = cfg.save_preset("MyPreset", json.dumps({"v0_ke": 0.15}),
-                              category="单滤波")
-        ss = {"_selected_preset": "[单滤波] MyPreset"}
-        params = cfg.apply_preset(pid)
-        assert params["v0_ke"] == 0.15
-        _, _ = self._render_selectbox(cfg.list_presets(), ss)
-        assert ss["_selected_preset"] == "[单滤波] MyPreset"
-
-    def test_save_new_targets_new_preset(self):
-        """保存新预设后 _selected_preset 跳到新项"""
+    def test_save_new_changes_hash(self):
+        """保存新预设后选项列表变了，hash 变化"""
+        before = self._render_selectbox(cfg.list_presets())
         cfg.save_preset("Fresh", json.dumps({"a": 1}))
-        ss = {"_selected_preset": "[通用] Fresh"}
-        _, names = self._render_selectbox(cfg.list_presets(), ss)
-        assert ss["_selected_preset"] == "[通用] Fresh"
-        assert "[通用] Fresh" in names
+        after = self._render_selectbox(cfg.list_presets())
+
+        assert before[2] != after[2]
+        assert "[通用] Fresh" in after[1]
+
+    def test_no_change_same_hash(self):
+        """没有增删改操作时 hash 保持不变"""
+        cfg.save_preset("A", json.dumps({"x": 1}))
+        cfg.save_preset("B", json.dumps({"x": 2}))
+        r1 = self._render_selectbox(cfg.list_presets())
+        r2 = self._render_selectbox(cfg.list_presets())
+        assert r1[2] == r2[2]  # hash 不变 — widget 状态保持
+
+    def test_apply_preset_does_not_change_hash(self):
+        """应用预设不改变数据，hash 不变"""
+        pid = cfg.save_preset("MyPreset", json.dumps({"v0_ke": 0.15}))
+        before = self._render_selectbox(cfg.list_presets())
+        cfg.apply_preset(pid)  # 不改变 DB
+        after = self._render_selectbox(cfg.list_presets())
+        assert before[2] == after[2]  # 纯读操作，hash 不变
 
 
 # ============================================================
