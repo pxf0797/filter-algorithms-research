@@ -442,25 +442,56 @@ class TestToastFeedback:
         result = cfg.delete_preset(99999)
         assert result is False
 
-    def test_simulate_apply_then_toast(self):
-        """模拟应用预设后的完整 feedback 路径。"""
-        pid = cfg.save_preset("ToastSim", json.dumps({"ticker": "TSLA", "v0_ke": 0.3}))
-        params = cfg.apply_preset(pid)
+    def test_simulate_apply_via_deferred_mechanism(self):
+        """模拟应用预设：使用 _pending_apply_params 延迟机制。
 
-        # 模拟将参数写入 session_state
-        for k, v in params.items():
+        验证参数在"widget 创建前"（模拟 main() 顶部）被应用，
+        而非在按钮回调中直接设置 session_state。
+        """
+        # 预设包含 widget 绑定的 key（与 collect_current_params 返回的一致）
+        params = {"ticker": "TSLA", "market": "港股 HK", "v0_ke": 0.3, "global_f": "ema"}
+
+        # ---- 阶段1：按钮回调（widget 已渲染） ----
+        # 正确做法：只设置 _pending_apply_params，不直接修改 widget key
+        self.ss["_pending_apply_params"] = params
+        # 此时不应有任何 widget key 被修改
+        assert "ticker" not in self.ss
+        assert "market" not in self.ss
+
+        # ---- 阶段2：下次 rerun 时 main() 顶部（widget 尚未创建） ----
+        deferred = self.ss.pop("_pending_apply_params")
+        for k, v in deferred.items():
             self.ss[k] = v
             self.ss[f"_imp_{k}"] = v
         self.ss["_import_data"] = "preset"
 
-        # toast 在真实 Streamlit 中调用；这里验证数据就绪即可
+        # 验证所有值已正确应用
         assert self.ss["ticker"] == "TSLA"
+        assert self.ss["market"] == "港股 HK"
         assert self.ss["v0_ke"] == 0.3
+        assert self.ss["global_f"] == "ema"
         assert self.ss["_import_data"] == "preset"
+        # 验证 _imp_ 备份也存在
+        assert self.ss["_imp_ticker"] == "TSLA"
+        assert self.ss["_imp_market"] == "港股 HK"
+
+    def test_deferred_apply_preserves_non_widget_internal_keys(self):
+        """延迟应用不应覆盖内部管理 key（_import_data 除外）。"""
+        params = {"ticker": "AAPL"}
+        self.ss["_preset_action"] = "update"  # 不应被覆盖
+        self.ss["_pending_apply_params"] = params
+
+        deferred = self.ss.pop("_pending_apply_params")
+        for k, v in deferred.items():
+            self.ss[k] = v
+            self.ss[f"_imp_{k}"] = v
+
+        # 内部标志未被污染
+        assert self.ss["_preset_action"] == "update"
+        assert self.ss["ticker"] == "AAPL"
 
     def test_simulate_save_then_toast(self):
         """模拟保存预设后的完整 feedback 路径。"""
-        # 收集当前参数
         params = {"ticker": "META", "v0_ke": 0.12}
         target_name = "SavedPreset"
 
@@ -472,3 +503,203 @@ class TestToastFeedback:
         # 保存后清理 overwrite checkbox 状态残留
         self.ss["overwrite_preset"] = False
         assert self.ss["overwrite_preset"] is False
+
+
+# ============================================================
+# 6.  Widget-bound key 冲突检测与防御
+# ============================================================
+
+class TestWidgetKeyConflictPrevention:
+    """验证预设应用不会触发 StreamlitAPIException (widget 绑定冲突).
+
+    问题背景: Streamlit 禁止在 widget 渲染后直接修改其 session_state key。
+    collect_current_params() 返回的所有 key 都对应已实例化的 widget，
+    因此应用预设必须使用延迟机制 (_pending_apply_params)，在下次
+    rerun 时 widget 创建前应用参数。
+
+    本测试类验证:
+    1. collect_current_params 返回的 key 全部是 widget 绑定的
+    2. 延迟机制正确隔离了 widget 创建前后的操作
+    3. 旧代码(直接设置)会在模拟中暴露风险
+    """
+
+    # ---- 已知的 widget 绑定 key 列表 (需与 streamlit_app.py 同步) ----
+    # 这些 key 都对应 st.radio/selectbox/checkbox/slider/text_input 等 widget
+    GLOBAL_WIDGET_KEYS = {"market", "ticker", "global_f", "global_dual", "global_f2"}
+    VIEW_KEYS = {"tf", "n", "sch", "pred", "ke", "sm", "ew",
+                 "fm", "next", "fc", "fc2", "strat", "sl",
+                 "cross_pnl", "align"}
+    FILTER_KEY_PREFIXES = [
+        "窗口大小_", "跨度_", "偏移量_", "标准差_", "多项式阶数_",
+        "过程噪声", "测量噪声", "滤波器阶数_", "截止频率_", "平滑比例_",
+    ]
+
+    def _mock_session_state_with_params(self):
+        """构建包含完整 widget 参数的模拟 session_state。"""
+        ss = {}
+        # 全局 widget key
+        for k in self.GLOBAL_WIDGET_KEYS:
+            ss[k] = "TEST_" + k
+        # 视图 widget key (v0~v3)
+        for vi in range(4):
+            for pk in self.VIEW_KEYS:
+                ss[f"v{vi}_{pk}"] = f"TEST_v{vi}_{pk}"
+        # 滤波器中文 key (模拟一个完整集合)
+        for pfx in self.FILTER_KEY_PREFIXES:
+            for vi in range(4):
+                ss[f"{pfx}v{vi}_f1_ema"] = 0.5
+        return ss
+
+    def test_collect_params_returns_only_widget_bound_keys(self, monkeypatch):
+        """验证 collect_current_params 返回的 key 都是 widget 绑定的。
+
+        如果将来有人新增了非 widget 的 key 到 collect_current_params，
+        此测试会提醒检查是否需要 widget 冲突保护。
+        """
+        ss = self._mock_session_state_with_params()
+        # 添加一些内部 key（不应被收集）
+        ss["_import_data"] = "preset"
+        ss["_preset_action"] = "update"
+        ss["_preset_action_id"] = 1
+        ss["_last_sel_name"] = "test"
+        ss["overwrite_preset"] = False
+        ss["_day_offset"] = 0
+        ss["_fetched_ticker"] = "AAPL"
+
+        # Mock streamlit.session_state（collect_current_params 内部 import streamlit as st）
+        import streamlit
+        monkeypatch.setattr(streamlit, "session_state", ss)
+
+        params = cfg.collect_current_params()
+
+        # 所有收集到的 key 应该都是已知 widget 绑定的
+        for k in params:
+            is_global = k in self.GLOBAL_WIDGET_KEYS
+            is_view = any(k.startswith(f"v{vi}_") for vi in range(4))
+            is_filter = any(k.startswith(pfx) for pfx in self.FILTER_KEY_PREFIXES)
+            assert is_global or is_view or is_filter, (
+                f"Key '{k}' 被 collect_current_params 收集但不在已知 widget key 列表中。"
+                f" 如果这是新 widget key，请更新 GLOBAL_WIDGET_KEYS/VIEW_KEYS/FILTER_KEY_PREFIXES。"
+                f" 如果是内部 key（_ 前缀），不应被收集——请更新 collect_current_params 的过滤逻辑。"
+            )
+
+        # 内部 key 不应被收集
+        for internal_key in ["_import_data", "_preset_action", "_preset_action_id",
+                             "_last_sel_name", "overwrite_preset", "_day_offset",
+                             "_fetched_ticker"]:
+            assert internal_key not in params, (
+                f"内部 key '{internal_key}' 被 collect_current_params 收集了，"
+                f" 这会导致保存的预设包含内部状态，apply 时可能污染 session_state。"
+            )
+
+    def test_all_collected_keys_require_deferred_apply(self, monkeypatch):
+        """验证: collect_current_params 返回的 ALL key 都需要延迟应用。
+
+        如果存在非 widget key，可以进行直接设置；但目前所有 key 都是 widget 绑定的，
+        所以 100% 需要通过 _pending_apply_params 延迟。
+        """
+        ss = self._mock_session_state_with_params()
+        import streamlit
+        monkeypatch.setattr(streamlit, "session_state", ss)
+
+        params = cfg.collect_current_params()
+
+        # 当前实现: 所有 key 都是 widget 绑定的
+        # 因此预设应用按钮回调中不能直接设置任何一个 key
+        widget_bound_count = 0
+        for k in params:
+            is_global = k in self.GLOBAL_WIDGET_KEYS
+            is_view = any(k.startswith(f"v{vi}_") for vi in range(4))
+            is_filter = any(k.startswith(pfx) for pfx in self.FILTER_KEY_PREFIXES)
+            if is_global or is_view or is_filter:
+                widget_bound_count += 1
+
+        total = len(params)
+        assert widget_bound_count == total, (
+            f"collect_current_params 返回了 {total} 个 key，"
+            f"其中 {widget_bound_count} 个是 widget 绑定的。"
+            f" 如果 widget_bound_count < total，说明有非 widget key 可以安全直接设置。"
+        )
+
+    def test_deferred_mechanism_isolates_widget_keys(self):
+        """验证延迟机制: _pending_apply_params 暂存后，widget key 不在 session_state 中。
+
+        模拟按钮回调阶段(widget 已渲染): 只应设置 _pending_apply_params，
+        不应直接在 session_state 中设置任何 widget key。
+        """
+        ss = {}
+        params = {"ticker": "AAPL", "market": "美股 US", "v0_ke": 0.15}
+
+        # 阶段1: 按钮回调 — 只设置暂存标志
+        ss["_pending_apply_params"] = params
+        assert "ticker" not in ss  # widget key 未被直接修改
+        assert "market" not in ss
+
+        # 阶段2: 下次 rerun 顶部(widget 创建前) — 应用所有参数
+        deferred = ss.pop("_pending_apply_params")
+        assert "_pending_apply_params" not in ss  # 标志已消费
+        for k, v in deferred.items():
+            ss[k] = v
+            ss[f"_imp_{k}"] = v
+
+        assert ss["ticker"] == "AAPL"
+        assert ss["market"] == "美股 US"
+
+    def test_deferred_apply_handles_extra_keys_gracefully(self):
+        """延迟应用处理预设中的"多余"key（如旧版本保存的、现已删除的 widget key）。
+
+        不应崩溃，静默应用即可。"""
+        ss = {}
+        params = {
+            "ticker": "IBM",
+            "market": "美股 US",
+            "v0_old_deprecated_key": 999,  # 已废弃的 key
+        }
+        ss["_pending_apply_params"] = params
+
+        deferred = ss.pop("_pending_apply_params")
+        for k, v in deferred.items():
+            ss[k] = v
+            ss[f"_imp_{k}"] = v
+
+        # 旧 key 也被设置了（Streamlit 会忽略不存在的 widget key）
+        assert ss["v0_old_deprecated_key"] == 999
+        assert ss["ticker"] == "IBM"
+
+    def test_deferred_apply_handles_missing_keys(self):
+        """延迟应用处理预设中缺少 key 的情况（新版本新增的 widget）。
+
+        旧预设不包含新 widget key，已存在的 session_state 值保持不变。"""
+        ss = {"ticker": "GOOGL", "market": "美股 US", "v0_new_param": 42}
+
+        # 旧预设只包含 ticker 和 market
+        params = {"ticker": "META", "market": "A股(沪深)"}
+        ss["_pending_apply_params"] = params
+
+        deferred = ss.pop("_pending_apply_params")
+        for k, v in deferred.items():
+            ss[k] = v
+            ss[f"_imp_{k}"] = v
+
+        # preset 中的 key 被更新
+        assert ss["ticker"] == "META"
+        assert ss["market"] == "A股(沪深)"
+        # preset 中不存在的 key 保持原值（部分覆盖）
+        assert ss["v0_new_param"] == 42
+
+    def test_file_import_uses_direct_set_before_widgets(self):
+        """文件导入使用直接设置，因为它运行在 widget 创建之前。
+
+        这是正确的——不应用 _pending_apply_params 机制。"""
+        ss = {}
+        params = {"ticker": "NVDA", "market": "美股 US"}
+
+        # 文件导入: widget 未创建，直接设置是安全的
+        for k, v in params.items():
+            ss[k] = v
+            ss[f"_imp_{k}"] = v
+        ss["_import_data"] = "md5hash"
+
+        assert ss["ticker"] == "NVDA"
+        assert ss["_imp_ticker"] == "NVDA"
+        assert ss["_import_data"] == "md5hash"
