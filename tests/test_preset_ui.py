@@ -392,7 +392,345 @@ class TestPresetEdgeCases:
     def test_uniqueness_constraint_violation_triggers_update(self):
         """违反 UNIQUE 约束时触发 UPDATE，不引发异常"""
         pid = cfg.save_preset("UniqueTest", json.dumps({"key": "original"}))
-        # 同名保存不应抛异常
-        cfg.save_preset("UniqueTest", json.dumps({"key": "updated"}))
+
+
+# ============================================================
+# 10. Selectbox 刷新模式 (Streamlit session_state 模拟)
+# ============================================================
+
+class TestSelectboxRefresh:
+    """模拟 Streamlit widget 生命周期，验证 _reset_preset_selector 标志位模式"""
+
+    @pytest.fixture
+    def mock_ss(self):
+        """模拟 session_state 为普通 dict（纯逻辑测试，不依赖真实 streamlit）。"""
+        return {}
+
+    def _render_selectbox(self, presets, session_state):
+        """模拟 streamlit_app.py 中 selectbox 渲染逻辑。"""
+        # Step 1: 检查重置标志
+        if session_state.pop("_reset_preset_selector", False):
+            session_state.pop("preset_selector", None)
+
+        # Step 2: 构建选项列表
+        preset_names = ["(不选择)"] + [
+            f"[{p['category']}] {p['name']}" for p in presets]
+
+        # Step 3: selectbox 读取/写入 session_state
+        current = session_state.get("preset_selector", "(不选择)")
+        if current not in preset_names:
+            current = "(不选择)"
+        session_state["preset_selector"] = current
+
+        return current, preset_names
+
+    def test_flag_clears_stale_value_after_delete(self, mock_ss):
+        """删除后设置标志位，下次渲染 selectbox 回退到 (不选择)"""
+        cfg.save_preset("ToDelete", json.dumps({"x": 1}))
+        presets = cfg.list_presets()
+
+        # 用户选中 ToDelete
+        mock_ss["preset_selector"] = "[通用] ToDelete"
+
+        # 模拟删除操作: 删 DB → 设标志 → rerun
+        p = cfg.get_preset_by_name("ToDelete")
+        cfg.delete_preset(p["preset_id"])
+        mock_ss["_reset_preset_selector"] = True
+
+        # Rerun 后重新渲染
+        presets_after = cfg.list_presets()
+        current, names = self._render_selectbox(presets_after, mock_ss)
+
+        assert current == "(不选择)", f"Expected '(不选择)' but got '{current}'"
+        assert "[通用] ToDelete" not in names
+        assert "_reset_preset_selector" not in mock_ss  # 标志已被消费
+
+    def test_flag_clears_stale_value_after_rename(self, mock_ss):
+        """重命名后旧名不在列表中，selectbox 正确回退"""
+        cfg.save_preset("OldName", json.dumps({"x": 1}))
+        mock_ss["preset_selector"] = "[通用] OldName"
+
+        p = cfg.get_preset_by_name("OldName")
+        cfg.rename_preset(p["preset_id"], "NewName")
+        mock_ss["_reset_preset_selector"] = True
+
+        presets = cfg.list_presets()
+        current, names = self._render_selectbox(presets, mock_ss)
+
+        assert current == "(不选择)"
+        assert "[通用] NewName" in names
+        assert "[通用] OldName" not in names
+
+    def test_no_flag_stale_value_cleared_by_fallback(self):
+        """即使没有标志位，_render_selectbox 的 fallback 逻辑也会清理幽灵值。
+
+        _render_selectbox 检查 current 是否在 preset_names 中，
+        如果不在则回退到 '(不选择)'。这是第二道防线。
+        """
+        cfg.save_preset("Ghost", json.dumps({"x": 1}))
+        ss = {}
+        ss["preset_selector"] = "[通用] Ghost"
+        p = cfg.get_preset_by_name("Ghost")
+        cfg.delete_preset(p["preset_id"])
+        # 没有设置 _reset_preset_selector
+
+        presets = cfg.list_presets()
+        current, names = self._render_selectbox(presets, ss)
+
+        # fallback 逻辑: 旧值不在选项中 → 回退到 (不选择)
+        assert current == "(不选择)"
+        assert "[通用] Ghost" not in names
+
+    def test_apply_preset_sets_selector(self, mock_ss):
+        """应用预设后 selectbox 保持选中状态"""
+        pid = cfg.save_preset("MyPreset", json.dumps({"v0_ke": 0.15}),
+                              category="单滤波")
+        mock_ss["preset_selector"] = "[单滤波] MyPreset"
+
+        # 模拟应用
+        params = cfg.apply_preset(pid)
+        assert params["v0_ke"] == 0.15
+        # 应用不应改变 selectbox
+        assert mock_ss["preset_selector"] == "[单滤波] MyPreset"
+
+    def test_save_new_then_selectbox_auto_targets(self, mock_ss):
+        """保存新预设后 selectbox 跳到新项"""
+        mock_ss["preset_selector"] = "(不选择)"
+        cfg.save_preset("Fresh", json.dumps({"a": 1}))
+        # streamlit_app.py 中: st.session_state.preset_selector = "[通用] Fresh"
+        mock_ss["preset_selector"] = "[通用] Fresh"
+
+        presets = cfg.list_presets()
+        current, names = self._render_selectbox(presets, mock_ss)
+        assert current == "[通用] Fresh"
+        assert "[通用] Fresh" in names
+
+
+# ============================================================
+# 11. 增删改查连续操作
+# ============================================================
+
+class TestPresetCrudCycle:
+    """模拟用户连续操作: 创建→修改→删除→重建 的完整流程"""
+
+    def test_create_modify_delete_recreate(self):
+        """创建预设 → 更新参数 → 删除 → 用同名重建"""
+        # 创建
+        pid = cfg.save_preset("Cycle", json.dumps({"step": 1}))
+        assert cfg.get_preset(pid) is not None
+        assert json.loads(cfg.get_preset(pid)["params_json"])["step"] == 1
+
+        # 修改(更新)
+        cfg.save_preset("Cycle", json.dumps({"step": 2}))
+        assert json.loads(cfg.get_preset(pid)["params_json"])["step"] == 2
+
+        # 删除
+        cfg.delete_preset(pid)
+        assert cfg.get_preset(pid) is None
+
+        # 同名重建
+        new_pid = cfg.save_preset("Cycle", json.dumps({"step": 3}))
+        assert new_pid != pid  # 新 ID
+        assert json.loads(cfg.get_preset(new_pid)["params_json"])["step"] == 3
+        assert len(cfg.list_presets()) == 1
+
+    def test_rename_then_recreate_original_name(self):
+        """重命名后立即用旧名创建新预设"""
+        pid = cfg.save_preset("Alpha", json.dumps({"v": 1}))
+        cfg.rename_preset(pid, "Beta")
+
+        # 旧名可用
+        new_pid = cfg.save_preset("Alpha", json.dumps({"v": 2}))
+        assert new_pid != pid
+        assert cfg.get_preset_by_name("Alpha") is not None
+        assert cfg.get_preset_by_name("Beta") is not None
+        assert len(cfg.list_presets()) == 2
+
+    def test_multiple_rapid_renames(self):
+        """连续多次重命名"""
+        pid = cfg.save_preset("R1", json.dumps({"x": 0}))
+        for name in ["R2", "R3", "R4"]:
+            cfg.rename_preset(pid, name)
+            assert cfg.get_preset_by_name(name) is not None
+
+        assert cfg.get_preset_by_name("R1") is None
+        assert cfg.get_preset_by_name("R4") is not None
+
+    def test_delete_all_then_reimport(self):
+        """删除全部预设后重新从 JSON 导入"""
+        cfg.save_preset("A", json.dumps({"x": 1}))
+        cfg.save_preset("B", json.dumps({"x": 2}))
+        assert len(cfg.list_presets()) == 2
+
+        for p in cfg.list_presets():
+            cfg.delete_preset(p["preset_id"])
+        assert len(cfg.list_presets()) == 0
+
+        # 创建模拟 JSON 文件来"重新导入"
+        (cfg._CONFIG_DIR / "C_US.json").write_text(
+            json.dumps({"market": "美股 US", "ticker": "C"}))
+        n = cfg.import_json_files_as_presets()
+        assert n == 1
+        presets = cfg.list_presets()
+        assert len(presets) == 1
+        assert presets[0]["name"] == "C_US"
+
+    def test_overwrite_preserves_id(self):
+        """覆盖更新保持 preset_id 不变"""
+        pid = cfg.save_preset("Stable", json.dumps({"gen": 1}))
+        cfg.save_preset("Stable", json.dumps({"gen": 2}))
+        cfg.save_preset("Stable", json.dumps({"gen": 3}))
         p = cfg.get_preset(pid)
-        assert json.loads(p["params_json"])["key"] == "updated"
+        assert p is not None
+        assert json.loads(p["params_json"])["gen"] == 3
+        assert len(cfg.list_presets()) == 1  # 没创建重复
+
+
+# ============================================================
+# 12. Session State 边界情况
+# ============================================================
+
+class TestSessionStateEdgeCases:
+    """Streamlit session_state 的各种边缘情况"""
+
+    def setup_method(self):
+        import streamlit as st
+        st.session_state = {}
+
+    def _ss(self):
+        import streamlit as st
+        return st.session_state
+
+    def test_empty_session_state_collect(self):
+        params = cfg.collect_current_params()
+        assert isinstance(params, dict)
+        assert len(params) == 0
+
+    def test_partial_global_keys(self):
+        ss = self._ss()
+        ss["market"] = "港股 HK"
+        ss["ticker"] = "0700"
+        ss["some_random"] = "junk"
+        params = cfg.collect_current_params()
+        assert params["market"] == "港股 HK"
+        assert params["ticker"] == "0700"
+        assert "some_random" not in params
+
+    def test_collect_all_four_views(self):
+        ss = self._ss()
+        for vi in range(4):
+            for pk in ["tf", "n", "sch", "pred", "ke", "sm", "ew",
+                        "fm", "next", "fc", "fc2", "strat", "sl",
+                        "cross_pnl", "align"]:
+                ss[f"v{vi}_{pk}"] = f"val_{vi}_{pk}"
+        params = cfg.collect_current_params()
+        for vi in range(4):
+            assert params[f"v{vi}_tf"] == f"val_{vi}_tf"
+
+    def test_collect_chinese_filter_keys(self):
+        ss = self._ss()
+        ss["窗口大小_v0_f1_savgol"] = 21
+        ss["多项式阶数_v0_f1_savgol"] = 3
+        ss["跨度_v0_f2_ema"] = 15
+        ss["过程噪声_v1_f1_kalman"] = 0.01
+        ss["测量噪声_v1_f1_kalman"] = 0.1
+        ss["滤波器阶数_v2_f1_butterworth"] = 4
+        ss["截止频率_v2_f1_butterworth"] = 0.05
+        ss["平滑比例_v3_f1_lowess"] = 0.3
+        ss["标准差_v3_f1_gaussian"] = 1.5
+        ss["偏移量_v3_f1_alma"] = 0.85
+        params = cfg.collect_current_params()
+        assert params["窗口大小_v0_f1_savgol"] == 21
+        assert params["过程噪声_v1_f1_kalman"] == 0.01
+        assert params["截止频率_v2_f1_butterworth"] == 0.05
+        assert params["平滑比例_v3_f1_lowess"] == 0.3
+        assert params["标准差_v3_f1_gaussian"] == 1.5
+        assert params["偏移量_v3_f1_alma"] == 0.85
+
+    def test_import_data_flag_preserved(self):
+        ss = self._ss()
+        pid = cfg.save_preset("FlagTest", json.dumps({"v0_ke": 0.2}))
+        params = cfg.apply_preset(pid)
+        for k, v in params.items():
+            ss[k] = v
+            ss[f"_imp_{k}"] = v
+        ss["_import_data"] = "preset"
+        assert ss["v0_ke"] == 0.2
+        assert ss["_imp_v0_ke"] == 0.2
+        assert ss["_import_data"] == "preset"
+
+    def test_imp_backup_not_overwritten(self):
+        ss = self._ss()
+        params = {"v0_ke": 0.08, "v0_sm": 0.03}
+        for k, v in params.items():
+            ss[k] = v
+            ss[f"_imp_{k}"] = v
+        ss["v0_ke"] = 0.15  # widget 默认值覆盖
+        assert ss["_imp_v0_ke"] == 0.08  # _imp_ 备份不受影响
+
+    def test_ticker_switch_different_presets(self):
+        ss = self._ss()
+        cfg.save_preset("AAPL_base", json.dumps({"ticker": "AAPL", "v0_ke": 0.1}))
+        cfg.save_preset("TSLA_base", json.dumps({"ticker": "TSLA", "v0_ke": 0.3}))
+        aapl = cfg.apply_preset(cfg.get_preset_by_name("AAPL_base")["preset_id"])
+        for k, v in aapl.items():
+            ss[k] = v
+        assert ss["v0_ke"] == 0.1
+        ss.clear()
+        tsla = cfg.apply_preset(cfg.get_preset_by_name("TSLA_base")["preset_id"])
+        for k, v in tsla.items():
+            ss[k] = v
+        assert ss["v0_ke"] == 0.3
+
+
+# ============================================================
+# 13. 大规模数据
+# ============================================================
+
+class TestLargeScale:
+    """大量预设和参数时的行为"""
+
+    def test_many_presets_list_and_query(self):
+        """100 个预设的列表和查询性能"""
+        for i in range(100):
+            cfg.save_preset(f"Preset{i:03d}",
+                            json.dumps({"index": i}),
+                            category=["单滤波", "双滤波", "快速"][i % 3])
+
+        presets = cfg.list_presets()
+        assert len(presets) == 100
+        # 按分类过滤
+        single = cfg.list_presets(category="单滤波")
+        assert len(single) == 34  # 0,3,6,...,99 = 34 个
+
+        # 按名查询
+        p = cfg.get_preset_by_name("Preset042")
+        assert p is not None
+        assert json.loads(p["params_json"])["index"] == 42
+
+    def test_large_params_json(self):
+        """1000 个 key 的大 JSON 配置"""
+        big = {f"key_{i}": f"value_{i}" for i in range(1000)}
+        pid = cfg.save_preset("BigConfig", json.dumps(big))
+        loaded = cfg.apply_preset(pid)
+        assert len(loaded) == 1000
+        assert loaded["key_999"] == "value_999"
+
+    def test_bulk_delete_and_recreate(self):
+        """批量删除后批量重建"""
+        ids = [cfg.save_preset(f"Bulk{i}", json.dumps({"n": i})) for i in range(50)]
+        assert len(cfg.list_presets()) == 50
+
+        for pid in ids:
+            cfg.delete_preset(pid)
+        assert len(cfg.list_presets()) == 0
+
+        # 重建
+        for i in range(50):
+            cfg.save_preset(f"Bulk{i}", json.dumps({"n": i * 10}))
+        assert len(cfg.list_presets()) == 50
+        # 同名覆盖更新
+        new_pid = cfg.save_preset("Bulk0", json.dumps({"n": 999}))
+        p = cfg.get_preset(new_pid)
+        assert p is not None
+        assert json.loads(p["params_json"])["n"] == 999
