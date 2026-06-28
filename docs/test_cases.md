@@ -1,6 +1,6 @@
 # 多周期股票滤波分析工具 — 测试用例文档
 
-> 自动生成于 2026-06-28 | 测试总数: 600（pytest 收集，不含 test_streamlit_app.py 的 25 个 mock 测试） | Python 3.12 + pytest
+> 自动生成于 2026-06-28 | 测试总数: 603（pytest 收集，不含 test_streamlit_app.py 的 25 个 mock 测试） | Python 3.12 + pytest
 
 ## 文档说明
 
@@ -1016,7 +1016,7 @@
 
 ## 4. 可视化测试
 
-### 4.1 图表渲染 (`test_charts.py`) — 87 用例
+### 4.1 图表渲染 (`test_charts.py`) — 90 用例
 
 #### 入场标记渲染 (`TestRenderEntryMarker`)
 
@@ -1116,6 +1116,9 @@
 | TC-CHART-057 | CDN 回退 URL | Plotly figure | render_plotly_html | HTML 包含备用 CDN |
 | TC-CHART-058 | HTML 含日期提示 div | Plotly figure | render_plotly_html | HTML 包含 date_tip div |
 | TC-CHART-059 | HTML 含 crosshair 逻辑 | Plotly figure | render_plotly_html | HTML 包含 crosshair JS |
+| TC-CHART-088 | fallback HTML 结构验证 | Plotly figure | render_plotly_html | HTML 包含 plotly-fallback div + IIFE 结构 (H4) |
+| TC-CHART-089 | setTimeout 超时安全检查 | Plotly figure | render_plotly_html | 输出包含 5秒 setTimeout 安全检查 (H5) |
+| TC-CHART-090 | IIFE 包裹正确性验证 | Plotly figure | render_plotly_html | `(function() {` 和 `})();` 配对，return 在函数内 (H4修复回归) |
 
 #### 跨 P&L 子图 (`TestCrossPnlSubplot`)
 
@@ -1520,7 +1523,7 @@ pytest tests/ --cov=. --cov-report=html
 | | test_preset_ui_actions.py | 7 | 45 |
 | | test_app_ui.py | 8 | 33 |
 | | test_streamlit_app.py | 5 | 25 |
-| 可视化 | test_charts.py | 14 | 87 |
+| 可视化 | test_charts.py | 14 | 90 |
 | | test_alignment.py | 1 | 6 |
 | | test_alignment_subplot.py | 2 | 14 |
 | 集成测试 | test_integration.py | 0 | 6 |
@@ -1529,4 +1532,4 @@ pytest tests/ --cov=. --cov-report=html
 | 边界与参数 | test_boundary.py | 11 | 30 |
 | | test_param_export_import.py | 5 | 13 |
 | 数据加载 | test_data_loader.py | 5 | 30 |
-| **合计** | **20 文件** | **139** | **600** |
+| **合计** | **20 文件** | **139** | **603** |
