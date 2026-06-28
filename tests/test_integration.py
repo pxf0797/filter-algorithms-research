@@ -26,8 +26,8 @@ _src = Path(__file__).resolve().parent.parent / "streamlit"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
-import streamlit_app  # noqa: E402
-from streamlit_app import (
+# Phase 2 modularization: functions moved to services.filter_engine
+from services.filter_engine import (
     FILTERS,
     compute_metrics,
     _schmitt_trigger,
@@ -238,7 +238,7 @@ def test_schmitt_trigger_pipeline():
     t = x
 
     # ── Savgol 滤波 ──
-    from streamlit_app import apply_savgol
+    from services.filter_engine import apply_savgol
     filtered = apply_savgol(noisy, t, window=21, order=2)
 
     # ── 计算 v, a ──

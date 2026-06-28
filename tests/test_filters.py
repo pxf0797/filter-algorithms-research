@@ -4,24 +4,19 @@ Tests for all 10 filter functions and compute_metrics.
 Fixtures are shared from tests/conftest.py.
 """
 
-import sys
-from unittest.mock import patch
-
 import numpy as np
 import pytest
 
 # ---------------------------------------------------------------------------
 # Import module under test
 # ---------------------------------------------------------------------------
-sys.path.insert(0, "streamlit")
-# Silence streamlit warnings during import
-with patch("streamlit.warning"):
-    from streamlit_app import (
-        apply_sma, apply_ema, apply_wma, apply_alma,
-        apply_savgol, apply_kalman, apply_butterworth,
-        apply_gaussian, apply_median, apply_lowess,
-        compute_metrics, FILTERS,
-    )
+# Filter functions moved to services/filter_engine in Phase 2 modularization
+from services.filter_engine import (
+    apply_sma, apply_ema, apply_wma, apply_alma,
+    apply_savgol, apply_kalman, apply_butterworth,
+    apply_gaussian, apply_median, apply_lowess,
+    compute_metrics, FILTERS,
+)
 
 pytestmark = pytest.mark.filter
 

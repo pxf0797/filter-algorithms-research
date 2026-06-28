@@ -4,7 +4,7 @@ Tests for Schmitt trigger (_schmitt_trigger) and pair finding (_find_all_pairs).
 
 import numpy as np
 import pytest
-from streamlit_app import _schmitt_trigger, _find_all_pairs
+from services.filter_engine import _schmitt_trigger, _find_all_pairs
 
 
 # ============================================================================

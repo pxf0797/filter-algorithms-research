@@ -6,7 +6,8 @@ import pytest
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from streamlit_app import _compute_holding_masks, _add_alignment_subplot
+from services.filter_engine import _compute_holding_masks
+from components.charts import _add_alignment_subplot
 
 
 # =========================================================================
