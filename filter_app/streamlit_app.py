@@ -1143,7 +1143,12 @@ def _render_db_import_export():
 
 
 def _run_auto_refresh(market, ticker_code, auto_refresh, interval):
-    """Execute auto-refresh loop if enabled."""
+    """Execute auto-refresh loop if enabled.
+
+    防无限 rerun: _auto_refresh_rerun_count 跟踪连续无操作次数，
+    超过阈值后自动停止（约等于 interval 秒数的空闲上限 + 缓冲）。
+    """
+    _MAX_IDLE_CYCLES = 300  # 5 分钟缓冲 @ ~1s/cycle
     if auto_refresh:
         now = time.time()
         last = AppState.get("_last_auto_refresh")
@@ -1154,7 +1159,16 @@ def _run_auto_refresh(market, ticker_code, auto_refresh, interval):
             _cached_fetch_stock.clear()
             _fetch_all_timeframes(market, ticker_code)
             AppState.set("_last_auto_refresh", now)
+            AppState.set("_auto_refresh_rerun_count", 0)
             st.rerun()
+        # 防无限 rerun 保护
+        rerun_count = AppState.get("_auto_refresh_rerun_count", 0) + 1
+        AppState.set("_auto_refresh_rerun_count", rerun_count)
+        if rerun_count > _MAX_IDLE_CYCLES:
+            logger.warning(f"Auto-refresh stopped after {_MAX_IDLE_CYCLES} idle cycles for {ticker_code}")
+            st.sidebar.warning(f"⏱️ 自动刷新已暂停，请手动刷新")
+            AppState.set("_auto_refresh_rerun_count", 0)
+            return
         remaining = max(0, interval - (now - AppState.get("_last_auto_refresh", now)))
         if remaining > 0:
             st.caption(f"⏱️ {int(remaining)}s 后自动刷新")

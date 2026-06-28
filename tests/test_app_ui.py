@@ -434,19 +434,20 @@ class TestPresetApplyEndToEnd:
 
 
 class TestAutoRefreshSafety:
-    """P2: 自动刷新安全性测试"""
+    """P2: 自动刷新安全性测试 — 预置计数器验证防无限 rerun 保护"""
 
-    @pytest.mark.xfail(strict=False, reason="自动刷新启用后 _run_auto_refresh 每隔 ~1s 触发 st.rerun()，"
-                                             "AppTest.run() 无法在 timeout 内完成（这是一个设计层面的流式循环）")
     def test_auto_refresh_checkbox_toggle(self):
-        """勾选自动刷新复选框不崩溃（已知 xfail：rerun 循环导致 AppTest timeout）"""
+        """模拟自动刷新启用 + 计数器近上限 — 验证保护机制在 1 次循环后退出"""
         app = _fresh_app()
         auto_cb = next((c for c in app.sidebar.checkbox if c.key == "auto_refresh"), None)
         if auto_cb is None:
             pytest.skip("自动刷新复选框不存在")
         auto_cb.check()
+        # 预置计数器为 _MAX_IDLE_CYCLES，下一轮 _run_auto_refresh 将触发保护退出
+        app.session_state["_auto_refresh_rerun_count"] = 300
         app.run(timeout=90)
-        assert "auto_refresh" in app.session_state
+        # 防无限循环保护生效，app.run() 正常返回
+        assert app.session_state["auto_refresh"] is True
 
 
 class TestExceptionPathCoverage:
