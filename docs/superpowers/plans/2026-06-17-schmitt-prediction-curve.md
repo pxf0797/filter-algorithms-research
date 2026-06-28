@@ -4,7 +4,7 @@
 
 **Goal:** 在价格子图上叠加基于施密特触发状态的二次多项式预测曲线（实线拟合段 + 虚线延伸段）
 
-**Architecture:** 新增 3 个纯函数（区间扫描、多项式拟合、trace 构建）+ 1 个 UI checkbox + `_render_chart` 内一小段集成代码。全部改动集中在 `streamlit_app.py` 单文件，约 100 行新增。
+**Architecture:** 新增 3 个纯函数（区间扫描、多项式拟合、trace 构建）+ 1 个 UI checkbox + `_render_chart` 内一小段集成代码。全部改动集中在 `filter_app/streamlit_app.py` 单文件（当时为单文件架构），约 100 行新增。
 
 **Tech Stack:** Python 3, NumPy, Plotly
 

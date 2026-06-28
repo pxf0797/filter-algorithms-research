@@ -19,7 +19,7 @@ Yahoo Finance 的日线 API 和周线 API 是**两个独立的数据端点，结
 
 ### 解决方案
 
-在 `_fetch_stock` 中增加了**日线 Close 周线回退机制**（`streamlit_app.py` L514-530）：
+在 `_fetch_stock` 中增加了**日线 Close 周线回退机制**（`filter_app/streamlit_app.py` L514-530，模块化后移入 `data_loader.py`，行为相同）：
 
 ```
 获取日线数据

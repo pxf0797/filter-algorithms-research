@@ -66,7 +66,7 @@ y_extend = np.polyval((a, b, c), x_extend)
 
 ### 新增函数（3个纯函数 + 1个渲染函数，~110行）
 
-位置: `streamlit_app.py`，`_schmitt_trigger()` 之后
+位置: `filter_app/streamlit_app.py`，`_schmitt_trigger()` 之后（模块化后移入 `filter_engine.py`）
 
 ```
 _find_last_complete_pair(sig_t)         → (start, end) 或 None

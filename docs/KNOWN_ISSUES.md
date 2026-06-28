@@ -2,10 +2,10 @@
 
 ## 测试覆盖限制
 
-### streamlit_app.py (0% 单元覆盖)
-- **原因**: 869行 UI 代码，依赖 Streamlit 运行时
-- **现状**: 通过 AppTest 覆盖冒烟测试 (6 tests)
-- **计划**: 逐步增加 AppTest 交互测试
+### filter_app/streamlit_app.py (0% 单元覆盖)
+- **原因**: ~350行 UI 入口代码，依赖 Streamlit 运行时
+- **现状**: 核心逻辑已拆分至 components/ + services/，各有较高覆盖
+- **AppTest**: 冒烟测试 (6 tests) 已就绪
 
 ### sidebar.py (7% 单元覆盖)
 - **原因**: 97% 代码为 Streamlit widget 调用
@@ -19,7 +19,7 @@
 ## 预存 Bug
 
 ### pandas Series truthiness (已修复)
-- **位置**: streamlit_app.py _load_chart_data, _render_chart
+- **位置**: filter_app/streamlit_app.py _load_chart_data, _render_chart
 - **问题**: `if err:` 对 pandas Series 抛 ValueError
 - **修复**: 改为 `if err is not None:`
 

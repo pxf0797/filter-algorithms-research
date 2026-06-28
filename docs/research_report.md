@@ -207,7 +207,7 @@ $$\sigma_t(v) = \sqrt{\text{EWMA}(v_t^2, \alpha)}$$
 这是施密特触发器在实盘中最关键的技术陷阱。当前实现使用NumPy的中心差分计算梯度：
 
 ```python
-_v = np.gradient(filtered, t)   # streamlit_app.py:1558
+_v = np.gradient(filtered, t)   # filter_app/services/filter_engine.py（原 streamlit_app.py:1558，模块化后已迁移）
 _a = np.gradient(_v, t)
 ```
 
@@ -430,7 +430,7 @@ $$\text{gradient}[i] = \frac{x_{i+1} - x_{i-1}}{2}$$
 
 ### 8.2 信号重绘修复方案
 
-**问题根因**：`streamlit_app.py`第1558行的`np.gradient`使用中心差分，梯度值依赖前后各1个点数据。在bar未关闭时计算梯度，下一个bar的数据到来会改变当前bar的梯度值，进而改变Schmitt Trigger信号。
+**问题根因**：`filter_app/streamlit_app.py`（原单文件版本第1558行，模块化后对应 `filter_engine.py`）的`np.gradient`使用中心差分，梯度值依赖前后各1个点数据。在bar未关闭时计算梯度，下一个bar的数据到来会改变当前bar的梯度值，进而改变Schmitt Trigger信号。
 
 **方案A——保守方案（推荐MVP阶段）**：将序列整体shift(1)，使当前bar的梯度仅基于已确定的历史数据计算。最后一个bar的梯度值为NaN（因为无后续数据），策略对该bar不产生信号。
 
@@ -1232,7 +1232,7 @@ class BrokerFailover:
 **Step 1: 准备环境（1-2天）**
 - [ ] 安装依赖：`pip install numpy pandas streamlit plotly scipy statsmodels`
 - [ ] 确认SQLite数据库路径：`data/market.db`
-- [ ] 测试数据拉取：在`streamlit_app.py`中拉取3690.HK数据
+- [ ] 测试数据拉取：在`filter_app/streamlit_app.py`中拉取3690.HK数据
 - [ ] 确认yfinance可用（或被替代的港股数据源）
 
 **Step 2: 审计与修复（2-3天）**

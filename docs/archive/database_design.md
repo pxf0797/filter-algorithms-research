@@ -491,7 +491,7 @@ def list_tickers() -> list:
 
 ### 3.2 `_fetch_stock` 新流程
 
-**当前流程**（`streamlit_app.py` 行 436-510）：
+**当前流程**（`filter_app/streamlit_app.py` 行 436-510，原单文件版本）：
 
 ```
 yfinance.download() → 保存 parquet → 返回最后 n_pts 条
@@ -544,7 +544,7 @@ return np.arange(n, dtype=float), close, df, full, None, dates
 
 ### 3.3 `_sync_to_display` 新流程
 
-**当前流程**（`streamlit_app.py` 行 513-548）：
+**当前流程**（`filter_app/streamlit_app.py` 行 513-548，原单文件版本）：
 
 ```
 读取 archive parquet → 按 day_offset 计算窗口 → 写 display parquet
@@ -586,7 +586,7 @@ def _sync_to_display(code, tf, day_offset, n_pts):
 
 ### 3.4 日期范围查询改造
 
-**当前**（`streamlit_app.py` 行 970-980）：
+**当前**（`filter_app/streamlit_app.py` 行 970-980，原单文件版本）：
 
 ```python
 archive_path = Path(...) / code / "日线.parquet"
@@ -752,7 +752,7 @@ if __name__ == "__main__":
 | 3 | Dry-run 预览 | `python tools/migrate_parquet_to_db.py --dry-run` | 打印各 ticker 行数汇总 |
 | 4 | 执行迁移 | `python tools/migrate_parquet_to_db.py` | 数据入库，`data/market_data.db` 生成 |
 | 5 | 验证数据量 | `python -c "import db; print(db.list_tickers(), db.has_data('AAPL','日线'))"` | True |
-| 6 | 修改 `streamlit_app.py` | 改造 `_fetch_stock`, `_sync_to_display`, `main` 中的日期查询 | 改动清单见 3.5 |
+| 6 | 修改 `filter_app/streamlit_app.py` | 改造 `_fetch_stock`, `_sync_to_display`, `main` 中的日期查询 | 改动清单见 3.5 |
 | 7 | 启动 Streamlit 验证 | `streamlit run filter_app/streamlit_app.py` | 图表正常渲染，数据正确 |
 | 8 | 数据翻页验证 | 点击"前移/后移"按钮 | 各周期独立对齐，数据连贯 |
 | 9 | （可选）归档旧 parquet | `mkdir data/_archive && mv data/AAPL data/_archive/` | 保留备份，不删除 |
@@ -767,7 +767,7 @@ if __name__ == "__main__":
 
 **任务**：
 1. 创建 `filter_app/db.py`（约 90 行）
-2. 修改 `streamlit_app.py`:
+2. 修改 `filter_app/streamlit_app.py`:
    - 顶部新增 `import db`
    - `_fetch_stock`: yfinance 下载后 `db.upsert_kline()` 替换 parquet 保存；返回时 `db.query_kline()` 替换 parquet 读取
    - `_sync_to_display`: `db.query_kline(limit=n_pts, offset_days=day_offset)` 替换 archive parquet 读取

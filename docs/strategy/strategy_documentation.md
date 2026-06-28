@@ -28,8 +28,16 @@ filter_research/
 ├── config/
 │   └── 3690_HK.json          # 策略配置文件（71键）
 ├── filter_app/
-│   ├── streamlit_app.py       # 主程序（~2105行）
-│   └── db.py                  # SQLite 数据层（130行）
+│   ├── components/
+│   │   ├── charts.py         # 图表渲染组件
+│   │   └── sidebar.py        # 侧边栏 UI 组件
+│   ├── services/
+│   │   ├── data_loader.py    # 数据加载服务
+│   │   └── filter_engine.py  # 滤波引擎（10 种算法）
+│   ├── config_db.py          # 配置数据库
+│   ├── db.py                 # SQLite 数据层（130行）
+│   ├── state.py              # AppState 状态管理
+│   └── streamlit_app.py      # 主程序（入口，~350行）
 ├── data/
 │   ├── market.db              # SQLite 数据库（运行时生成）
 │   └── display/               # Parquet 缓存（运行时生成）
@@ -310,15 +318,15 @@ sch (Schmitt Trigger)
 
 | # | 约束 | 影响 | 位置 |
 |---|------|------|------|
-| 1 | **TF_HIERARCHY 硬编码** | 8 个时间框架的层级顺序 `['1分钟','5分钟','15分钟','60分钟','日线','周线','月线','季线']` 不可通过配置修改；添加新周期需改动代码 | `streamlit_app.py` |
-| 2 | **day_offset 全局共享** | 4 个视图共享同一个时间窗口偏移量；无法让 v0 看历史、v1 看当前 | `streamlit_app.py` |
-| 3 | **PnL 缓存依赖渲染顺序** | 跨周期 PnL 数据依赖高周期视图**先于**本周期渲染；若高周期视图渲染失败（如数据缺失），本周期跨周期子图为空白 | `streamlit_app.py` |
-| 4 | **全局滤波器类型共用** | `global_f` / `global_f2` 决定 4 个视图的滤波算法类型；无法 v0 用 Savgol、v1 用 Kalman | `streamlit_app.py` |
-| 5 | **数据点数统一** | 4 个视图的 `n`（回看数据点）从配置独立读取，但 `_sync_to_display()` 的日期范围由全局 `day_offset` + `n` 的最大值决定 | `streamlit_app.py` |
-| 6 | **_imp 备份键硬性要求** | JSON 中缺少 `_imp` 备份键会导致"重置"按钮无效果（无法恢复到导入值） | `streamlit_app.py` |
-| 7 | **颜色值格式** | `fc`/`fc2` 必须为合法 CSS 颜色字符串（如 `#00d4aa`），非法值导致 Plotly 渲染异常（无校验） | `streamlit_app.py` |
-| 8 | **n_extend 影响 PnL 计算** | 预测延伸数 = 保护期长度；n_extend 越大，止损保护期越长，但也引入更多 look-ahead | `streamlit_app.py` |
-| 9 | **同一 ticker 跨视图必需** | 4 个视图**必须**使用同一 ticker；切换标的会清空所有视图的 PnL 缓存 | `streamlit_app.py` |
+| 1 | **TF_HIERARCHY 硬编码** | 8 个时间框架的层级顺序 `['1分钟','5分钟','15分钟','60分钟','日线','周线','月线','季线']` 不可通过配置修改；添加新周期需改动代码 | `filter_app/streamlit_app.py` |
+| 2 | **day_offset 全局共享** | 4 个视图共享同一个时间窗口偏移量；无法让 v0 看历史、v1 看当前 | `filter_app/streamlit_app.py` |
+| 3 | **PnL 缓存依赖渲染顺序** | 跨周期 PnL 数据依赖高周期视图**先于**本周期渲染；若高周期视图渲染失败（如数据缺失），本周期跨周期子图为空白 | `filter_app/streamlit_app.py` |
+| 4 | **全局滤波器类型共用** | `global_f` / `global_f2` 决定 4 个视图的滤波算法类型；无法 v0 用 Savgol、v1 用 Kalman | `filter_app/streamlit_app.py` |
+| 5 | **数据点数统一** | 4 个视图的 `n`（回看数据点）从配置独立读取，但 `_sync_to_display()` 的日期范围由全局 `day_offset` + `n` 的最大值决定 | `filter_app/streamlit_app.py` |
+| 6 | **_imp 备份键硬性要求** | JSON 中缺少 `_imp` 备份键会导致"重置"按钮无效果（无法恢复到导入值） | `filter_app/streamlit_app.py` |
+| 7 | **颜色值格式** | `fc`/`fc2` 必须为合法 CSS 颜色字符串（如 `#00d4aa`），非法值导致 Plotly 渲染异常（无校验） | `filter_app/streamlit_app.py` |
+| 8 | **n_extend 影响 PnL 计算** | 预测延伸数 = 保护期长度；n_extend 越大，止损保护期越长，但也引入更多 look-ahead | `filter_app/streamlit_app.py` |
+| 9 | **同一 ticker 跨视图必需** | 4 个视图**必须**使用同一 ticker；切换标的会清空所有视图的 PnL 缓存 | `filter_app/streamlit_app.py` |
 | 10 | **Streamlit 会话隔离** | 每个浏览器标签页有独立 `session_state`，配置和参数不跨标签页共享 | Streamlit 框架 |
 
 **高风险约束**（违反后系统行为未定义）：
