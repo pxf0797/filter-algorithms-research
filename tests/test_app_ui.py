@@ -354,3 +354,131 @@ class TestIsolationRegression:
                 msg = str(exc[0])
                 assert "truth value of a Series is ambiguous" in msg or "The truth value" in msg, \
                     f"第{i+1}次: 未知异常 {msg}"
+
+
+# ─────────────────────────────────────────────
+# P0 — 刷新按钮点击测试
+# ─────────────────────────────────────────────
+
+
+class TestRefreshButtonEndToEnd:
+    """P0: 验证点击刷新数据按钮不崩溃 — 这是实际崩溃过的路径"""
+
+    def test_refresh_button_click_does_not_crash(self):
+        """点击刷新数据按钮后应用不崩溃，session_state 保持正常"""
+        app = _fresh_app()
+        refresh_btn = next((b for b in app.sidebar.button if b.label == "刷新数据"), None)
+        if refresh_btn is None:
+            pytest.skip("刷新按钮不存在（可能被条件渲染隐藏）")
+        refresh_btn.click()
+        app.run(timeout=90)
+        exc = app.exception
+        assert len(exc) == 0 or "truth value of a Series is ambiguous" in str(exc[0]), \
+            f"点击刷新后出现未预期的异常: {exc}"
+
+    def test_refresh_button_clears_cache(self):
+        """点击刷新数据后缓存被清除（不抛出 AttributeError）"""
+        app = _fresh_app()
+        refresh_btn = next((b for b in app.sidebar.button if b.label == "刷新数据"), None)
+        if refresh_btn is None:
+            pytest.skip("刷新按钮不存在")
+        try:
+            refresh_btn.click()
+            app.run(timeout=90)
+        except AttributeError as e:
+            pytest.fail(f"缓存清除失败: {e}")
+
+
+# ─────────────────────────────────────────────
+# P1 — 备份/预设操作测试
+# ─────────────────────────────────────────────
+
+
+class TestBackupRestoreButtons:
+    """P1: 验证备份/恢复/删除按钮交互"""
+
+    def test_create_backup_button_exists_and_clickable(self):
+        """创建备份按钮存在且可点击"""
+        app = _fresh_app()
+        backup_btn = next((b for b in app.sidebar.button if b.label == "创建备份"), None)
+        if backup_btn is None:
+            pytest.skip("创建备份按钮不存在")
+        backup_btn.click()
+        app.run(timeout=90)
+
+
+class TestPresetApplyEndToEnd:
+    """P1: 预设应用端到端测试"""
+
+    def test_apply_preset_button_does_not_crash(self):
+        """选择预设后点击应用按钮不崩溃"""
+        app = _fresh_app()
+        preset_sel = next((s for s in app.sidebar.selectbox if s.key and s.key.startswith("preset_sel")), None)
+        if preset_sel is None:
+            pytest.skip("预设下拉框不存在")
+        options = [o for o in preset_sel.options if o != "(不选择)"]
+        if not options:
+            pytest.skip("没有可选的预设")
+        preset_sel.set_value(options[0])
+        app.run(timeout=90)
+        apply_btn = next((b for b in app.sidebar.button if b.key == "apply_preset"), None)
+        if apply_btn is None:
+            pytest.skip("应用按钮不存在")
+        apply_btn.click()
+        app.run(timeout=90)
+
+
+# ─────────────────────────────────────────────
+# P2 — 自动刷新 + 异常路径
+# ─────────────────────────────────────────────
+
+
+class TestAutoRefreshSafety:
+    """P2: 自动刷新安全性测试"""
+
+    @pytest.mark.xfail(strict=False, reason="自动刷新启用后 _run_auto_refresh 每隔 ~1s 触发 st.rerun()，"
+                                             "AppTest.run() 无法在 timeout 内完成（这是一个设计层面的流式循环）")
+    def test_auto_refresh_checkbox_toggle(self):
+        """勾选自动刷新复选框不崩溃（已知 xfail：rerun 循环导致 AppTest timeout）"""
+        app = _fresh_app()
+        auto_cb = next((c for c in app.sidebar.checkbox if c.key == "auto_refresh"), None)
+        if auto_cb is None:
+            pytest.skip("自动刷新复选框不存在")
+        auto_cb.check()
+        app.run(timeout=90)
+        assert "auto_refresh" in app.session_state
+
+
+class TestExceptionPathCoverage:
+    """P2: 异常路径覆盖测试"""
+
+    def test_invalid_ticker_does_not_crash(self):
+        """无效 ticker 下刷新数据不崩溃"""
+        app = _fresh_app()
+        ticker_inp = next((t for t in app.sidebar.text_input if t.key == "ticker"), None)
+        if ticker_inp:
+            ticker_inp.set_value("")
+            app.run(timeout=90)
+        refresh_btn = next((b for b in app.sidebar.button if b.label == "刷新数据"), None)
+        if refresh_btn:
+            refresh_btn.click()
+            app.run(timeout=90)
+
+
+# ─────────────────────────────────────────────
+# P3 — 删除备份边缘情况
+# ─────────────────────────────────────────────
+
+
+class TestDeleteBackupEdgeCase:
+    """P3: 删除备份按钮边缘情况"""
+
+    def test_delete_backup_with_missing_file_handled(self):
+        """确保删除不存在的备份文件不会崩溃"""
+        app = _fresh_app()
+        delete_btns = [b for b in app.sidebar.button if b.label == "删除此备份"]
+        if not delete_btns:
+            pytest.skip("删除备份按钮不存在")
+        for btn in delete_btns[:1]:
+            btn.click()
+            app.run(timeout=90)

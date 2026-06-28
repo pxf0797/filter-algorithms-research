@@ -1,6 +1,6 @@
 # 多周期股票滤波分析工具 — 测试用例文档
 
-> 自动生成于 2026-06-28 | 测试总数: 589 | Python 3.12 + pytest
+> 自动生成于 2026-06-28 | 测试总数: 596 | Python 3.12 + pytest
 
 ## 文档说明
 
@@ -831,7 +831,7 @@
 
 ---
 
-### 3.4 应用 UI (`test_app_ui.py`) — 26 用例
+### 3.4 应用 UI (`test_app_ui.py`) — 33 用例
 
 #### 冒烟测试 (`TestAppSmoke`)
 
@@ -898,6 +898,33 @@
 | TC-APPUI-024 | 多次新鲜 app 一致性 | 无 | 多次创建新 app | 每次行为一致 |
 | TC-APPUI-025 | 新鲜 app 日期按钮稳定 | 新 app | 检查 day nav 按钮 | 按钮始终可交互 |
 | TC-APPUI-026 | 新鲜 app 无意外异常 | 新 app | 完整渲染 | 无未预期异常 |
+
+#### P0 刷新按钮点击 (`TestRefreshButtonEndToEnd`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-APPUI-027 | 点击刷新数据按钮后应用不崩溃 | _fresh_app | 点击"刷新数据"按钮后 run() | 无意外异常或仅有 Series truth value 已知异常 |
+| TC-APPUI-028 | 点击刷新后缓存被清除 | _fresh_app | 点击"刷新数据"按钮后 run() | 不抛出 AttributeError |
+
+#### P1 备份/预设操作 (`TestBackupRestoreButtons`, `TestPresetApplyEndToEnd`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-APPUI-029 | 创建备份按钮存在且可点击 | _fresh_app | 点击"创建备份"按钮后 run() | 不崩溃 |
+| TC-APPUI-030 | 选择预设后点击应用按钮不崩溃 | _fresh_app，存在预设 | 选择预设，点击应用按钮后 run() | 不崩溃 |
+
+#### P2 自动刷新 + 异常路径 (`TestAutoRefreshSafety`, `TestExceptionPathCoverage`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-APPUI-031 | 勾选自动刷新复选框不崩溃 (xfail) | _fresh_app | 勾选 auto_refresh 后 run() | auto_refresh 在 session_state 中 (xfail: rerun 循环导致 AppTest timeout) |
+| TC-APPUI-032 | 无效 ticker 下刷新不崩溃 | _fresh_app | 清空 ticker，点击刷新按钮后 run() | 不崩溃 |
+
+#### P3 删除备份边缘情况 (`TestDeleteBackupEdgeCase`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-APPUI-033 | 删除不存在的备份文件不崩溃 | _fresh_app | 点击"删除此备份"按钮后 run() | 不崩溃 |
 
 ---
 
@@ -1433,7 +1460,7 @@ pytest tests/ --cov=. --cov-report=html
 | UI 组件 | test_sidebar.py | 5 | 19 |
 | | test_preset_ui.py | 14 | 60 |
 | | test_preset_ui_actions.py | 7 | 45 |
-| | test_app_ui.py | 8 | 26 |
+| | test_app_ui.py | 8 | 33 |
 | | test_streamlit_app.py | 5 | 25 |
 | 可视化 | test_charts.py | 11 | 75 |
 | | test_alignment.py | 1 | 6 |
@@ -1444,4 +1471,4 @@ pytest tests/ --cov=. --cov-report=html
 | 边界与参数 | test_boundary.py | 11 | 30 |
 | | test_param_export_import.py | 5 | 13 |
 | 数据加载 | test_data_loader.py | 5 | 30 |
-| **合计** | **20 文件** | **133** | **589** |
+| **合计** | **20 文件** | **133** | **596** |
