@@ -186,6 +186,13 @@ var figure = {figure_json};
             }}
         }});
     }});
+    // Safety check: if Plotly still not loaded after 5s, show fallback
+    setTimeout(function() {{
+        if (typeof Plotly === 'undefined') {{
+            _fallbackEl.style.display = 'block';
+            document.getElementById('{div_id}').style.display = 'none';
+        }}
+    }}, 5000);
 }})();
 </script>
 </body>
