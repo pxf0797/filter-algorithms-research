@@ -1,5 +1,7 @@
 # 滤波算法交互式对比分析工具 — 操作指南
 
+[![CI](https://github.com/pxf0797/filter-algorithms-research/actions/workflows/ci.yml/badge.svg)](https://github.com/pxf0797/filter-algorithms-research/actions/workflows/ci.yml)
+
 ## 1. 快速启动
 
 ### 方式一：Streamlit（推荐）
