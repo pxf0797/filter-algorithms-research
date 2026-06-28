@@ -90,9 +90,21 @@ g.hovertext {{ visibility: hidden !important; }}
 <body>
 <div id="{div_id}"></div>
 <div id="date-tip-{div_id}"></div>
+<div id="plotly-fallback-{div_id}" style="display:none;padding:2rem;text-align:center;color:#888">
+  <p>Plotly.js 加载失败</p>
+  <p>请检查网络连接或联系管理员</p>
+</div>
 <script>
-(function() {{
-    var figure = {figure_json};
+var _fallbackEl = document.getElementById('plotly-fallback-{div_id}');
+if (typeof Plotly === 'undefined') {{
+    _fallbackEl.style.display = 'block';
+    document.getElementById('{div_id}').style.display = 'none';
+    return;
+}} else if (window._plotlyCdnFailed) {{
+    // 从CDNJS fallback成功加载，清除标记
+    delete window._plotlyCdnFailed;
+}}
+var figure = {figure_json};
     var config = {{
         responsive: true,
         displayModeBar: true,
