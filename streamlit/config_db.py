@@ -5,13 +5,11 @@ streamlit/config_db.py — 配置管理数据层 (独立 SQLite)
 """
 
 import json
-import logging
 import sqlite3
+from loguru import logger
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-
-logger = logging.getLogger(__name__)
 
 _CONFIG_DB_PATH = Path(__file__).parent.parent / "data" / "config.db"
 _CONFIG_DIR = Path(__file__).parent.parent / "config"
@@ -82,6 +80,7 @@ CREATE INDEX IF NOT EXISTS idx_history_lookup
 
 def init_config_tables():
     """确保配置表存在并迁移旧 schema。在 db.init_db() 之后调用。"""
+    logger.info("Config DB initialized at {}", _CONFIG_DB_PATH)
     with _get_conn() as conn:
         conn.executescript(_SCHEMA)
         conn.executescript(_HISTORY_SCHEMA)
@@ -122,6 +121,7 @@ def init_config_tables():
 # ═══════════════════════════════════════════════════════════
 
 def list_presets(category: Optional[str] = None) -> List[Dict[str, Any]]:
+    logger.debug("Listing presets (category={})", category)
     with _get_conn() as conn:
         if category:
             rows = conn.execute(
@@ -135,6 +135,7 @@ def list_presets(category: Optional[str] = None) -> List[Dict[str, Any]]:
 
 
 def get_preset(preset_id: int) -> Optional[Dict[str, Any]]:
+    logger.debug("Getting preset by id={}", preset_id)
     with _get_conn() as conn:
         row = conn.execute(
             "SELECT * FROM config_presets WHERE preset_id=?", (preset_id,)
@@ -143,6 +144,7 @@ def get_preset(preset_id: int) -> Optional[Dict[str, Any]]:
 
 
 def get_preset_by_name(name: str) -> Optional[Dict[str, Any]]:
+    logger.debug("Getting preset by name={}", name)
     with _get_conn() as conn:
         row = conn.execute(
             "SELECT * FROM config_presets WHERE name=?", (name,)
@@ -175,12 +177,15 @@ def save_preset(name: str, params_json: str,
                RETURNING preset_id""",
             (name.strip(), description, category, params_json)
         ).fetchone()
-        return row[0]
+        preset_id = row[0]
+        logger.debug("Saved preset id={}, name={}, category={}", preset_id, name, category)
+        return preset_id
 
 
 def delete_preset(preset_id: int) -> bool:
     """删除预设。返回 True 表示成功删除了记录，False 表示记录不存在。
     同时删除对应的 JSON 配置文件（如果存在），防止下次启动时被重新导入。"""
+    logger.debug("Deleting preset id={}", preset_id)
     with _get_conn() as conn:
         # 先获取名称，以便同步删除 JSON 文件
         row = conn.execute(
@@ -195,7 +200,7 @@ def delete_preset(preset_id: int) -> bool:
             json_path = _CONFIG_DIR / f"{row['name']}.json"
             if json_path.exists():
                 json_path.unlink()
-                logger.info("delete_preset: 已同步删除 JSON 文件 %s", json_path)
+                logger.info("delete_preset: 已同步删除 JSON 文件 {}", json_path)
             return True
         return False
 
@@ -205,7 +210,7 @@ def rename_preset(preset_id: int, new_name: str) -> Optional[str]:
     调用者应区分：冲突返回 None（名称已被占用），不存在也返回 None（追加日志判断）。"""
     # P1-6: 空名称校验
     if not new_name or not new_name.strip():
-        logger.warning("rename_preset: 拒绝空名称 (preset_id=%s)", preset_id)
+        logger.warning("rename_preset: 拒绝空名称 (preset_id={})", preset_id)
         return None
 
     new_name = new_name.strip()
@@ -216,14 +221,14 @@ def rename_preset(preset_id: int, new_name: str) -> Optional[str]:
             (new_name, preset_id)
         ).fetchone()
         if existing:
-            logger.warning("rename_preset: 名称 '%s' 已被 preset_id=%s 占用", new_name, existing[0])
+            logger.warning("rename_preset: 名称 '{}' 已被 preset_id={} 占用", new_name, existing[0])
             return None
 
         cur = conn.execute(
             "UPDATE config_presets SET name=?, updated_at=datetime('now','localtime') WHERE preset_id=?",
             (new_name, preset_id))
         if cur.rowcount == 0:
-            logger.warning("rename_preset: preset_id=%s 不存在", preset_id)
+            logger.warning("rename_preset: preset_id={} 不存在", preset_id)
             return None
         return new_name
 
@@ -234,12 +239,12 @@ def apply_preset(preset_id: int) -> Optional[Dict[str, Any]]:
     """
     p = get_preset(preset_id)
     if not p:
-        logger.warning("apply_preset: preset_id=%s 不存在", preset_id)  # P1-3: 日志区分
+        logger.warning("apply_preset: preset_id={} 不存在", preset_id)  # P1-3: 日志区分
         return None
     try:
         return json.loads(p["params_json"])
     except (json.JSONDecodeError, TypeError) as e:
-        logger.error("apply_preset: preset_id=%s (%s) JSON 解析失败: %s",
+        logger.error("apply_preset: preset_id={} ({}) JSON 解析失败: {}",
                      preset_id, p.get("name", "?"), e)  # P1-3: 日志区分
         return None
 
@@ -249,6 +254,7 @@ def apply_preset(preset_id: int) -> Optional[Dict[str, Any]]:
 # ═══════════════════════════════════════════════════════════
 
 def load_ticker_config(ticker: str, variant: str = "single") -> Optional[Dict[str, Any]]:
+    logger.debug("Loading ticker config: ticker={}, variant={}", ticker, variant)
     with _get_conn() as conn:
         row = conn.execute(
             "SELECT * FROM config_ticker WHERE ticker=? AND variant=?",
@@ -260,10 +266,12 @@ def load_ticker_config(ticker: str, variant: str = "single") -> Optional[Dict[st
 
 def save_ticker_config(ticker: str, market: str, variant: str,
                        params_json: str, preset_id: Optional[int] = None):
+    logger.debug("Saving ticker config: ticker={}, variant={}, market={}, preset_id={}",
+                 ticker, variant, market, preset_id)
     # P1-4: 校验 preset_id 存在性，避免 FK 引用不存在的预设
     if preset_id is not None:
         if get_preset(preset_id) is None:
-            logger.warning("save_ticker_config: preset_id=%s 不存在，设为 NULL", preset_id)
+            logger.warning("save_ticker_config: preset_id={} 不存在，设为 NULL", preset_id)
             preset_id = None
 
     with _get_conn() as conn:
@@ -282,6 +290,7 @@ def record_history(ticker: str, variant: str,
                    old_json: str, new_json: str,
                    preset_id: Optional[int] = None,
                    source: str = "ui"):
+    logger.debug("Recording history: ticker={}, variant={}, source={}", ticker, variant, source)
     with _get_conn() as conn:
         conn.execute(
             """INSERT INTO config_history(ticker,variant,preset_id,old_json,new_json,source)
@@ -291,6 +300,7 @@ def record_history(ticker: str, variant: str,
 
 def get_history(ticker: str, variant: str = "single",
                 limit: int = 20) -> List[Dict[str, Any]]:
+    logger.debug("Getting history: ticker={}, variant={}, limit={}", ticker, variant, limit)
     with _get_conn() as conn:
         rows = conn.execute(
             """SELECT h.*, p.name as preset_name
@@ -346,10 +356,10 @@ def import_json_files_as_presets(force: bool = False):
             imported += 1
         except Exception as e:
             errors.append(f"{fpath.stem}: 存入数据库失败 — {e}")
-            logger.warning("import_json_files_as_presets: %s 导入失败: %s", fpath, e)
+            logger.warning("import_json_files_as_presets: {} 导入失败: {}", fpath, e)
 
     if errors:
-        logger.warning("import_json_files_as_presets: 完成 %d 个，%d 个错误 — %s",
+        logger.warning("import_json_files_as_presets: 完成 {} 个，{} 个错误 — {}",
                        imported, len(errors), errors)
     return imported, errors
 
@@ -399,12 +409,12 @@ if __name__ == "__main__":
     init_config_tables()
 
     n, errs = import_json_files_as_presets(force=True)
-    print(f"Imported {n} JSON files as presets")
+    logger.info("Imported {} JSON files as presets", n)
     if errs:
-        print(f"Errors: {errs}")
+        logger.warning("Errors during import: {}", errs)
 
     presets = list_presets()
-    print(f"\nPresets ({len(presets)} total):")
+    logger.info("Presets ({} total):", len(presets))
     for p in presets:
         params = json.loads(p["params_json"])
-        print(f"  [{p['category']}] {p['name']} — {p['description']} ({len(params)} keys)")
+        logger.info("  [{}] {} — {} ({} keys)", p["category"], p["name"], p["description"], len(params))

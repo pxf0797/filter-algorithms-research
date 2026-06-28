@@ -10,12 +10,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 import pandas as pd
+from loguru import logger
 
 DB_PATH = Path(__file__).parent.parent / "data" / "market.db"
 SNAPSHOT_DIR = DB_PATH.parent / "snapshots"
 
 
 def get_conn() -> sqlite3.Connection:
+    logger.debug("Connecting to DB: {}", DB_PATH)
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
@@ -26,6 +28,7 @@ def get_conn() -> sqlite3.Connection:
 
 def init_db():
     """应用启动时调用一次。"""
+    logger.debug("Initializing database schema")
     with get_conn() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS kline (
@@ -46,6 +49,7 @@ def init_db():
 
 def upsert_kline(ticker: str, tf: str, df: pd.DataFrame):
     """批量 upsert。df需包含 Date,Open,High,Low,Close,Volume 列。"""
+    logger.debug("Upserting kline: ticker={}, tf={}, rows={}", ticker, tf, len(df))
     records = []
     for idx, row in df.iterrows():
         ts = idx.isoformat() if hasattr(idx, "isoformat") else str(idx)
@@ -71,13 +75,17 @@ def upsert_kline(ticker: str, tf: str, df: pd.DataFrame):
         if history:
             conn.executemany(
                 "INSERT OR IGNORE INTO kline VALUES (?,?,?,?,?,?,?,?)", history)
+            logger.debug("Inserted {} history rows for {}/{}", len(history), ticker, tf)
         for r in recent:
             conn.execute(
                 "INSERT OR REPLACE INTO kline VALUES (?,?,?,?,?,?,?,?)", r)
+        if recent:
+            logger.debug("Upserted {} recent rows for {}/{}", len(recent), ticker, tf)
 
 
 def query_kline(ticker: str, tf: str, n_pts: int, day_offset: int = 0) -> pd.DataFrame:
     """查询K线。day_offset>0=前移N天，0=最新。"""
+    logger.debug("Querying kline: ticker={}, tf={}, n_pts={}, day_offset={}", ticker, tf, n_pts, day_offset)
     with get_conn() as conn:
         row = conn.execute(
             "SELECT MAX(ts) FROM kline WHERE ticker=? AND timeframe=?",
@@ -134,6 +142,7 @@ def has_data(ticker: str) -> bool:
 
 def checkpoint_wal():
     """Force WAL checkpoint so all data is in the main DB file."""
+    logger.debug("Checkpointing WAL")
     with get_conn() as conn:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
@@ -146,6 +155,7 @@ def check_data_health(ticker=None):
 
     Returns dict with keys: status, summary, details, issues.
     """
+    logger.debug("Checking data health: ticker={}", ticker or "all")
     with get_conn() as conn:
         if ticker:
             tickers = [ticker]
@@ -260,15 +270,16 @@ def validate_db(db_path=None):
     """Check that a DB file has the kline table. Returns (bool, error_msg)."""
     path = db_path or str(DB_PATH)
     try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-        row = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='kline'"
-        ).fetchone()
-        conn.close()
+        logger.debug("Validating DB: {}", path)
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as conn:
+            row = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='kline'"
+            ).fetchone()
         if not row:
             return False, "缺少 kline 表"
         return True, ""
     except sqlite3.DatabaseError as e:
+        logger.error("DB validation failed: {}", e)
         return False, f"无效的 SQLite 文件: {e}"
 
 

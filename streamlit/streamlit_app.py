@@ -9,6 +9,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
+from loguru import logger
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -464,6 +465,7 @@ def _fetch_all_timeframes(market, code):
                 return tf, False, err or "无数据"
             return tf, True, len(ohlc)
         except Exception as e:
+            logger.warning(f"Fetch {market}/{code}/{tf} failed: {e}")
             return tf, False, str(e)[:80]
 
     results = {}
@@ -545,16 +547,16 @@ def _fetch_stock(market, code, tf, n_pts, force_period=None):
                     w_close = w["Close"].iloc[-1]
                     if not pd.isna(w_close):
                         data.loc[data.index[-1], "Close"] = float(w_close)
-            except Exception:
-                pass  # 回退失败不影响主流程，后续 nan 行仍会被丢弃
+            except Exception as e:
+                logger.warning(f"Weekly close fallback failed for {full}: {e}")
 
     data = data[data["Close"].notna()]
 
     # ── 全量写入 SQLite ──
     try:
         upsert_kline(code, tf, data)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"Kline upsert failed for {code}/{tf}: {e}", exc_info=True)
 
     # 从DB返回最后 n_pts 条
     result_df = query_kline(code, tf, n_pts, day_offset=0)
@@ -1500,12 +1502,19 @@ def _render_params(key, filter_id, dual, filter_id2, tf_default):
     return cfg
 
 
+@st.fragment
+def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None):
+    """Fragment wrapper for _render_chart — enables per-view independent re-rendering."""
+    _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl)
+
+
 def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None):
     """Fetch data + render multi-subplot figure from config.
     优先从本地 Parquet 读取；day_offset=向历史前移N天（各周期独立对齐）。
     higher_pnl: 高周期PnL数据（来自 _align_pnl_to_current_tf 的输出），非空时新增row 7子图。"""
     tf = cfg["tf"]
     n_pts = cfg["n_pts"]
+    logger.debug(f"Rendering chart: {ticker_code}/{tf} view={key} n_pts={n_pts}")
 
     # 查找紧邻高周期tf，尝试从session_state获取其PnL数据
     _higher_tf = TF_HIERARCHY.get(tf)
@@ -1597,7 +1606,8 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     try:
         filtered = sf["func"](noisy, t, **cfg["pv"])
         filtered = np.asarray(filtered, dtype=float).ravel()
-    except Exception:
+    except Exception as e:
+        logger.error(f"Filter {cfg['_fid']} failed: {e}", exc_info=True)
         filtered = np.full_like(noisy, np.nan)
     filtered2 = None
     if cfg["_dual"] and cfg["_fid2"] and cfg["pv2"]:
@@ -1605,7 +1615,8 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
             sf2 = FILTERS[cfg["_fid2"]]
             filtered2 = sf2["func"](noisy, t, **cfg["pv2"])
             filtered2 = np.asarray(filtered2, dtype=float).ravel()
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Filter2 {cfg['_fid2']} failed: {e}")
             filtered2 = np.full_like(noisy, np.nan)
 
     rough = float(np.sum(np.diff(filtered,2)**2)) if len(filtered)>2 else 0.0
@@ -1618,6 +1629,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     schmitt = None
     if cfg["show_sch"] and not np.all(np.isnan(filtered)):
         _v = np.gradient(filtered, t); _a = np.gradient(_v, t)
+        logger.debug(f"Computing Schmitt trigger: ewma={cfg['ew']}, k_eps={cfg['ke']}, sigma_min={cfg['sm']}")
         schmitt = _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
 
     # 约束检查：bar数不足时提示用户
@@ -1633,6 +1645,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     # 预测曲线 — 窗口中所有多空对，全段拟合 + 前向预测
     pred_pairs = []
     if cfg.get("show_pred") and schmitt is not None:
+        logger.debug(f"Computing prediction curves: {len(all_pairs)} pairs, mode={cfg.get('fit_mode')}")
         fit_func = _fit_physics_parabola if cfg.get("fit_mode") == "parabola" else _fit_parabolic
         for pair_start, pair_end in all_pairs:
             if pair_end - pair_start >= 3:  # 需 ≥3 点
@@ -1653,6 +1666,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     show_alignment = cfg.get("show_alignment", False)
     stop_loss_pct = cfg.get("stop_loss_pct", 2.0)
     if show_strategy and schmitt is not None and len(pred_pairs) > 0:
+        logger.debug(f"Computing strategy PnL: stop_loss={stop_loss_pct}%, n_extend={cfg.get('n_ext', 10)}")
         long_pnl, short_pnl, trade_records = _compute_strategy_pnl(
             t, filtered, schmitt["sig"], all_pairs, pred_pairs, stop_loss_pct,
             n_extend=cfg.get("n_ext", 10),
@@ -1934,8 +1948,17 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
 
 
 # =====================================================================
-def main():
+@st.cache_resource
+def _get_db_connection():
+    """Get database connection (cached across all sessions)."""
+    logger.debug("Initializing database connection (cache miss)")
     init_db()
+    return True
+
+
+def main():
+    logger.info("App started")
+    _get_db_connection()
     init_config_tables()
     if not st.session_state.get("_config_initialized"):
         import_json_files_as_presets()  # 首次运行导入已有 JSON
@@ -1970,8 +1993,10 @@ def main():
                     st.session_state[k] = v
                     st.session_state[f"_imp_{k}"] = v  # 非widget备份，防rerun丢失
                 st.session_state._import_data = file_hash
+                logger.info(f"Config imported: {len(config)} keys")
                 st.sidebar.success("配置已加载")
             except Exception as e:
+                logger.error(f"Config import failed: {e}", exc_info=True)
                 st.sidebar.error(f"导入失败: {e}")
 
     market = st.sidebar.radio("市场", ["美股 US","A股(沪深)","港股 HK"],
@@ -1991,7 +2016,8 @@ def main():
                     else:
                         full = code.upper()
                     return yf.Ticker(full).info.get("longName") or ""
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"Stock name lookup failed for {full}: {e}")
                     return ""
             name = _stock_name(market, ticker_code)
             if name:
@@ -2005,6 +2031,7 @@ def main():
             with st.spinner(f"首次获取 {ticker_code} 全部周期数据..."):
                 results = _fetch_all_timeframes(market, ticker_code)
                 ok = sum(1 for ok, _ in results.values() if ok)
+                logger.info(f"Initial fetch: {ticker_code} — {ok}/8 timeframes loaded")
                 if ok > 0:
                     st.sidebar.success(f"已获取 {ok}/8 个周期")
         st.session_state._fetched_ticker = ticker_code
@@ -2053,6 +2080,7 @@ def main():
             if st.button("✅ 应用", key="apply_preset", use_container_width=True):
                 params = apply_preset(p["preset_id"])
                 if params:
+                    logger.info(f"Preset applied: {p['name']} ({len(params)} params)")
                     # 延迟应用：不能在此处直接设置 widget 绑定的 session_state key
                     # (market/ticker 等 widget 已渲染)，传入 _pending_apply_params
                     # 在下次 rerun 时 widget 创建前应用。
@@ -2181,6 +2209,7 @@ def main():
                 # P1-2: 补充 category 参数，覆盖时保留原分类
                 cat = (selected_preset.get("category", "通用")
                        if overwrite and selected_preset else "通用")
+                logger.info(f"Preset saved: {target_name} (overwrite={overwrite})")
                 save_preset(target_name,
                             _json.dumps(params, ensure_ascii=False),
                             description=(new_desc.strip() if not overwrite
@@ -2199,6 +2228,7 @@ def main():
     with st.sidebar.expander("🩺 数据健康检查", expanded=False):
         if st.button("运行检查", key="health_btn", use_container_width=True) and ticker_code:
             with st.spinner("检查数据完整性..."):
+                logger.debug(f"Running data health check for {ticker_code}")
                 report = check_data_health(ticker_code)
             status = report.get("status", "ok")
             color_map = {"ok": "green", "warn": "orange", "error": "red"}
@@ -2217,6 +2247,7 @@ def main():
         st.caption("对比数据库与 yfinance 全部周期，发现历史数据修正")
 
         if st.button("校验全部周期", key="val_btn", use_container_width=True) and ticker_code:
+            logger.debug(f"Validating all timeframes for {ticker_code}")
             # Build ticker symbol once
             if market == "A股(沪深)":
                 full_code = ticker_code + (".SS" if ticker_code[0] == "6" else ".SZ")
@@ -2309,8 +2340,8 @@ def main():
                                         data = data[data["Close"].notna()]
                                         force_update_kline(ticker_code, tf, data)
                                         updated += 1
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    logger.warning(f"Force update {tf} failed: {e}")
                         if updated > 0:
                             _fetch_stock.clear()
                             clear_display_cache()
@@ -2393,6 +2424,7 @@ def main():
     # ── 数据备份与恢复 ──
     with st.sidebar.expander("💾 数据备份与恢复", expanded=False):
         db_size = get_db_size_mb()
+        logger.debug(f"DB status: {DB_PATH.name} ({db_size:.1f} MB)")
         st.caption(f"数据库: {DB_PATH.name} ({db_size:.1f} MB)")
 
         c_s1, c_s2 = st.columns([1, 1])
@@ -2401,8 +2433,10 @@ def main():
                 try:
                     path = snapshot_db()
                     prune_snapshots(max_keep=5)
+                    logger.info(f"Snapshot created: {Path(path).name}")
                     st.success(f"已创建: {Path(path).name}")
                 except Exception as e:
+                    logger.error(f"Snapshot failed: {e}", exc_info=True)
                     st.error(f"备份失败: {e}")
 
         snapshots = list_snapshots()
@@ -2425,17 +2459,21 @@ def main():
                         _fetch_stock.clear()
                         clear_display_cache()
                         st.session_state._fetched_ticker = ""
+                        logger.info(f"Snapshot restored: {snap_labels[selected_idx]}")
                         st.success("已恢复，页面将刷新")
                         time.sleep(0.5)
                         st.rerun()
                     except Exception as e:
+                        logger.error(f"Snapshot restore failed: {e}", exc_info=True)
                         st.error(f"恢复失败: {e}")
             with c_r2:
                 if st.button("删除此备份", key="del_snap_btn", use_container_width=True):
                     try:
                         os.remove(snapshots[selected_idx][0])
+                        logger.info(f"Snapshot deleted: {snap_labels[selected_idx]}")
                         st.rerun()
                     except Exception as e:
+                        logger.warning(f"Snapshot deletion failed: {e}")
                         st.error(f"删除失败: {e}")
 
     # ---- Pass 2: Bottom 2x2 chart views ----
@@ -2453,8 +2491,8 @@ def main():
         row_idx = orig_i // 2
         col_idx = orig_i % 2
         with grid_cols[row_idx][col_idx]:
-            _render_chart(market, ticker_code, cfg, f"v{orig_i}", compact=True,
-                          day_offset=day_offset)
+            _render_chart_fragment(market, ticker_code, cfg, f"v{orig_i}", compact=True,
+                                   day_offset=day_offset)
 
     # ── Export (after ALL widgets) ──
     st.sidebar.markdown("---")
@@ -2512,10 +2550,11 @@ def main():
         # Export
         try:
             checkpoint_wal()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Checkpoint WAL failed (non-critical): {e}")
         try:
             db_bytes = DB_PATH.read_bytes()
+            logger.debug(f"DB export: {len(db_bytes) / 1024 / 1024:.1f} MB")
             st.download_button(
                 "导出数据库", db_bytes,
                 file_name="market.db", mime="application/octet-stream",
@@ -2523,6 +2562,7 @@ def main():
                 help=f"文件大小: {len(db_bytes) / 1024 / 1024:.1f} MB"
             )
         except Exception as e:
+            logger.error(f"DB export failed: {e}", exc_info=True)
             st.error(f"导出失败: {e}")
 
         # Import
@@ -2540,8 +2580,8 @@ def main():
                 valid, err_msg = validate_db(tmp_path)
                 try:
                     os.remove(tmp_path)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Temp file cleanup failed: {e}")
 
                 if not valid:
                     st.error(f"无效的数据库文件: {err_msg}")
@@ -2555,6 +2595,7 @@ def main():
                     clear_display_cache()
                     st.session_state._fetched_ticker = ""
                     st.session_state._db_import_hash = file_hash
+                    logger.info(f"DB imported: {len(raw) / 1024 / 1024:.1f} MB")
                     st.success(f"数据库已导入 ({len(raw) / 1024 / 1024:.1f} MB)，页面将刷新")
                     time.sleep(0.5)
                     st.rerun()
@@ -2567,6 +2608,7 @@ def main():
         if last is None:
             st.session_state._last_auto_refresh = now
         elif now - last >= interval:
+            logger.info(f"Auto-refresh triggered for {ticker_code} (interval={interval}s)")
             _fetch_stock.clear()
             _fetch_all_timeframes(market, ticker_code)
             st.session_state._last_auto_refresh = now

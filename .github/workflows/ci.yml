@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [master, feat/*]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12']
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: pip-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('streamlit/requirements.txt') }}
+
+    - name: Install dependencies
+      run: |
+        pip install -r streamlit/requirements.txt
+        pip install pytest pytest-cov ruff mypy types-requests
+
+    - name: Lint with ruff
+      run: ruff check . --ignore=E501,F841 --exit-zero
+
+    - name: Type check with mypy
+      run: mypy streamlit/ --ignore-missing-imports --follow-imports=skip --exit-zero
+
+    - name: Test with pytest
+      run: pytest --cov=streamlit --cov-report=term --tb=short
