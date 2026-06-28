@@ -645,9 +645,18 @@ def _render_refresh_row(market, ticker_code):
 def _render_preset_selector(market, ticker_code):
     """Render preset selector, action buttons, and confirmation flows."""
     st.sidebar.markdown("---")
-    presets = list_presets()
-    preset_labels = ["(不选择)"] + [f"[{p['category']}] {p['name']}" for p in presets]
-    preset_map = {f"[{p['category']}] {p['name']}": p for p in presets}
+    search_query = st.sidebar.text_input("🔍 搜索配置", key="preset_search",
+                                          placeholder="输入股票代码或名称…")
+    all_presets = list_presets()
+    if search_query.strip():
+        q = search_query.strip().lower()
+        presets = [p for p in all_presets if
+                   q in p["name"].lower() or
+                   q in p.get("description", "").lower()]
+    else:
+        presets = all_presets
+    preset_labels = ["(不选择)"] + [p["name"] for p in presets]
+    preset_map = {p["name"]: p for p in presets}
 
     _hash = hashlib.md5("|".join(preset_labels).encode()).hexdigest()[:8]
     selected_label = st.sidebar.selectbox("📋 配置方案", preset_labels,
@@ -659,7 +668,7 @@ def _render_preset_selector(market, ticker_code):
 
     if selected_preset:
         p = selected_preset
-        st.sidebar.caption(f"💡 {p['description']}  [{p['category']}]")
+        st.sidebar.caption(f"💡 {p['description']}")
         c1, c2, c3, c4 = st.sidebar.columns([1.2, 1, 1, 0.8])
         with c1:
             if st.button("✅ 应用", key="apply_preset", use_container_width=True):
