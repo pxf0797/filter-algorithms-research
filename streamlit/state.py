@@ -102,7 +102,7 @@ class AppState:
         if st is None:
             return
         for k, v in SYSTEM_KEYS.items():
-            if k not in st.session_state:
+            if k not in st.session_state and v is not None:
                 st.session_state[k] = v
 
     @staticmethod

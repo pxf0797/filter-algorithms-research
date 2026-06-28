@@ -537,6 +537,8 @@ def _handle_pending_apply():
     """Apply pending preset params from session_state."""
     if AppState.has("_pending_apply_params"):
         params = AppState.pop("_pending_apply_params")
+        if params is None:
+            return
         for k, v in params.items():
             AppState.set(k, v)
         AppState.set("_import_data", "preset")
