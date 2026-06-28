@@ -2,7 +2,7 @@
 Shared pytest fixtures for filter_research tests.
 
 Mocks the `streamlit` module before any project imports so that pytest can
-import pure functions from streamlit/streamlit_app.py without triggering a
+import pure functions from filter_app/streamlit_app.py without triggering a
 Streamlit runtime environment.
 """
 

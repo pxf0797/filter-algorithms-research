@@ -39,4 +39,4 @@ jobs:
       run: mypy filter_app/ --ignore-missing-imports --follow-imports=skip --exit-zero
 
     - name: Test with pytest
-      run: pytest --cov=filter_app --cov-report=term --tb=short
+      run: pytest --cov=filter_app --cov-report=term --cov-fail-under=45 --tb=short

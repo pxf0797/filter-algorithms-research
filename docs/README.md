@@ -35,6 +35,31 @@
 | [tests/data_computation_test_cases.md](tests/data_computation_test_cases.md) | 数据计算测试用例 |
 | [tests/ui_test_cases.md](tests/ui_test_cases.md) | UI 测试用例 |
 
+### 测试文件索引
+
+| 文件 | 说明 |
+|------|------|
+| `test_alignment.py` | 对齐模块单元测试 |
+| `test_alignment_subplot.py` | 子图对齐测试 |
+| `test_app_smoke.py` | AppTest 冒烟测试 (6 tests) |
+| `test_app_ui.py` | Streamlit UI 交互测试 |
+| `test_boundary.py` | 边界条件测试 |
+| `test_charts.py` | 图表模块测试 |
+| `test_config_db.py` | 配置数据库测试 |
+| `test_data_loader.py` | 数据加载器测试 |
+| `test_db.py` | 数据库基础操作测试 |
+| `test_filters.py` | 滤波算法测试 |
+| `test_integration.py` | 集成测试 |
+| `test_integration_flows.py` | 集成流程测试 |
+| `test_param_export_import.py` | 参数导出导入测试 |
+| `test_preset_ui.py` | 预设 UI 单元测试 |
+| `test_preset_ui_actions.py` | 预设 UI 操作测试 |
+| `test_sidebar.py` | 侧边栏模块测试 (19 tests) |
+| `test_signals.py` | 信号生成测试 |
+| `test_state.py` | 状态管理测试 |
+| `test_strategy.py` | 策略逻辑测试 |
+| `test_streamlit_app.py` | streamlit_app 函数测试 |
+
 ## 🗄️ 数据处理
 
 | 文档 | 说明 |
@@ -53,4 +78,4 @@
 
 ---
 
-*最后更新：2026-06-20*
+*最后更新：2026-06-28*
