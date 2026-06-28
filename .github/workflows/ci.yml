@@ -38,5 +38,8 @@ jobs:
     - name: Type check with mypy
       run: mypy filter_app/ --ignore-missing-imports --follow-imports=skip --exit-zero
 
-    - name: Test with pytest
-      run: pytest --cov=filter_app --cov-report=term --cov-fail-under=45 --tb=short
+    - name: Run tests (with streamlit mock)
+      run: python -m pytest tests/ --ignore=tests/test_app_ui.py --ignore=tests/test_app_smoke.py --ignore=tests/test_streamlit_app.py --cov=filter_app --cov-report=term --cov-fail-under=55 --tb=short -q
+
+    - name: Run AppTest UI tests (real streamlit)
+      run: python -m pytest tests/test_app_ui.py tests/test_app_smoke.py tests/test_streamlit_app.py -q --tb=short

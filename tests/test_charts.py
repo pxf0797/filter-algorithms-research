@@ -9,6 +9,10 @@ Tests cover the non-Streamlit parts:
 - _render_pnl_curves() 多空曲线
 - _sanitize_for_json / _NpEncoder 行为
 - CDN URL 包含在 HTML 输出中
+- _render_plotly JSON 序列化（NaN/Inf/空数据）
+- _add_prediction_traces poly2/physics 模式
+- _add_cross_pnl_subplot 边界（空 trades / 有 trades）
+- _add_schmitt_traces 边界条件
 """
 
 import sys
@@ -20,6 +24,7 @@ if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
 import json
+from unittest.mock import MagicMock
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -1038,3 +1043,278 @@ class TestPredictionTraces:
         names = [tr.name for tr in fig.data if tr.name is not None]
         assert any("(拟合)" in n for n in names)
         assert any("(预测)" in n for n in names)
+
+    def test_prediction_trace_poly2_mode(self):
+        """poly2 模式（无 x0）应通过 np.polyval((a,b,c), x_ext) 计算预测."""
+        fig = _make_fig()
+        t = np.arange(100, dtype=float)
+        filtered = np.full(100, 0.5)
+        # poly2 fit: 无 x0 key
+        fit_result = {"a": 0.001, "b": 0.01, "c": 1.0,
+                      "y_fit": np.linspace(0.5, 1.0, 50)}
+        fit_start = 0
+        pair_end = 49
+
+        from components.charts import _add_prediction_traces
+        _add_prediction_traces(fig, t, filtered, fit_result, fit_start,
+                               pair_end, row=2, n_extend=10)
+
+        traces = fig.data
+        pred_traces = [tr for tr in traces if tr.name and "(预测)" in tr.name]
+        assert len(pred_traces) == 1
+        # polyval((0.001, 0.01, 1.0), [50..59]) 应产生递增数列
+        y_pred = pred_traces[0].y
+        assert y_pred is not None and len(y_pred) == 10
+        # 正二次项系数 → 递增
+        assert y_pred[0] < y_pred[-1]
+
+    def test_prediction_trace_physics_mode(self):
+        """physics 模式（有 x0）应通过 np.polyval((a,b,c), x_ext-x0) 计算预测."""
+        fig = _make_fig()
+        t = np.arange(100, dtype=float)
+        filtered = np.full(100, 0.5)
+        # physics fit: 顶点在 x0=49, y_fit 对称于 x0
+        fit_result = {"a": 0.001, "b": 0.0, "c": 1.0,
+                      "y_fit": np.linspace(0.5, 1.0, 50), "x0": 49.0}
+        fit_start = 0
+        pair_end = 49
+
+        from components.charts import _add_prediction_traces
+        _add_prediction_traces(fig, t, filtered, fit_result, fit_start,
+                               pair_end, row=2, n_extend=10)
+
+        traces = fig.data
+        pred_traces = [tr for tr in traces if tr.name and "(预测)" in tr.name]
+        assert len(pred_traces) == 1
+        y_pred = pred_traces[0].y
+        assert y_pred is not None and len(y_pred) == 10
+
+
+# ===================================================================
+# SECTION 12 — _render_plotly JSON serialization
+# ===================================================================
+
+class TestRenderPlotlySerialization:
+    """_render_plotly 的 JSON 序列化管道：NaN/Inf/空数据."""
+
+    def test_render_plotly_with_nan_values(self, monkeypatch):
+        """NaN 值应被序列化为 JSON null."""
+        captured = {}
+        def _capture_html(html, **kw):
+            captured["html"] = html
+            return MagicMock()
+        import streamlit as st
+        monkeypatch.setattr(st.components.v1, "html", _capture_html)
+
+        fig = _make_fig()
+        # 向第一个 trace 的 y 中注入 NaN
+        fig.data[0].y = np.array([1.0, float("nan"), 3.0, float("nan"), 5.0])
+
+        from components.charts import _render_plotly
+        _render_plotly(fig)
+
+        assert "html" in captured
+        # 从 HTML 中提取 JSON data 部分（排除 JavaScript 中的 Infinity）
+        import re
+        m = re.search(r"var figure = (\{.+?\});\s*\n\s*var config", captured["html"], re.DOTALL)
+        assert m is not None
+        figure_json = m.group(1)
+        # NaN 在 JSON 中应为 null，不应出现字符串 NaN
+        assert "null" in figure_json
+        assert "NaN" not in figure_json
+
+    def test_render_plotly_with_inf_values(self, monkeypatch):
+        """Inf 值应被序列化为 JSON null."""
+        captured = {}
+        def _capture_html(html, **kw):
+            captured["html"] = html
+            return MagicMock()
+        import streamlit as st
+        monkeypatch.setattr(st.components.v1, "html", _capture_html)
+
+        fig = _make_fig()
+        fig.data[0].y = np.array([1.0, float("inf"), 3.0, float("-inf"), 5.0])
+
+        from components.charts import _render_plotly
+        _render_plotly(fig)
+
+        assert "html" in captured
+        # 从 HTML 中提取 JSON data 部分（在 var figure = 和 ; 之间）
+        import re
+        m = re.search(r"var figure = (\{.+?\});\s*\n\s*var config", captured["html"], re.DOTALL)
+        assert m is not None, "无法从 HTML 中提取 figure JSON"
+        figure_json = m.group(1)
+        # y 数组中的 Infinity/NaN 应已被替换为 null
+        assert "Infinity" not in figure_json
+        assert "NaN" not in figure_json
+        assert "null" in figure_json
+
+    def test_render_plotly_empty_data(self, monkeypatch):
+        """空数据 fig 不应崩溃."""
+        captured = {}
+        def _capture_html(html, **kw):
+            captured["html"] = html
+            return MagicMock()
+        import streamlit as st
+        monkeypatch.setattr(st.components.v1, "html", _capture_html)
+
+        fig = go.Figure()  # 完全空白的 figure
+        fig.add_trace(go.Scatter(x=[], y=[]))
+
+        from components.charts import _render_plotly
+        _render_plotly(fig)
+
+        assert "html" in captured
+        assert "Plotly.newPlot" in captured["html"]
+
+    def test_render_plotly_with_dates(self, monkeypatch):
+        """带 dates 参数时应在 layout 中嵌入 _dates."""
+        captured = {}
+        def _capture_html(html, **kw):
+            captured["html"] = html
+            return MagicMock()
+        import streamlit as st
+        monkeypatch.setattr(st.components.v1, "html", _capture_html)
+
+        from datetime import datetime
+        fig = _make_fig()
+        dates = [datetime(2026, 1, 1), datetime(2026, 1, 2)]
+
+        from components.charts import _render_plotly
+        _render_plotly(fig, dates=dates)
+
+        assert "html" in captured
+        assert "2026-01-01" in captured["html"]
+
+
+# ===================================================================
+# SECTION 13 — _add_cross_pnl_subplot with trades
+# ===================================================================
+
+class TestCrossPnlSubplotTrades:
+    """_add_cross_pnl_subplot 的 trade 标记边界."""
+
+    def test_cross_pnl_empty_higher_trades(self):
+        """空 entry/exit markers 且全 NaN 参考线时不应添加 traces."""
+        fig = _make_fig()
+        t = np.arange(100, dtype=float)
+        aligned = {
+            "aligned_long": np.array([np.nan] * 100),
+            "aligned_short": np.array([np.nan] * 100),
+            "entry_markers": [],
+            "exit_markers": [],
+        }
+
+        from components.charts import _add_cross_pnl_subplot
+        initial_len = len(fig.data)
+        _add_cross_pnl_subplot(fig, t, aligned, row=2)
+
+        # 0 条参考线 + 0 个标记 = 0 新 traces（但有 baseline shape）
+        assert len(fig.data) == initial_len
+
+    def test_cross_pnl_with_trades(self):
+        """同时有入场和离场标记时应添加对应 traces."""
+        fig = _make_fig()
+        t = np.arange(100, dtype=float)
+        aligned = {
+            "aligned_long": np.array([np.nan] * 100),
+            "aligned_short": np.array([np.nan] * 100),
+            "entry_markers": [
+                (20, "long", 100.0),
+                (60, "short", 95.0),
+            ],
+            "exit_markers": [
+                (40, "long", 110.0, 10.0, "take_profit"),
+                (80, "short", 90.0, -5.26, "stop_loss"),
+            ],
+        }
+
+        from components.charts import _add_cross_pnl_subplot
+        initial_len = len(fig.data)
+        _add_cross_pnl_subplot(fig, t, aligned, row=2)
+
+        traces_added = len(fig.data) - initial_len
+        assert traces_added == 4  # 2 entry + 2 exit
+
+
+# ===================================================================
+# SECTION 14 — _add_schmitt_traces (from streamlit_app.py)
+# ===================================================================
+
+class TestSchmittTraces:
+    """_add_schmitt_traces 边界条件."""
+
+    def _make_schmitt(self, n=100):
+        """Create a minimal schmitt dict with correct structure."""
+        return {
+            "eps": np.full(n, 0.1),
+            "sig": np.zeros(n, dtype=int),
+            "sigma_v": np.full(n, 0.05),
+        }
+
+    def test_schmitt_trace_empty_pairs(self):
+        """all_pairs 为空时不应崩溃."""
+        from streamlit_app import _add_schmitt_traces
+        n = 50
+        fig = _make_fig()
+        t = np.arange(n, dtype=float)
+        schmitt = self._make_schmitt(n)
+        acc = np.zeros(n)
+        all_pairs = []
+
+        _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar=1, ssr=2)
+
+        # 至少应有 eps bands + sigma_v + acc + sig traces
+        assert len(fig.data) >= 6
+
+    def test_schmitt_trace_single_pair(self):
+        """单个 pair 应添加 pair band trace."""
+        from streamlit_app import _add_schmitt_traces
+        n = 50
+        fig = _make_fig()
+        t = np.arange(n, dtype=float)
+        schmitt = self._make_schmitt(n)
+        schmitt["sig"][10:30] = 1  # 一段 active region
+        acc = np.zeros(n)
+        all_pairs = [(5, 25)]
+
+        initial_len = len(fig.data)
+        _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar=1, ssr=2)
+
+        assert len(fig.data) >= initial_len + 1
+
+    def test_schmitt_trace_with_sar(self):
+        """sar 和 ssr 参数指向不同子图时应正确布局."""
+        from streamlit_app import _add_schmitt_traces
+        n = 50
+        fig = _make_fig(nrows=4)
+        t = np.arange(n, dtype=float)
+        schmitt = self._make_schmitt(n)
+        schmitt["sig"] = np.array([1] * 20 + [-1] * 30, dtype=int)
+        acc = np.linspace(0, 0.5, n)
+        all_pairs = [(0, 19), (20, 39)]
+
+        initial_len = len(fig.data)
+        _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar=1, ssr=2)
+
+        # 7 base traces (eps fill + +eps + -eps + sigma_v + acc + sig + sig fill)
+        # + 2 pair bands = 9
+        assert len(fig.data) >= initial_len + 7
+
+    def test_schmitt_sig_with_both_states(self):
+        """sig 为 1 和 -1 时应添加不同颜色的 fill traces."""
+        from streamlit_app import _add_schmitt_traces
+        n = 50
+        fig = _make_fig(nrows=4)
+        t = np.arange(n, dtype=float)
+        schmitt = self._make_schmitt(n)
+        schmitt["sig"] = np.array([1] * 20 + [-1] * 30, dtype=int)
+        acc = np.zeros(n)
+        all_pairs = []
+
+        initial_len = len(fig.data)
+        _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar=1, ssr=2)
+
+        # sig state fill traces: 绿色(状态1) + 红色(状态-1) = 2
+        # Total: 6 base + 2 fill = 8 (可能有重复)
+        assert len(fig.data) >= initial_len + 6
