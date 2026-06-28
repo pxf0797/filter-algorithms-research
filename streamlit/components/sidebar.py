@@ -162,7 +162,11 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
                             st.session_state.get(f"_imp_{sl_key}", 2.0))
 
     # 滤波参数 — 可折叠
-    sf = FILTERS[filter_id]
+    sf = FILTERS.get(filter_id)
+    if sf is None:
+        st.warning(f"未知 filter_id: {filter_id}，跳过滤波参数")
+        cfg["pv"] = {}
+        return
     cfg["pv"] = {}
     f1 = list(sf["params"].items())
     with st.expander(f"滤波参数 · {sf['name']}", expanded=exp_all):
@@ -175,16 +179,20 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
 
     # 滤波参数2（可选）
     if dual and filter_id2:
-        sf2 = FILTERS[filter_id2]
-        cfg["pv2"] = {}
-        f2 = list(sf2["params"].items())
-        with st.expander(f"滤波参数2 · {sf2['name']}", expanded=exp_all):
-            fc2 = st.columns([1]*len(f2) + [0.25])
-            for j, (pn, sp) in enumerate(f2):
-                with fc2[j]:
-                    cfg["pv2"][pn] = _render_param_slider(*sp, key_suffix=f"{key}_f2_{filter_id2}", container=st)
-            with fc2[-1]:
-                cfg["fc2"] = st.color_picker("", "#ff6b6b", key=f"{key}_fc2", label_visibility="collapsed")
+        sf2 = FILTERS.get(filter_id2)
+        if sf2 is None:
+            st.warning(f"未知 filter_id2: {filter_id2}，跳过滤波参数2")
+            cfg["pv2"] = {}
+        else:
+            cfg["pv2"] = {}
+            f2 = list(sf2["params"].items())
+            with st.expander(f"滤波参数2 · {sf2['name']}", expanded=exp_all):
+                fc2 = st.columns([1]*len(f2) + [0.25])
+                for j, (pn, sp) in enumerate(f2):
+                    with fc2[j]:
+                        cfg["pv2"][pn] = _render_param_slider(*sp, key_suffix=f"{key}_f2_{filter_id2}", container=st)
+                with fc2[-1]:
+                    cfg["fc2"] = st.color_picker("", "#ff6b6b", key=f"{key}_fc2", label_visibility="collapsed")
     else:
         cfg["pv2"] = {}
         cfg["fc2"] = "#ff6b6b"

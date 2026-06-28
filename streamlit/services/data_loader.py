@@ -45,6 +45,8 @@ def _fetch_all_timeframes(market: str, code: str) -> Dict[str, Tuple[bool, Any]]
 def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
                  force_period: Optional[str] = None) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[pd.DataFrame], Optional[str], Optional[str], Optional[pd.DatetimeIndex]]:
     """从yfinance获取股票数据并写入DB。返回 (t, close, ohlc, full, err, dates)。"""
+    if not code or not code.strip():
+        return None, None, None, None, "Empty ticker code", None
     if market == "A股(沪深)":
         suffix = ".SS" if code[0] == "6" else ".SZ"
         full = code + suffix
@@ -148,8 +150,11 @@ def _sync_to_display(code: str, tf: str, day_offset: int, n_pts: int) -> Tuple[b
 
 def _stock_name_lookup(market: str, code: str) -> str:
     """查询股票名称。"""
+    if not code or not code.strip():
+        return ""
     try:
         if market == "A股(沪深)":
+            full = code + (".SS" if code[0] == "6" else ".SZ")
             full = code + (".SS" if code[0] == "6" else ".SZ")
         elif market == "港股 HK":
             full = code.zfill(4) + ".HK"

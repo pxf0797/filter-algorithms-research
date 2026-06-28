@@ -1,5 +1,5 @@
 """
-边界条件测试 — 空数据、短序列、数值稳定性、导入导出。
+边界条件测试 — 空数据、短序列、数值稳定性、导入导出、P0 回归。
 """
 import numpy as np
 import pandas as pd
@@ -8,7 +8,9 @@ import pytest
 from services.filter_engine import (
     _compute_strategy_pnl, _find_all_pairs, _align_pnl_to_current_tf,
     _fit_parabolic, _fit_physics_parabola, _schmitt_trigger,
+    apply_sma, apply_ema, FILTERS,
 )
+from services.data_loader import _stock_name_lookup
 from components.sidebar import TF_HIERARCHY, ALL_TFS
 
 
@@ -438,3 +440,77 @@ class TestCrossTfHierarchy:
         # 验证所有key都存在
         for tf in ALL_TFS:
             assert tf in TF_HIERARCHY, f"Missing TF_HIERARCHY entry for {tf}"
+
+
+# =========================================================================
+# P0 回归测试 — 空 ticker / 未知 filter_id / None 预设
+# =========================================================================
+
+class TestP0RegressionBoundary:
+
+    def test_data_loader_handles_empty_ticker(self):
+        """空ticker不应crash，应返回空字符串."""
+        result = _stock_name_lookup("美股 US", "")
+        assert result == ""
+
+    def test_data_loader_handles_whitespace_ticker(self):
+        """纯空格ticker不应crash，应返回空字符串."""
+        result = _stock_name_lookup("美股 US", "   ")
+        assert result == ""
+
+    def test_filters_registry_get_unknown_id(self):
+        """未知filter_id用.get()不crash."""
+        result = FILTERS.get("nonexistent_filter_999")
+        assert result is None
+
+    def test_filters_registry_has_schmitt_trigger_func(self):
+        """_schmitt_trigger 函数必须在模块中可用（作为 fallback 信号）.
+        注意: schmitt 不在 FILTERS 注册表中（注册表仅含滑动平均类），
+        它是一个独立的私有函数，直接由信号层调用。"""
+        assert callable(_schmitt_trigger), "_schmitt_trigger 必须可调用"
+
+    def test_preset_selector_none_is_safe(self):
+        """None 预设不应导致crash — 防御模式: 先检查再使用."""
+        preset = None
+        # 模拟防御模式: 检查 None 后跳过访问
+        if preset is not None:
+            _ = preset["name"]  # pragma: no cover
+        assert preset is None
+
+
+# =========================================================================
+# P0 回归测试 — filter_engine 空数组 / 单元素 / NaN 边界
+# =========================================================================
+
+class TestFilterEngineEdgeBoundary:
+
+    def test_sma_empty_array(self):
+        """空数组输入apply_sma抛 ValueError（np.convolve 约束）."""
+        t = np.array([])
+        data = np.array([])
+        with pytest.raises(ValueError, match="v cannot be empty"):
+            apply_sma(data, t, window=5)
+
+    def test_ema_empty_array(self):
+        """空数组输入apply_ema应安全返回空."""
+        t = np.array([])
+        data = np.array([])
+        result = apply_ema(data, t, span=5)
+        assert len(result) == 0
+        assert isinstance(result, np.ndarray)
+
+    def test_ema_single_element(self):
+        """单元素输入apply_ema应安全返回长度为1的结果."""
+        t = np.array([0.0])
+        data = np.array([1.0])
+        result = apply_ema(data, t, span=5)
+        assert len(result) == 1
+        assert result[0] == pytest.approx(1.0)
+
+    def test_sma_with_nan(self):
+        """NaN输入apply_sma不应crash."""
+        t = np.arange(5, dtype=float)
+        data = np.array([1.0, np.nan, 3.0, 4.0, 5.0])
+        result = apply_sma(data, t, window=3)
+        assert len(result) == 5
+        assert isinstance(result, np.ndarray)

@@ -127,7 +127,11 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts):
 
 def _compute_filters(noisy, t, cfg):
     """Compute primary and optional secondary filter. Returns (filtered, filtered2)."""
-    sf = FILTERS[cfg["_fid"]]
+    sf = FILTERS.get(cfg["_fid"])
+    if sf is None:
+        logger.warning(f"Unknown filter_id '{cfg['_fid']}', skipping primary filter")
+        filtered = np.full_like(noisy, np.nan)
+        return filtered, None
     try:
         filtered = sf["func"](noisy, t, **cfg["pv"])
         filtered = np.asarray(filtered, dtype=float).ravel()
@@ -137,8 +141,12 @@ def _compute_filters(noisy, t, cfg):
     filtered2 = None
     if cfg["_dual"] and cfg["_fid2"] and cfg["pv2"]:
         try:
-            sf2 = FILTERS[cfg["_fid2"]]
-            filtered2 = sf2["func"](noisy, t, **cfg["pv2"])
+            sf2 = FILTERS.get(cfg["_fid2"])
+            if sf2 is None:
+                logger.warning(f"Unknown filter_id2 '{cfg['_fid2']}', skipping secondary filter")
+                filtered2 = np.full_like(noisy, np.nan)
+            else:
+                filtered2 = sf2["func"](noisy, t, **cfg["pv2"])
             filtered2 = np.asarray(filtered2, dtype=float).ravel()
         except Exception as e:
             logger.warning(f"Filter2 {cfg['_fid2']} failed: {e}")
@@ -575,6 +583,8 @@ def _render_market_ticker():
         if ticker_code:
             @st.cache_data(show_spinner=False, ttl=3600)
             def _stock_name(mkt, code):
+                if not code or not code.strip():
+                    return ""
                 try:
                     if mkt == "A股(沪深)":
                         full = code + (".SS" if code[0] == "6" else ".SZ")
@@ -643,6 +653,9 @@ def _render_preset_selector(market, ticker_code):
     selected_label = st.sidebar.selectbox("📋 配置方案", preset_labels,
                                           key=f"preset_sel_{_hash}")
     selected_preset = preset_map.get(selected_label)
+
+    if selected_preset is None:
+        return  # 用户尚未选择预设，不渲染任何操作
 
     if selected_preset:
         p = selected_preset
@@ -798,6 +811,9 @@ def _render_data_validation(market, ticker_code):
         if st.button("校验全部周期", key="val_btn", use_container_width=True) and ticker_code:
             logger.debug(f"Validating all timeframes for {ticker_code}")
             if market == "A股(沪深)":
+                if not ticker_code.strip():
+                    st.warning("股票代码不能为空")
+                    return
                 full_code = ticker_code + (".SS" if ticker_code[0] == "6" else ".SZ")
             elif market == "港股 HK":
                 full_code = ticker_code.zfill(4) + ".HK"
@@ -888,12 +904,12 @@ def _render_data_validation(market, ticker_code):
 def _render_filter_selectors():
     """Render filter selector widgets. Returns (filter_id, dual, filter_id2)."""
     filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),
-        format_func=lambda x: FILTERS[x]["name"], key="global_f")
+        format_func=lambda x: FILTERS.get(x, {}).get("name", x), key="global_f")
     dual = st.sidebar.checkbox("双滤波对比", value=False, key="global_dual")
     filter_id2 = None
     if dual:
         filter_id2 = st.sidebar.selectbox("滤波器 2", list(FILTERS.keys()),
-            format_func=lambda x: FILTERS[x]["name"], key="global_f2")
+            format_func=lambda x: FILTERS.get(x, {}).get("name", x), key="global_f2")
     return filter_id, dual, filter_id2
 
 
