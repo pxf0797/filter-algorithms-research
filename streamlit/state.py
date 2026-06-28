@@ -13,7 +13,7 @@
     vs.slider("ke", 0.15)            # 类型安全的 slider 读写
     vs.set("ke", 0.20)               # 写优先 key + 写 _imp_ 备份
 """
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     import streamlit as st
@@ -186,7 +186,7 @@ class ViewState:
     _PREFIX = "v"
     _EXP_SUFFIX = "exp_all"
 
-    def __init__(self, vi: int):
+    def __init__(self, vi: int) -> None:
         self.vi = vi
         self.prefix = f"{self._PREFIX}{vi}_"
 

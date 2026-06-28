@@ -8,12 +8,15 @@
 
 import streamlit as st
 from services.filter_engine import FILTERS
+from typing import Any, Dict, Optional
 
 ALL_TFS = ["1分钟","5分钟","15分钟","60分钟","日线","周线","月线","季线"]
 DEFAULT_TFS = ["日线", "60分钟", "15分钟", "5分钟"]
 
 
-def _compact_slider(label, pmin, pmax, pdefault, pstep=1, key=None, fmt=None):
+def _compact_slider(label: str, pmin: float, pmax: float, pdefault: float,
+                    pstep: float = 1.0, key: Optional[str] = None,
+                    fmt: Optional[str] = None) -> float:
     """标签与滑块同行（仅用于无 help 的简单滑块）。"""
     c = st.columns([0.35, 0.65])
     c[0].markdown(f"<small>{label}</small>", unsafe_allow_html=True)
@@ -23,7 +26,9 @@ def _compact_slider(label, pmin, pmax, pdefault, pstep=1, key=None, fmt=None):
     return c[1].slider(label, **kwargs)
 
 
-def _render_param_slider(label, pmin, pmax, pstep, pdefault, key_suffix="", container=None):
+def _render_param_slider(label: str, pmin: float, pmax: float, pstep: float,
+                         pdefault: float, key_suffix: str = "",
+                         container: Optional[Any] = None) -> float:
     """Render an st.slider with appropriate numeric format.
     If container is None, renders in sidebar (backward compat).
     Pass container=st to render inline in the current column context.
@@ -46,7 +51,8 @@ TF_HIERARCHY = {
 }
 
 
-def _render_params(key, filter_id, dual, filter_id2, tf_default):
+def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[str],
+                   tf_default: str) -> Dict[str, Any]:
     """Ultra-compact parameter panel. Returns config dict."""
     cfg = {"_fid": filter_id, "_dual": dual, "_fid2": filter_id2}
 
