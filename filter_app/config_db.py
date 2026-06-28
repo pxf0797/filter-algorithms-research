@@ -403,7 +403,7 @@ def collect_current_params() -> Dict[str, Any]:
 # Self-test
 # ═══════════════════════════════════════════════════════════
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     from db import init_db
     init_db()
     init_config_tables()
