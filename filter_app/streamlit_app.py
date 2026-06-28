@@ -1145,10 +1145,11 @@ def _render_db_import_export():
 def _run_auto_refresh(market, ticker_code, auto_refresh, interval):
     """Execute auto-refresh loop if enabled.
 
-    防无限 rerun: _auto_refresh_rerun_count 跟踪连续无操作次数，
-    超过阈值后自动停止（约等于 interval 秒数的空闲上限 + 缓冲）。
+    防无限 rerun: _MAX_IDLE_CYCLES 动态适配刷新间隔，确保至少 2 倍间隔
+    的空闲缓冲，最短 120 个周期（~2 分钟）。正常使用时计数器会在每次
+    实际刷新后归零，不会触及上限。
     """
-    _MAX_IDLE_CYCLES = 300  # 5 分钟缓冲 @ ~1s/cycle
+    _MAX_IDLE_CYCLES = max(int(interval * 2), 120)
     if auto_refresh:
         now = time.time()
         last = AppState.get("_last_auto_refresh")
@@ -1161,7 +1162,7 @@ def _run_auto_refresh(market, ticker_code, auto_refresh, interval):
             AppState.set("_last_auto_refresh", now)
             AppState.set("_auto_refresh_rerun_count", 0)
             st.rerun()
-        # 防无限 rerun 保护
+        # 防无限 rerun 保护：计数器超过动态阈值后停止
         rerun_count = AppState.get("_auto_refresh_rerun_count", 0) + 1
         AppState.set("_auto_refresh_rerun_count", rerun_count)
         if rerun_count > _MAX_IDLE_CYCLES:
