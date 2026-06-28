@@ -6,3 +6,5 @@ plotly==6.7.0
 pandas==2.3.3
 statsmodels==0.14.6
 yfinance==1.4.1
+# pip-audit 依赖项，用于 GitHub Actions 安全检查步骤
+pip-audit>=2.7,<3

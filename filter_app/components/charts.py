@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 # ---------------------------------------------------------------------------
 # Plotly cross-subplot crosshair helper
 # ---------------------------------------------------------------------------
-def _render_plotly(fig, height=750, dates=None):
+def _render_plotly(fig, height=750, dates=None) -> None:
     """Render Plotly chart with cross-subplot crosshair (no value tooltip)."""
     fig_dict = {"data": [], "layout": fig.layout.to_plotly_json()}
     if dates is not None:
@@ -45,6 +45,7 @@ def _render_plotly(fig, height=750, dates=None):
 
     def _sanitize_for_json(obj):
         """递归替换 NaN/Inf 为 None (JSON null)。"""
+
         if isinstance(obj, dict):
             return {k: _sanitize_for_json(v) for k, v in obj.items()}
         if isinstance(obj, (list, tuple)):
@@ -204,7 +205,7 @@ var figure = {figure_json};
 # Prediction traces on chart
 # ---------------------------------------------------------------------------
 def _add_prediction_traces(fig, t, filtered, fit_result, fit_start, pair_end, row,
-                          n_extend=10, show_legend=True):
+                          n_extend=10, show_legend=True) -> None:
     """在 price 子图上添加预测曲线 + 残差子图上的拟合残差。"""
     name = "预测曲线"
     fit_color = "#f0a040"   # 橙色
@@ -258,7 +259,7 @@ def _add_prediction_traces(fig, t, filtered, fit_result, fit_start, pair_end, ro
 # Shared PnL rendering helpers
 # ---------------------------------------------------------------------------
 def _render_entry_marker(fig, t, bar_idx, pnl_val, row, col=1,
-                         color="#d2991d", size=9, hovertext=""):
+                         color="#d2991d", size=9, hovertext="") -> None:
     """统一的入场标记（三角形）。"""
     if not (0 <= bar_idx < len(t)):
         return
@@ -276,7 +277,7 @@ def _render_entry_marker(fig, t, bar_idx, pnl_val, row, col=1,
 def _render_exit_marker_with_label(fig, t, bar_idx, pnl_val, row, col=1,
                                    color="#d2991d", trade_type="long",
                                    exit_reason="", ret_pct=0.0,
-                                   hovertext=""):
+                                   hovertext="") -> None:
     """统一的离场标记（止损=x / 止盈=circle）+ 盈亏标注。"""
     if not (0 <= bar_idx < len(t)):
         return
@@ -308,7 +309,7 @@ def _render_exit_marker_with_label(fig, t, bar_idx, pnl_val, row, col=1,
 def _render_pnl_curves(fig, t, long_filtered, short_filtered, row, col=1,
                        long_color="#3fb950", short_color="#f85149",
                        long_name="做多PnL", short_name="做空PnL",
-                       show_legend=False):
+                       show_legend=False) -> None:
     """为子图渲染橙色/绿色PnL基线曲线。"""
     fig.add_trace(go.Scatter(
         x=t, y=long_filtered,
@@ -324,14 +325,14 @@ def _render_pnl_curves(fig, t, long_filtered, short_filtered, row, col=1,
     ), row=row, col=col)
 
 
-def _render_baseline(fig, row, col=1, y=100, opacity=0.5):
+def _render_baseline(fig, row, col=1, y=100, opacity=0.5) -> None:
     """渲染100基准线。"""
     fig.add_hline(y=y, line_dash="dash", line_color="gray",
                   opacity=opacity, row=row, col=col)
 
 
 def _render_fill_background(fig, t, y_values, row, col=1,
-                            color="rgba(63,185,80,0.04)", baseline=100):
+                            color="rgba(63,185,80,0.04)", baseline=100) -> None:
     """渲染PnL区域半透明背景。"""
     y_max = max(float(np.nanmax(y_values)), baseline) * 1.02
     fig.add_trace(go.Scatter(
@@ -346,7 +347,7 @@ def _render_fill_background(fig, t, y_values, row, col=1,
 # ---------------------------------------------------------------------------
 # Cross-period PnL reference subplot
 # ---------------------------------------------------------------------------
-def _add_cross_pnl_subplot(fig, t, aligned, row, higher_tf=""):
+def _add_cross_pnl_subplot(fig, t, aligned, row, higher_tf="") -> None:
     """在指定row添加高周期PnL参考子图（事件标记+参考线+盈亏标注）。"""
     color_long = "#3fb950"
     color_short = "#f85149"
@@ -395,7 +396,7 @@ def _add_cross_pnl_subplot(fig, t, aligned, row, higher_tf=""):
 
 
 def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
-                           long_mask, short_mask, row):
+                           long_mask, short_mask, row) -> None:
     """同向性判断子图：高周期持仓时sample，非持仓时hold。"""
     n = len(t)
 
