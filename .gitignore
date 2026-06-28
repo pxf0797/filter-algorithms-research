@@ -16,3 +16,6 @@ data/snapshots/
 data/*.db
 .env
 .gstack/
+.coverage
+htmlcov/
+.pytest_cache/
