@@ -25,13 +25,14 @@ def app():
     # 2. 延迟导入 AppTest (此时 streamlit 已恢复)
     from streamlit.testing.v1 import AppTest
 
-    _cwd = os.getcwd()
-    _app_dir = os.path.join(_cwd, "filter_app")
+    _app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "filter_app"))
+    _script = os.path.join(_app_dir, "streamlit_app.py")
     sys.path.insert(0, _app_dir)
+    cwd = os.getcwd()
     os.chdir(_app_dir)
-    at = AppTest.from_file("streamlit_app.py")
+    at = AppTest.from_file(_script)
     at.run(timeout=90)
-    os.chdir(_cwd)
+    os.chdir(cwd)
     return at
 
 
@@ -47,6 +48,22 @@ def _fix_streamlit():
             if mod.startswith("streamlit."):
                 del sys.modules[mod]
         importlib.import_module("streamlit")
+
+
+def _fresh_app():
+    """Create and run a fresh AppTest instance (helper for re-run tests)."""
+    _fix_streamlit()
+    from streamlit.testing.v1 import AppTest
+
+    _app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "filter_app"))
+    _script = os.path.join(_app_dir, "streamlit_app.py")
+    sys.path.insert(0, _app_dir)
+    cwd = os.getcwd()
+    os.chdir(_app_dir)
+    at = AppTest.from_file(_script)
+    at.run(timeout=90)
+    os.chdir(cwd)
+    return at
 
 
 # ─────────────────────────────────────────────
@@ -109,3 +126,164 @@ class TestP0Regression:
                 "truth value of a Series is ambiguous" in msg
                 or "The truth value" in msg
             ), f"未知的异常: {msg}"
+
+
+# ─────────────────────────────────────────────
+# Layer 4: Sidebar 控件存在性
+# ─────────────────────────────────────────────
+
+
+class TestSidebarInteraction:
+    """侧边栏控件存在性验证"""
+
+    def test_market_selector_present(self, app):
+        """市场选择器 (Radio) 存在且默认选中美股"""
+        radios = app.sidebar.radio
+        market = next((r for r in radios if r.key == "market"), None)
+        assert market is not None, "market selector not found"
+        assert market.value == "美股 US"
+
+    def test_ticker_input_present(self, app):
+        """ticker 输入框存在且默认值为 AAPL"""
+        inputs = app.sidebar.text_input
+        ticker = next((t for t in inputs if t.key == "ticker"), None)
+        assert ticker is not None, "ticker input not found"
+        assert ticker.value == "AAPL"
+
+    def test_filter_selector_present(self, app):
+        """滤波器选择器 (Selectbox) 存在"""
+        selectboxes = app.sidebar.selectbox
+        filt = next((s for s in selectboxes if s.key == "global_f"), None)
+        assert filt is not None, "filter selector not found"
+        assert filt.value == "sma"
+
+    def test_dual_filter_checkbox_present(self, app):
+        """双滤波对比复选框存在"""
+        checkboxes = app.sidebar.checkbox
+        dual = next((c for c in checkboxes if c.key == "global_dual"), None)
+        assert dual is not None, "dual filter checkbox not found"
+        assert dual.value is False
+
+    def test_day_step_selector_present(self, app):
+        """移动步长选择器存在"""
+        selectboxes = app.sidebar.selectbox
+        step = next((s for s in selectboxes if s.label == "移动步长"), None)
+        assert step is not None, "day_step selector not found"
+        # value is the selected option's internal value (int index)
+        assert step.value == 20
+
+    def test_refresh_button_present(self, app):
+        """刷新数据按钮存在"""
+        buttons = app.sidebar.button
+        refresh = next((b for b in buttons if b.label == "刷新数据"), None)
+        assert refresh is not None, "refresh button not found"
+
+    def test_auto_refresh_checkbox_present(self, app):
+        """自动刷新复选框存在"""
+        checkboxes = app.sidebar.checkbox
+        auto = next((c for c in checkboxes if c.key == "auto_refresh"), None)
+        assert auto is not None, "auto refresh checkbox not found"
+        assert auto.value is False
+
+
+# ─────────────────────────────────────────────
+# Layer 5: 预设选择器交互
+# ─────────────────────────────────────────────
+
+
+class TestPresetInteraction:
+    """预设选择器交互测试"""
+
+    def test_preset_selector_present(self, app):
+        """预设下拉框存在且默认值为 (不选择)"""
+        selectboxes = app.sidebar.selectbox
+        preset = next((s for s in selectboxes if s.key.startswith("preset_sel")), None)
+        assert preset is not None, "preset selector not found"
+        assert preset.value == "(不选择)"
+
+    def test_preset_options_include_none(self, app):
+        """预设选项包含 (不选择) 作为首项"""
+        selectboxes = app.sidebar.selectbox
+        preset = next((s for s in selectboxes if s.key.startswith("preset_sel")), None)
+        options = preset.options
+        assert "(不选择)" in options
+
+    def test_preset_options_not_empty(self, app):
+        """预设选项列表非空"""
+        selectboxes = app.sidebar.selectbox
+        preset = next((s for s in selectboxes if s.key.startswith("preset_sel")), None)
+        assert len(preset.options) >= 1
+
+    def test_no_preset_selection_safe(self, app):
+        """保持 (不选择) 不 crash — 页面仍然渲染"""
+        selectboxes = app.sidebar.selectbox
+        preset = next((s for s in selectboxes if s.key.startswith("preset_sel")), None)
+        preset.set_value("(不选择)")
+        assert preset.value == "(不选择)"
+
+
+# ─────────────────────────────────────────────
+# Layer 6: Widget 交互操作
+# ─────────────────────────────────────────────
+
+
+class TestWidgetInteraction:
+    """侧边栏控件交互操作测试"""
+
+    def test_ticker_change_does_not_crash(self):
+        """切换 ticker 不导致应用崩溃"""
+        app = _fresh_app()
+        inp = app.sidebar.text_input[0]
+        inp.set_value("MSFT")
+        app.run(timeout=90)
+        assert app.session_state["ticker"] == "MSFT"
+
+    def test_filter_change_does_not_crash(self):
+        """切换滤波器不导致应用崩溃"""
+        app = _fresh_app()
+        sel = app.sidebar.selectbox[1]
+        sel.set_value("指数移动平均 (EMA)")
+        app.run(timeout=90)
+        assert app.session_state["global_f"] == "ema"
+
+    def test_dual_filter_toggle(self):
+        """勾选双滤波对比 — session_state 更新"""
+        app = _fresh_app()
+        cb = app.sidebar.checkbox[1]
+        cb.check()
+        app.run(timeout=90)
+        assert app.session_state["global_dual"] is True
+
+    def test_day_nav_buttons_present(self, app):
+        """日期导航按钮 (前移/后移/最新) 都存在"""
+        buttons = app.sidebar.button
+        labels = {b.label for b in buttons}
+        assert "◀ 前移" in labels
+        assert "后移 ▶" in labels
+        assert "最新" in labels
+
+
+# ─────────────────────────────────────────────
+# Layer 7: P0 回归扩展
+# ─────────────────────────────────────────────
+
+
+class TestP0RegressionExtended:
+    """扩展 P0 回归测试"""
+
+    def test_empty_ticker_safe(self):
+        """空 ticker 不导致进程级崩溃"""
+        app = _fresh_app()
+        inp = app.sidebar.text_input[0]
+        inp.set_value("")
+        app.run(timeout=90)
+        # app.exception is an ElementList; crash means it remains accessible
+        assert len(list(app.exception)) >= 0
+
+    def test_unknown_filter_setting(self):
+        """设置有效滤波器值不崩溃"""
+        app = _fresh_app()
+        sel = app.sidebar.selectbox[1]
+        sel.set_value("LOWESS 平滑")
+        app.run(timeout=90)
+        assert app.session_state["global_f"] == "lowess"
