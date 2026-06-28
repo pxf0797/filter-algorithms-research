@@ -14,6 +14,7 @@ from scipy.signal import savgol_filter, butter, sosfiltfilt, medfilt
 from scipy.ndimage import gaussian_filter1d
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from pandas import DataFrame
+from typing import Any, Dict, List, Optional, Tuple
 
 
 # ---------------------------------------------------------------------------
@@ -22,7 +23,7 @@ from pandas import DataFrame
 #   filter_func(noisy, t, **param_values)
 # ---------------------------------------------------------------------------
 
-def apply_sma(signal, t, window):
+def apply_sma(signal: np.ndarray, t: np.ndarray, window: int) -> np.ndarray:
     """简单移动平均 (Simple Moving Average)."""
     if window % 2 == 0:
         window += 1
@@ -30,12 +31,12 @@ def apply_sma(signal, t, window):
     return np.convolve(signal, kernel, mode="same")
 
 
-def apply_ema(signal, t, span):
+def apply_ema(signal: np.ndarray, t: np.ndarray, span: int) -> np.ndarray:
     """指数移动平均 (Exponential Moving Average) via pandas ewm."""
     return DataFrame({"v": signal}).ewm(span=span, adjust=False).mean().values.flatten()
 
 
-def apply_wma(signal, t, window):
+def apply_wma(signal: np.ndarray, t: np.ndarray, window: int) -> np.ndarray:
     """加权移动平均 (Weighted Moving Average)."""
     if window % 2 == 0:
         window += 1
@@ -44,7 +45,7 @@ def apply_wma(signal, t, window):
     return np.convolve(signal, weights, mode="same")
 
 
-def apply_alma(signal, t, window, offset, sigma):
+def apply_alma(signal: np.ndarray, t: np.ndarray, window: int, offset: float, sigma: float) -> np.ndarray:
     """Arnaud Legoux 移动平均 (ALMA)."""
     if window % 2 == 0:
         window += 1
@@ -56,7 +57,7 @@ def apply_alma(signal, t, window, offset, sigma):
     return np.convolve(signal, weights, mode="same")
 
 
-def apply_savgol(signal, t, window, order):
+def apply_savgol(signal: np.ndarray, t: np.ndarray, window: int, order: int) -> np.ndarray:
     """Savitzky-Golay 滤波 (多项式平滑)."""
     if window % 2 == 0:
         window += 1
@@ -65,7 +66,7 @@ def apply_savgol(signal, t, window, order):
     return savgol_filter(signal, window, order)
 
 
-def apply_kalman(signal, t, Q, R):
+def apply_kalman(signal: np.ndarray, t: np.ndarray, Q: float, R: float) -> np.ndarray:
     """1D 恒定速度卡尔曼滤波."""
     dt = t[1] - t[0]
     n = len(signal)
@@ -90,7 +91,7 @@ def apply_kalman(signal, t, Q, R):
     return result
 
 
-def apply_butterworth(signal, t, order, cutoff):
+def apply_butterworth(signal: np.ndarray, t: np.ndarray, order: int, cutoff: float) -> np.ndarray:
     """巴特沃斯低通滤波 (零相位)."""
     nyquist = 0.5  # stock: bar index dt≈1, fs=1, nyquist=0.5
     if cutoff >= nyquist:
@@ -99,19 +100,19 @@ def apply_butterworth(signal, t, order, cutoff):
     return sosfiltfilt(sos, signal)
 
 
-def apply_gaussian(signal, t, sigma):
+def apply_gaussian(signal: np.ndarray, t: np.ndarray, sigma: float) -> np.ndarray:
     """高斯滤波 (scipy.ndimage)."""
     return gaussian_filter1d(signal, sigma)
 
 
-def apply_median(signal, t, window):
+def apply_median(signal: np.ndarray, t: np.ndarray, window: int) -> np.ndarray:
     """中值滤波."""
     if window % 2 == 0:
         window += 1
     return medfilt(signal, kernel_size=window)
 
 
-def apply_lowess(signal, t, frac):
+def apply_lowess(signal: np.ndarray, t: np.ndarray, frac: float) -> np.ndarray:
     """LOWESS 局部加权回归平滑."""
     result = lowess(signal, t, frac=frac, return_sorted=False)
     # return_sorted=False returns a 1-D array of smoothed y-values
@@ -192,7 +193,7 @@ FILTERS = {
 # ---------------------------------------------------------------------------
 # Metrics computation
 # ---------------------------------------------------------------------------
-def compute_metrics(clean, noisy, filtered):
+def compute_metrics(clean: np.ndarray, noisy: np.ndarray, filtered: np.ndarray) -> Dict[str, Any]:
     """计算 6 项滤波质量指标."""
     valid = ~np.isnan(filtered) & ~np.isnan(clean) & ~np.isnan(noisy)
     c, n, f = clean[valid], noisy[valid], filtered[valid]
@@ -228,7 +229,8 @@ def compute_metrics(clean, noisy, filtered):
 # Schmitt Trigger computation (ref: 多周期趋势策略V2_优化4 §二, chart ④⑥)
 # Inputs: v (velocity = d(filtered)/dt) as momentum, a (d²/dt²) as acceleration
 # ---------------------------------------------------------------------------
-def _schmitt_trigger(v, a, ewma_span=60, k_eps=0.15, sigma_min=0.05):
+def _schmitt_trigger(v: np.ndarray, a: np.ndarray, ewma_span: int = 60,
+                     k_eps: float = 0.15, sigma_min: float = 0.05) -> Optional[Dict[str, Any]]:
     """Schmitt trigger: adaptive deadband on acceleration (a),
     with velocity (v) as direction constraint.
 
@@ -293,7 +295,7 @@ def _schmitt_trigger(v, a, ewma_span=60, k_eps=0.15, sigma_min=0.05):
             "eps": eps_t, "sig": sig_t, "dur": dur_t}
 
 
-def _find_all_pairs(sig_t):
+def _find_all_pairs(sig_t: np.ndarray) -> List[Tuple[int, int]]:
     """扫描 sig_t，找出窗口中所有多空切换对。
     规则：合并相邻同号段（+1,0,+1 → 一个连续段），异号配对。
     起始于首次入场边缘，经过中间的同向多次入场+观望，止于相反信号入口。
@@ -339,7 +341,7 @@ def _find_all_pairs(sig_t):
     return pairs
 
 
-def _fit_parabolic(x, y, start, end):
+def _fit_parabolic(x: np.ndarray, y: np.ndarray, start: int, end: int) -> Optional[Dict[str, Any]]:
     """对 y[start:end+1] 做二次多项式拟合。
     返回 dict {a, b, c, y_fit} 或 None（数据不足）。"""
     x_seg = x[start:end + 1]
@@ -351,7 +353,7 @@ def _fit_parabolic(x, y, start, end):
     return {"a": coeffs[0], "b": coeffs[1], "c": coeffs[2], "y_fit": y_fit}
 
 
-def _fit_physics_parabola(x, y, start, end):
+def _fit_physics_parabola(x: np.ndarray, y: np.ndarray, start: int, end: int) -> Optional[Dict[str, Any]]:
     """抛物线拟合 — 锚定对终点为顶点，y = a·(x-x₀)² + y₀。
     顶点 (x₀,y₀) = (x[end], y[end]) 固定，仅拟合曲率 a。
     预测段 = 抛物线右半（与左半对称）。"""
@@ -372,8 +374,11 @@ def _fit_physics_parabola(x, y, start, end):
     return {"a": a, "b": 0.0, "c": y0, "y_fit": y_fit, "x0": x0}
 
 
-def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
-                          stop_loss_pct, n_extend=10):
+def _compute_strategy_pnl(
+    t: np.ndarray, filtered: np.ndarray, sig_t: np.ndarray,
+    all_pairs: List[Tuple[int, int]], pred_pairs: List[Dict[str, Any]],
+    stop_loss_pct: float, n_extend: int = 10,
+) -> Tuple[np.ndarray, np.ndarray, List[Dict[str, Any]]]:
     """基于施密特触发器信号和预测曲线方向计算策略PnL。
 
     返回两条独立曲线：
@@ -574,8 +579,11 @@ def _compute_strategy_pnl(t, filtered, sig_t, all_pairs, pred_pairs,
 # Cross-period PnL alignment helpers
 # ---------------------------------------------------------------------------
 
-def _align_pnl_to_current_tf(higher_dates, higher_pnl_long, higher_pnl_short,
-                              higher_trades, current_dates):
+def _align_pnl_to_current_tf(
+    higher_dates: pd.DatetimeIndex, higher_pnl_long: np.ndarray,
+    higher_pnl_short: np.ndarray, higher_trades: List[Dict[str, Any]],
+    current_dates: pd.DatetimeIndex,
+) -> Dict[str, Any]:
     """将高周期PnL数据按时间戳前向填充对齐到当前周期时间轴。
 
     Args:
@@ -605,7 +613,7 @@ def _align_pnl_to_current_tf(higher_dates, higher_pnl_long, higher_pnl_short,
 
     # 统一时区：日内数据带时区(HKT)，日线/周线无时区
     # np.datetime64 无法直接比较 tz-aware 和 tz-naive，需先归一化
-    def _normalize_dates(dates):
+    def _normalize_dates(dates: pd.DatetimeIndex) -> np.ndarray:
         """去掉时区信息，按各自字面值比较（日期级对齐）"""
         result = pd.DatetimeIndex(dates)
         if result.tz is not None:
@@ -661,7 +669,10 @@ def _align_pnl_to_current_tf(higher_dates, higher_pnl_long, higher_pnl_short,
     }
 
 
-def _compute_holding_masks(n_bars, entry_markers, exit_markers):
+def _compute_holding_masks(
+    n_bars: int, entry_markers: List[Tuple[int, str, float]],
+    exit_markers: List[Tuple[int, str, float, float, str]],
+) -> Tuple[np.ndarray, np.ndarray]:
     """从高周期入场/离场marker计算持仓区间掩码。
 
     Args:

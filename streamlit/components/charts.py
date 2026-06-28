@@ -63,7 +63,8 @@ def _render_plotly(fig, height=750, dates=None):
 <html>
 <head>
 <meta charset="utf-8">
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"
+    onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js'"></script>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 html, body {{ width: 100%; height: 100%; overflow: hidden; }}
@@ -235,6 +236,95 @@ def _add_prediction_traces(fig, t, filtered, fit_result, fit_start, pair_end, ro
 
 
 # ---------------------------------------------------------------------------
+# Shared PnL rendering helpers
+# ---------------------------------------------------------------------------
+def _render_entry_marker(fig, t, bar_idx, pnl_val, row, col=1,
+                         color="#d2991d", size=9, hovertext=""):
+    """统一的入场标记（三角形）。"""
+    if not (0 <= bar_idx < len(t)):
+        return
+    fig.add_trace(go.Scatter(
+        x=[t[bar_idx]], y=[pnl_val],
+        mode="markers",
+        marker=dict(color=color, symbol="triangle-up", size=size,
+                    line=dict(width=1, color="rgba(0,0,0,0.3)")),
+        showlegend=False,
+        hovertext=hovertext,
+        hoverinfo="text",
+    ), row=row, col=col)
+
+
+def _render_exit_marker_with_label(fig, t, bar_idx, pnl_val, row, col=1,
+                                   color="#d2991d", trade_type="long",
+                                   exit_reason="", ret_pct=0.0,
+                                   hovertext=""):
+    """统一的离场标记（止损=x / 止盈=circle）+ 盈亏标注。"""
+    if not (0 <= bar_idx < len(t)):
+        return
+    is_sl = exit_reason == "stop_loss"
+    sym = "x" if is_sl else "circle"
+    ec = "#f85149" if is_sl else "#3fb950"
+    fig.add_trace(go.Scatter(
+        x=[t[bar_idx]], y=[pnl_val],
+        mode="markers",
+        marker=dict(color=color, symbol=sym, size=9,
+                    line=dict(width=1, color=ec)),
+        showlegend=False,
+        hovertext=hovertext,
+        hoverinfo="text",
+    ), row=row, col=col)
+
+    label_color = "#f85149" if is_sl else "#3fb950"
+    arrow = "↑" if trade_type == "long" else "↓"
+    fig.add_annotation(
+        x=t[bar_idx], y=pnl_val,
+        text=f"{arrow}{ret_pct:+.1f}%",
+        showarrow=False,
+        font=dict(size=8, color=label_color),
+        yshift=12,
+        row=row, col=col,
+    )
+
+
+def _render_pnl_curves(fig, t, long_filtered, short_filtered, row, col=1,
+                       long_color="#3fb950", short_color="#f85149",
+                       long_name="做多PnL", short_name="做空PnL",
+                       show_legend=False):
+    """为子图渲染橙色/绿色PnL基线曲线。"""
+    fig.add_trace(go.Scatter(
+        x=t, y=long_filtered,
+        mode="lines", name=long_name,
+        line=dict(color=long_color, width=1.5, dash="solid"),
+        showlegend=show_legend,
+    ), row=row, col=col)
+    fig.add_trace(go.Scatter(
+        x=t, y=short_filtered,
+        mode="lines", name=short_name,
+        line=dict(color=short_color, width=1.5, dash="solid"),
+        showlegend=show_legend,
+    ), row=row, col=col)
+
+
+def _render_baseline(fig, row, col=1, y=100, opacity=0.5):
+    """渲染100基准线。"""
+    fig.add_hline(y=y, line_dash="dash", line_color="gray",
+                  opacity=opacity, row=row, col=col)
+
+
+def _render_fill_background(fig, t, y_values, row, col=1,
+                            color="rgba(63,185,80,0.04)", baseline=100):
+    """渲染PnL区域半透明背景。"""
+    y_max = max(float(np.nanmax(y_values)), baseline) * 1.02
+    fig.add_trace(go.Scatter(
+        x=[t[0], t[-1], t[-1], t[0]],
+        y=[baseline, baseline, y_max, y_max],
+        fill="toself", fillcolor=color,
+        mode="lines", line=dict(width=0),
+        showlegend=False, hoverinfo="skip",
+    ), row=row, col=col)
+
+
+# ---------------------------------------------------------------------------
 # Cross-period PnL reference subplot
 # ---------------------------------------------------------------------------
 def _add_cross_pnl_subplot(fig, t, aligned, row, higher_tf=""):
@@ -266,49 +356,23 @@ def _add_cross_pnl_subplot(fig, t, aligned, row, higher_tf=""):
 
     # 入场标记（▲三角形）
     for bar_idx, trade_type, pnl_val in aligned["entry_markers"]:
-        if 0 <= bar_idx < len(t):
-            fig.add_trace(go.Scatter(
-                x=[t[bar_idx]], y=[pnl_val],
-                mode="markers",
-                marker=dict(color=marker_color, symbol="triangle-up", size=9,
-                            line=dict(width=1, color="rgba(0,0,0,0.3)")),
-                showlegend=False,
-                hovertext=f"{tf_label}入场 {'多' if trade_type == 'long' else '空'}",
-                hoverinfo="text",
-            ), row=row, col=1)
+        _render_entry_marker(
+            fig, t, bar_idx, pnl_val, row,
+            color=marker_color, size=9,
+            hovertext=f"{tf_label}入场 {'多' if trade_type == 'long' else '空'}",
+        )
 
     # 离场标记 + 盈亏标注
     for bar_idx, trade_type, pnl_val, ret_pct, exit_reason in aligned["exit_markers"]:
-        if not (0 <= bar_idx < len(t)):
-            continue
-        is_sl = exit_reason == "stop_loss"
-        sym = "x" if is_sl else "circle"
-        ec = color_short if is_sl else color_long
-        fig.add_trace(go.Scatter(
-            x=[t[bar_idx]], y=[pnl_val],
-            mode="markers",
-            marker=dict(color=marker_color, symbol=sym, size=9,
-                        line=dict(width=1, color=ec)),
-            showlegend=False,
+        _render_exit_marker_with_label(
+            fig, t, bar_idx, pnl_val, row,
+            color=marker_color, trade_type=trade_type,
+            exit_reason=exit_reason, ret_pct=ret_pct,
             hovertext=f"{tf_label}离场 {'多' if trade_type == 'long' else '空'} | {ret_pct:+.2f}%",
-            hoverinfo="text",
-        ), row=row, col=1)
-
-        # 盈亏数字标注
-        label_color = "#f85149" if exit_reason == "stop_loss" else "#3fb950"
-        arrow = "↑" if trade_type == "long" else "↓"
-        fig.add_annotation(
-            x=t[bar_idx], y=pnl_val,
-            text=f"{arrow}{ret_pct:+.1f}%",
-            showarrow=False,
-            font=dict(size=8, color=label_color),
-            yshift=12,
-            row=row, col=1,
         )
 
     # 100基准线
-    fig.add_hline(y=100, line_dash="dash", line_color="gray",
-                  opacity=0.4, row=row, col=1)
+    _render_baseline(fig, row, opacity=0.4)
 
 
 def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
@@ -322,12 +386,6 @@ def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
             long_filtered[i] = long_filtered[i - 1] * (long_pnl[i] / long_pnl[i - 1])
         else:
             long_filtered[i] = long_filtered[i - 1]
-    fig.add_trace(go.Scatter(
-        x=t, y=long_filtered,
-        mode="lines", name="做多PnL",
-        line=dict(color="#3fb950", width=1.5, dash="solid"),
-        showlegend=False,
-    ), row=row, col=1)
 
     short_filtered = np.full(n, 100.0)
     for i in range(1, n):
@@ -335,12 +393,8 @@ def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
             short_filtered[i] = short_filtered[i - 1] * (short_pnl[i] / short_pnl[i - 1])
         else:
             short_filtered[i] = short_filtered[i - 1]
-    fig.add_trace(go.Scatter(
-        x=t, y=short_filtered,
-        mode="lines", name="做空PnL",
-        line=dict(color="#f85149", width=1.5, dash="solid"),
-        showlegend=False,
-    ), row=row, col=1)
+
+    _render_pnl_curves(fig, t, long_filtered, short_filtered, row)
 
     for trade in trade_records:
         is_long = trade["type"] == "long"
@@ -366,50 +420,21 @@ def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
         ), row=row, col=1)
 
         if mask[entry_i]:
-            fig.add_trace(go.Scatter(
-                x=[seg_t[0]], y=[seg_pnl[0]],
-                mode="markers",
-                marker=dict(color=color, symbol="triangle-up", size=8),
-                showlegend=False,
-            ), row=row, col=1)
-
-        if trade["exit_reason"] in ("stop_loss", "take_profit") and mask[exit_i]:
-            exit_marker = "x" if trade["exit_reason"] == "stop_loss" else "circle"
-            exit_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
-            fig.add_trace(go.Scatter(
-                x=[seg_t[-1]], y=[seg_pnl[-1]],
-                mode="markers",
-                marker=dict(color=exit_color, symbol=exit_marker, size=8),
-                showlegend=False,
-            ), row=row, col=1)
-            ret_pct = trade["return_pct"]
-            label_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
-            arrow = "↑" if trade["type"] == "long" else "↓"
-            fig.add_annotation(
-                x=seg_t[-1], y=seg_pnl[-1],
-                text=f"{arrow}{ret_pct:+.1f}%",
-                showarrow=False,
-                font=dict(size=8, color=label_color),
-                yshift=12,
-                row=row, col=1,
+            _render_entry_marker(
+                fig, seg_t, 0, seg_pnl[0], row,
+                color=color, size=8,
             )
 
-    y_max_l = max(float(np.nanmax(long_filtered)), 100.0) * 1.02
-    fig.add_trace(go.Scatter(
-        x=[t[0], t[-1], t[-1], t[0]],
-        y=[100, 100, y_max_l, y_max_l],
-        fill="toself", fillcolor="rgba(63,185,80,0.04)",
-        mode="lines", line=dict(width=0),
-        showlegend=False, hoverinfo="skip",
-    ), row=row, col=1)
-    y_min_s = min(float(np.nanmin(short_filtered)), 100.0) * 0.98
-    fig.add_trace(go.Scatter(
-        x=[t[0], t[-1], t[-1], t[0]],
-        y=[100, 100, y_min_s, y_min_s],
-        fill="toself", fillcolor="rgba(248,81,73,0.04)",
-        mode="lines", line=dict(width=0),
-        showlegend=False, hoverinfo="skip",
-    ), row=row, col=1)
+        if trade["exit_reason"] in ("stop_loss", "take_profit") and mask[exit_i]:
+            _render_exit_marker_with_label(
+                fig, seg_t, -1, seg_pnl[-1], row,
+                color=color, trade_type=trade["type"],
+                exit_reason=trade["exit_reason"], ret_pct=trade["return_pct"],
+            )
 
-    fig.add_hline(y=100, line_dash="dash", line_color="gray",
-                  opacity=0.5, row=row, col=1)
+    _render_fill_background(fig, t, long_filtered, row,
+                            color="rgba(63,185,80,0.04)", baseline=100)
+    _render_fill_background(fig, t, short_filtered, row,
+                            color="rgba(248,81,73,0.04)", baseline=100)
+
+    _render_baseline(fig, row, opacity=0.5)

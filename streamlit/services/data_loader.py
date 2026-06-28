@@ -10,10 +10,11 @@ import yfinance as yf
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
+from typing import Any, Dict, Optional, Tuple
 from db import upsert_kline, query_kline
 
 
-def _fetch_all_timeframes(market, code):
+def _fetch_all_timeframes(market: str, code: str) -> Dict[str, Tuple[bool, Any]]:
     """获取某股票全部8个周期的数据，并行写入DB。返回成功/失败统计。"""
     tf_config = {
         "1分钟": ("7d",), "5分钟": ("60d",), "15分钟": ("60d",),
@@ -21,7 +22,7 @@ def _fetch_all_timeframes(market, code):
         "月线": ("max",), "季线": ("max",),
     }
 
-    def _fetch_one(tf):
+    def _fetch_one(tf: str) -> Tuple[str, bool, Any]:
         force_period = tf_config[tf][0]
         try:
             t, close, ohlc, full, err, dates = _fetch_stock(market, code, tf, 99999, force_period=force_period)
@@ -41,7 +42,8 @@ def _fetch_all_timeframes(market, code):
     return results
 
 
-def _fetch_stock(market, code, tf, n_pts, force_period=None):
+def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
+                 force_period: Optional[str] = None) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[pd.DataFrame], Optional[str], Optional[str], Optional[pd.DatetimeIndex]]:
     """从yfinance获取股票数据并写入DB。返回 (t, close, ohlc, full, err, dates)。"""
     if market == "A股(沪深)":
         suffix = ".SS" if code[0] == "6" else ".SZ"
@@ -132,7 +134,7 @@ def _fetch_stock(market, code, tf, n_pts, force_period=None):
     return np.arange(n, dtype=float), close, result_ohlc, full, None, dates
 
 
-def _sync_to_display(code, tf, day_offset, n_pts):
+def _sync_to_display(code: str, tf: str, day_offset: int, n_pts: int) -> Tuple[bool, int]:
     """从 SQLite 按天偏移查询，写入 display parquet。"""
     df = query_kline(code, tf, n_pts, day_offset=day_offset)
     if len(df) < 5:
@@ -144,7 +146,7 @@ def _sync_to_display(code, tf, day_offset, n_pts):
     return True, len(df)
 
 
-def _stock_name_lookup(market, code):
+def _stock_name_lookup(market: str, code: str) -> str:
     """查询股票名称。"""
     try:
         if market == "A股(沪深)":

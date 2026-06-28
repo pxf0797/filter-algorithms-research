@@ -57,33 +57,53 @@ st.set_page_config(
 
 
 # =====================================================================
-# Chart rendering (main figure builder — kept in entry file due to deep
-# Streamlit + plotly coupling with UI state)
+# Chart rendering — sub-functions extracted from _render_chart
 # =====================================================================
 
-@st.fragment
-def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None):
-    """Fragment wrapper for _render_chart — enables per-view independent re-rendering."""
-    _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl)
+
+def _date_markers(dates, tf):
+    """Return (positions, labels) for vertical date markers."""
+    if dates is None or len(dates) == 0:
+        return [], []
+    positions, labels = [], []
+    n = len(dates)
+    if tf in ("1分钟", "5分钟", "15分钟", "60分钟"):
+        prev_d = None
+        for i, d in enumerate(dates):
+            day = d.date() if hasattr(d, 'date') else pd.Timestamp(d).date()
+            if prev_d is not None and day != prev_d:
+                positions.append(i)
+                labels.append(day.strftime("%m/%d"))
+            prev_d = day
+    elif tf == "日线":
+        for i, d in enumerate(dates):
+            if d.weekday() == 0:
+                positions.append(i)
+                labels.append(d.strftime("%m/%d"))
+    elif tf == "周线":
+        prev_m = None
+        for i, d in enumerate(dates):
+            m = d.month
+            if prev_m is not None and m != prev_m:
+                positions.append(i)
+                labels.append(d.strftime("%m/%d"))
+            prev_m = m
+    elif tf == "月线":
+        for i, d in enumerate(dates):
+            if d.month == 1:
+                positions.append(i)
+                labels.append(d.strftime("%Y"))
+    else:  # 季线
+        for i, d in enumerate(dates):
+            if d.month == 1:
+                positions.append(i)
+                labels.append(d.strftime("%Y"))
+    return positions, labels
 
 
-def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None):
-    """Fetch data + render multi-subplot figure from config.
-    优先从本地 Parquet 读取；day_offset=向历史前移N天（各周期独立对齐）。
-    higher_pnl: 高周期PnL数据（来自 _align_pnl_to_current_tf 的输出），非空时新增row 7子图。"""
-    tf = cfg["tf"]
-    n_pts = cfg["n_pts"]
-    logger.debug(f"Rendering chart: {ticker_code}/{tf} view={key} n_pts={n_pts}")
-
-    # 查找紧邻高周期tf，尝试从session_state获取其PnL数据
-    _higher_tf = TF_HIERARCHY.get(tf)
-    _raw_higher = None
-    if higher_pnl is None and _higher_tf is not None:
-        _raw_higher = st.session_state.get(f"_pnl_{_higher_tf}")
-
-    # ── 数据获取：DB → display → 渲染 ──
+def _load_chart_data(market, ticker_code, tf, day_offset, n_pts):
+    """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err)."""
     _sync_to_display(ticker_code, tf, day_offset, n_pts)
-
     display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
     err = None
     if display_path.exists():
@@ -94,71 +114,19 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
                 df = df.set_index("Date").sort_index()
                 t = np.arange(len(df), dtype=float)
                 noisy = df["Close"].values.ravel()
-                ohlc = df[["Open","High","Low","Close"]] if all(c in df.columns for c in ["Open","High","Low"]) else pd.DataFrame({"Open":noisy,"High":noisy,"Low":noisy,"Close":noisy}, index=df.index)
-                ticker_full = ticker_code
-                dates = df.index
+                ohlc = df[["Open", "High", "Low", "Close"]] if all(c in df.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=df.index)
+                return t, noisy, ohlc, ticker_code, df.index, None
             else:
                 err = "数据不足"
         except Exception as e:
             err = str(e)
-    else:
-        t, noisy, ohlc, ticker_full, err, dates = _fetch_stock(market, ticker_code, tf, n_pts)
-
     if err:
-        st.error(err)
-        return
+        return None, None, None, None, None, err
+    return _fetch_stock(market, ticker_code, tf, n_pts)
 
-    # ── Date markers: vertical dashed lines + tick labels ──
-    def _date_markers(dates, tf):
-        """Return (positions, labels) for vertical date markers."""
-        if dates is None or len(dates) == 0:
-            return [], []
-        positions, labels = [], []
-        n = len(dates)
-        if tf in ("1分钟", "5分钟", "15分钟", "60分钟"):
-            prev_d = None
-            for i, d in enumerate(dates):
-                day = d.date() if hasattr(d, 'date') else pd.Timestamp(d).date()
-                if prev_d is not None and day != prev_d:
-                    positions.append(i)
-                    labels.append(day.strftime("%m/%d"))
-                prev_d = day
-        elif tf == "日线":
-            for i, d in enumerate(dates):
-                if d.weekday() == 0:
-                    positions.append(i)
-                    labels.append(d.strftime("%m/%d"))
-        elif tf == "周线":
-            prev_m = None
-            for i, d in enumerate(dates):
-                m = d.month
-                if prev_m is not None and m != prev_m:
-                    positions.append(i)
-                    labels.append(d.strftime("%m/%d"))
-                prev_m = m
-        elif tf == "月线":
-            for i, d in enumerate(dates):
-                if d.month == 1:
-                    positions.append(i)
-                    labels.append(d.strftime("%Y"))
-        else:  # 季线
-            for i, d in enumerate(dates):
-                if d.month == 1:
-                    positions.append(i)
-                    labels.append(d.strftime("%Y"))
-        return positions, labels
 
-    marker_positions, marker_labels = _date_markers(dates, cfg["tf"])
-
-    # 高周期PnL数据对齐（从session_state获取的原始数据，需要时间戳对齐）
-    if _raw_higher is not None and dates is not None:
-        higher_pnl = _align_pnl_to_current_tf(
-            _raw_higher["dates"], _raw_higher["long_pnl"], _raw_higher["short_pnl"],
-            _raw_higher["trade_records"], dates,
-        )
-    elif higher_pnl is None:
-        higher_pnl = None
-
+def _compute_filters(noisy, t, cfg):
+    """Compute primary and optional secondary filter. Returns (filtered, filtered2)."""
     sf = FILTERS[cfg["_fid"]]
     try:
         filtered = sf["func"](noisy, t, **cfg["pv"])
@@ -175,50 +143,44 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         except Exception as e:
             logger.warning(f"Filter2 {cfg['_fid2']} failed: {e}")
             filtered2 = np.full_like(noisy, np.nan)
+    return filtered, filtered2
 
-    rough = float(np.sum(np.diff(filtered,2)**2)) if len(filtered)>2 else 0.0
-    c1,c2,c3 = st.columns(3)
-    c1.caption(f"{ticker_full}·{cfg['tf']}  |  ¥{noisy[-1]:.2f}")
-    c2.caption(f"σ={noisy.std():.2f}  平滑={rough:.1f}")
-    c3.caption(f"{len(t)} 点")
 
-    # Schmitt
-    schmitt = None
-    if cfg["show_sch"] and not np.all(np.isnan(filtered)):
-        _v = np.gradient(filtered, t)
-        _a = np.gradient(_v, t)
-        logger.debug(f"Computing Schmitt trigger: ewma={cfg['ew']}, k_eps={cfg['ke']}, sigma_min={cfg['sm']}")
-        schmitt = _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
+def _compute_schmitt_trigger(filtered, t, cfg):
+    """Compute Schmitt trigger signal. Returns schmitt dict or None."""
+    if not cfg["show_sch"] or np.all(np.isnan(filtered)):
+        return None
+    _v = np.gradient(filtered, t)
+    _a = np.gradient(_v, t)
+    logger.debug(f"Computing Schmitt trigger: ewma={cfg['ew']}, k_eps={cfg['ke']}, sigma_min={cfg['sm']}")
+    return _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
 
-    if cfg["show_sch"] and schmitt is None and len(t) > 0:
-        st.warning(f"⚠️ 施密特信号不可用：bar数({len(t)}) < N_EWMA({cfg['ew']})。"
-                   f"请降低 N_EWMA 至 ≤{len(t)} 或增加数据点数(N)。")
 
-    all_pairs = []
-    if schmitt is not None:
-        all_pairs = _find_all_pairs(schmitt["sig"])
-
+def _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs):
+    """Compute prediction curves for each pair. Returns list of pred_pairs dicts."""
+    if not cfg.get("show_pred") or schmitt is None:
+        return []
     pred_pairs = []
-    if cfg.get("show_pred") and schmitt is not None:
-        logger.debug(f"Computing prediction curves: {len(all_pairs)} pairs, mode={cfg.get('fit_mode')}")
-        fit_func = _fit_physics_parabola if cfg.get("fit_mode") == "parabola" else _fit_parabolic
-        for pair_start, pair_end in all_pairs:
-            if pair_end - pair_start >= 3:
-                fit_result = fit_func(t, filtered, pair_start, pair_end)
-                if fit_result is not None:
-                    pred_pairs.append({
-                        "fit_result": fit_result,
-                        "fit_start": pair_start,
-                        "pair_end": pair_end,
-                    })
+    logger.debug(f"Computing prediction curves: {len(all_pairs)} pairs, mode={cfg.get('fit_mode')}")
+    fit_func = _fit_physics_parabola if cfg.get("fit_mode") == "parabola" else _fit_parabolic
+    for pair_start, pair_end in all_pairs:
+        if pair_end - pair_start >= 3:
+            fit_result = fit_func(t, filtered, pair_start, pair_end)
+            if fit_result is not None:
+                pred_pairs.append({
+                    "fit_result": fit_result,
+                    "fit_start": pair_start,
+                    "pair_end": pair_end,
+                })
+    return pred_pairs
 
-    long_pnl = None
-    short_pnl = None
-    trade_records = []
+
+def _compute_strategy_display(t, filtered, schmitt, all_pairs, pred_pairs, cfg, tf, dates):
+    """Compute strategy PnL and display summary captions. Returns (long_pnl, short_pnl, trade_records)."""
     show_strategy = cfg.get("show_strategy", False)
-    show_cross_pnl = cfg.get("show_cross_pnl", False)
-    show_alignment = cfg.get("show_alignment", False)
     stop_loss_pct = cfg.get("stop_loss_pct", 2.0)
+    long_pnl = short_pnl = None
+    trade_records = []
     if show_strategy and schmitt is not None and len(pred_pairs) > 0:
         logger.debug(f"Computing strategy PnL: stop_loss={stop_loss_pct}%, n_extend={cfg.get('n_ext', 10)}")
         long_pnl, short_pnl, trade_records = _compute_strategy_pnl(
@@ -242,15 +204,241 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         drawdown_s = (short_pnl - peak_s) / peak_s * 100
         max_dd_s = np.min(drawdown_s)
         c6.caption(f"多DD: {max_dd_l:.2f}% | 空DD: {max_dd_s:.2f}%")
+        st.session_state[f"_pnl_{tf}"] = {
+            "dates": dates, "t": t,
+            "long_pnl": long_pnl, "short_pnl": short_pnl,
+            "trade_records": trade_records,
+        }
+    return long_pnl, short_pnl, trade_records
 
-        if has_strategy and trade_records:
-            st.session_state[f"_pnl_{tf}"] = {
-                "dates": dates, "t": t,
-                "long_pnl": long_pnl, "short_pnl": short_pnl,
-                "trade_records": trade_records,
-            }
 
-    # Build figure
+def _determine_subplot_layout(has_s, has_strategy, has_cross, has_alignment, _higher_tf):
+    """Determine subplot layout dimensions based on enabled features.
+    Returns (rows, rh, titles, mr, rr, vr, sar, ssr, ar, pnl_row, cross_row, align_row)."""
+    if has_s:
+        if has_strategy:
+            if has_cross:
+                if has_alignment:
+                    rows = 8
+                    rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.24, 0.15, 0.12]
+                    titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}PnL参考", "同向性判断")
+                    pnl_row = 6
+                    cross_row = 7
+                    align_row = 8
+                else:
+                    rows = 7
+                    rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.27, 0.18]
+                    titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}PnL参考")
+                    pnl_row = 6
+                    cross_row = 7
+                    align_row = None
+            else:
+                rows = 6
+                rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.375]
+                titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)")
+                pnl_row = 6
+                cross_row = None
+                align_row = None
+        else:
+            rows = 5
+            rh = [0.28, 0.14, 0.18, 0.18, 0.22]
+            titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t")
+            pnl_row = None
+            cross_row = None
+            align_row = None
+        return rows, rh, titles, 1, 2, 3, 4, 5, None, pnl_row, cross_row, align_row
+    else:
+        return 4, [0.40, 0.18, 0.20, 0.22], ("价格&滤波", "残差", "速度v", "加速度a"), \
+               1, 2, 3, None, None, 4, None, None, None
+
+
+def _add_main_price_traces(fig, t, noisy, ohlc, filtered, filtered2, cfg):
+    """Add K-line, close price, and filter lines to the main price subplot."""
+    fig.add_trace(go.Candlestick(x=t, open=ohlc["Open"].values.ravel(),
+        high=ohlc["High"].values.ravel(), low=ohlc["Low"].values.ravel(),
+        close=ohlc["Close"].values.ravel(), name="K",
+        increasing_line_color="#26a69a", decreasing_line_color="#ef5350",
+        showlegend=False), row=1, col=1)
+    fig.add_trace(go.Scatter(x=t, y=noisy, mode="lines", name="收盘",
+        line=dict(color="#5f6c80", width=1.0)), row=1, col=1)
+    if not np.all(np.isnan(filtered)):
+        fig.add_trace(go.Scatter(x=t, y=filtered, mode="lines", name="滤波",
+            line=dict(color=cfg["fc"], width=2.0)), row=1, col=1)
+    if cfg["_dual"] and filtered2 is not None and not np.all(np.isnan(filtered2)):
+        fig.add_trace(go.Scatter(x=t, y=filtered2, mode="lines", name="滤波2",
+            line=dict(color=cfg["fc2"], width=2.0)), row=1, col=1)
+
+
+def _add_residual_traces(fig, t, filtered, noisy, filtered2, cfg, rr, vr):
+    """Add residual, velocity, and acceleration traces to subplots."""
+    if not np.all(np.isnan(filtered)):
+        fig.add_trace(go.Scatter(x=t, y=filtered - noisy, mode="lines", name="残差",
+            line=dict(color="#5f6c80", width=1.0, dash="dot")), row=rr, col=1)
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=rr, col=1)
+        vel = np.gradient(filtered, t)
+        acc = np.gradient(vel, t)
+        fig.add_trace(go.Scatter(x=t, y=vel, mode="lines", name="v",
+            line=dict(color=cfg["fc"], width=1.5)), row=vr, col=1)
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=vr, col=1)
+        return acc
+    vel = np.gradient(filtered, t) if not np.all(np.isnan(filtered)) else np.zeros_like(t)
+    return np.gradient(vel, t)
+
+
+def _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar, ssr):
+    """Add Schmitt trigger traces: eps bands, sigma_v, acceleration, Sig signal, pair bands."""
+    eps = schmitt["eps"]
+    sig = schmitt["sig"]
+    fig.add_trace(go.Scatter(x=list(t) + list(t[::-1]), y=list(eps) + list(-eps[::-1]),
+        fill="toself", fillcolor="rgba(128,128,128,0.06)", line=dict(width=0),
+        name="±ε", hoverinfo="skip"), row=sar, col=1)
+    fig.add_trace(go.Scatter(x=t, y=eps, mode="lines", name="+ε",
+        line=dict(color="#f85149", width=0.8, dash="dash"), showlegend=False), row=sar, col=1)
+    fig.add_trace(go.Scatter(x=t, y=-eps, mode="lines", name="-ε",
+        line=dict(color="#f85149", width=0.8, dash="dash")), row=sar, col=1)
+    fig.add_trace(go.Scatter(x=t, y=schmitt["sigma_v"], mode="lines", name="σ(v)",
+        line=dict(color="#a371f7", width=1.0, dash="dot")), row=sar, col=1)
+    fig.add_trace(go.Scatter(x=t, y=acc, mode="lines", name="a",
+        line=dict(color="#d2991d", width=1.5)), row=sar, col=1)
+    fig.add_hline(y=0, line_dash="solid", line_color="gray", opacity=0.3, row=sar, col=1)
+    fig.add_trace(go.Scatter(x=t, y=sig.astype(float), mode="lines", name="Sig",
+        line=dict(color="#58a6ff", width=2, shape="hv")), row=ssr, col=1)
+    for state, cl in [(1, "rgba(63,185,80,0.06)"), (-1, "rgba(248,81,73,0.06)")]:
+        msk = sig == state
+        if msk.any():
+            fig.add_trace(go.Scatter(x=t[msk], y=np.where(msk, state, 0),
+                mode="lines", line=dict(width=0), fill="tozeroy",
+                fillcolor=cl, showlegend=False, hoverinfo="skip"), row=ssr, col=1)
+    for i, (p_start, p_end) in enumerate(all_pairs):
+        direction = sig[p_end]
+        y_lo, y_hi = (0, 1) if direction == 1 else (-1, 0)
+        band_color = "rgba(88,166,255,0.10)" if i % 2 == 0 else "rgba(163,113,247,0.10)"
+        fig.add_trace(go.Scatter(
+            x=[p_start, p_end, p_end, p_start],
+            y=[y_hi, y_hi, y_lo, y_lo],
+            fill="toself", fillcolor=band_color,
+            mode="lines", line=dict(width=0),
+            showlegend=False, hoverinfo="skip",
+        ), row=ssr, col=1)
+
+
+def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row):
+    """Add PnL curves, individual trade segments, markers, and annotations."""
+    fig.add_trace(go.Scatter(x=t, y=long_pnl, mode="lines", name="做多PnL",
+        line=dict(color="#3fb950", width=1.5, dash="solid")), row=pnl_row, col=1)
+    fig.add_trace(go.Scatter(x=t, y=short_pnl, mode="lines", name="做空PnL",
+        line=dict(color="#f85149", width=1.5, dash="solid")), row=pnl_row, col=1)
+    for trade in trade_records:
+        seg_t = t[trade["entry_idx"]:trade["exit_idx"] + 1]
+        curve = long_pnl if trade["type"] == "long" else short_pnl
+        seg_pnl = curve[trade["entry_idx"]:trade["exit_idx"] + 1]
+        is_long = trade["type"] == "long"
+        color = "#3fb950" if is_long else "#f85149"
+        label_prefix = "多" if is_long else "空"
+        fig.add_trace(go.Scatter(x=seg_t, y=seg_pnl, mode="lines",
+            name=f"{label_prefix}#{trade['id']}",
+            line=dict(color=color, width=3), showlegend=False), row=pnl_row, col=1)
+        fig.add_trace(go.Scatter(x=[seg_t[0]], y=[seg_pnl[0]], mode="markers",
+            marker=dict(color=color, symbol="triangle-up", size=8),
+            showlegend=False), row=pnl_row, col=1)
+        if trade["exit_reason"] in ("stop_loss", "take_profit"):
+            exit_marker = "x" if trade["exit_reason"] == "stop_loss" else "circle"
+            exit_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
+            fig.add_trace(go.Scatter(x=[seg_t[-1]], y=[seg_pnl[-1]], mode="markers",
+                marker=dict(color=exit_color, symbol=exit_marker, size=8),
+                showlegend=False), row=pnl_row, col=1)
+            ret_pct = trade["return_pct"]
+            label_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
+            arrow = "↑" if trade["type"] == "long" else "↓"
+            fig.add_annotation(x=seg_t[-1], y=seg_pnl[-1], text=f"{arrow}{ret_pct:+.1f}%",
+                showarrow=False, font=dict(size=8, color=label_color), yshift=12,
+                row=pnl_row, col=1)
+    fig.add_hline(y=100, line_dash="dash", line_color="gray", opacity=0.5, row=pnl_row, col=1)
+    y_max_l = max(float(np.nanmax(long_pnl)), 100.0) * 1.02
+    fig.add_trace(go.Scatter(x=[t[0], t[-1], t[-1], t[0]],
+        y=[100, 100, y_max_l, y_max_l], fill="toself", fillcolor="rgba(63,185,80,0.04)",
+        mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"), row=pnl_row, col=1)
+    y_min_s = min(float(np.nanmin(short_pnl)), 100.0) * 0.98
+    fig.add_trace(go.Scatter(x=[t[0], t[-1], t[-1], t[0]],
+        y=[100, 100, y_min_s, y_min_s], fill="toself", fillcolor="rgba(248,81,73,0.04)",
+        mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"), row=pnl_row, col=1)
+    fig.update_yaxes(title_text="PnL(%)", row=pnl_row, col=1, ticksuffix="%")
+
+
+# =====================================================================
+# Chart rendering (main figure builder)
+# =====================================================================
+
+@st.fragment
+def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None):
+    """Fragment wrapper for _render_chart — enables per-view independent re-rendering."""
+    _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl)
+
+
+def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None):
+    """Fetch data + render multi-subplot figure from config.
+    优先从本地 Parquet 读取；day_offset=向历史前移N天（各周期独立对齐）。
+    higher_pnl: 高周期PnL数据（来自 _align_pnl_to_current_tf 的输出），非空时新增row 7子图。"""
+    tf = cfg["tf"]
+    n_pts = cfg["n_pts"]
+    logger.debug(f"Rendering chart: {ticker_code}/{tf} view={key} n_pts={n_pts}")
+
+    # 查找紧邻高周期tf，尝试从session_state获取其PnL数据
+    _higher_tf = TF_HIERARCHY.get(tf)
+    _raw_higher = None
+    if higher_pnl is None and _higher_tf is not None:
+        _raw_higher = st.session_state.get(f"_pnl_{_higher_tf}")
+
+    # ── Step 1: Load chart data ──
+    t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts)
+    if err:
+        st.error(err)
+        return
+
+    # ── Step 2: Date markers ──
+    marker_positions, marker_labels = _date_markers(dates, cfg["tf"])
+
+    # ── Step 3: Align higher-period PnL ──
+    if _raw_higher is not None and dates is not None:
+        higher_pnl = _align_pnl_to_current_tf(
+            _raw_higher["dates"], _raw_higher["long_pnl"], _raw_higher["short_pnl"],
+            _raw_higher["trade_records"], dates,
+        )
+    elif higher_pnl is None:
+        higher_pnl = None
+
+    # ── Step 4: Compute filters ──
+    filtered, filtered2 = _compute_filters(noisy, t, cfg)
+
+    # ── Step 5: Info captions ──
+    rough = float(np.sum(np.diff(filtered, 2) ** 2)) if len(filtered) > 2 else 0.0
+    c1, c2, c3 = st.columns(3)
+    c1.caption(f"{ticker_full}·{cfg['tf']}  |  ¥{noisy[-1]:.2f}")
+    c2.caption(f"σ={noisy.std():.2f}  平滑={rough:.1f}")
+    c3.caption(f"{len(t)} 点")
+
+    # ── Step 6: Schmitt trigger ──
+    schmitt = _compute_schmitt_trigger(filtered, t, cfg)
+    if cfg["show_sch"] and schmitt is None and len(t) > 0:
+        st.warning(f"⚠️ 施密特信号不可用：bar数({len(t)}) < N_EWMA({cfg['ew']})。"
+                   f"请降低 N_EWMA 至 ≤{len(t)} 或增加数据点数(N)。")
+
+    all_pairs = []
+    if schmitt is not None:
+        all_pairs = _find_all_pairs(schmitt["sig"])
+
+    # ── Step 7: Prediction curves ──
+    pred_pairs = _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs)
+
+    # ── Step 8: Strategy PnL ──
+    long_pnl, short_pnl, trade_records = _compute_strategy_display(
+        t, filtered, schmitt, all_pairs, pred_pairs, cfg, tf, dates)
+    show_strategy = cfg.get("show_strategy", False)
+    show_cross_pnl = cfg.get("show_cross_pnl", False)
+    show_alignment = cfg.get("show_alignment", False)
+    has_strategy = show_strategy and long_pnl is not None and len(trade_records) > 0
+
+    # ── Step 9: Determine subplot layout ──
     has_s = schmitt is not None
     has_cross = (show_cross_pnl and higher_pnl is not None and
                  (len(higher_pnl.get("entry_markers", [])) > 0 or
@@ -261,67 +449,15 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
             len(t), higher_pnl["entry_markers"], higher_pnl["exit_markers"])
     has_alignment = (_align_masks is not None and
                      (_align_masks[0].any() or _align_masks[1].any()))
-    if has_s:
-        if has_strategy:
-            if has_cross:
-                if has_alignment:
-                    rows = 8
-                    rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.24, 0.15, 0.12]
-                    titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)",f"{_higher_tf}PnL参考","同向性判断")
-                    pnl_row = 6
-                    cross_row = 7
-                    align_row = 8
-                else:
-                    rows = 7
-                    rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.27, 0.18]
-                    titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)",f"{_higher_tf}PnL参考")
-                    pnl_row = 6
-                    cross_row = 7
-                    align_row = None
-            else:
-                rows = 6
-                rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.375]
-                titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t","PnL收益(%)")
-                pnl_row = 6
-                cross_row = None
-                align_row = None
-        else:
-            rows = 5
-            rh = [0.28, 0.14, 0.18, 0.18, 0.22]
-            titles = ("价格&滤波","残差","速度v","a&±ε","Sig_t")
-            pnl_row = None
-            cross_row = None
-            align_row = None
-        mr = 1
-        rr = 2
-        vr = 3
-        sar = 4
-        ssr = 5
-        ar = None
-    else:
-        rows = 4
-        rh=[0.40,0.18,0.20,0.22]
-        titles=("价格&滤波","残差","速度v","加速度a")
-        mr=1
-        rr=2
-        vr=3
-        ar=4
-        sar=ssr=pnl_row=cross_row=align_row=None
+
+    rows, rh, titles, mr, rr, vr, sar, ssr, ar, pnl_row, cross_row, align_row = \
+        _determine_subplot_layout(has_s, has_strategy, has_cross, has_alignment, _higher_tf)
+
+    # ── Step 10: Build figure ──
     fig = make_subplots(rows=rows, cols=1, shared_xaxes=True,
                         vertical_spacing=0.01, row_heights=rh, subplot_titles=titles)
-    fig.add_trace(go.Candlestick(x=t, open=ohlc["Open"].values.ravel(),
-        high=ohlc["High"].values.ravel(), low=ohlc["Low"].values.ravel(),
-        close=ohlc["Close"].values.ravel(), name="K",
-        increasing_line_color="#26a69a", decreasing_line_color="#ef5350",
-        showlegend=False), row=mr, col=1)
-    fig.add_trace(go.Scatter(x=t, y=noisy, mode="lines", name="收盘",
-        line=dict(color="#5f6c80", width=1.0)), row=mr, col=1)
-    if not np.all(np.isnan(filtered)):
-        fig.add_trace(go.Scatter(x=t, y=filtered, mode="lines", name="滤波",
-            line=dict(color=cfg["fc"], width=2.0)), row=mr, col=1)
-    if cfg["_dual"] and filtered2 is not None and not np.all(np.isnan(filtered2)):
-        fig.add_trace(go.Scatter(x=t, y=filtered2, mode="lines", name="滤波2",
-            line=dict(color=cfg["fc2"], width=2.0)), row=mr, col=1)
+
+    _add_main_price_traces(fig, t, noisy, ohlc, filtered, filtered2, cfg)
 
     for i, pp in enumerate(pred_pairs):
         _add_prediction_traces(fig, t, filtered,
@@ -330,92 +466,13 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
                                n_extend=cfg.get("n_ext", 10),
                                show_legend=(i == 0))
 
-    if not np.all(np.isnan(filtered)):
-        fig.add_trace(go.Scatter(x=t, y=filtered-noisy, mode="lines", name="残差",
-            line=dict(color="#5f6c80", width=1.0, dash="dot")), row=rr, col=1)
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=rr, col=1)
-        vel=np.gradient(filtered,t)
-        acc=np.gradient(vel,t)
-        fig.add_trace(go.Scatter(x=t, y=vel, mode="lines", name="v",
-            line=dict(color=cfg["fc"], width=1.5)), row=vr, col=1)
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=vr, col=1)
+    acc = _add_residual_traces(fig, t, filtered, noisy, filtered2, cfg, rr, vr)
+
     if has_s:
-        eps=schmitt["eps"]
-        sig=schmitt["sig"]
-        fig.add_trace(go.Scatter(x=list(t)+list(t[::-1]), y=list(eps)+list(-eps[::-1]),
-            fill="toself", fillcolor="rgba(128,128,128,0.06)", line=dict(width=0),
-            name="±ε", hoverinfo="skip"), row=sar, col=1)
-        fig.add_trace(go.Scatter(x=t, y=eps, mode="lines", name="+ε",
-            line=dict(color="#f85149", width=0.8, dash="dash"), showlegend=False), row=sar, col=1)
-        fig.add_trace(go.Scatter(x=t, y=-eps, mode="lines", name="-ε",
-            line=dict(color="#f85149", width=0.8, dash="dash")), row=sar, col=1)
-        fig.add_trace(go.Scatter(x=t, y=schmitt["sigma_v"], mode="lines", name="σ(v)",
-            line=dict(color="#a371f7", width=1.0, dash="dot")), row=sar, col=1)
-        fig.add_trace(go.Scatter(x=t, y=acc, mode="lines", name="a",
-            line=dict(color="#d2991d", width=1.5)), row=sar, col=1)
-        fig.add_hline(y=0, line_dash="solid", line_color="gray", opacity=0.3, row=sar, col=1)
-        fig.add_trace(go.Scatter(x=t, y=sig.astype(float), mode="lines", name="Sig",
-            line=dict(color="#58a6ff", width=2, shape="hv")), row=ssr, col=1)
-        for state,cl in [(1,"rgba(63,185,80,0.06)"),(-1,"rgba(248,81,73,0.06)")]:
-            msk=sig==state
-            if msk.any():
-                fig.add_trace(go.Scatter(x=t[msk], y=np.where(msk,state,0),
-                    mode="lines", line=dict(width=0), fill="tozeroy",
-                    fillcolor=cl, showlegend=False, hoverinfo="skip"), row=ssr, col=1)
-        for i, (p_start, p_end) in enumerate(all_pairs):
-            direction = sig[p_end]
-            y_lo, y_hi = (0, 1) if direction == 1 else (-1, 0)
-            band_color = "rgba(88,166,255,0.10)" if i % 2 == 0 else "rgba(163,113,247,0.10)"
-            fig.add_trace(go.Scatter(
-                x=[p_start, p_end, p_end, p_start],
-                y=[y_hi, y_hi, y_lo, y_lo],
-                fill="toself", fillcolor=band_color,
-                mode="lines", line=dict(width=0),
-                showlegend=False, hoverinfo="skip",
-            ), row=ssr, col=1)
-    if has_strategy:
-        fig.add_trace(go.Scatter(x=t, y=long_pnl, mode="lines", name="做多PnL",
-            line=dict(color="#3fb950", width=1.5, dash="solid")), row=pnl_row, col=1)
-        fig.add_trace(go.Scatter(x=t, y=short_pnl, mode="lines", name="做空PnL",
-            line=dict(color="#f85149", width=1.5, dash="solid")), row=pnl_row, col=1)
-        for trade in trade_records:
-            seg_t = t[trade["entry_idx"]:trade["exit_idx"] + 1]
-            curve = long_pnl if trade["type"] == "long" else short_pnl
-            seg_pnl = curve[trade["entry_idx"]:trade["exit_idx"] + 1]
-            is_long = trade["type"] == "long"
-            color = "#3fb950" if is_long else "#f85149"
-            label_prefix = "多" if is_long else "空"
-            fig.add_trace(go.Scatter(x=seg_t, y=seg_pnl, mode="lines",
-                name=f"{label_prefix}#{trade['id']}",
-                line=dict(color=color, width=3), showlegend=False), row=pnl_row, col=1)
-            marker_color = "#3fb950" if is_long else "#f85149"
-            fig.add_trace(go.Scatter(x=[seg_t[0]], y=[seg_pnl[0]], mode="markers",
-                marker=dict(color=marker_color, symbol="triangle-up", size=8),
-                showlegend=False), row=pnl_row, col=1)
-            if trade["exit_reason"] in ("stop_loss", "take_profit"):
-                exit_marker = "x" if trade["exit_reason"] == "stop_loss" else "circle"
-                exit_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
-                fig.add_trace(go.Scatter(x=[seg_t[-1]], y=[seg_pnl[-1]], mode="markers",
-                    marker=dict(color=exit_color, symbol=exit_marker, size=8),
-                    showlegend=False), row=pnl_row, col=1)
-                ret_pct = trade["return_pct"]
-                label_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
-                arrow = "↑" if trade["type"] == "long" else "↓"
-                fig.add_annotation(x=seg_t[-1], y=seg_pnl[-1], text=f"{arrow}{ret_pct:+.1f}%",
-                    showarrow=False, font=dict(size=8, color=label_color), yshift=12,
-                    row=pnl_row, col=1)
-        fig.add_hline(y=100, line_dash="dash", line_color="gray", opacity=0.5, row=pnl_row, col=1)
-        y_max_l = max(float(np.nanmax(long_pnl)), 100.0) * 1.02
-        fig.add_trace(go.Scatter(x=[t[0], t[-1], t[-1], t[0]],
-            y=[100, 100, y_max_l, y_max_l], fill="toself", fillcolor="rgba(63,185,80,0.04)",
-            mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"), row=pnl_row, col=1)
-        y_min_s = min(float(np.nanmin(short_pnl)), 100.0) * 0.98
-        fig.add_trace(go.Scatter(x=[t[0], t[-1], t[-1], t[0]],
-            y=[100, 100, y_min_s, y_min_s], fill="toself", fillcolor="rgba(248,81,73,0.04)",
-            mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"), row=pnl_row, col=1)
+        _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar, ssr)
 
     if has_strategy:
-        fig.update_yaxes(title_text="PnL(%)", row=pnl_row, col=1, ticksuffix="%")
+        _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row)
 
     if has_cross and higher_pnl is not None and cross_row is not None:
         _add_cross_pnl_subplot(fig, t, higher_pnl, row=cross_row, higher_tf=_higher_tf)
@@ -431,6 +488,8 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         fig.add_trace(go.Scatter(x=t, y=acc, mode="lines", name="a",
             line=dict(color="#ffa502", width=1.5)), row=ar, col=1)
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=ar, col=1)
+
+    # ── Step 11: Final layout ──
     fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=1, xref="x", yref="paper",
                    line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"), visible=False)
     for pos in marker_positions:
@@ -442,7 +501,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     if has_alignment:
         fh += 75
     fig.update_layout(template="plotly_dark", height=fh,
-        margin=dict(l=10,r=10,t=25,b=10), hovermode="x unified",
+        margin=dict(l=10, r=10, t=25, b=10), hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=9)))
     fig.update_xaxes(title_text="", row=rows, col=1,
                       tickvals=marker_positions, ticktext=marker_labels,
@@ -454,10 +513,10 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     if has_s:
         fig.update_yaxes(title_text="a±ε", row=sar, col=1)
         fig.update_yaxes(title_text="Sig", row=ssr, col=1,
-                          tickvals=[-1,0,1], ticktext=["空","观","多"], range=[-1.5,1.5])
+                          tickvals=[-1, 0, 1], ticktext=["空", "观", "多"], range=[-1.5, 1.5])
     if ar is not None:
         fig.update_yaxes(title_text="加速度", row=ar, col=1)
-    _render_plotly(fig, height=fh+30, dates=dates)
+    _render_plotly(fig, height=fh + 30, dates=dates)
 
 
 # =====================================================================
@@ -469,26 +528,22 @@ def _get_db_connection():
     return True
 
 
-def main():
-    logger.info("App started")
-    _get_db_connection()
-    init_config_tables()
-    AppState.init_defaults()
-    if not AppState.get("_config_initialized"):
-        import_json_files_as_presets()
-        AppState.set("_config_initialized", True)
-    st.sidebar.title("多周期股票滤波分析")
+# =====================================================================
+# Sidebar sections — extracted from main() for readability
+# =====================================================================
 
-    # ── Import config (before any widget) ──
-    if not AppState.has("_import_data"):
-        AppState.set("_import_data", None)
 
+def _handle_pending_apply():
+    """Apply pending preset params from session_state."""
     if AppState.has("_pending_apply_params"):
         params = AppState.pop("_pending_apply_params")
         for k, v in params.items():
             AppState.set(k, v)
         AppState.set("_import_data", "preset")
 
+
+def _render_config_import():
+    """Render config file uploader and handle import."""
     uploaded = st.sidebar.file_uploader("导入配置", type=["json"], key="config_import",
                                          label_visibility="collapsed")
     if uploaded is not None:
@@ -506,7 +561,10 @@ def main():
                 logger.error(f"Config import failed: {e}", exc_info=True)
                 st.sidebar.error(f"导入失败: {e}")
 
-    market = st.sidebar.radio("市场", ["美股 US","A股(沪深)","港股 HK"],
+
+def _render_market_ticker():
+    """Render market radio + ticker input. Returns (market, ticker_code)."""
+    market = st.sidebar.radio("市场", ["美股 US", "A股(沪深)", "港股 HK"],
                                horizontal=True, key="market")
     c1, c2 = st.sidebar.columns([1, 1])
     with c1:
@@ -529,8 +587,11 @@ def main():
             name = _stock_name(market, ticker_code)
             if name:
                 st.caption(f"📌 {name}")
+    return market, ticker_code
 
-    # 首次加载：DB无数据时自动获取全部周期
+
+def _handle_initial_fetch(market, ticker_code):
+    """Auto-fetch all timeframes on first load."""
     if not AppState.has("_fetched_ticker"):
         AppState.set("_fetched_ticker", "")
     if ticker_code and ticker_code != AppState.get("_fetched_ticker"):
@@ -543,8 +604,12 @@ def main():
                     st.sidebar.success(f"已获取 {ok}/8 个周期")
         AppState.set("_fetched_ticker", ticker_code)
 
-    # Refresh row: button + auto toggle
+
+def _render_refresh_row(market, ticker_code):
+    """Render refresh button + auto-refresh checkbox. Returns (auto_refresh, interval)."""
     c_refresh, c_auto = st.sidebar.columns([1, 1.2])
+    auto_refresh = False
+    interval = 60
     with c_refresh:
         if st.button("刷新数据", use_container_width=True):
             _fetch_stock.clear()
@@ -562,8 +627,11 @@ def main():
         auto_refresh = st.checkbox("自动刷新", value=False, key="auto_refresh")
     if auto_refresh:
         interval = st.sidebar.slider("刷新间隔(秒)", 10, 600, 60, 10, key="refresh_interval")
+    return auto_refresh, interval
 
-    # ── 配置方案预设选择器 ──
+
+def _render_preset_selector(market, ticker_code):
+    """Render preset selector, action buttons, and confirmation flows."""
     st.sidebar.markdown("---")
     presets = list_presets()
     preset_labels = ["(不选择)"] + [f"[{p['category']}] {p['name']}" for p in presets]
@@ -572,13 +640,11 @@ def main():
     _hash = hashlib.md5("|".join(preset_labels).encode()).hexdigest()[:8]
     selected_label = st.sidebar.selectbox("📋 配置方案", preset_labels,
                                           key=f"preset_sel_{_hash}")
-
     selected_preset = preset_map.get(selected_label)
 
     if selected_preset:
         p = selected_preset
         st.sidebar.caption(f"💡 {p['description']}  [{p['category']}]")
-
         c1, c2, c3, c4 = st.sidebar.columns([1.2, 1, 1, 0.8])
         with c1:
             if st.button("✅ 应用", key="apply_preset", use_container_width=True):
@@ -588,7 +654,6 @@ def main():
                     AppState.set("_pending_apply_params", params)
                     st.toast(f"已应用: {p['name']}")
                     st.rerun()
-
         with c2:
             if st.button("📝 更新", key="update_preset_btn", use_container_width=True):
                 AppState.set("_preset_action", "update")
@@ -670,42 +735,32 @@ def main():
                     AppState.pop("_preset_action_id")
                     st.rerun()
 
-    # 保存当前为预设
+    # Save as preset
     with st.sidebar.expander("💾 保存 / 另存为预设", expanded=False):
         if not AppState.has("_last_sel_name"):
             AppState.set("_last_sel_name", "")
         curr_sel_name = selected_preset["name"] if selected_preset else ""
         if AppState.get("_last_sel_name") != curr_sel_name:
-            AppState.set("new_preset_name",
-                         (curr_sel_name + "_副本" if curr_sel_name else ""))
+            AppState.set("new_preset_name", (curr_sel_name + "_副本" if curr_sel_name else ""))
             AppState.set("_last_sel_name", curr_sel_name)
-
-        new_name = st.text_input("预设名称", key="new_preset_name",
-                                 placeholder="如: 我的港股配置")
-        new_desc = st.text_input("描述(可选)", key="new_preset_desc",
-                                 placeholder="港股·短线·savgol")
+        new_name = st.text_input("预设名称", key="new_preset_name", placeholder="如: 我的港股配置")
+        new_desc = st.text_input("描述(可选)", key="new_preset_desc", placeholder="港股·短线·savgol")
         if AppState.pop("_pending_reset_overwrite", False):
             AppState.set("overwrite_preset", False)
-
         overwrite = False
         if selected_preset:
-            overwrite = st.checkbox(f"覆盖「{selected_preset['name']}」",
-                                    key="overwrite_preset")
+            overwrite = st.checkbox(f"覆盖「{selected_preset['name']}」", key="overwrite_preset")
         if st.button("💾 保存", key="save_preset_btn", use_container_width=True):
             if new_name.strip():
                 from config_db import collect_current_params
                 import json as _json
                 params = collect_current_params()
-                target_name = (selected_preset["name"]
-                               if overwrite and selected_preset
-                               else new_name.strip())
-                cat = (selected_preset.get("category", "通用")
-                       if overwrite and selected_preset else "通用")
+                target_name = (selected_preset["name"] if overwrite and selected_preset else new_name.strip())
+                cat = (selected_preset.get("category", "通用") if overwrite and selected_preset else "通用")
                 logger.info(f"Preset saved: {target_name} (overwrite={overwrite})")
                 save_preset(target_name,
                             _json.dumps(params, ensure_ascii=False),
-                            description=(new_desc.strip() if not overwrite
-                                         else selected_preset.get("description", "")),
+                            description=(new_desc.strip() if not overwrite else selected_preset.get("description", "")),
                             category=cat)
                 st.toast(f"已保存: {target_name}")
                 AppState.set("_pending_reset_overwrite", True)
@@ -713,8 +768,9 @@ def main():
             else:
                 st.error("请输入预设名称")
 
-    st.sidebar.markdown("---")
-    # ── 数据健康检查 ──
+
+def _render_health_check(ticker_code):
+    """Render data health check expander section."""
     with st.sidebar.expander("🩺 数据健康检查", expanded=False):
         if st.button("运行检查", key="health_btn", use_container_width=True) and ticker_code:
             with st.spinner("检查数据完整性..."):
@@ -732,10 +788,11 @@ def main():
                 st.dataframe(detail_df, use_container_width=True, hide_index=True,
                              height=min(35 * len(detail_df) + 38, 300))
 
-    # ── 数据校验：DB vs 数据源（全部周期） ──
+
+def _render_data_validation(market, ticker_code):
+    """Render DB vs source data validation expander section."""
     with st.sidebar.expander("📋 数据校验", expanded=False):
         st.caption("对比数据库与 yfinance 全部周期，发现历史数据修正")
-
         if st.button("校验全部周期", key="val_btn", use_container_width=True) and ticker_code:
             logger.debug(f"Validating all timeframes for {ticker_code}")
             if market == "A股(沪深)":
@@ -748,15 +805,14 @@ def main():
             rows = []
             has_conflict = False
             has_update = False
-
+            TF_INTERVAL = {"1分钟": ("1m", "7d"), "5分钟": ("5m", "60d"), "15分钟": ("15m", "60d"),
+                           "60分钟": ("1h", "730d"), "日线": ("1d", "max"), "周线": ("1wk", "max"),
+                           "月线": ("1mo", "max"), "季线": ("3mo", "max")}
             for tf in ALL_TFS:
-                interval, period = {"1分钟": ("1m", "7d"), "5分钟": ("5m", "60d"), "15分钟": ("15m", "60d"),
-                    "60分钟": ("1h", "730d"), "日线": ("1d", "max"), "周线": ("1wk", "max"),
-                    "月线": ("1mo", "max"), "季线": ("3mo", "max")}[tf]
+                interval, period = TF_INTERVAL[tf]
                 with st.spinner(f"校验 {tf} ..."):
                     try:
-                        data = yf.download(full_code, period=period, interval=interval,
-                                           progress=False)
+                        data = yf.download(full_code, period=period, interval=interval, progress=False)
                         if data.empty or len(data[data["Close"].notna()]) < 5:
                             rows.append({"周期": tf, "DB": "-", "yf": "-", "重叠": "-",
                                          "指纹": "⚠️ 数据不足", "仅DB": "-", "仅yf": "-", "操作": ""})
@@ -767,27 +823,19 @@ def main():
                         rows.append({"周期": tf, "DB": "-", "yf": "-", "重叠": "-",
                                      "指纹": f"❌ {str(e)[:30]}", "仅DB": "-", "仅yf": "-", "操作": ""})
                         continue
-
-                db_c = report["db_count"]
-                yf_c = report["yf_count"]
-                fp = "✅" if report["fingerprint_match"] else "❌"
-                status = report["status"]
-
-                if status == "conflict":
-                    has_conflict = True
-                elif status == "update_available":
-                    has_update = True
-
-                rows.append({
-                    "周期": tf,
-                    "DB": db_c,
-                    "yf": yf_c,
-                    "重叠": report["overlap_count"],
-                    "指纹": fp,
-                    "仅DB": report["only_db"],
-                    "仅yf": report["only_yf"],
-                    "操作": status,
-                })
+                    db_c = report["db_count"]
+                    yf_c = report["yf_count"]
+                    fp = "✅" if report["fingerprint_match"] else "❌"
+                    status = report["status"]
+                    if status == "conflict":
+                        has_conflict = True
+                    elif status == "update_available":
+                        has_update = True
+                    rows.append({
+                        "周期": tf, "DB": db_c, "yf": yf_c,
+                        "重叠": report["overlap_count"], "指纹": fp,
+                        "仅DB": report["only_db"], "仅yf": report["only_yf"], "操作": status,
+                    })
 
             if rows:
                 import pandas as _pd
@@ -803,29 +851,22 @@ def main():
 
                 df_display = df.rename(columns={"操作": "差异"})
                 df_display["差异"] = df_display["差异"].replace({
-                    "conflict": "⚠️ 数据冲突", "update_available": "有新数据",
-                    "ok": "✅ 一致",
+                    "conflict": "⚠️ 数据冲突", "update_available": "有新数据", "ok": "✅ 一致",
                 })
                 styled = df_display.style.apply(_row_style, axis=1)
                 st.dataframe(styled, use_container_width=True, hide_index=True,
                              height=min(35 * len(df) + 38, 350))
-
                 st.caption("🟡 黄底 = 历史数据被修正 | 🟢 绿底 = 有新增数据")
-
                 if has_conflict or has_update:
-                    if st.button("⚠️ 更新全部有差异的周期", key="force_update_all",
-                                 use_container_width=True):
+                    if st.button("⚠️ 更新全部有差异的周期", key="force_update_all", use_container_width=True):
                         updated = 0
                         for _, r in df.iterrows():
                             s = r["操作"]
                             if s in ("conflict", "update_available"):
                                 tf = r["周期"]
                                 try:
-                                    interval, period = {"1分钟": ("1m", "7d"), "5分钟": ("5m", "60d"), "15分钟": ("15m", "60d"),
-                                        "60分钟": ("1h", "730d"), "日线": ("1d", "max"), "周线": ("1wk", "max"),
-                                        "月线": ("1mo", "max"), "季线": ("3mo", "max")}[tf]
-                                    data = yf.download(full_code, period=period,
-                                                       interval=interval, progress=False)
+                                    interval, period = TF_INTERVAL[tf]
+                                    data = yf.download(full_code, period=period, interval=interval, progress=False)
                                     if not data.empty:
                                         data = data[data["Close"].notna()]
                                         force_update_kline(ticker_code, tf, data)
@@ -841,6 +882,9 @@ def main():
                         else:
                             st.warning("没有周期被更新")
 
+
+def _render_filter_selectors():
+    """Render filter selector widgets. Returns (filter_id, dual, filter_id2)."""
     filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),
         format_func=lambda x: FILTERS[x]["name"], key="global_f")
     dual = st.sidebar.checkbox("双滤波对比", value=False, key="global_dual")
@@ -848,35 +892,38 @@ def main():
     if dual:
         filter_id2 = st.sidebar.selectbox("滤波器 2", list(FILTERS.keys()),
             format_func=lambda x: FILTERS[x]["name"], key="global_f2")
+    return filter_id, dual, filter_id2
 
-    # ---- Pass 1: Top 2x2 parameter panels ----
+
+def _render_param_panels(filter_id, dual, filter_id2):
+    """Render 2x2 parameter panels. Returns list of config dicts."""
     configs = []
     for row_idx in range(2):
         c1, c2 = st.columns(2)
         for col_idx, col in enumerate([c1, c2]):
             i = row_idx * 2 + col_idx
             with col:
-                    tf_label = st.session_state.get(f"v{i}_tf", DEFAULT_TFS[i])
-                    st.caption(f"视图{i+1} · {tf_label}")
-                    cfg = _render_params(f"v{i}", filter_id, dual, filter_id2, DEFAULT_TFS[i])
-                    configs.append(cfg)
+                tf_label = st.session_state.get(f"v{i}_tf", DEFAULT_TFS[i])
+                st.caption(f"视图{i + 1} · {tf_label}")
+                cfg = _render_params(f"v{i}", filter_id, dual, filter_id2, DEFAULT_TFS[i])
+                configs.append(cfg)
+    return configs
 
-    # ── 时间窗口导航（按天前移/后移，各周期独立对齐）──
+
+def _render_time_nav(configs, ticker_code):
+    """Render time window navigation. Returns day_offset."""
     st.sidebar.markdown("---")
     st.sidebar.caption("⏪ 时间窗口（按天移动）")
     if not AppState.has("_day_offset"):
         AppState.set("_day_offset", 0)
-
     step_days = st.sidebar.selectbox("移动步长", [1, 3, 5, 10, 20, 30, 60, 90, 180, 365],
                                       index=4, key="day_step",
                                       format_func=lambda x: f"{x}天")
-
     data_start = data_end = None
     date_range = get_date_range(ticker_code)
     if date_range:
         data_start = pd.Timestamp(date_range[0][:10]).date()
         data_end = pd.Timestamp(date_range[1][:10]).date()
-
     cur_offset = AppState.get("_day_offset", 0)
     n_pts = configs[0]["n_pts"] if configs else 120
     if data_end:
@@ -887,7 +934,6 @@ def main():
     else:
         has_older = True
         has_newer = cur_offset > 0
-
     c_prev, c_next, c_home = st.sidebar.columns([1, 1, 0.8])
     with c_prev:
         disabled = not has_older
@@ -903,18 +949,18 @@ def main():
         if st.button("最新", key="day_home", use_container_width=True, disabled=cur_offset == 0,
                      help="已是最新"):
             AppState.set("_day_offset", 0)
-
     st.sidebar.caption(f"已偏移: {cur_offset} 天")
     if data_start and data_end:
         st.sidebar.caption(f"数据范围: {data_start} ~ {data_end}")
-    day_offset = AppState.get("_day_offset", 0)
+    return AppState.get("_day_offset", 0)
 
-    # ── 数据备份与恢复 ──
+
+def _render_db_backup():
+    """Render DB backup/restore expander section."""
     with st.sidebar.expander("💾 数据备份与恢复", expanded=False):
         db_size = get_db_size_mb()
         logger.debug(f"DB status: {DB_PATH.name} ({db_size:.1f} MB)")
         st.caption(f"数据库: {DB_PATH.name} ({db_size:.1f} MB)")
-
         c_s1, c_s2 = st.columns([1, 1])
         with c_s1:
             if st.button("创建备份", key="snap_btn", use_container_width=True):
@@ -926,19 +972,14 @@ def main():
                 except Exception as e:
                     logger.error(f"Snapshot failed: {e}", exc_info=True)
                     st.error(f"备份失败: {e}")
-
         snapshots = list_snapshots()
         with c_s2:
             snap_count = len(snapshots)
             st.caption(f"共 {snap_count} 个备份" if snap_count else "暂无备份")
-
         if snapshots:
             snap_labels = [s[3] for s in snapshots]
-            selected_idx = st.selectbox(
-                "选择备份", range(len(snap_labels)),
-                format_func=lambda i: snap_labels[i],
-                key="restore_select"
-            )
+            selected_idx = st.selectbox("选择备份", range(len(snap_labels)),
+                                        format_func=lambda i: snap_labels[i], key="restore_select")
             c_r1, c_r2 = st.columns([1, 1])
             with c_r1:
                 if st.button("恢复到此备份", key="restore_btn", use_container_width=True):
@@ -964,22 +1005,9 @@ def main():
                         logger.warning(f"Snapshot deletion failed: {e}")
                         st.error(f"删除失败: {e}")
 
-    # ---- Pass 2: Bottom 2x2 chart views ----
-    grid_cols = []
-    for row_idx in range(2):
-        c1, c2 = st.columns(2)
-        grid_cols.append((c1, c2))
 
-    sorted_views = sorted(enumerate(configs),
-                          key=lambda x: ALL_TFS.index(x[1]["tf"]), reverse=True)
-    for orig_i, cfg in sorted_views:
-        row_idx = orig_i // 2
-        col_idx = orig_i % 2
-        with grid_cols[row_idx][col_idx]:
-            _render_chart_fragment(market, ticker_code, cfg, f"v{orig_i}", compact=True,
-                                   day_offset=day_offset)
-
-    # ── Export (after ALL widgets) ──
+def _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code):
+    """Render config export download button."""
     st.sidebar.markdown("---")
     export_data = {
         "market": market, "ticker": ticker_code,
@@ -1013,7 +1041,9 @@ def main():
         file_name="filter_config.json", mime="application/json",
         use_container_width=True)
 
-    # ── 配置历史 ──
+
+def _render_config_history(ticker_code):
+    """Render config history expander section."""
     if ticker_code:
         st.sidebar.markdown("---")
         with st.sidebar.expander("📜 配置历史", expanded=False):
@@ -1026,11 +1056,11 @@ def main():
             else:
                 st.caption("暂无记录")
 
-    # ── 数据库导入/导出 ──
-    st.sidebar.markdown("---")
+
+def _render_db_import_export():
+    """Render DB import/export expander section."""
     with st.sidebar.expander("📦 数据库导入/导出", expanded=False):
         st.caption("导出整个数据库到文件，可在其他设备导入")
-
         try:
             checkpoint_wal()
         except Exception as e:
@@ -1038,20 +1068,13 @@ def main():
         try:
             db_bytes = DB_PATH.read_bytes()
             logger.debug(f"DB export: {len(db_bytes) / 1024 / 1024:.1f} MB")
-            st.download_button(
-                "导出数据库", db_bytes,
-                file_name="market.db", mime="application/octet-stream",
-                use_container_width=True,
-                help=f"文件大小: {len(db_bytes) / 1024 / 1024:.1f} MB"
-            )
+            st.download_button("导出数据库", db_bytes, file_name="market.db",
+                mime="application/octet-stream", use_container_width=True,
+                help=f"文件大小: {len(db_bytes) / 1024 / 1024:.1f} MB")
         except Exception as e:
             logger.error(f"DB export failed: {e}", exc_info=True)
             st.error(f"导出失败: {e}")
-
-        uploaded_db = st.file_uploader(
-            "导入数据库", type=["db"],
-            key="db_import", label_visibility="collapsed"
-        )
+        uploaded_db = st.file_uploader("导入数据库", type=["db"], key="db_import", label_visibility="collapsed")
         if uploaded_db is not None:
             raw = uploaded_db.read()
             file_hash = hashlib.md5(raw).hexdigest()
@@ -1064,7 +1087,6 @@ def main():
                     os.remove(tmp_path)
                 except Exception as e:
                     logger.debug(f"Temp file cleanup failed: {e}")
-
                 if not valid:
                     st.error(f"无效的数据库文件: {err_msg}")
                 else:
@@ -1082,7 +1104,9 @@ def main():
                     time.sleep(0.5)
                     st.rerun()
 
-    # ── Auto-refresh execution ──
+
+def _run_auto_refresh(market, ticker_code, auto_refresh, interval):
+    """Execute auto-refresh loop if enabled."""
     if auto_refresh:
         now = time.time()
         last = AppState.get("_last_auto_refresh")
@@ -1099,6 +1123,82 @@ def main():
             st.caption(f"⏱️ {int(remaining)}s 后自动刷新")
             time.sleep(min(remaining, 1.0))
             st.rerun()
+
+
+# =====================================================================
+def main():
+    logger.info("App started")
+    _get_db_connection()
+    init_config_tables()
+    AppState.init_defaults()
+    if not AppState.get("_config_initialized"):
+        import_json_files_as_presets()
+        AppState.set("_config_initialized", True)
+    st.sidebar.title("多周期股票滤波分析")
+
+    # ── Config import ──
+    if not AppState.has("_import_data"):
+        AppState.set("_import_data", None)
+    _handle_pending_apply()
+    _render_config_import()
+
+    # ── Market & ticker ──
+    market, ticker_code = _render_market_ticker()
+
+    # ── Initial fetch ──
+    _handle_initial_fetch(market, ticker_code)
+
+    # ── Refresh row ──
+    auto_refresh, interval = _render_refresh_row(market, ticker_code)
+
+    # ── Preset selector ──
+    _render_preset_selector(market, ticker_code)
+
+    st.sidebar.markdown("---")
+
+    # ── Data health check ──
+    _render_health_check(ticker_code)
+
+    # ── Data validation ──
+    _render_data_validation(market, ticker_code)
+
+    # ── Filter selectors ──
+    filter_id, dual, filter_id2 = _render_filter_selectors()
+
+    # ── Pass 1: 2x2 parameter panels ──
+    configs = _render_param_panels(filter_id, dual, filter_id2)
+
+    # ── Time window navigation ──
+    day_offset = _render_time_nav(configs, ticker_code)
+
+    # ── DB backup/restore ──
+    _render_db_backup()
+
+    # ── Pass 2: 2x2 chart views ──
+    grid_cols = []
+    for row_idx in range(2):
+        c1, c2 = st.columns(2)
+        grid_cols.append((c1, c2))
+    sorted_views = sorted(enumerate(configs),
+                          key=lambda x: ALL_TFS.index(x[1]["tf"]), reverse=True)
+    for orig_i, cfg in sorted_views:
+        row_idx = orig_i // 2
+        col_idx = orig_i % 2
+        with grid_cols[row_idx][col_idx]:
+            _render_chart_fragment(market, ticker_code, cfg, f"v{orig_i}", compact=True,
+                                   day_offset=day_offset)
+
+    # ── Export config ──
+    _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code)
+
+    # ── Config history ──
+    _render_config_history(ticker_code)
+
+    # ── DB import/export ──
+    _render_db_import_export()
+
+    # ── Auto-refresh ──
+    _run_auto_refresh(market, ticker_code, auto_refresh, interval)
 
 
 if __name__ == "__main__":
