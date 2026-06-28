@@ -25,6 +25,8 @@ sys.modules["streamlit"] = _old_streamlit
 
 AppState = state.AppState
 SYSTEM_KEYS = state.SYSTEM_KEYS
+ViewState = state.ViewState
+VIEW_DEFAULTS = state.VIEW_DEFAULTS
 
 
 # ---------------------------------------------------------------------------
@@ -278,3 +280,199 @@ class TestPendingApplyParamsLifecycle:
         assert AppState.get("tf") == "1h"
         assert AppState.get("ke") == 0.15
         assert AppState.get("sm") == 20
+
+
+# ====================================================================
+# ViewState
+# ====================================================================
+
+class TestViewState:
+    """Tests for ViewState -- view parameter wrapper."""
+
+    def test_init_prefix(self):
+        vs = ViewState.load(0)
+        assert vs.vi == 0
+        assert vs.prefix == "v0_"
+
+    def test_init_prefix_v3(self):
+        vs = ViewState(3)
+        assert vs.vi == 3
+        assert vs.prefix == "v3_"
+
+    def test_get_without_session_state(self, real_session_state):
+        """get() falls back to VIEW_DEFAULTS when key not in session."""
+        vs = ViewState(0)
+        val = vs.get("ke")
+        assert val == VIEW_DEFAULTS["ke"]["default"]
+
+    def test_get_from_session_state(self, real_session_state):
+        """get() reads value stored in session_state."""
+        real_session_state["v0_ke"] = 0.42
+        vs = ViewState(0)
+        assert vs.get("ke") == 0.42
+
+    def test_get_fallback_to_imp(self, real_session_state):
+        """get() falls back to _imp_ backup when primary missing."""
+        real_session_state["_imp_v1_ke"] = 0.99
+        vs = ViewState(1)
+        assert vs.get("ke") == 0.99
+
+    def test_primary_overrides_imp(self, real_session_state):
+        vs = ViewState(0)
+        vs.set("ke", 0.20)
+        real_session_state["_imp_v0_ke"] = 0.99
+        val = vs.get("ke")
+        assert val == 0.20
+
+    def test_set_writes_session_state(self, real_session_state):
+        vs = ViewState(2)
+        vs.set("tf", "60分钟")
+        assert real_session_state["v2_tf"] == "60分钟"
+
+    def test_set_writes_imp_backup(self, real_session_state):
+        vs = ViewState(0)
+        vs.set("ke", 0.33)
+        assert real_session_state["_imp_v0_ke"] == 0.33
+
+    def test_set_many(self, real_session_state):
+        vs = ViewState(0)
+        vs.set_many({"ke": 0.10, "sm": 0.02, "ew": 30})
+        assert real_session_state["v0_ke"] == 0.10
+        assert real_session_state["v0_sm"] == 0.02
+        assert real_session_state["v0_ew"] == 30
+
+    def test_get_expanded_default_false(self, real_session_state):
+        vs = ViewState(0)
+        assert vs.get_expanded() is False
+
+    def test_get_expanded_true(self, real_session_state):
+        real_session_state["v0_exp_all"] = True
+        vs = ViewState(0)
+        assert vs.get_expanded() is True
+
+    def test_toggle_expanded(self, real_session_state):
+        vs = ViewState(0)
+        assert vs.get_expanded() is False
+        new_val = vs.toggle_expanded()
+        assert new_val is True
+        assert vs.get_expanded() is True
+        # Toggle again
+        new_val = vs.toggle_expanded()
+        assert new_val is False
+        assert vs.get_expanded() is False
+
+    def test_get_unknown_suffix_returns_none(self, real_session_state):
+        """Unknown suffix that's not in VIEW_DEFAULTS returns None."""
+        vs = ViewState(0)
+        val = vs.get("nonexistent_suffix")
+        assert val is None
+
+    def test_get_unknown_suffix_with_explicit_default(self, real_session_state):
+        vs = ViewState(0)
+        val = vs.get("nonexistent_suffix", "fallback_val")
+        assert val == "fallback_val"
+
+    def test_different_views_independent(self, real_session_state):
+        """View 0 and View 1 have separate key namespaces."""
+        vs0 = ViewState(0)
+        vs1 = ViewState(1)
+        vs0.set("ke", 0.10)
+        vs1.set("ke", 0.50)
+        assert vs0.get("ke") == 0.10
+        assert vs1.get("ke") == 0.50
+
+    def test_key_method(self):
+        vs = ViewState(2)
+        assert vs._key("tf") == "v2_tf"
+        assert vs._key("ke") == "v2_ke"
+
+    def test_load_returns_viewstate_instance(self):
+        vs = ViewState.load(0)
+        assert isinstance(vs, ViewState)
+        assert vs.vi == 0
+
+
+class TestViewStateBuildCfg:
+    """Tests for build_cfg() -- constructing the param dict."""
+
+    def test_build_cfg_all_defaults(self, real_session_state):
+        """Empty session_state → cfg uses VIEW_DEFAULTS for all keys."""
+        vs = ViewState(0)
+        cfg = vs.build_cfg()
+        for suffix, info in VIEW_DEFAULTS.items():
+            if suffix in ("exp_all",):  # exp_all is not in build_cfg
+                continue
+            expected_key = ViewState._suffix_to_cfg_key(suffix)
+            assert cfg[expected_key] == info["default"], (
+                f"Expected {expected_key}={info['default']}, got {cfg.get(expected_key)}"
+            )
+
+    def test_build_cfg_with_extra(self, real_session_state):
+        vs = ViewState(0)
+        cfg = vs.build_cfg(extra={"_fid": "sma"})
+        assert cfg["_fid"] == "sma"
+
+    def test_build_cfg_extra_overrides_default(self, real_session_state):
+        vs = ViewState(0)
+        cfg = vs.build_cfg(extra={"n_pts": 200})
+        assert cfg["n_pts"] == 200
+
+    def test_build_cfg_reads_session_state(self, real_session_state):
+        real_session_state["v0_ke"] = 0.33
+        real_session_state["v0_tf"] = "60分钟"
+        vs = ViewState(0)
+        cfg = vs.build_cfg()
+        assert cfg["ke"] == 0.33
+        assert cfg["tf"] == "60分钟"
+
+    def test_build_cfg_uses_get_default_for_unset_keys(self, real_session_state):
+        """Keys not in session_state get their VIEW_DEFAULTS default."""
+        vs = ViewState(0)
+        cfg = vs.build_cfg()
+        assert "tf" in cfg
+        assert cfg["tf"] == VIEW_DEFAULTS["tf"]["default"]
+
+    def test_suffix_to_cfg_key_mapping(self):
+        """Verify all suffix → cfg key renames match _suffix_to_cfg_key."""
+        for suffix in ["tf", "n", "sch", "pred", "next", "fm", "strat", "sl",
+                       "cross_pnl", "align", "fc", "fc2", "ke", "sm", "ew"]:
+            cfg_key = ViewState._suffix_to_cfg_key(suffix)
+            assert isinstance(cfg_key, str), f"suffix={suffix!r} produced non-string {cfg_key!r}"
+            assert len(cfg_key) > 0, f"suffix={suffix!r} produced empty string"
+
+
+class TestApplyPresetParams:
+    """Tests for ViewState.apply_preset_params()."""
+
+    def test_view_key_writes_directly(self, real_session_state):
+        ViewState.apply_preset_params({"v0_ke": 0.25, "v1_tf": "60分钟"})
+        assert real_session_state["v0_ke"] == 0.25
+        assert real_session_state["v1_tf"] == "60分钟"
+
+    def test_non_view_key_writes_directly(self, real_session_state):
+        ViewState.apply_preset_params({"market": "港股 HK"})
+        assert real_session_state["market"] == "港股 HK"
+
+    def test_mixed_keys(self, real_session_state):
+        ViewState.apply_preset_params({
+            "v0_tf": "日线", "v1_ke": 0.15, "market": "A股",
+        })
+        assert real_session_state["v0_tf"] == "日线"
+        assert real_session_state["v1_ke"] == 0.15
+        assert real_session_state["market"] == "A股"
+
+
+# ====================================================================
+# get_view_cfg / view shortcut
+# ====================================================================
+
+class TestShortcutFunctions:
+    def test_view_returns_viewstate(self, real_session_state):
+        vs = state.view(2)
+        assert isinstance(vs, ViewState)
+        assert vs.vi == 2
+
+    def test_get_view_cfg(self, real_session_state):
+        cfg = state.get_view_cfg(0)
+        assert isinstance(cfg, dict)
+        assert "tf" in cfg

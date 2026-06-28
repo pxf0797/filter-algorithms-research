@@ -227,6 +227,25 @@ class ViewState:
 
     # ---- 构建参数 cfg dict — 兼容 _render_params / collect_current_params ----
 
+    @staticmethod
+    def _suffix_to_cfg_key(suffix: str) -> str:
+        """将视图参数后缀（如 "n", "sch"）映射为 cfg dict 的 key。
+
+        部分后缀在内部使用不同命名，显式映射确保一致性。
+        """
+        mapping: Dict[str, str] = {
+            "n": "n_pts",
+            "sch": "show_sch",
+            "pred": "show_pred",
+            "next": "n_ext",
+            "fm": "fit_mode",
+            "strat": "show_strategy",
+            "sl": "stop_loss_pct",
+            "cross_pnl": "show_cross_pnl",
+            "align": "show_alignment",
+        }
+        return mapping.get(suffix, suffix)
+
     def build_cfg(self, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """构建与 _render_params 返回格式一致的 cfg dict。
 
@@ -235,37 +254,8 @@ class ViewState:
         cfg: Dict[str, Any] = {}
         for suffix, info in VIEW_DEFAULTS.items():
             val = self.get(suffix)
-            # 部分 key 在内部使用不同命名 —— 工具函数中转换映射
-            if suffix == "tf":
-                cfg["tf"] = val
-            elif suffix == "n":
-                cfg["n_pts"] = val
-            elif suffix == "sch":
-                cfg["show_sch"] = val
-            elif suffix == "pred":
-                cfg["show_pred"] = val
-            elif suffix == "next":
-                cfg["n_ext"] = val
-            elif suffix == "fm":
-                cfg["fit_mode"] = val
-            elif suffix == "strat":
-                cfg["show_strategy"] = val
-            elif suffix == "sl":
-                cfg["stop_loss_pct"] = val
-            elif suffix == "cross_pnl":
-                cfg["show_cross_pnl"] = val
-            elif suffix == "align":
-                cfg["show_alignment"] = val
-            elif suffix == "fc":
-                cfg["fc"] = val
-            elif suffix == "fc2":
-                cfg["fc2"] = val
-            elif suffix == "ke":
-                cfg["ke"] = val
-            elif suffix == "sm":
-                cfg["sm"] = val
-            elif suffix == "ew":
-                cfg["ew"] = val
+            cfg_key = self._suffix_to_cfg_key(suffix)
+            cfg[cfg_key] = val
 
         if extra:
             cfg.update(extra)
