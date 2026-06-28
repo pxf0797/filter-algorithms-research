@@ -8,8 +8,8 @@
 
 ```bash
 cd filter_research
-pip install -r streamlit/requirements.txt
-streamlit run streamlit/streamlit_app.py
+pip install -r filter_app/requirements.txt
+streamlit run filter_app/streamlit_app.py
 ```
 
 浏览器自动打开 `http://localhost:8501`，侧边栏调节参数，关闭终端即停止服务。

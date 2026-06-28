@@ -11,9 +11,9 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
-# Ensure the streamlit/ package directory is importable
+# Ensure the filter_app/ package directory is importable
 # ---------------------------------------------------------------------------
-_src = Path(__file__).resolve().parent.parent / "streamlit"
+_src = Path(__file__).resolve().parent.parent / "filter_app"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 

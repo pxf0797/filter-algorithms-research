@@ -17,7 +17,7 @@ import pytest
 
 # ---------------------------------------------------------------------------
 # Remove the conftest mock so streamlit_app can import as a real module
-# conftest already added streamlit/ dir to sys.path, so the namespace package
+# conftest already added filter_app/ dir to sys.path, so the namespace package
 # resolves to our project dir (not site-packages).
 # ---------------------------------------------------------------------------
 _old_streamlit = sys.modules.pop("streamlit", None)

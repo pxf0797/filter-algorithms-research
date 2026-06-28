@@ -14,7 +14,7 @@
 
 | File | Action | Responsibility |
 |------|--------|----------------|
-| `streamlit/streamlit_app.py` | Modify (+~100 lines) | 新增预测曲线函数 + UI + 图表集成 |
+| `filter_app/streamlit_app.py` | Modify (+~100 lines) | 新增预测曲线函数 + UI + 图表集成 |
 
 ---
 
@@ -35,7 +35,7 @@ Expected: new branch `schmitt-prediction` created from `master`
 ### Task 2: Add prediction curve utility functions
 
 **Files:**
-- Modify: `streamlit/streamlit_app.py` — insert 3 new functions after `_schmitt_trigger()` (~line 613)
+- Modify: `filter_app/streamlit_app.py` — insert 3 new functions after `_schmitt_trigger()` (~line 613)
 
 - [ ] **Step 1: Add `_find_last_complete_pair(sig_t)` function**
 
@@ -146,7 +146,7 @@ def _add_prediction_traces(fig, t, filtered, sig_t, fit_result, fit_start, fit_e
 ### Task 3: Add "预测曲线" checkbox in parameter panel
 
 **Files:**
-- Modify: `streamlit/streamlit_app.py` — `_render_params()` Row 1 columns (~line 631)
+- Modify: `filter_app/streamlit_app.py` — `_render_params()` Row 1 columns (~line 631)
 
 - [ ] **Step 1: Adjust column layout and add checkbox**
 
@@ -198,7 +198,7 @@ Replace the Row 1 column definitions in `_render_params()` (lines 630-645):
 ### Task 4: Wire prediction logic into chart rendering
 
 **Files:**
-- Modify: `streamlit/streamlit_app.py` — `_render_chart()`, Schmitt + figure section (~line 777)
+- Modify: `filter_app/streamlit_app.py` — `_render_chart()`, Schmitt + figure section (~line 777)
 
 - [ ] **Step 1: Add prediction computation after Schmitt trigger calculation**
 
@@ -236,7 +236,7 @@ After the `filtered2` trace block (line 801), insert:
 - [ ] **Step 1: Run the Streamlit app**
 
 ```bash
-cd /Users/xfpan/claude/filter_research && streamlit run streamlit/streamlit_app.py --server.port 8502
+cd /Users/xfpan/claude/filter_research && streamlit run filter_app/streamlit_app.py --server.port 8502
 ```
 
 - [ ] **Step 2: Verify visually**
@@ -252,7 +252,7 @@ Check:
 
 ```bash
 cd /Users/xfpan/claude/filter_research
-git add streamlit/streamlit_app.py
+git add filter_app/streamlit_app.py
 git commit -m "feat: add Schmitt trigger prediction curve with parabolic fitting
 
 - _find_last_complete_pair(): scan sig_t for last 2 non-zero segments

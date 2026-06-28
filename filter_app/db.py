@@ -1,5 +1,5 @@
 """
-streamlit/db.py — SQLite 数据层
+filter_app/db.py — SQLite 数据层
 统一管理所有股票多周期K线数据。
 """
 

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-_src = Path(__file__).resolve().parent.parent / "streamlit"
+_src = Path(__file__).resolve().parent.parent / "filter_app"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 

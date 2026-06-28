@@ -1,5 +1,5 @@
 """
-streamlit/config_db.py — 配置管理数据层 (独立 SQLite)
+filter_app/config_db.py — 配置管理数据层 (独立 SQLite)
 管理预设模板、标的配置快照、变更历史。
 存储于 data/config.db，与股票数据 data/market.db 分离。
 """

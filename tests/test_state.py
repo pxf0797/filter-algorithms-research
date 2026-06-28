@@ -1,4 +1,4 @@
-"""Tests for streamlit.state -- AppState session_state management.
+"""Tests for filter_app.state -- AppState session_state management.
 
 The conftest.py mocks `streamlit` as a MagicMock, which shadows the real
 package name in sys.modules.  Since state.py guards with

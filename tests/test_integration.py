@@ -20,9 +20,9 @@ import pandas as pd
 import pytest
 
 # ---------------------------------------------------------------------------
-# Ensure import paths for streamlit/ package
+# Ensure import paths for filter_app/ package
 # ---------------------------------------------------------------------------
-_src = Path(__file__).resolve().parent.parent / "streamlit"
+_src = Path(__file__).resolve().parent.parent / "filter_app"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 

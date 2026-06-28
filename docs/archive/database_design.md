@@ -272,7 +272,7 @@ PRAGMA temp_store = MEMORY;
 
 ### 3.1 db.py 模块 API
 
-新文件：`streamlit/db.py`（约 90 行）
+新文件：`filter_app/db.py`（约 90 行）
 
 ```python
 """
@@ -608,11 +608,11 @@ data_end = pd.Timestamp(data_end_str).date() if data_end_str else None
 
 | 文件 | 改动 | 行数变化 | 说明 |
 |------|------|----------|------|
-| **新增：`streamlit/db.py`** | 新建 | +~90 | SQLite 数据访问层 |
-| `streamlit/streamlit_app.py:_fetch_stock` | 改造 | -15 +12 | yfinance → upsert DB → query DB 返回；移除 parquet 保存 |
-| `streamlit/streamlit_app.py:_sync_to_display` | 改造 | -12 +10 | archive parquet 读取 → db.query_kline() |
-| `streamlit/streamlit_app.py:main` (日期范围) | 改造 | -6 +4 | parquet 读取 → db.get_date_range() |
-| `streamlit/streamlit_app.py` 顶部 import | 修改 | +1 | 新增 `import db` |
+| **新增：`filter_app/db.py`** | 新建 | +~90 | SQLite 数据访问层 |
+| `filter_app/streamlit_app.py:_fetch_stock` | 改造 | -15 +12 | yfinance → upsert DB → query DB 返回；移除 parquet 保存 |
+| `filter_app/streamlit_app.py:_sync_to_display` | 改造 | -12 +10 | archive parquet 读取 → db.query_kline() |
+| `filter_app/streamlit_app.py:main` (日期范围) | 改造 | -6 +4 | parquet 读取 → db.get_date_range() |
+| `filter_app/streamlit_app.py` 顶部 import | 修改 | +1 | 新增 `import db` |
 | **新增：`tools/migrate_parquet_to_db.py`** | 新建 | +~60 | 一次性迁移脚本 |
 | **净增行数** | | **~82 行** | 90(新) + 17(改) - 25(删) |
 
@@ -633,7 +633,7 @@ data_end = pd.Timestamp(data_end_str).date() if data_end_str else None
     python tools/migrate_parquet_to_db.py --dry-run  # 仅统计，不写入
 
 前置条件:
-    - streamlit/db.py 已存在且可用
+    - filter_app/db.py 已存在且可用
     - data/ 目录下有各 ticker 的 parquet 文件
 
 安全:
@@ -747,13 +747,13 @@ if __name__ == "__main__":
 
 | 步骤 | 操作 | 命令 | 预期结果 |
 |------|------|------|----------|
-| 1 | 创建 `db.py` | 写入 `streamlit/db.py` | 模块可 import |
+| 1 | 创建 `db.py` | 写入 `filter_app/db.py` | 模块可 import |
 | 2 | 创建迁移脚本 | 写入 `tools/migrate_parquet_to_db.py` | 脚本可用 |
 | 3 | Dry-run 预览 | `python tools/migrate_parquet_to_db.py --dry-run` | 打印各 ticker 行数汇总 |
 | 4 | 执行迁移 | `python tools/migrate_parquet_to_db.py` | 数据入库，`data/market_data.db` 生成 |
 | 5 | 验证数据量 | `python -c "import db; print(db.list_tickers(), db.has_data('AAPL','日线'))"` | True |
 | 6 | 修改 `streamlit_app.py` | 改造 `_fetch_stock`, `_sync_to_display`, `main` 中的日期查询 | 改动清单见 3.5 |
-| 7 | 启动 Streamlit 验证 | `streamlit run streamlit/streamlit_app.py` | 图表正常渲染，数据正确 |
+| 7 | 启动 Streamlit 验证 | `streamlit run filter_app/streamlit_app.py` | 图表正常渲染，数据正确 |
 | 8 | 数据翻页验证 | 点击"前移/后移"按钮 | 各周期独立对齐，数据连贯 |
 | 9 | （可选）归档旧 parquet | `mkdir data/_archive && mv data/AAPL data/_archive/` | 保留备份，不删除 |
 
@@ -766,7 +766,7 @@ if __name__ == "__main__":
 **目标**：SQLite 可读写，`_fetch_stock` 和 `_sync_to_display` 切换到 DB 数据源。
 
 **任务**：
-1. 创建 `streamlit/db.py`（约 90 行）
+1. 创建 `filter_app/db.py`（约 90 行）
 2. 修改 `streamlit_app.py`:
    - 顶部新增 `import db`
    - `_fetch_stock`: yfinance 下载后 `db.upsert_kline()` 替换 parquet 保存；返回时 `db.query_kline()` 替换 parquet 读取

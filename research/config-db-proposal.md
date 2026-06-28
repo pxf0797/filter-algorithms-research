@@ -32,7 +32,7 @@
 
 ### 2.4 现有 DB 基础设施
 
-- `streamlit/db.py` 提供 `DB_PATH`（`data/market.db`）和 `get_conn()`（WAL 模式，`sqlite3.Row` factory）
+- `filter_app/db.py` 提供 `DB_PATH`（`data/market.db`）和 `get_conn()`（WAL 模式，`sqlite3.Row` factory）
 - 当前仅 1 张表 `kline(ticker, timeframe, ts, open, high, low, close, volume)`
 - 扩展 3 张配置表即可，复用现有连接管理逻辑
 
@@ -165,7 +165,7 @@ CREATE TABLE IF NOT EXISTS config_history (
 
 ### 5.1 文件位置
 
-**新建文件：** `streamlit/config_db.py`
+**新建文件：** `filter_app/config_db.py`
 
 - 与 `db.py` 同级，避免新建目录导致的命名冲突（上次教训：新建 `config/` 目录与 Streamlit 内置 `config.py` 冲突）
 - 备选命名：`cfg_mgr.py`（若 `config_db` 仍然有冲突风险）
@@ -235,13 +235,13 @@ def apply_params_to_session(params: dict, session_state)
 
 | 改动位置 | 行号范围 | 内容 | 行数 |
 |:--|:--|:--|:--:|
-| `streamlit/streamlit_app.py` import 区 | ~顶部 | `from config_db import *` | +1 |
+| `filter_app/streamlit_app.py` import 区 | ~顶部 | `from config_db import *` | +1 |
 | JSON 导入块 | ~L1931-1943 | 导入成功后调用 `import_to_db(session_state)` | +4 |
 | 参数面板前（预设选择器） | ~L1920-1960 | 预设选择器 UI：selectbox + 操作按钮 + 回调 | +30 |
 | 视图渲染后 / 参数面板底部 | ~L2260 | "保存为预设"按钮 + 弹窗 | +15 |
 | DB 备份区前 | ~L2295-2320 | 配置历史 expander + 回滚按钮 | +25 |
 | 导出块附近 | ~L2262-2295 | 调用 `upsert_ticker_config()` 同步 | +5 |
-| 新建文件 | `streamlit/config_db.py` | 模块文件 | ~120 |
+| 新建文件 | `filter_app/config_db.py` | 模块文件 | ~120 |
 
 **总计新增约 80-100 行（应用层）+ 120 行（模块层）= ~200 行。**
 
@@ -261,7 +261,7 @@ def apply_params_to_session(params: dict, session_state)
 **目标：** 用户可以通过下拉框选择预设，一键填充参数。先不要求持久化到 ticker 级别。
 
 **改动：**
-1. 新建 `streamlit/config_db.py`，实现：
+1. 新建 `filter_app/config_db.py`，实现：
    - `list_presets()`、`get_preset()`、`save_preset()`、`delete_preset()`
    - `collect_current_params()`、`apply_params_to_session()`
 2. 在 `streamlit_app.py` sidebar 插入预设选择器 UI：
@@ -312,7 +312,7 @@ def apply_params_to_session(params: dict, session_state)
 
 | 风险 | 措施 |
 |:--|:--|
-| 新建 `config/` 目录与 Streamlit 内置 `config.py` 冲突 | 模块文件放在 `streamlit/` 下，命名为 `config_db.py`（不叫 `config.py`）|
+| 新建 `config/` 目录与 Streamlit 内置 `config.py` 冲突 | 模块文件放在 `filter_app/` 下，命名为 `config_db.py`（不叫 `config.py`）|
 | 与 `db.py` 循环导入 | `config_db.py` 单方向引用 `db.py`，`db.py` 不引用 `config_db.py` |
 | 与 `streamlit_app.py` 循环导入 | `streamlit_app.py` 引用 `config_db.py`，反之不引 |
 

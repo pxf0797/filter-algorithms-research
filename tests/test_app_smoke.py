@@ -6,7 +6,7 @@ import pytest
 
 def test_app_launches():
     proc = subprocess.Popen(
-        ["streamlit", "run", "streamlit/streamlit_app.py", "--server.headless=true"],
+        ["streamlit", "run", "filter_app/streamlit_app.py", "--server.headless=true"],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
     time.sleep(10)

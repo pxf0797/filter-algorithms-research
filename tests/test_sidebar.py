@@ -9,8 +9,8 @@ These tests cover the non-Streamlit-widget parts of sidebar.py:
 import sys
 from pathlib import Path
 
-# Ensure streamlit/ package is importable (conftest handles streamlit mock)
-_src = Path(__file__).resolve().parent.parent / "streamlit"
+# Ensure filter_app/ package is importable (conftest handles streamlit mock)
+_src = Path(__file__).resolve().parent.parent / "filter_app"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 

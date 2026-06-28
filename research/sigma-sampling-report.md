@@ -212,7 +212,7 @@ sigma_min = 0.08   （提高波动率地板，补偿初始化阶段的低估）
 
 ## 6. 附录：关键代码引用
 
-文件路径：`/Users/xfpan/claude/filter_research/streamlit/streamlit_app.py`
+文件路径：`/Users/xfpan/claude/filter_research/filter_app/streamlit_app.py`
 
 | 功能 | 说明 |
 |:--|:--|

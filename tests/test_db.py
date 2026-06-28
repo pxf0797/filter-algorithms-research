@@ -1,5 +1,5 @@
 """
-tests/test_db.py — 完整单元测试覆盖 streamlit/db.py 模块
+tests/test_db.py — 完整单元测试覆盖 filter_app/db.py 模块
 
 覆盖全部 16 个函数：
   init_db, upsert_kline, query_kline, get_date_range, has_data,

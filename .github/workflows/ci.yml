@@ -25,18 +25,18 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~/.cache/pip
-        key: pip-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('streamlit/requirements.txt') }}
+        key: pip-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('filter_app/requirements.txt') }}
 
     - name: Install dependencies
       run: |
-        pip install -r streamlit/requirements.txt
+        pip install -r filter_app/requirements.txt
         pip install pytest pytest-cov ruff mypy types-requests
 
     - name: Lint with ruff
       run: ruff check . --ignore=E501,F841 --exit-zero
 
     - name: Type check with mypy
-      run: mypy streamlit/ --ignore-missing-imports --follow-imports=skip --exit-zero
+      run: mypy filter_app/ --ignore-missing-imports --follow-imports=skip --exit-zero
 
     - name: Test with pytest
-      run: pytest --cov=streamlit --cov-report=term --tb=short
+      run: pytest --cov=filter_app --cov-report=term --tb=short

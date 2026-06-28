@@ -1,4 +1,4 @@
-"""Tests for streamlit.services.data_loader — target 70%+ coverage."""
+"""Tests for filter_app.services.data_loader — target 70%+ coverage."""
 
 from unittest.mock import patch, MagicMock
 from pathlib import Path
@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-# conftest.py adds streamlit/ to sys.path, so imports are: services.data_loader
+# conftest.py adds filter_app/ to sys.path, so imports are: services.data_loader
 # Patch paths also use services.data_loader.xxx
 
 
@@ -393,7 +393,7 @@ class TestSyncToDisplay:
         with patch("services.data_loader.query_kline",
                    return_value=mock_df), \
              patch("services.data_loader.Path") as mock_path_cls:
-            fake_path = tmp_path / "streamlit" / "services" / "data_loader.py"
+            fake_path = tmp_path / "filter_app" / "services" / "data_loader.py"
             mock_path_cls.return_value = fake_path
 
             from services.data_loader import _sync_to_display

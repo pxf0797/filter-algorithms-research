@@ -125,9 +125,9 @@ graph TD
 
 | 文件 | 行数 | 函数/模块数 | 类型注解覆盖 | 日志 |
 |------|------|------------|-------------|------|
-| `streamlit/streamlit_app.py` | 2,582 | ~20 个函数 + 多个内部函数 | ~20% | 无 (仅 `st.toast`/`st.error`) |
-| `streamlit/db.py` | 438 | ~15 个函数 | ~60% | 无 (仅 `print()` in `__main__`) |
-| `streamlit/config_db.py` | 411 | ~15 个函数 | ~90% | `logging.getLogger(__name__)` |
+| `filter_app/streamlit_app.py` | 2,582 | ~20 个函数 + 多个内部函数 | ~20% | 无 (仅 `st.toast`/`st.error`) |
+| `filter_app/db.py` | 438 | ~15 个函数 | ~60% | 无 (仅 `print()` in `__main__`) |
+| `filter_app/config_db.py` | 411 | ~15 个函数 | ~90% | `logging.getLogger(__name__)` |
 
 > 来源: T1-A/F
 
@@ -364,17 +364,17 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install
-        working-directory: streamlit
+        working-directory: filter_app
         run: |
           pip install -r requirements.txt
           pip install pytest pytest-cov ruff mypy
       - name: Test
-        working-directory: streamlit
+        working-directory: filter_app
         run: python -m pytest --cov=. --cov-report=term --cov-report=xml -v --tb=short
       - name: Lint
-        run: ruff check streamlit/ --output-format=github
+        run: ruff check filter_app/ --output-format=github
       - name: Type check
-        run: mypy streamlit/ --ignore-missing-imports --strict=false
+        run: mypy filter_app/ --ignore-missing-imports --strict=false
 ```
 
 > 来源: T5-5B CI 配置设计, T3-6.4 Streamlit App Action
@@ -404,7 +404,7 @@ jobs:
 **目标:** 所有异常至少 `logger.warning(exc_info=True)`，统一使用 Python `logging` 模块。
 
 **具体实施:** 
-1. 新建 `streamlit/utils/logging.py`，配置控制台 + 文件双 handler (T5-4C)
+1. 新建 `filter_app/utils/logging.py`，配置控制台 + 文件双 handler (T5-4C)
 2. 4 处静默异常替换为 `logger.warning("描述性信息", exc_info=True)` (T5-4B)
 3. `streamlit_app.py` 和 `db.py` 引入 `logger = logging.getLogger(__name__)` (T5-4C)
 
@@ -486,8 +486,8 @@ for i in range(4):
 **目标:** Key 命名统一前缀化、初始化集中管理、`_imp_` 回退封装为 `get_view_param()`。
 
 **具体实施:**
-1. 新建 `streamlit/utils/state_keys.py`：将所有 session_state key 定义为常量 (T5-3A)
-2. 新建 `streamlit/utils/state.py`：`init_app_state()` 集中初始化 + `get_view_param(i, suffix, default)` 封装 `_imp_` 回退 (T5-3B)
+1. 新建 `filter_app/utils/state_keys.py`：将所有 session_state key 定义为常量 (T5-3A)
+2. 新建 `filter_app/utils/state.py`：`init_app_state()` 集中初始化 + `get_view_param(i, suffix, default)` 封装 `_imp_` 回退 (T5-3B)
 
 **改造示例:**
 
@@ -510,7 +510,7 @@ cfg["n_ext"] = get_view_param(i, "next", 8)
 
 **目标:** `docker compose up` 一键启动。
 
-**具体实施:** 创建 `streamlit/Dockerfile` (基于 `python:3.11-slim`, 非 root 用户, 健康检查) + 项目根 `docker-compose.yml` (挂载 data/logs 目录) (T5-5A)。补充 `.gitignore`:
+**具体实施:** 创建 `filter_app/Dockerfile` (基于 `python:3.11-slim`, 非 root 用户, 健康检查) + 项目根 `docker-compose.yml` (挂载 data/logs 目录) (T5-5A)。补充 `.gitignore`:
 ```
 data/display/*.parquet
 tools/filter_comparison_plots/*.png
@@ -732,7 +732,7 @@ gantt
 | 3 | 创建 `feat/logging-and-error-handling` 分支 | 后端开发 | 1 天 | `grep "except Exception: pass"` 返回 0 结果 |
 | 4 | 创建 `refactor/extract-filters-module` 分支，抽离滤波器模块 | 后端开发 | 1 天 | `streamlit_app.py` 减少 170 行，测试全部通过 |
 | 5 | 创建 `refactor/fragment-isolation` 分支，引入 fragment | 前端开发 | 0.5 天 | 调整单视图参数时其他 3 视图不触发 rerun |
-| 6 | 项目根目录添加 `docker-compose.yml` 和 `streamlit/Dockerfile` | DevOps | 0.5 天 | `docker compose up` 后 http://localhost:8501 可访问 |
+| 6 | 项目根目录添加 `docker-compose.yml` 和 `filter_app/Dockerfile` | DevOps | 0.5 天 | `docker compose up` 后 http://localhost:8501 可访问 |
 
 ---
 

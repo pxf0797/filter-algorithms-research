@@ -2,7 +2,7 @@
 
 ## Scope
 
-Covering 10 filter algorithms, Schmitt Trigger, 2 parabolic fit methods, PnL backtesting engine, and time alignment module in `/Users/xfpan/claude/filter_research/streamlit/streamlit_app.py`.
+Covering 10 filter algorithms, Schmitt Trigger, 2 parabolic fit methods, PnL backtesting engine, and time alignment module in `/Users/xfpan/claude/filter_research/filter_app/streamlit_app.py`.
 
 ---
 

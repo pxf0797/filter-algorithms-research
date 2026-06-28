@@ -1,6 +1,6 @@
 # STPP 策略文档 — 施密特触发器 + 预测曲线双确认交易系统
 
-> 基于 `/streamlit/streamlit_app.py` 实际代码实现，版本 2026-06
+> 基于 `/filter_app/streamlit_app.py` 实际代码实现，版本 2026-06
 
 ---
 

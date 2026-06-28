@@ -27,7 +27,7 @@
 filter_research/
 ├── config/
 │   └── 3690_HK.json          # 策略配置文件（71键）
-├── streamlit/
+├── filter_app/
 │   ├── streamlit_app.py       # 主程序（~2105行）
 │   └── db.py                  # SQLite 数据层（130行）
 ├── data/

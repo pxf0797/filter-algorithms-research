@@ -1,7 +1,7 @@
 # 施密特触发预测曲线 — 完整说明文档
 
 **分支:** `master`（已合并）
-**文件:** `streamlit/streamlit_app.py`
+**文件:** `filter_app/streamlit_app.py`
 **日期:** 2026-06-19
 
 ---
