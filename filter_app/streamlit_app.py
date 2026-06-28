@@ -1175,8 +1175,6 @@ def _run_auto_refresh(market, ticker_code, auto_refresh, interval) -> None:
         remaining = max(0, interval - (now - AppState.get("_last_auto_refresh", now)))
         if remaining > 0:
             st.caption(f"⏱️ {int(remaining)}s 后自动刷新")
-            time.sleep(min(remaining, 1.0))
-            st.rerun()
 
 
 # =====================================================================
