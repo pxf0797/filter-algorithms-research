@@ -1145,34 +1145,20 @@ def _render_db_import_export() -> None:
 
 
 def _run_auto_refresh(market, ticker_code, auto_refresh, interval) -> None:
-    """Execute auto-refresh loop if enabled.
+    """Execute auto-refresh if enabled — sleep full interval, then refresh once.
 
-    非闪烁模式：
-    - 倒计时期间每秒 rerun 仅更新 caption 文字，不重新加载数据
-    - 到周期后清缓存、重新获取数据，触发刷新
+    设计: time.sleep(interval) 阻塞等待，不产生中间 rerun。
+    页面仅在 sleep 前渲染一次 caption，到周期后才 rerun 刷新数据。
     """
     if not auto_refresh:
         return
 
-    now = time.time()
-    last = AppState.get("_last_auto_refresh")
-    if last is None:
-        AppState.set("_last_auto_refresh", now)
-        remaining = interval
-    else:
-        elapsed = now - last
-        if elapsed >= interval:
-            logger.info(f"Auto-refresh triggered for {ticker_code} (interval={interval}s)")
-            _cached_fetch_stock.clear()
-            _fetch_all_timeframes(market, ticker_code)
-            AppState.set("_last_auto_refresh", now)
-            st.rerun()
-            return
-        remaining = int(interval - elapsed)
+    st.caption(f"⏱️ {interval}s 后自动刷新")
+    time.sleep(interval)
 
-    st.caption(f"⏱️ {remaining}s 后自动刷新")
-    time.sleep(1)
-    # 更新倒计时显示，不重新获取数据
+    logger.info(f"Auto-refresh triggered for {ticker_code} (interval={interval}s)")
+    _cached_fetch_stock.clear()
+    _fetch_all_timeframes(market, ticker_code)
     st.rerun()
 
 
