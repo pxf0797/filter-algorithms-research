@@ -1145,38 +1145,21 @@ def _render_db_import_export() -> None:
 
 
 def _run_auto_refresh(market, ticker_code, auto_refresh, interval) -> None:
-    """Execute auto-refresh loop if enabled.
+    """Execute auto-refresh if enabled — sleep full interval, then refresh once.
 
-    防无限 rerun: _MAX_IDLE_CYCLES 动态适配刷新间隔，确保至少 2 倍间隔
-    的空闲缓冲，最短 120 个周期（~2 分钟）。正常使用时计数器会在每次
-    实际刷新后归零，不会触及上限。
+    设计: time.sleep(interval) 阻塞等待，不产生中间 rerun。
+    页面仅在 sleep 前渲染一次 caption，到周期后才 rerun 刷新数据。
     """
-    _MAX_IDLE_CYCLES = max(int(interval * 2), 120)
-    if auto_refresh:
-        now = time.time()
-        last = AppState.get("_last_auto_refresh")
-        if last is None:
-            AppState.set("_last_auto_refresh", now)
-        elif now - last >= interval:
-            logger.info(f"Auto-refresh triggered for {ticker_code} (interval={interval}s)")
-            _cached_fetch_stock.clear()
-            _fetch_all_timeframes(market, ticker_code)
-            AppState.set("_last_auto_refresh", now)
-            AppState.set("_auto_refresh_rerun_count", 0)
-            st.rerun()
-        # 防无限 rerun 保护：计数器超过动态阈值后停止
-        rerun_count = AppState.get("_auto_refresh_rerun_count", 0) + 1
-        AppState.set("_auto_refresh_rerun_count", rerun_count)
-        if rerun_count > _MAX_IDLE_CYCLES:
-            logger.warning(f"Auto-refresh stopped after {_MAX_IDLE_CYCLES} idle cycles for {ticker_code}")
-            st.sidebar.warning(f"⏱️ 自动刷新已暂停，请手动刷新")
-            AppState.set("_auto_refresh_rerun_count", 0)
-            return
-        remaining = max(0, interval - (now - AppState.get("_last_auto_refresh", now)))
-        if remaining > 0:
-            st.caption(f"⏱️ {int(remaining)}s 后自动刷新")
-            time.sleep(min(remaining, 1.0))
-            st.rerun()
+    if not auto_refresh:
+        return
+
+    st.caption(f"⏱️ {interval}s 后自动刷新")
+    time.sleep(interval)
+
+    logger.info(f"Auto-refresh triggered for {ticker_code} (interval={interval}s)")
+    _cached_fetch_stock.clear()
+    _fetch_all_timeframes(market, ticker_code)
+    st.rerun()
 
 
 # =====================================================================
