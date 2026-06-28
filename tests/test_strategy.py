@@ -5,11 +5,11 @@ PnL computation (_compute_strategy_pnl, _add_prediction_traces).
 
 import numpy as np
 import pytest
-from streamlit_app import (
+from services.filter_engine import (
     _fit_parabolic, _fit_physics_parabola,
-    _compute_strategy_pnl, _add_prediction_traces,
-    _find_all_pairs,
+    _compute_strategy_pnl, _find_all_pairs,
 )
+from components.charts import _add_prediction_traces
 
 
 # ============================================================================

@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from streamlit_app import _align_pnl_to_current_tf
+from services.filter_engine import _align_pnl_to_current_tf
 
 
 # =========================================================================

@@ -5,11 +5,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from streamlit_app import (
+from services.filter_engine import (
     _compute_strategy_pnl, _find_all_pairs, _align_pnl_to_current_tf,
     _fit_parabolic, _fit_physics_parabola, _schmitt_trigger,
-    TF_HIERARCHY, ALL_TFS,
 )
+from components.sidebar import TF_HIERARCHY, ALL_TFS
 
 
 # =========================================================================
