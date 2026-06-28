@@ -64,7 +64,7 @@ def _render_plotly(fig, height=750, dates=None):
 <head>
 <meta charset="utf-8">
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"
-    onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js'"></script>
+    onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js';window._plotlyCdnFailed=true"></script>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 html, body {{ width: 100%; height: 100%; overflow: hidden; }}
@@ -89,9 +89,21 @@ g.hovertext {{ visibility: hidden !important; }}
 <body>
 <div id="{div_id}"></div>
 <div id="date-tip-{div_id}"></div>
+<div id="plotly-fallback-{div_id}" style="display:none;padding:2rem;text-align:center;color:#888">
+  <p>Plotly.js 加载失败</p>
+  <p>请检查网络连接或联系管理员</p>
+</div>
 <script>
-(function() {{
-    var figure = {figure_json};
+var _fallbackEl = document.getElementById('plotly-fallback-{div_id}');
+if (typeof Plotly === 'undefined') {{
+    _fallbackEl.style.display = 'block';
+    document.getElementById('{div_id}').style.display = 'none';
+    return;
+}} else if (window._plotlyCdnFailed) {{
+    // 从CDNJS fallback成功加载，清除标记
+    delete window._plotlyCdnFailed;
+}}
+var figure = {figure_json};
     var config = {{
         responsive: true,
         displayModeBar: true,
@@ -173,6 +185,13 @@ g.hovertext {{ visibility: hidden !important; }}
             }}
         }});
     }});
+    // Safety check: if Plotly still not loaded after 5s, show fallback
+    setTimeout(function() {{
+        if (typeof Plotly === 'undefined') {{
+            _fallbackEl.style.display = 'block';
+            document.getElementById('{div_id}').style.display = 'none';
+        }}
+    }}, 5000);
 }})();
 </script>
 </body>

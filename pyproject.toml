@@ -5,3 +5,22 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "W"]
 ignore = ["E501"]
+
+[project]
+name = "filter-research"
+version = "10.5.0"
+description = "多周期股票滤波分析工具"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = ["-v", "--tb=short", "--strict-markers"]
+
+[tool.coverage.run]
+source = ["filter_app"]
+omit = ["tests/*"]
+
+[tool.coverage.report]
+fail_under = 55
+exclude_lines = ["pragma: no cover", "if __name__ == .__main__.:"]

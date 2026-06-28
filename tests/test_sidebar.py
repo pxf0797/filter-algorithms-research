@@ -201,7 +201,7 @@ class TestCompactSlider:
             from components.sidebar import _compact_slider
             result = _compact_slider("N", 20, 300, 120, 10)
             assert result == 50.0
-            mock_col0.markdown.assert_called_once()
+            mock_col0.caption.assert_called_once()
             mock_col1.slider.assert_called_once_with(
                 "N", min_value=20, max_value=300, value=120,
                 step=10, key=None, label_visibility="collapsed",
@@ -225,8 +225,8 @@ class TestCompactSlider:
                 format="%.3f",
             )
 
-    def test_slider_markdown_renders_label(self):
-        """验证 markdown 用 f-string 传入 label."""
+    def test_slider_caption_renders_label(self):
+        """验证 caption 显示 label 文本（替代 markdown+unsafe_allow_html）。"""
         mock_col0 = MagicMock()
         mock_col1 = MagicMock()
         mock_col1.slider.return_value = 5.0
@@ -235,9 +235,7 @@ class TestCompactSlider:
                    return_value=[mock_col0, mock_col1]):
             from components.sidebar import _compact_slider
             _compact_slider("窗口", 1, 100, 50, 1)
-            mock_col0.markdown.assert_called_once_with(
-                "<small>窗口</small>", unsafe_allow_html=True,
-            )
+            mock_col0.caption.assert_called_once_with("窗口")
 
 
 # ===================================================================
@@ -446,11 +444,8 @@ class TestRenderParams:
             "params": {"window": ("窗口大小", 3, 101, 2, 11)},
         },
     })
-    def test_render_params_unknown_filter_id2_crashes(self):
-        """dual=True 但 filter_id2 未知时触发 warning 后仍会崩溃(TypeError).
-
-        这是生产代码 bug (line 218-219 未检查 sf2 is None)，测试记录当前行为。
-        """
+    def test_render_params_unknown_filter_id2_not_crash(self):
+        """dual=True 但 filter_id2 未知时不应崩溃 (regression)."""
         mock_warning = MagicMock()
         with patch("components.sidebar.st.warning", mock_warning), \
              patch("components.sidebar.st.columns",
@@ -469,12 +464,14 @@ class TestRenderParams:
              patch("components.sidebar.st.color_picker",
                    return_value="#00d4aa"):
             from components.sidebar import _render_params
-            with pytest.raises(TypeError):
-                _render_params(
-                    key="v0", filter_id="sma", dual=True,
-                    filter_id2="unknown_filter", tf_default="日线",
-                )
-        assert mock_warning.call_count >= 1
+            cfg = _render_params(
+                key="v0", filter_id="sma", dual=True,
+                filter_id2="unknown_filter", tf_default="日线",
+            )
+        mock_warning.assert_called_once()
+        assert cfg is not None
+        assert cfg["pv2"] == {}
+        assert cfg["fc2"] == "#ff6b6b"
 
     def test_render_params_show_sch_false_skips_expanders(self):
         """show_sch=False 时不渲染施密特面板."""

@@ -19,7 +19,8 @@ def _compact_slider(label: str, pmin: float, pmax: float, pdefault: float,
                     fmt: Optional[str] = None) -> float:
     """标签与滑块同行（仅用于无 help 的简单滑块）。"""
     c = st.columns([0.35, 0.65])
-    c[0].markdown(f"<small>{label}</small>", unsafe_allow_html=True)
+    c[0].caption(label)
+    # L22 原为 markdown(unsafe_allow_html=True)，改用 caption 实现小型标签且无安全风险
     kwargs = dict(min_value=pmin, max_value=pmax, value=pdefault, step=pstep,
                   key=key, label_visibility="collapsed")
     if fmt: kwargs["format"] = fmt
@@ -126,7 +127,7 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
                     <b>入场</b> <code>entry=pair_end</code>　做多需 <code>Sig=+1</code>且<code>ŷ<sub>end</sub>&gt;ŷ<sub>0</sub></code><br>
                     <b>曲线</b> <code>PnL<sub>t</sub>=capital·(1+未实现%)</code>　空仓期水平直线
                     </div>
-                    """, unsafe_allow_html=True)
+                    """, unsafe_allow_html=True)  # 安全: 内容为纯静态文档，无用户输入插值
                     c_strat = st.columns([1.0, 1.0])
                     strat_key = f"{key}_strat"
                     sl_key = f"{key}_sl"
@@ -215,7 +216,7 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
         sk = f"{label}_{key}_f1_{filter_id}"
         cfg["pv"][pname] = st.session_state.get(sk,
             st.session_state.get(f"_imp_{sk}", cfg["pv"].get(pname, 0)))
-    if dual and filter_id2:
+    if dual and sf2 is not None:
         for pname in sf2["params"]:
             label = sf2["params"][pname][0]
             sk = f"{label}_{key}_f2_{filter_id2}"
