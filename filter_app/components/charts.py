@@ -95,6 +95,7 @@ g.hovertext {{ visibility: hidden !important; }}
   <p>请检查网络连接或联系管理员</p>
 </div>
 <script>
+(function() {{
 var _fallbackEl = document.getElementById('plotly-fallback-{div_id}');
 if (typeof Plotly === 'undefined') {{
     _fallbackEl.style.display = 'block';
