@@ -694,6 +694,105 @@ class TestRenderPlotlyHtml:
         assert "plotly_hover" in source
         assert "plotly_unhover" in source
 
+    def test_fallback_html_structure(self):
+        """H4: _render_plotly 输出包含 plotly-fallback div + IIFE 结构."""
+        from components.charts import _render_plotly
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[1, 2, 3], y=[1, 2, 3]))
+
+        import streamlit as st
+        captured = {}
+        def _capture_html(html, **kw):
+            captured["html"] = html
+            return MagicMock()
+        from unittest.mock import MagicMock
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(st.components.v1, "html", _capture_html)
+
+        _render_plotly(fig, height=300)
+
+        monkeypatch.undo()
+        html = captured.get("html", "")
+        assert html, "_render_plotly 应产生 HTML 输出"
+
+        # fallback div 存在
+        assert "plotly-fallback-" in html
+        assert "加载失败" in html
+        # IIFE 结构
+        assert "(function()" in html.replace("{{", "{")
+
+    # -----------------------------------------------------------------
+    # H5: timeout safety
+    # -----------------------------------------------------------------
+    def test_timeout_safety_check(self):
+        """H5: 输出包含 5秒 setTimeout 安全检查."""
+        from components.charts import _render_plotly
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[1, 2, 3], y=[1, 2, 3]))
+
+        import streamlit as st
+        captured = {}
+        def _capture_html(html, **kw):
+            captured["html"] = html
+            return MagicMock()
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(st.components.v1, "html", _capture_html)
+
+        _render_plotly(fig, height=300)
+
+        monkeypatch.undo()
+        html = captured.get("html", "")
+        assert html
+
+        assert "setTimeout" in html
+        assert "5000" in html
+
+    # -----------------------------------------------------------------
+    # IIFE 配对验证
+    # -----------------------------------------------------------------
+    def test_iife_wrapping_is_valid(self):
+        """修复验证: (function() { 和 })(); 配对，return 在函数内."""
+        from components.charts import _render_plotly
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[1, 2, 3], y=[1, 2, 3]))
+
+        import streamlit as st
+        captured = {}
+        def _capture_html(html, **kw):
+            captured["html"] = html
+            return MagicMock()
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(st.components.v1, "html", _capture_html)
+
+        _render_plotly(fig, height=300)
+
+        monkeypatch.undo()
+        html = captured.get("html", "")
+        assert html
+
+        # 提取 <script> 块内容
+        import re
+        script_match = re.search(r"<script>(.*?)</script>", html, re.DOTALL)
+        assert script_match, "HTML 必须包含 <script> 块"
+        js = script_match.group(1)
+
+        # IIFE 开始
+        assert "function()" in js, "JS 必须以自调用函数开头 (function() {"
+        # IIFE 结束 — JS 中使用 }} 表示 }，在 Python f-string 中表示为 }}}
+        assert "})()" in js or "}()" in js, "JS 必须以 })(); 结尾"
+
+        # return 不能出现在 function 之外
+        func_idx = js.find("function()")
+        return_idx = js.find("return;")
+        if return_idx > 0:
+            assert return_idx > func_idx, (
+                f"return; 必须在 function 体内 "
+                f"(func at {func_idx}, return at {return_idx})"
+            )
+
 
 # ===================================================================
 # SECTION 9 — _add_cross_pnl_subplot
