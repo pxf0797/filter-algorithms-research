@@ -71,7 +71,7 @@ def _cached_fetch_stock(market, code, tf, n_pts, force_period=None):
 # =====================================================================
 
 
-def _date_markers(dates, tf):
+def _date_markers(dates, tf) -> tuple[list, list]:
     """Return (positions, labels) for vertical date markers."""
     if dates is None or len(dates) == 0:
         return [], []
@@ -111,7 +111,7 @@ def _date_markers(dates, tf):
     return positions, labels
 
 
-def _load_chart_data(market, ticker_code, tf, day_offset, n_pts):
+def _load_chart_data(market, ticker_code, tf, day_offset, n_pts) -> tuple:
     """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err)."""
     _sync_to_display(ticker_code, tf, day_offset, n_pts)
     display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
@@ -135,8 +135,9 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts):
     return _cached_fetch_stock(market, ticker_code, tf, n_pts)
 
 
-def _compute_filters(noisy, t, cfg):
-    """Compute primary and optional secondary filter. Returns (filtered, filtered2)."""
+def _compute_filters(noisy, t, cfg) -> tuple[np.ndarray, np.ndarray | None]:
+    """Compute primary and optional secondary filter. Returns (filtered, filtered2).
+    Note: Not cached via @st.cache_data because params include unhashable np.ndarray."""
     sf = FILTERS.get(cfg["_fid"])
     if sf is None:
         logger.warning(f"Unknown filter_id '{cfg['_fid']}', skipping primary filter")
@@ -164,8 +165,9 @@ def _compute_filters(noisy, t, cfg):
     return filtered, filtered2
 
 
-def _compute_schmitt_trigger(filtered, t, cfg):
-    """Compute Schmitt trigger signal. Returns schmitt dict or None."""
+def _compute_schmitt_trigger(filtered, t, cfg) -> dict | None:
+    """Compute Schmitt trigger signal. Returns schmitt dict or None.
+    Note: Not cached via @st.cache_data because params include unhashable np.ndarray."""
     if not cfg["show_sch"] or np.all(np.isnan(filtered)):
         return None
     _v = np.gradient(filtered, t)
@@ -174,7 +176,7 @@ def _compute_schmitt_trigger(filtered, t, cfg):
     return _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
 
 
-def _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs):
+def _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs) -> list:
     """Compute prediction curves for each pair. Returns list of pred_pairs dicts."""
     if not cfg.get("show_pred") or schmitt is None:
         return []
@@ -193,7 +195,7 @@ def _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs):
     return pred_pairs
 
 
-def _compute_strategy_display(t, filtered, schmitt, all_pairs, pred_pairs, cfg, tf, dates):
+def _compute_strategy_display(t, filtered, schmitt, all_pairs, pred_pairs, cfg, tf, dates) -> tuple:
     """Compute strategy PnL and display summary captions. Returns (long_pnl, short_pnl, trade_records)."""
     show_strategy = cfg.get("show_strategy", False)
     stop_loss_pct = cfg.get("stop_loss_pct", 2.0)
@@ -230,7 +232,7 @@ def _compute_strategy_display(t, filtered, schmitt, all_pairs, pred_pairs, cfg, 
     return long_pnl, short_pnl, trade_records
 
 
-def _determine_subplot_layout(has_s, has_strategy, has_cross, has_alignment, _higher_tf):
+def _determine_subplot_layout(has_s, has_strategy, has_cross, has_alignment, _higher_tf) -> tuple:
     """Determine subplot layout dimensions based on enabled features.
     Returns (rows, rh, titles, mr, rr, vr, sar, ssr, ar, pnl_row, cross_row, align_row)."""
     if has_s:
@@ -270,7 +272,7 @@ def _determine_subplot_layout(has_s, has_strategy, has_cross, has_alignment, _hi
                1, 2, 3, None, None, 4, None, None, None
 
 
-def _add_main_price_traces(fig, t, noisy, ohlc, filtered, filtered2, cfg):
+def _add_main_price_traces(fig, t, noisy, ohlc, filtered, filtered2, cfg) -> None:
     """Add K-line, close price, and filter lines to the main price subplot."""
     fig.add_trace(go.Candlestick(x=t, open=ohlc["Open"].values.ravel(),
         high=ohlc["High"].values.ravel(), low=ohlc["Low"].values.ravel(),
@@ -287,8 +289,8 @@ def _add_main_price_traces(fig, t, noisy, ohlc, filtered, filtered2, cfg):
             line=dict(color=cfg["fc2"], width=2.0)), row=1, col=1)
 
 
-def _add_residual_traces(fig, t, filtered, noisy, filtered2, cfg, rr, vr):
-    """Add residual, velocity, and acceleration traces to subplots."""
+def _add_residual_traces(fig, t, filtered, noisy, filtered2, cfg, rr, vr) -> np.ndarray:
+    """Add residual, velocity, and acceleration traces to subplots. Returns acceleration array."""
     if not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=filtered - noisy, mode="lines", name="残差",
             line=dict(color="#5f6c80", width=1.0, dash="dot")), row=rr, col=1)
@@ -303,7 +305,7 @@ def _add_residual_traces(fig, t, filtered, noisy, filtered2, cfg, rr, vr):
     return np.gradient(vel, t)
 
 
-def _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar, ssr):
+def _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar, ssr) -> None:
     """Add Schmitt trigger traces: eps bands, sigma_v, acceleration, Sig signal, pair bands."""
     eps = schmitt["eps"]
     sig = schmitt["sig"]
@@ -340,7 +342,7 @@ def _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar, ssr):
         ), row=ssr, col=1)
 
 
-def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row):
+def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row) -> None:
     """Add PnL curves, individual trade segments, markers, and annotations."""
     fig.add_trace(go.Scatter(x=t, y=long_pnl, mode="lines", name="做多PnL",
         line=dict(color="#3fb950", width=1.5, dash="solid")), row=pnl_row, col=1)
@@ -388,12 +390,12 @@ def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row):
 # =====================================================================
 
 @st.fragment
-def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None):
+def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None) -> None:
     """Fragment wrapper for _render_chart — enables per-view independent re-rendering."""
     _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl)
 
 
-def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None):
+def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None) -> None:
     """Fetch data + render multi-subplot figure from config.
     优先从本地 Parquet 读取；day_offset=向历史前移N天（各周期独立对齐）。
     higher_pnl: 高周期PnL数据（来自 _align_pnl_to_current_tf 的输出），非空时新增row 7子图。"""
@@ -539,7 +541,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
 
 # =====================================================================
 @st.cache_resource
-def _get_db_connection():
+def _get_db_connection() -> bool:
     """Get database connection (cached across all sessions)."""
     logger.debug("Initializing database connection (cache miss)")
     init_db()
@@ -551,7 +553,7 @@ def _get_db_connection():
 # =====================================================================
 
 
-def _handle_pending_apply():
+def _handle_pending_apply() -> None:
     """Apply pending preset params from session_state."""
     if AppState.has("_pending_apply_params"):
         params = AppState.pop("_pending_apply_params")
@@ -562,7 +564,7 @@ def _handle_pending_apply():
         AppState.set("_import_data", "preset")
 
 
-def _render_config_import():
+def _render_config_import() -> None:
     """Render config file uploader and handle import."""
     uploaded = st.sidebar.file_uploader("导入配置", type=["json"], key="config_import",
                                          label_visibility="collapsed")
@@ -582,7 +584,7 @@ def _render_config_import():
                 st.sidebar.error(f"导入失败: {e}")
 
 
-def _render_market_ticker():
+def _render_market_ticker() -> tuple:
     """Render market radio + ticker input. Returns (market, ticker_code)."""
     market = st.sidebar.radio("市场", ["美股 US", "A股(沪深)", "港股 HK"],
                                horizontal=True, key="market")
@@ -592,7 +594,7 @@ def _render_market_ticker():
     with c2:
         if ticker_code:
             @st.cache_data(show_spinner=False, ttl=3600)
-            def _stock_name(mkt, code):
+            def _stock_name(mkt, code) -> str:
                 if not code or not code.strip():
                     return ""
                 try:
@@ -612,7 +614,7 @@ def _render_market_ticker():
     return market, ticker_code
 
 
-def _handle_initial_fetch(market, ticker_code):
+def _handle_initial_fetch(market, ticker_code) -> None:
     """Auto-fetch all timeframes on first load."""
     if not AppState.has("_fetched_ticker"):
         AppState.set("_fetched_ticker", "")
@@ -627,7 +629,7 @@ def _handle_initial_fetch(market, ticker_code):
         AppState.set("_fetched_ticker", ticker_code)
 
 
-def _render_refresh_row(market, ticker_code):
+def _render_refresh_row(market, ticker_code) -> tuple:
     """Render refresh button + auto-refresh checkbox. Returns (auto_refresh, interval)."""
     c_refresh, c_auto = st.sidebar.columns([1, 1.2])
     auto_refresh = False
@@ -652,7 +654,7 @@ def _render_refresh_row(market, ticker_code):
     return auto_refresh, interval
 
 
-def _render_preset_selector(market, ticker_code):
+def _render_preset_selector(market, ticker_code) -> None:
     """Render preset selector, action buttons, and confirmation flows."""
     st.sidebar.markdown("---")
     search_query = st.sidebar.text_input("🔍 搜索配置", key="preset_search",
@@ -803,7 +805,7 @@ def _render_preset_selector(market, ticker_code):
                 st.error("请输入预设名称")
 
 
-def _render_health_check(ticker_code):
+def _render_health_check(ticker_code) -> None:
     """Render data health check expander section."""
     with st.sidebar.expander("🩺 数据健康检查", expanded=False):
         if st.button("运行检查", key="health_btn", use_container_width=True) and ticker_code:
@@ -823,7 +825,7 @@ def _render_health_check(ticker_code):
                              height=min(35 * len(detail_df) + 38, 300))
 
 
-def _render_data_validation(market, ticker_code):
+def _render_data_validation(market, ticker_code) -> None:
     """Render DB vs source data validation expander section."""
     with st.sidebar.expander("📋 数据校验", expanded=False):
         st.caption("对比数据库与 yfinance 全部周期，发现历史数据修正")
@@ -920,7 +922,7 @@ def _render_data_validation(market, ticker_code):
                             st.warning("没有周期被更新")
 
 
-def _render_filter_selectors():
+def _render_filter_selectors() -> tuple:
     """Render filter selector widgets. Returns (filter_id, dual, filter_id2)."""
     filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),
         format_func=lambda x: FILTERS.get(x, {}).get("name", x), key="global_f")
@@ -932,7 +934,7 @@ def _render_filter_selectors():
     return filter_id, dual, filter_id2
 
 
-def _render_param_panels(filter_id, dual, filter_id2):
+def _render_param_panels(filter_id, dual, filter_id2) -> list:
     """Render 2x2 parameter panels. Returns list of config dicts."""
     configs = []
     for row_idx in range(2):
@@ -947,7 +949,7 @@ def _render_param_panels(filter_id, dual, filter_id2):
     return configs
 
 
-def _render_time_nav(configs, ticker_code):
+def _render_time_nav(configs, ticker_code) -> int:
     """Render time window navigation. Returns day_offset."""
     st.sidebar.markdown("---")
     st.sidebar.caption("⏪ 时间窗口（按天移动）")
@@ -992,7 +994,7 @@ def _render_time_nav(configs, ticker_code):
     return AppState.get("_day_offset", 0)
 
 
-def _render_db_backup():
+def _render_db_backup() -> None:
     """Render DB backup/restore expander section."""
     with st.sidebar.expander("💾 数据备份与恢复", expanded=False):
         db_size = get_db_size_mb()
@@ -1043,7 +1045,7 @@ def _render_db_backup():
                         st.error(f"删除失败: {e}")
 
 
-def _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code):
+def _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code) -> None:
     """Render config export download button."""
     st.sidebar.markdown("---")
     export_data = {
@@ -1079,7 +1081,7 @@ def _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_c
         use_container_width=True)
 
 
-def _render_config_history(ticker_code):
+def _render_config_history(ticker_code) -> None:
     """Render config history expander section."""
     if ticker_code:
         st.sidebar.markdown("---")
@@ -1094,7 +1096,7 @@ def _render_config_history(ticker_code):
                 st.caption("暂无记录")
 
 
-def _render_db_import_export():
+def _render_db_import_export() -> None:
     """Render DB import/export expander section."""
     with st.sidebar.expander("📦 数据库导入/导出", expanded=False):
         st.caption("导出整个数据库到文件，可在其他设备导入")
@@ -1142,7 +1144,7 @@ def _render_db_import_export():
                     st.rerun()
 
 
-def _run_auto_refresh(market, ticker_code, auto_refresh, interval):
+def _run_auto_refresh(market, ticker_code, auto_refresh, interval) -> None:
     """Execute auto-refresh loop if enabled.
 
     防无限 rerun: _MAX_IDLE_CYCLES 动态适配刷新间隔，确保至少 2 倍间隔
@@ -1178,7 +1180,7 @@ def _run_auto_refresh(market, ticker_code, auto_refresh, interval):
 
 
 # =====================================================================
-def main():
+def main() -> None:
     logger.info("App started")
     _get_db_connection()
     init_config_tables()
