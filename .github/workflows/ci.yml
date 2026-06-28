@@ -32,11 +32,16 @@ jobs:
         pip install -r filter_app/requirements.txt
         pip install pytest pytest-cov ruff mypy types-requests
 
+    - name: Security audit (pip-audit)
+      run: |
+        pip install pip-audit
+        pip-audit
+
     - name: Lint with ruff
-      run: ruff check . --ignore=E501,F841 --exit-zero
+      run: ruff check . --ignore=E501,F841
 
     - name: Type check with mypy
-      run: mypy filter_app/ --ignore-missing-imports --follow-imports=skip --exit-zero
+      run: mypy filter_app/ --ignore-missing-imports --follow-imports=skip
 
     - name: Run tests (with streamlit mock)
       run: python -m pytest tests/ --ignore=tests/test_app_ui.py --ignore=tests/test_app_smoke.py --ignore=tests/test_streamlit_app.py --cov=filter_app --cov-report=term --cov-fail-under=55 --tb=short -q

@@ -1,6 +1,6 @@
 # 多周期股票滤波分析工具 — 测试用例文档
 
-> 自动生成于 2026-06-28 | 测试总数: 596 | Python 3.12 + pytest
+> 自动生成于 2026-06-28 | 测试总数: 600（pytest 收集，不含 test_streamlit_app.py 的 25 个 mock 测试） | Python 3.12 + pytest
 
 ## 文档说明
 
@@ -555,7 +555,7 @@
 
 ## 3. UI 组件测试
 
-### 3.1 侧边栏组件 (`test_sidebar.py`) — 19 用例
+### 3.1 侧边栏组件 (`test_sidebar.py`) — 36 用例
 
 #### 全时间帧 (`TestAllTFs`)
 
@@ -600,6 +600,38 @@
 | TC-SIDEBAR-017 | step 类型决定格式 | 不同类型 step | render_param_slider_logic | 整数步长用 %d，浮点用 %f |
 | TC-SIDEBAR-018 | key 后缀追加 | 给定 key 和 suffix | render_param_slider_logic | 生成的 key = key + suffix |
 | TC-SIDEBAR-019 | container 默认为 None | 不传 container | render_param_slider_logic | container 参数为 None |
+
+#### 紧凑 slider 渲染 (`TestCompactSlider`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-SIDEBAR-020 | 不传 key 和 fmt 时正常渲染 | mock st.columns | _compact_slider(N, 20, 300, 120, 10) | 返回 slider 值，caption 被调用 |
+| TC-SIDEBAR-021 | 传入 key 和 fmt 时传递给 slider | mock st.columns | _compact_slider(sigma, ..., key="my_ke", fmt="%.3f") | key 和 format 透传给 slider |
+| TC-SIDEBAR-022 | caption 显示 label 文本 | mock st.columns | _compact_slider("窗口", ...) | caption 内容为 "窗口" |
+
+#### 渲染参数 slider (`TestRenderParamSlider`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-SIDEBAR-023 | container=None 使用 st.sidebar.slider | mock st.sidebar | _render_param_slider(...) | sidebar.slider 被调用 |
+| TC-SIDEBAR-024 | container=st 使用 st.slider | mock st | _render_param_slider(..., container=mock_st) | st.slider 被调用 |
+| TC-SIDEBAR-025 | key_suffix 非空时 key 为 f"{label}_{key_suffix}" | mock st.sidebar | _render_param_slider(key_suffix="f1_sma") | key 为 "跨度_f1_sma" |
+| TC-SIDEBAR-026 | int step 不传 format 参数 | mock st.sidebar | _render_param_slider(step=1) | format 不在 kwargs 中 |
+| TC-SIDEBAR-027 | float step < 0.01 使用 %.3f 格式 | mock st.sidebar | _render_param_slider(step=0.001) | format 为 "%.3f" |
+| TC-SIDEBAR-028 | float step >= 0.01 使用 %.2f 格式 | mock st.sidebar | _render_param_slider(step=0.1) | format 为 "%.2f" |
+| TC-SIDEBAR-029 | key_suffix='' 不查 session_state | mock st.sidebar | _render_param_slider(key_suffix="") | key 为 None |
+
+#### 渲染参数面板 (`TestRenderParams`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-SIDEBAR-030 | 基本 SMA filter 渲染 | mock FILTERS + st 组件 | _render_params(sma) | 组件被正确渲染 |
+| TC-SIDEBAR-031 | 未知 filter 显示警告 | mock FILTERS 不含目标 filter | _render_params(unknown) | 警告信息被显示 |
+| TC-SIDEBAR-032 | 双滤波模式渲染 | mock 双 filter 配置 | _render_params(dual=True) | 两组参数面板均渲染 |
+| TC-SIDEBAR-033 | 未知 filter_id2 不崩溃 | mock 无效 filter_id2 | _render_params(filter_id2=unknown) | 应用不崩溃 |
+| TC-SIDEBAR-034 | show_sch=False 跳过施密特展开 | mock st 组件 | _render_params(show_sch=False) | 施密特 expander 不被渲染 |
+| TC-SIDEBAR-035 | 展开/折叠按钮状态切换 | mock st.button True | _render_params(...) | expander 状态正确切换 |
+| TC-SIDEBAR-036 | 策略禁用时从 session_state 读取止损 | mock session_state | _render_params(strategy=False) | 止损值从 state 读取 |
 
 ---
 
@@ -984,7 +1016,7 @@
 
 ## 4. 可视化测试
 
-### 4.1 图表渲染 (`test_charts.py`) — 75 用例
+### 4.1 图表渲染 (`test_charts.py`) — 87 用例
 
 #### 入场标记渲染 (`TestRenderEntryMarker`)
 
@@ -1115,9 +1147,35 @@
 | TC-CHART-073 | 预测 trace 属性 | Plotly figure | render_prediction_traces | trace 属性正确 |
 | TC-CHART-074 | no_extend 不添加外推 | Plotly figure | render_prediction_traces(extend=False) | 仅拟合区间 |
 | TC-CHART-075 | poly2 trace 名称 | Plotly figure | render_prediction_traces(method="poly2") | 名称含 "poly2" |
+| TC-CHART-076 | poly2 模式通过 polyval 计算预测 | Plotly figure + fit_result(无 x0) | _add_prediction_traces | 预测值递增（正二次项系数） |
+| TC-CHART-077 | physics 模式通过 polyval(x_ext-x0) 计算 | Plotly figure + fit_result(有 x0) | _add_prediction_traces | 预测以 x0 为顶点延伸 |
+
+#### Plotly 序列化 (`TestRenderPlotlySerialization`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-CHART-078 | NaN 值序列化为 JSON null | Plotly fig + NaN 数据 | _render_plotly | figure JSON 中 NaN 被替换为 null |
+| TC-CHART-079 | Inf 值序列化为 JSON null | Plotly fig + Inf 数据 | _render_plotly | figure JSON 中 Inf 被替换为 null |
+| TC-CHART-080 | 空数据 fig 不崩溃 | 空 go.Figure | _render_plotly | Plotly.newPlot 在 HTML 中 |
+| TC-CHART-081 | dates 参数嵌入 layout | Plotly fig + 日期列表 | _render_plotly(dates=...) | HTML 包含日期字符串 |
+
+#### 跨 P&L 子图交易标记 (`TestCrossPnlSubplotTrades`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-CHART-082 | 空 entry/exit 且全 NaN 参考线不添加 traces | Plotly fig + 空标记列表 | _add_cross_pnl_subplot | 不添加新 trace |
+| TC-CHART-083 | 同时有入场和离场标记时添加对应 traces | Plotly fig + 入场/出场标记 | _add_cross_pnl_subplot | 添加 4 条新 traces |
+
+#### 施密特触发 trace (`TestSchmittTraces`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-CHART-084 | all_pairs 为空时不崩溃 | Plotly fig + 空 pairs | _add_schmitt_traces | 至少 6 条基础 traces |
+| TC-CHART-085 | 单个 pair 添加 pair band trace | Plotly fig + 有 sig 数据 | _add_schmitt_traces | trace 数量增加 |
+| TC-CHART-086 | sar/ssr 参数指向不同子图时正确布局 | Plotly fig(4 rows) | _add_schmitt_traces(sar=1, ssr=2) | trace 数量 >= base+7 |
+| TC-CHART-087 | sig 为 1 和 -1 时添加不同颜色的 fill | Plotly fig + 双向 sig | _add_schmitt_traces | 含双向 sig fill traces |
 
 ---
-
 ### 4.2 时间对齐 (`test_alignment.py`) — 6 用例
 
 #### 对齐 P&L 到当前时间帧 (`TestAlignPnlToCurrentTf`)
@@ -1457,12 +1515,12 @@ pytest tests/ --cov=. --cov-report=html
 | 算法核心 | test_filters.py | 6 | 22 |
 | | test_signals.py | 2 | 16 |
 | | test_strategy.py | 5 | 18 |
-| UI 组件 | test_sidebar.py | 5 | 19 |
+| UI 组件 | test_sidebar.py | 8 | 36 |
 | | test_preset_ui.py | 14 | 60 |
 | | test_preset_ui_actions.py | 7 | 45 |
 | | test_app_ui.py | 8 | 33 |
 | | test_streamlit_app.py | 5 | 25 |
-| 可视化 | test_charts.py | 11 | 75 |
+| 可视化 | test_charts.py | 14 | 87 |
 | | test_alignment.py | 1 | 6 |
 | | test_alignment_subplot.py | 2 | 14 |
 | 集成测试 | test_integration.py | 0 | 6 |
@@ -1471,4 +1529,4 @@ pytest tests/ --cov=. --cov-report=html
 | 边界与参数 | test_boundary.py | 11 | 30 |
 | | test_param_export_import.py | 5 | 13 |
 | 数据加载 | test_data_loader.py | 5 | 30 |
-| **合计** | **20 文件** | **133** | **596** |
+| **合计** | **20 文件** | **139** | **600** |
