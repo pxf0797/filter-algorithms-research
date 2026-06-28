@@ -37,7 +37,7 @@ filter_research/
 │   ├── config_db.py          # 配置数据库
 │   ├── db.py                 # SQLite 数据层（130行）
 │   ├── state.py              # AppState 状态管理
-│   └── streamlit_app.py      # 主程序（入口，~350行）
+│   └── streamlit_app.py      # 主程序（入口，~1223行, 含提取的辅助函数）
 ├── data/
 │   ├── market.db              # SQLite 数据库（运行时生成）
 │   └── display/               # Parquet 缓存（运行时生成）

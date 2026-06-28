@@ -3,9 +3,9 @@
 ## 测试覆盖限制
 
 ### filter_app/streamlit_app.py (0% 单元覆盖)
-- **原因**: ~350行 UI 入口代码，依赖 Streamlit 运行时
+- **原因**: ~1223行 UI 入口代码（含提取的辅助函数, main()本身~350行），依赖 Streamlit 运行时
 - **现状**: 核心逻辑已拆分至 components/ + services/，各有较高覆盖
-- **AppTest**: 冒烟测试 (6 tests) 已就绪
+- **AppTest**: 交互测试 (29 tests, 含侧边栏/预设/控件/P0回归) 已就绪
 
 ### sidebar.py (7% 单元覆盖)
 - **原因**: 97% 代码为 Streamlit widget 调用
@@ -25,6 +25,6 @@
 
 ## 工程化待办
 
-- [ ] AppTest 交互测试扩展 (预设选择、ticker输入)
+- [x] AppTest 交互测试扩展 (预设选择、ticker输入)
 - [ ] pre-commit hooks 配置
 - [ ] CI 覆盖率门禁 (已设置 --cov-fail-under=45)

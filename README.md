@@ -189,7 +189,7 @@ pytest tests/test_app_ui.py -v
 pytest tests/ --ignore=tests/test_app_ui.py --cov=filter_app --cov-report=term
 ```
 
-当前测试：**569 个**，覆盖率 **49%**。
+当前测试：**623 个**，覆盖率 **49%**。
 
 ## 9. CI/CD
 
@@ -216,7 +216,7 @@ filter_research/
 │   ├── db.py                   # SQLite 数据层
 │   ├── state.py                # AppState 状态管理
 │   └── streamlit_app.py        # 入口文件
-├── tests/                      # 测试目录（22 个文件）
+├── tests/                      # 测试目录（20 个文件）
 ├── config/                     # 策略配置文件
 ├── data/                       # SQLite 数据库 + 缓存
 ├── docs/                       # 文档
