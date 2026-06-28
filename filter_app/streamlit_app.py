@@ -56,6 +56,16 @@ st.set_page_config(
 )
 
 
+# ---------------------------------------------------------------------------
+# Cached data-fetching wrapper (Streamlit cache over bare data_loader._fetch_stock)
+# ---------------------------------------------------------------------------
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def _cached_fetch_stock(market, code, tf, n_pts, force_period=None):
+    """Cached wrapper for yfinance data fetching. Clear cache to force refresh."""
+    return _fetch_stock(market, code, tf, n_pts, force_period=force_period)
+
+
 # =====================================================================
 # Chart rendering — sub-functions extracted from _render_chart
 # =====================================================================
@@ -122,7 +132,7 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts):
             err = str(e)
     if err is not None:
         return None, None, None, None, None, err
-    return _fetch_stock(market, ticker_code, tf, n_pts)
+    return _cached_fetch_stock(market, ticker_code, tf, n_pts)
 
 
 def _compute_filters(noisy, t, cfg):
@@ -624,7 +634,7 @@ def _render_refresh_row(market, ticker_code):
     interval = 60
     with c_refresh:
         if st.button("刷新数据", use_container_width=True):
-            _fetch_stock.clear()
+            _cached_fetch_stock.clear()
             with st.spinner("正在获取全部周期..."):
                 results = _fetch_all_timeframes(market, ticker_code)
             ok = sum(1 for r_ok, _ in results.values() if r_ok)
@@ -901,7 +911,7 @@ def _render_data_validation(market, ticker_code):
                                 except Exception as e:
                                     logger.warning(f"Force update {tf} failed: {e}")
                         if updated > 0:
-                            _fetch_stock.clear()
+                            _cached_fetch_stock.clear()
                             clear_display_cache()
                             st.success(f"已更新 {updated} 个周期，页面将刷新")
                             time.sleep(0.5)
@@ -1012,7 +1022,7 @@ def _render_db_backup():
                 if st.button("恢复到此备份", key="restore_btn", use_container_width=True):
                     try:
                         restore_snapshot(snapshots[selected_idx][0])
-                        _fetch_stock.clear()
+                        _cached_fetch_stock.clear()
                         clear_display_cache()
                         AppState.set("_fetched_ticker", "")
                         logger.info(f"Snapshot restored: {snap_labels[selected_idx]}")
@@ -1122,7 +1132,7 @@ def _render_db_import_export():
                         p = str(DB_PATH) + suffix
                         if os.path.exists(p):
                             os.remove(p)
-                    _fetch_stock.clear()
+                    _cached_fetch_stock.clear()
                     clear_display_cache()
                     AppState.set("_fetched_ticker", "")
                     AppState.set("_db_import_hash", file_hash)
@@ -1141,7 +1151,7 @@ def _run_auto_refresh(market, ticker_code, auto_refresh, interval):
             AppState.set("_last_auto_refresh", now)
         elif now - last >= interval:
             logger.info(f"Auto-refresh triggered for {ticker_code} (interval={interval}s)")
-            _fetch_stock.clear()
+            _cached_fetch_stock.clear()
             _fetch_all_timeframes(market, ticker_code)
             AppState.set("_last_auto_refresh", now)
             st.rerun()
