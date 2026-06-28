@@ -35,7 +35,7 @@ filter_research/
 │   │   ├── data_loader.py    # 数据加载服务
 │   │   └── filter_engine.py  # 滤波引擎（10 种算法）
 │   ├── config_db.py          # 配置数据库
-│   ├── db.py                 # SQLite 数据层（130行）
+│   ├── db.py                 # SQLite 数据层（448行）
 │   ├── state.py              # AppState 状态管理
 │   └── streamlit_app.py      # 主程序（入口，~1223行, 含提取的辅助函数）
 ├── data/

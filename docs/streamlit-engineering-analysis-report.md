@@ -10,7 +10,7 @@
 > - Docker 容器化部署已就绪（`Dockerfile` + `docker-compose.yml`）
 > - loguru 日志系统已集成
 > - 新增 `state.py`（AppState 状态管理）
-> - 测试数从 333 增至 569，新增 7 个测试文件
+> - 测试数从 333 增至 623，新增 7 个测试文件
 > - AppTest UI 测试框架已就绪
 > - 连接泄漏已在 `db.py` 中修复
 

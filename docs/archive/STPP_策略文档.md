@@ -533,12 +533,12 @@ for i in range(n):
 
 | 函数 | 行号 | 功能 |
 |------|------|------|
-| `_schmitt_trigger` | 575–633 | 施密特触发器计算 |
-| `_find_all_pairs` | 636–679 | 多空切换对提取 |
-| `_fit_parabolic` | 682–691 | 二次多项式拟合 |
-| `_fit_physics_parabola` | 694–712 | 抛物线顶点锚定拟合 |
-| `_add_prediction_traces` | 715–766 | 预测曲线 + 残差绘制 |
-| `_compute_strategy_pnl` | 769–964 | PnL 双曲线计算引擎 |
-| `_render_params` | 977–1113 | 参数 UI（含策略参数） |
-| `_render_chart` | 1116–1463 | 图表渲染（含策略子图） |
-| `main` — 导入导出 | 1478–1660 | 配置导入导出逻辑 |
+| `_schmitt_trigger` | filter_engine.py | 施密特触发器计算 |
+| `_find_all_pairs` | filter_engine.py | 多空切换对提取 |
+| `_fit_parabolic` | filter_engine.py | 二次多项式拟合 |
+| `_fit_physics_parabola` | filter_engine.py | 抛物线顶点锚定拟合 |
+| `_add_prediction_traces` | charts.py | 预测曲线 + 残差绘制 |
+| `_compute_strategy_pnl` | filter_engine.py | PnL 双曲线计算引擎 |
+| `_render_params` | sidebar.py | 参数 UI（含策略参数） |
+| `_render_chart` | charts.py | 图表渲染（含策略子图） |
+| `main` — 导入导出 | streamlit_app.py | 配置导入导出逻辑 |
