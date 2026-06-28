@@ -120,7 +120,7 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts):
                 err = "数据不足"
         except Exception as e:
             err = str(e)
-    if err:
+    if err is not None:
         return None, None, None, None, None, err
     return _fetch_stock(market, ticker_code, tf, n_pts)
 
@@ -399,7 +399,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
 
     # ── Step 1: Load chart data ──
     t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts)
-    if err:
+    if err is not None:
         st.error(err)
         return
 
