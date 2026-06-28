@@ -19,3 +19,4 @@ data/*.db
 .coverage
 htmlcov/
 .pytest_cache/
+config/
