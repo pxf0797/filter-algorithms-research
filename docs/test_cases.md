@@ -949,7 +949,7 @@
 
 | 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
 |--------|---------|---------|---------|---------|
-| TC-APPUI-031 | 勾选自动刷新复选框不崩溃 (xfail) | _fresh_app | 勾选 auto_refresh 后 run() | auto_refresh 在 session_state 中 (xfail: rerun 循环导致 AppTest timeout) |
+| TC-APPUI-031 | 自动刷新防无限循环保护生效 | _fresh_app | 勾选 auto_refresh，预置计数器近阈值后 run() | 保护机制在 1 次循环后退出，app.run() 正常返回（已修复：移除等待间隔中连续 rerun 导致的闪烁） |
 | TC-APPUI-032 | 无效 ticker 下刷新不崩溃 | _fresh_app | 清空 ticker，点击刷新按钮后 run() | 不崩溃 |
 
 #### P3 删除备份边缘情况 (`TestDeleteBackupEdgeCase`)
