@@ -249,24 +249,32 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None)
     df = df.set_index("Date").sort_index()
 
     # Step 1: 获取 bar_index 对应的截止日期
+    # 直接从 parquet 读取 min_tf 日期（绕过 _bt_data_cache 类型不确定性）
     min_tf = AppState.get("_min_tf", "")
-    bt_cache = AppState.get("_bt_data_cache", {})
-    min_tf_raw = bt_cache.get(min_tf)
-    # 始终构造 DatetimeIndex，杜绝 int/object 混入
-    if isinstance(min_tf_raw, pd.DataFrame) and len(min_tf_raw) > 0:
-        if isinstance(min_tf_raw.index, pd.DatetimeIndex):
-            min_tf_dates = min_tf_raw.index
-        elif "Date" in min_tf_raw.columns:
-            min_tf_dates = pd.DatetimeIndex(pd.to_datetime(min_tf_raw["Date"]))
-        else:
-            min_tf_dates = pd.DatetimeIndex([])
-    else:
-        min_tf_dates = pd.DatetimeIndex([])
+    min_tf_dates = pd.DatetimeIndex([])
+    if min_tf and min_tf != tf:
+        min_path = Path(__file__).parent.parent / "data" / "display" / f"{min_tf}.parquet"
+        if min_path.exists():
+            try:
+                min_df = pd.read_parquet(min_path, columns=["Date"])
+                if "Date" in min_df.columns and len(min_df) > 0:
+                    raw_dates = pd.to_datetime(min_df["Date"])
+                    min_tf_dates = raw_dates if isinstance(raw_dates, pd.DatetimeIndex) else pd.DatetimeIndex(raw_dates)
+            except Exception:
+                min_tf_dates = pd.DatetimeIndex([])
+    elif min_tf == tf:
+        # 同一周期时直接复用 df 的索引（相同 parquet，类型已保证）
+        min_tf_dates = df.index
 
-    if len(min_tf_dates) <= bar_index:
+    # 双重保障：确保 df.index / cutoff 均为日期类型
+    bar_index_int = int(bar_index)
+    if len(min_tf_dates) <= bar_index_int:
         cutoff = df.index[-1]                       # DatetimeIndex → Timestamp
     else:
-        cutoff = min_tf_dates[bar_index]            # DatetimeIndex → Timestamp
+        cutoff = min_tf_dates[bar_index_int]        # DatetimeIndex → Timestamp
+
+    # === 强制 Timestamp 转换（防御性：防止任何 int/其他类型混入）===
+    cutoff = pd.Timestamp(cutoff)
 
     # Step 2: 确定窗口 – 使用日期定位确保高周期对齐
     cutoff_idx = int(np.searchsorted(df.index, cutoff, side="right") - 1)
