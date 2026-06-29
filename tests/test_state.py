@@ -476,3 +476,28 @@ class TestShortcutFunctions:
         cfg = state.get_view_cfg(0)
         assert isinstance(cfg, dict)
         assert "tf" in cfg
+
+
+# ====================================================================
+# Backtest state keys
+# ====================================================================
+
+class TestBacktestStateKeys:
+    """回测状态键测试"""
+
+    def test_backtest_keys_in_system_keys(self):
+        """验证 7 个回测状态键在 SYSTEM_KEYS 中"""
+        bt_keys = ["_cb_mode", "_bar_index", "_is_playing", "_play_speed",
+                    "_min_tf", "_min_tf_bar_count", "_bt_data_cache"]
+        for k in bt_keys:
+            assert k in SYSTEM_KEYS, f"Missing backtest key: {k}"
+
+    def test_backtest_keys_default_values(self):
+        """验证回测状态键的默认值"""
+        assert SYSTEM_KEYS["_cb_mode"] is False
+        assert SYSTEM_KEYS["_bar_index"] == 0
+        assert SYSTEM_KEYS["_is_playing"] is False
+        assert SYSTEM_KEYS["_play_speed"] == 0.5
+        assert SYSTEM_KEYS["_min_tf"] == ""
+        assert SYSTEM_KEYS["_min_tf_bar_count"] == 0
+        assert SYSTEM_KEYS["_bt_data_cache"] == {}

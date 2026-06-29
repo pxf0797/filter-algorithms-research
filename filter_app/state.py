@@ -39,6 +39,14 @@ SYSTEM_KEYS: Dict[str, Any] = {
     "_preset_action_id": None,
     "new_preset_name": "",
     "overwrite_preset": False,
+    # 回测模式状态键
+    "_cb_mode": False,           # 回测模式开关
+    "_bar_index": 0,             # 当前 bar 位置 (0-indexed)
+    "_is_playing": False,        # 是否自动播放中
+    "_play_speed": 0.5,          # 播放速度（秒/步）
+    "_min_tf": "",               # 4 视图中最小周期名称
+    "_min_tf_bar_count": 0,      # 最小周期总 bar 数
+    "_bt_data_cache": {},        # 回测全量数据缓存 (key: tf)
 }
 
 # 全局参数 — 已在 main() 中由 widget 初始化，这里只做参考

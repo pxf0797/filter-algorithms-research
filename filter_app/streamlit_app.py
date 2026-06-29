@@ -67,6 +67,92 @@ def _cached_fetch_stock(market, code, tf, n_pts, force_period=None):
 
 
 # =====================================================================
+# 回测模式 — Phase 2: 数据截断、多周期对齐、高周期合成、图表标注
+# =====================================================================
+
+
+def _truncate_arrays(t, noisy, ohlc, dates, bar_index):
+    """回测模式：截断所有数组到 [:bar_index+1]。
+    当 bar_index 为 None 时直接返回原数组（浏览模式）。
+    返回 (t, noisy, ohlc, dates) —— 可能截断后的副本。"""
+    if bar_index is None:
+        return t, noisy, ohlc, dates
+    return t[:bar_index + 1], noisy[:bar_index + 1], ohlc.iloc[:bar_index + 1], dates[:bar_index + 1]
+
+
+def _global_to_local_bar_index(dates, global_idx, min_tf_dates):
+    """将全局 bar_index（最小周期刻度）映射为本视图的本地 bar_index。
+    使用 np.searchsorted 实现 O(log n) 映射。
+    取 dates 中 <= min_tf_dates[global_idx] 的最大索引。"""
+    import numpy as np
+    if global_idx >= len(min_tf_dates):
+        return len(dates) - 1
+    cutoff_time = min_tf_dates[global_idx]
+    return int(np.searchsorted(dates, cutoff_time, side="right") - 1)
+
+
+def _synthesize_higher_tf_bar(lower_ohlc_df, higher_tf_name):
+    """从低周期 OHLC DataFrame 合成高周期最后一根 bar。
+    合成规则：Open=首个Open, High=max(Highs), Low=min(Lows), Close=末个Close。
+    仅当低周期数据量 >= 2 时合成，否则返回 None。
+    返回 {"Open": float, "High": float, "Low": float, "Close": float} 或 None。"""
+    if lower_ohlc_df is None or len(lower_ohlc_df) < 2:
+        return None
+    return {
+        "Open": float(lower_ohlc_df["Open"].iloc[0]),
+        "High": float(lower_ohlc_df["High"].max()),
+        "Low": float(lower_ohlc_df["Low"].min()),
+        "Close": float(lower_ohlc_df["Close"].iloc[-1]),
+    }
+
+
+def _add_backtest_overlay(fig, bar_index, total_bars, dates, tf):
+    """在 Plotly Figure 上添加回测标注：
+    1. 金色竖线 (line_color="gold", width=2.5) 标记 bar_index 位置
+    2. 未来区域灰色半透明遮罩 (x0=bar_index 到 x1=total_bars-1)
+    3. 右上角 "回测模式" 注解
+    当 bar_index 为 None 时不做任何操作。"""
+    if bar_index is None or total_bars == 0:
+        return
+
+    # 金色竖线标记当前 bar 位置
+    fig.add_vline(
+        x=bar_index,
+        line_color="gold",
+        line_width=2.5,
+        layer="above",
+    )
+
+    # 未来区域灰色半透明遮罩
+    fig.add_shape(
+        type="rect",
+        x0=bar_index,
+        x1=total_bars - 1,
+        y0=0,
+        y1=1,
+        xref="x",
+        yref="paper",
+        fillcolor="rgba(128, 128, 128, 0.25)",
+        line=dict(width=0),
+        layer="above",
+    )
+
+    # 右上角 "回测模式" 注解
+    fig.add_annotation(
+        x=total_bars - 1,
+        y=1,
+        xref="x",
+        yref="paper",
+        text="回测模式",
+        showarrow=False,
+        font=dict(size=11, color="gold"),
+        xanchor="right",
+        yanchor="top",
+        opacity=0.7,
+    )
+
+
+# =====================================================================
 # Chart rendering — sub-functions extracted from _render_chart
 # =====================================================================
 
@@ -111,8 +197,26 @@ def _date_markers(dates, tf) -> tuple[list, list]:
     return positions, labels
 
 
-def _load_chart_data(market, ticker_code, tf, day_offset, n_pts) -> tuple:
-    """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err)."""
+def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None) -> tuple:
+    """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err).
+    回测模式下（bar_index 非 None）：加载全部 N 条数据（day_offset=0），
+    从 _bt_data_cache 读取，不在此层截断（截断在 _render_chart 中统一处理）。
+    浏览模式下行为完全不变（向后兼容）。"""
+    # 回测模式：从缓存加载全量数据
+    if bar_index is not None:
+        cache = AppState.get("_bt_data_cache", {})
+        df = cache.get(tf)
+        if df is not None and len(df) >= 5:
+            t = np.arange(len(df), dtype=float)
+            noisy = df["Close"].values.ravel()
+            ohlc = df[["Open", "High", "Low", "Close"]] if all(c in df.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=df.index)
+            return t, noisy, ohlc, ticker_code, df.index, None
+        # 缓存缺失时回退到标准加载
+        _sync_to_display(ticker_code, tf, day_offset, n_pts)
+        display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
+        if display_path.exists():
+            return _read_display_parquet(display_path, ticker_code)
+    # 浏览模式（标准加载）
     _sync_to_display(ticker_code, tf, day_offset, n_pts)
     display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
     err = None
@@ -133,6 +237,22 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts) -> tuple:
     if err is not None:
         return None, None, None, None, None, err
     return _cached_fetch_stock(market, ticker_code, tf, n_pts)
+
+
+def _read_display_parquet(display_path, ticker_code) -> tuple:
+    """从 display parquet 读取数据并返回 (t, noisy, ohlc, ticker_full, dates, err)。"""
+    try:
+        df = pd.read_parquet(display_path)
+        if "Date" in df.columns and "Close" in df.columns and len(df) >= 5:
+            df["Date"] = pd.to_datetime(df["Date"])
+            df = df.set_index("Date").sort_index()
+            t = np.arange(len(df), dtype=float)
+            noisy = df["Close"].values.ravel()
+            ohlc = df[["Open", "High", "Low", "Close"]] if all(c in df.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=df.index)
+            return t, noisy, ohlc, ticker_code, df.index, None
+        return None, None, None, None, None, "数据不足"
+    except Exception as e:
+        return None, None, None, None, None, str(e)
 
 
 def _compute_filters(noisy, t, cfg) -> tuple[np.ndarray, np.ndarray | None]:
@@ -168,7 +288,7 @@ def _compute_filters(noisy, t, cfg) -> tuple[np.ndarray, np.ndarray | None]:
 def _compute_schmitt_trigger(filtered, t, cfg) -> dict | None:
     """Compute Schmitt trigger signal. Returns schmitt dict or None.
     Note: Not cached via @st.cache_data because params include unhashable np.ndarray."""
-    if not cfg["show_sch"] or np.all(np.isnan(filtered)):
+    if not cfg["show_sch"] or np.all(np.isnan(filtered)) or len(t) < 2:
         return None
     _v = np.gradient(filtered, t)
     _a = np.gradient(_v, t)
@@ -176,8 +296,9 @@ def _compute_schmitt_trigger(filtered, t, cfg) -> dict | None:
     return _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
 
 
-def _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs) -> list:
-    """Compute prediction curves for each pair. Returns list of pred_pairs dicts."""
+def _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs, bar_index=None) -> list:
+    """Compute prediction curves for each pair. Returns list of pred_pairs dicts.
+    回测模式下（bar_index 非 None）过滤 pair_end > bar_index 的预测对，防止前视偏差。"""
     if not cfg.get("show_pred") or schmitt is None:
         return []
     pred_pairs = []
@@ -185,6 +306,9 @@ def _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs) -> list:
     fit_func = _fit_physics_parabola if cfg.get("fit_mode") == "parabola" else _fit_parabolic
     for pair_start, pair_end in all_pairs:
         if pair_end - pair_start >= 3:
+            # 回测模式：跳过使用未来信号的预测对
+            if bar_index is not None and pair_end > bar_index:
+                continue
             fit_result = fit_func(t, filtered, pair_start, pair_end)
             if fit_result is not None:
                 pred_pairs.append({
@@ -291,6 +415,8 @@ def _add_main_price_traces(fig, t, noisy, ohlc, filtered, filtered2, cfg) -> Non
 
 def _add_residual_traces(fig, t, filtered, noisy, filtered2, cfg, rr, vr) -> np.ndarray:
     """Add residual, velocity, and acceleration traces to subplots. Returns acceleration array."""
+    if len(t) < 2:
+        return np.zeros_like(t)
     if not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=filtered - noisy, mode="lines", name="残差",
             line=dict(color="#5f6c80", width=1.0, dash="dot")), row=rr, col=1)
@@ -390,12 +516,13 @@ def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row) -> None
 # =====================================================================
 
 @st.fragment
-def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None) -> None:
-    """Fragment wrapper for _render_chart — enables per-view independent re-rendering."""
-    _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl)
+def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, bar_index=None) -> None:
+    """Fragment wrapper for _render_chart — enables per-view independent re-rendering.
+    bar_index: 回测模式下传递的 playhead 位置，用于数据截断。"""
+    _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl, bar_index=bar_index)
 
 
-def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None) -> None:
+def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, bar_index=None) -> None:
     """Fetch data + render multi-subplot figure from config.
     优先从本地 Parquet 读取；day_offset=向历史前移N天（各周期独立对齐）。
     higher_pnl: 高周期PnL数据（来自 _align_pnl_to_current_tf 的输出），非空时新增row 7子图。"""
@@ -410,9 +537,21 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         _raw_higher = st.session_state.get(f"_pnl_{_higher_tf}")
 
     # ── Step 1: Load chart data ──
-    t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts)
+    # 回测模式：加载全量数据（day_offset=0）并传入 bar_index
+    if bar_index is not None:
+        t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, 0, n_pts, bar_index=bar_index)
+    else:
+        t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=bar_index)
     if err is not None:
         st.error(err)
+        return
+
+    # [NEW] 回测模式：截断数组
+    t, noisy, ohlc, dates = _truncate_arrays(t, noisy, ohlc, dates, bar_index)
+
+    # 回测模式：数据点不足时友好提示
+    if bar_index is not None and len(t) < 2:
+        st.warning("回测位置数据不足，请前进至少1个bar")
         return
 
     # ── Step 2: Date markers ──
@@ -448,7 +587,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         all_pairs = _find_all_pairs(schmitt["sig"])
 
     # ── Step 7: Prediction curves ──
-    pred_pairs = _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs)
+    pred_pairs = _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs, bar_index=bar_index)
 
     # ── Step 8: Strategy PnL ──
     long_pnl, short_pnl, trade_records = _compute_strategy_display(
@@ -536,6 +675,11 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
                           tickvals=[-1, 0, 1], ticktext=["空", "观", "多"], range=[-1.5, 1.5])
     if ar is not None:
         fig.update_yaxes(title_text="加速度", row=ar, col=1)
+
+    # [NEW] 回测模式：添加标注
+    if bar_index is not None:
+        _add_backtest_overlay(fig, bar_index, len(t), dates, cfg.get("tf", ""))
+
     _render_plotly(fig, height=fh + 30, dates=dates)
 
 
@@ -949,10 +1093,264 @@ def _render_param_panels(filter_id, dual, filter_id2) -> list:
     return configs
 
 
+# =====================================================================
+# 回测模式 — Phase 1 基础函数
+# =====================================================================
+
+
+def _get_min_tf_and_count(configs, ticker_code) -> tuple:
+    """从4个视图的tf配置中确定最小周期和总bar数。
+    遍历configs中各视图的tf字段，取ALL_TFS中索引最大的（最精细的）为_min_tf。
+    返回 (_min_tf, bar_count)。"""
+    from components.sidebar import ALL_TFS
+
+    if not configs:
+        return "", 0
+
+    # 取索引最大的 tf（最精细周期）
+    max_idx = -1
+    min_tf = ""
+    for cfg in configs:
+        tf = cfg.get("tf", "")
+        try:
+            idx = ALL_TFS.index(tf)
+            if idx > max_idx:
+                max_idx = idx
+                min_tf = tf
+        except ValueError:
+            continue
+
+    if not min_tf:
+        return "", 0
+
+    # 加载该 tf 的数据获取总 bar 数
+    try:
+        from pathlib import Path
+        display_path = Path(__file__).parent.parent / "data" / "display" / f"{min_tf}.parquet"
+        if display_path.exists():
+            df = pd.read_parquet(display_path)
+            bar_count = len(df)
+        else:
+            bar_count = 0
+    except Exception:
+        bar_count = 0
+
+    return min_tf, bar_count
+
+
+def _render_backtest_mode_switch(market, ticker_code, configs) -> None:
+    """侧边栏回测模式切换 radio。切换时触发数据预加载/清除。"""
+    from services.data_loader import _sync_to_display
+    from pathlib import Path
+
+    st.sidebar.markdown("---")
+    st.sidebar.caption("🔬 回测模式")
+
+    mode_options = ["浏览模式", "回测模式"]
+    mode_index = 1 if AppState.get("_cb_mode", False) else 0
+    selected = st.sidebar.radio("模式", mode_options, horizontal=True,
+                                 index=mode_index, key="_bt_mode_radio")
+
+    new_cb_mode = (selected == "回测模式")
+    old_cb_mode = AppState.get("_cb_mode", False)
+
+    if new_cb_mode != old_cb_mode:
+        if new_cb_mode:
+            # 切换到回测模式：加载全量数据到 _bt_data_cache
+            with st.spinner("加载回测数据..."):
+                cache = {}
+                for cfg in configs:
+                    tf = cfg["tf"]
+                    n_pts = cfg["n_pts"]
+                    try:
+                        _sync_to_display(ticker_code, tf, 0, n_pts)
+                        display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
+                        if display_path.exists():
+                            df = pd.read_parquet(display_path)
+                            if "Date" in df.columns:
+                                df["Date"] = pd.to_datetime(df["Date"])
+                                df = df.set_index("Date").sort_index()
+                            cache[tf] = df
+                    except Exception as e:
+                        logger.warning(f"回测数据加载失败 {tf}: {e}")
+                AppState.set("_bt_data_cache", cache)
+                AppState.set("_bar_index", 0)
+                AppState.set("_is_playing", False)
+                # 计算并保存最小周期信息
+                min_tf, bar_count = _get_min_tf_and_count(configs, ticker_code)
+                AppState.set("_min_tf", min_tf)
+                AppState.set("_min_tf_bar_count", bar_count)
+                st.toast(f"回测模式已启用  最小周期: {min_tf} ({bar_count} bars)")
+        else:
+            # 切换回浏览模式：清除回测状态
+            AppState.set("_bt_data_cache", {})
+            AppState.set("_bar_index", 0)
+            AppState.set("_is_playing", False)
+            AppState.set("_min_tf", "")
+            AppState.set("_min_tf_bar_count", 0)
+
+        AppState.set("_cb_mode", new_cb_mode)
+        st.rerun()
+
+
+def _render_backtest_status() -> None:
+    """侧边栏紧凑状态显示：当前bar时间 + bar_index/total + 播放状态。"""
+    if not AppState.get("_cb_mode", False):
+        return
+
+    bar_index = AppState.get("_bar_index", 0)
+    total_bars = AppState.get("_min_tf_bar_count", 0)
+    min_tf = AppState.get("_min_tf", "")
+    is_playing = AppState.get("_is_playing", False)
+
+    # 尝试从缓存中获取当前 bar 的时间
+    cache = AppState.get("_bt_data_cache", {})
+    current_date = ""
+    if min_tf and min_tf in cache and total_bars > 0:
+        df = cache[min_tf]
+        if bar_index < len(df):
+            idx = df.index[bar_index]
+            current_date = str(idx.date()) if hasattr(idx, "date") else str(idx)
+
+    label = f"📍 bar {bar_index + 1}/{total_bars}"
+    if current_date:
+        label += f" | {current_date}"
+    if is_playing:
+        label += " | :green[▶ 播放中]"
+    st.sidebar.caption(label)
+
+
+def _render_backtest_controls() -> None:
+    """回测控制条：导航按钮 + 速度选择 + 进度 slider。
+    布局：2x2 图表上方，一行 st.columns 排列。
+    仅 _cb_mode=True 时调用。"""
+    if not AppState.get("_cb_mode", False):
+        return
+
+    bar_index = AppState.get("_bar_index", 0)
+    total_bars = AppState.get("_min_tf_bar_count", 0)
+    if total_bars == 0:
+        st.caption("回测数据未就绪")
+        return
+
+    is_playing = AppState.get("_is_playing", False)
+
+    # 速度选择（单独一行 + 为了紧凑放在导航行之前或之后；这里放在导航行最后）
+    # 使用 6 列布局：⏮ ◀ ▶/⏸ ▶▶ ⏭  速度
+    # 但为了进度 slider 需要额外一行
+    col_nav = st.columns([1, 1, 1, 1, 1, 2])
+
+    with col_nav[0]:
+        if st.button("⏮", key="_bt_goto_start", use_container_width=True, help="跳到开头"):
+            AppState.set("_bar_index", 0)
+            st.rerun()
+
+    with col_nav[1]:
+        disabled = bar_index <= 0
+        if st.button("◀", key="_bt_step_back", use_container_width=True,
+                     disabled=disabled, help="后退一个 bar"):
+            AppState.set("_bar_index", max(0, bar_index - 1))
+            st.rerun()
+
+    with col_nav[2]:
+        btn_label = "⏸" if is_playing else "▶"
+        btn_help = "暂停" if is_playing else "播放"
+        if st.button(btn_label, key="_bt_toggle_play", use_container_width=True, help=btn_help):
+            AppState.set("_is_playing", not is_playing)
+            st.rerun()
+
+    with col_nav[3]:
+        disabled = bar_index >= total_bars - 1
+        if st.button("▶▶", key="_bt_step_fwd", use_container_width=True,
+                     disabled=disabled, help="前进一个 bar"):
+            AppState.set("_bar_index", min(total_bars - 1, bar_index + 1))
+            st.rerun()
+
+    with col_nav[4]:
+        if st.button("⏭", key="_bt_goto_end", use_container_width=True, help="跳到最新"):
+            AppState.set("_bar_index", total_bars - 1)
+            st.rerun()
+
+    with col_nav[5]:
+        speed_label = AppState.get("_play_speed_label", "1x")
+        speed_map = {
+            "0.25x": 0.25, "0.5x": 0.5, "1x": 1.0,
+            "2x": 2.0, "5x": 5.0, "10x": 10.0,
+        }
+        # 速度选择器 label 需反向查找当前索引
+        speed_options = list(speed_map.keys())
+        current_idx = speed_options.index(speed_label) if speed_label in speed_options else 2
+        new_speed_label = st.selectbox(
+            "速度", speed_options, index=current_idx,
+            key="_bt_speed_select", label_visibility="collapsed",
+        )
+        if new_speed_label != speed_label:
+            AppState.set("_play_speed_label", new_speed_label)
+            AppState.set("_play_speed", speed_map[new_speed_label])
+
+    # 进度 slider（第二行）
+    new_bar_index = st.slider(
+        "进度", 0, total_bars - 1, bar_index,
+        key="_bt_progress_slider", label_visibility="collapsed",
+    )
+    if new_bar_index != bar_index:
+        AppState.set("_bar_index", new_bar_index)
+        if is_playing:
+            AppState.set("_is_playing", False)  # 拖拽进度条时自动暂停
+        st.rerun()
+
+
+def _run_backtest_play() -> None:
+    """回测自动播放：time.sleep + st.rerun 循环。
+    仅在 _cb_mode=True 且 _is_playing=True 时执行。
+    到达末尾自动停止并设置 _is_playing=False。"""
+    if not AppState.get("_cb_mode", False):
+        return
+    if not AppState.get("_is_playing", False):
+        return
+
+    bar_index = AppState.get("_bar_index", 0)
+    total = AppState.get("_min_tf_bar_count", 0)
+    if total == 0:
+        return
+    if bar_index >= total - 1:
+        AppState.set("_is_playing", False)  # 到达末尾，自动停止
+        return
+
+    # 速度映射：speed_label → 延迟（秒/步）
+    speed_label = AppState.get("_play_speed_label", "1x")
+    speed_map = {
+        "0.25x": 4.0, "0.5x": 2.0, "1x": 1.0,
+        "2x": 0.5, "5x": 0.2, "10x": 0.1,
+    }
+    delay = speed_map.get(speed_label, 1.0)
+
+    time.sleep(delay)
+    AppState.set("_bar_index", bar_index + 1)
+    st.rerun()
+
+
 def _render_time_nav(configs, ticker_code) -> int:
-    """Render time window navigation. Returns day_offset."""
+    """Render time window navigation. Returns day_offset.
+    回测模式下隐藏 day_offset 控件，显示回测控件占位文本。"""
     st.sidebar.markdown("---")
     st.sidebar.caption("⏪ 时间窗口（按天移动）")
+
+    # 回测模式：隐藏 day_offset 控件，显示回测占位
+    if AppState.get("_cb_mode", False):
+        bar_index = AppState.get("_bar_index", 0)
+        total_bars = AppState.get("_min_tf_bar_count", 0)
+        st.sidebar.caption(f"📍 回测中 — bar {bar_index + 1}/{total_bars}")
+        # 回测导航控件占位（正式控件在 T3 实现）
+        st.sidebar.button("▶ 播放/暂停", key="_bt_play_placeholder", disabled=True,
+                          help="回测导航控件将在后续版本实现", use_container_width=True)
+        # 保持分隔线一致
+        st.sidebar.markdown("---")
+        # 仍然返回 day_offset=0（回测模式下始终使用全量数据）
+        AppState.set("_day_offset", 0)
+        return 0
+
+    # 浏览模式：保持现有功能不变
     if not AppState.has("_day_offset"):
         AppState.set("_day_offset", 0)
     step_days = st.sidebar.selectbox("移动步长", [1, 3, 5, 10, 20, 30, 60, 90, 180, 365],
@@ -1208,8 +1606,18 @@ def main() -> None:
     # ── Time window navigation ──
     day_offset = _render_time_nav(configs, ticker_code)
 
+    # ── 回测模式切换 — Phase 1 ──
+    _render_backtest_mode_switch(market, ticker_code, configs)
+    _render_backtest_status()
+
     # ── DB backup/restore ──
     _render_db_backup()
+
+    # ── 回测控制条（在 2x2 图表上方）— Phase 3 ──
+    cb_mode = AppState.get("_cb_mode", False)
+    bar_index = AppState.get("_bar_index", None) if cb_mode else None
+    if cb_mode:
+        _render_backtest_controls()
 
     # ── Pass 2: 2x2 chart views ──
     grid_cols = []
@@ -1223,7 +1631,7 @@ def main() -> None:
         col_idx = orig_i % 2
         with grid_cols[row_idx][col_idx]:
             _render_chart_fragment(market, ticker_code, cfg, f"v{orig_i}", compact=True,
-                                   day_offset=day_offset)
+                                   day_offset=day_offset, bar_index=bar_index)
 
     # ── Export config ──
     _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code)
@@ -1233,6 +1641,9 @@ def main() -> None:
 
     # ── DB import/export ──
     _render_db_import_export()
+
+    # ── 回测播放循环（在 auto-refresh 之前）— Phase 3 ──
+    _run_backtest_play()
 
     # ── Auto-refresh ──
     _run_auto_refresh(market, ticker_code, auto_refresh, interval)
