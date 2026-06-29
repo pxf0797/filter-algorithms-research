@@ -67,7 +67,7 @@ def _cached_fetch_stock(market, code, tf, n_pts, force_period=None):
 
 
 # =====================================================================
-# 回测模式 — Phase 2: 数据截断、多周期对齐、高周期合成、图表标注
+# 回测模式 — Phase 2: 窗口平移、多周期对齐、高周期合成、图表标注
 # =====================================================================
 
 
@@ -197,46 +197,123 @@ def _date_markers(dates, tf) -> tuple[list, list]:
     return positions, labels
 
 
+def _get_next_lower_tf(tf):
+    """返回比 tf 更精细一级的周期。如 _get_next_lower_tf('日线') → '60分钟'"""
+    from components.sidebar import ALL_TFS
+    idx = ALL_TFS.index(tf)
+    if idx > 0:
+        return ALL_TFS[idx - 1]
+    return None
+
+
 def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None) -> tuple:
     """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err).
-    回测模式下（bar_index 非 None）：加载全部 N 条数据（day_offset=0），
-    从 _bt_data_cache 读取，不在此层截断（截断在 _render_chart 中统一处理）。
+
+    回测模式下（bar_index 非 None）：
+    窗口平移策略 — 以 bar_index 对应的 min_tf 日期为截止点，
+    确保始终返回 n_pts 条（或尽可能多）数据，永不截断到 1 条。
+    高周期最后一 bar 若处于未完成周期，从低周期合成。
     浏览模式下行为完全不变（向后兼容）。"""
-    # 回测模式：从缓存加载全量数据
-    if bar_index is not None:
-        cache = AppState.get("_bt_data_cache", {})
-        df = cache.get(tf)
-        if df is not None and len(df) >= 5:
-            t = np.arange(len(df), dtype=float)
-            noisy = df["Close"].values.ravel()
-            ohlc = df[["Open", "High", "Low", "Close"]] if all(c in df.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=df.index)
-            return t, noisy, ohlc, ticker_code, df.index, None
-        # 缓存缺失时回退到标准加载
+    # 浏览模式（标准加载）
+    if bar_index is None:
         _sync_to_display(ticker_code, tf, day_offset, n_pts)
         display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
+        err = None
         if display_path.exists():
-            return _read_display_parquet(display_path, ticker_code)
-    # 浏览模式（标准加载）
-    _sync_to_display(ticker_code, tf, day_offset, n_pts)
+            try:
+                df = pd.read_parquet(display_path)
+                if "Date" in df.columns and "Close" in df.columns and len(df) >= 5:
+                    df["Date"] = pd.to_datetime(df["Date"])
+                    df = df.set_index("Date").sort_index()
+                    t = np.arange(len(df), dtype=float)
+                    noisy = df["Close"].values.ravel()
+                    ohlc = df[["Open", "High", "Low", "Close"]] if all(c in df.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=df.index)
+                    return t, noisy, ohlc, ticker_code, df.index, None
+                else:
+                    err = "数据不足"
+            except Exception as e:
+                err = str(e)
+        if err is not None:
+            return None, None, None, None, None, err
+        return _cached_fetch_stock(market, ticker_code, tf, n_pts)
+
+    # ── 回测模式：窗口平移 ──
+    _sync_to_display(ticker_code, tf, 0, n_pts)
     display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
-    err = None
-    if display_path.exists():
-        try:
-            df = pd.read_parquet(display_path)
-            if "Date" in df.columns and "Close" in df.columns and len(df) >= 5:
-                df["Date"] = pd.to_datetime(df["Date"])
-                df = df.set_index("Date").sort_index()
-                t = np.arange(len(df), dtype=float)
-                noisy = df["Close"].values.ravel()
-                ohlc = df[["Open", "High", "Low", "Close"]] if all(c in df.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=df.index)
-                return t, noisy, ohlc, ticker_code, df.index, None
-            else:
-                err = "数据不足"
-        except Exception as e:
-            err = str(e)
-    if err is not None:
-        return None, None, None, None, None, err
-    return _cached_fetch_stock(market, ticker_code, tf, n_pts)
+    if not display_path.exists():
+        return None, None, None, None, None, f"显示缓存不存在: {tf}"
+    df = pd.read_parquet(display_path)
+    if "Date" not in df.columns or "Close" not in df.columns or len(df) < 5:
+        return None, None, None, None, None, "数据不足"
+    df["Date"] = pd.to_datetime(df["Date"])
+    df = df.set_index("Date").sort_index()
+
+    # Step 1: 获取 bar_index 对应的截止日期
+    min_tf = AppState.get("_min_tf", "")
+    bt_cache = AppState.get("_bt_data_cache", {})
+    min_tf_raw = bt_cache.get(min_tf)
+    min_tf_dates = min_tf_raw.index if isinstance(min_tf_raw, pd.DataFrame) else pd.DatetimeIndex([])
+
+    if len(min_tf_dates) <= bar_index:
+        cutoff = df.index[-1]
+    else:
+        cutoff = min_tf_dates[bar_index]
+
+    # Step 2: 确定窗口 – 使用日期定位确保高周期对齐
+    cutoff_idx = int(np.searchsorted(df.index, cutoff, side="right") - 1)
+    cutoff_idx = max(0, min(cutoff_idx, len(df) - 1))
+
+    if tf == min_tf:
+        # 最小周期：窗口终点 = bar_index 对应日期
+        # 当 bar_index < n_pts 时窗口从数据起点开始，
+        # 确保 bar_index=0 也能加载 n_pts 条数据（而非仅 1 条）
+        end_idx = cutoff_idx
+        if bar_index < n_pts:
+            # 数据起点附近：从 data[0] 开始取 n_pts 条
+            start_idx = 0
+            end_idx = max(end_idx, min(n_pts - 1, len(df) - 1))
+        else:
+            start_idx = max(0, end_idx - n_pts + 1)
+    else:
+        # 高周期：窗口终点 <= min_tf 的截止时间
+        start_idx = max(0, cutoff_idx - n_pts + 1)
+        end_idx = cutoff_idx
+
+    n_pts_slice = df.iloc[start_idx:end_idx + 1]
+
+    # Step 3: 高周期最后一 bar 合成
+    if tf != min_tf:
+        lower_tf = _get_next_lower_tf(tf)
+        if lower_tf:
+            lower_path = Path(__file__).parent.parent / "data" / "display" / f"{lower_tf}.parquet"
+            if lower_path.exists():
+                lower_df = pd.read_parquet(lower_path)
+                if "Date" in lower_df.columns and "Close" in lower_df.columns:
+                    lower_df["Date"] = pd.to_datetime(lower_df["Date"])
+                    lower_df = lower_df.set_index("Date").sort_index()
+                    if len(n_pts_slice) > 0:
+                        last_bar_end = n_pts_slice.index[-1]
+                        # 取 lower_tf 中 > last_bar_end 且 <= cutoff 的数据
+                        synthetic_bars = lower_df[
+                            (lower_df.index > last_bar_end) & (lower_df.index <= cutoff)
+                        ]
+                        if len(synthetic_bars) >= 2:
+                            syn = _synthesize_higher_tf_bar(synthetic_bars, tf)
+                            if syn is not None:
+                                # 追加合成 bar
+                                syn_date = synthetic_bars.index[-1]
+                                syn_row = pd.DataFrame(
+                                    [[syn["Open"], syn["High"], syn["Low"], syn["Close"]]],
+                                    columns=["Open", "High", "Low", "Close"],
+                                    index=[syn_date],
+                                )
+                                n_pts_slice = pd.concat([n_pts_slice, syn_row])
+
+    # Step 4: 返回
+    t = np.arange(len(n_pts_slice), dtype=float)
+    noisy = n_pts_slice["Close"].values.ravel()
+    ohlc = n_pts_slice[["Open", "High", "Low", "Close"]] if all(c in n_pts_slice.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=n_pts_slice.index)
+    return t, noisy, ohlc, ticker_code, n_pts_slice.index, None
 
 
 def _read_display_parquet(display_path, ticker_code) -> tuple:
@@ -537,7 +614,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         _raw_higher = st.session_state.get(f"_pnl_{_higher_tf}")
 
     # ── Step 1: Load chart data ──
-    # 回测模式：加载全量数据（day_offset=0）并传入 bar_index
+    # 回测模式：窗口平移（day_offset=0，通过 bar_index 定位截止日期）
     if bar_index is not None:
         t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, 0, n_pts, bar_index=bar_index)
     else:
@@ -546,13 +623,9 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         st.error(err)
         return
 
-    # [NEW] 回测模式：截断数组
-    t, noisy, ohlc, dates = _truncate_arrays(t, noisy, ohlc, dates, bar_index)
-
-    # 回测模式：数据点不足时友好提示
+    # 回测模式：数据点不足时友好提示（非阻断）
     if bar_index is not None and len(t) < 2:
-        st.warning("回测位置数据不足，请前进至少1个bar")
-        return
+        st.caption("⚠️ 位于数据起始位置，可用历史有限")
 
     # ── Step 2: Date markers ──
     marker_positions, marker_labels = _date_markers(dates, cfg["tf"])
@@ -579,7 +652,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     # ── Step 6: Schmitt trigger ──
     schmitt = _compute_schmitt_trigger(filtered, t, cfg)
     if cfg["show_sch"] and schmitt is None and len(t) > 0:
-        st.warning(f"⚠️ 施密特信号不可用：bar数({len(t)}) < N_EWMA({cfg['ew']})。"
+        st.caption(f"⚠️ 施密特信号不可用：bar数({len(t)}) < N_EWMA({cfg['ew']})。"
                    f"请降低 N_EWMA 至 ≤{len(t)} 或增加数据点数(N)。")
 
     all_pairs = []
@@ -676,9 +749,10 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     if ar is not None:
         fig.update_yaxes(title_text="加速度", row=ar, col=1)
 
-    # [NEW] 回测模式：添加标注
+    # 回测模式：添加标注（窗口最后位置 = bar_index）
     if bar_index is not None:
-        _add_backtest_overlay(fig, bar_index, len(t), dates, cfg.get("tf", ""))
+        local_pos = len(t) - 1  # 窗口的最后位置 = 回测当前位置
+        _add_backtest_overlay(fig, local_pos, len(t), dates, cfg.get("tf", ""))
 
     _render_plotly(fig, height=fh + 30, dates=dates)
 
@@ -1099,23 +1173,23 @@ def _render_param_panels(filter_id, dual, filter_id2) -> list:
 
 
 def _get_min_tf_and_count(configs, ticker_code) -> tuple:
-    """从4个视图的tf配置中确定最小周期和总bar数。
-    遍历configs中各视图的tf字段，取ALL_TFS中索引最大的（最精细的）为_min_tf。
+    """从4个视图的tf配置中确定最小周期（最精细）和总bar数。
+    遍历configs中各视图的tf字段，取ALL_TFS中索引最小的（最精细的）为_min_tf。
     返回 (_min_tf, bar_count)。"""
     from components.sidebar import ALL_TFS
 
     if not configs:
         return "", 0
 
-    # 取索引最大的 tf（最精细周期）
-    max_idx = -1
+    # 取索引最小的 tf（最精细周期）
+    min_idx = len(ALL_TFS)  # 初始化为一个比任何有效索引都大的值
     min_tf = ""
     for cfg in configs:
         tf = cfg.get("tf", "")
         try:
             idx = ALL_TFS.index(tf)
-            if idx > max_idx:
-                max_idx = idx
+            if idx < min_idx:
+                min_idx = idx
                 min_tf = tf
         except ValueError:
             continue
@@ -1332,21 +1406,12 @@ def _run_backtest_play() -> None:
 
 def _render_time_nav(configs, ticker_code) -> int:
     """Render time window navigation. Returns day_offset.
-    回测模式下隐藏 day_offset 控件，显示回测控件占位文本。"""
+    回测模式下隐藏 day_offset 控件，返回 day_offset=0。"""
     st.sidebar.markdown("---")
     st.sidebar.caption("⏪ 时间窗口（按天移动）")
 
-    # 回测模式：隐藏 day_offset 控件，显示回测占位
+    # 回测模式：隐藏 day_offset 控件，回测导航由 _render_backtest_controls 提供
     if AppState.get("_cb_mode", False):
-        bar_index = AppState.get("_bar_index", 0)
-        total_bars = AppState.get("_min_tf_bar_count", 0)
-        st.sidebar.caption(f"📍 回测中 — bar {bar_index + 1}/{total_bars}")
-        # 回测导航控件占位（正式控件在 T3 实现）
-        st.sidebar.button("▶ 播放/暂停", key="_bt_play_placeholder", disabled=True,
-                          help="回测导航控件将在后续版本实现", use_container_width=True)
-        # 保持分隔线一致
-        st.sidebar.markdown("---")
-        # 仍然返回 day_offset=0（回测模式下始终使用全量数据）
         AppState.set("_day_offset", 0)
         return 0
 

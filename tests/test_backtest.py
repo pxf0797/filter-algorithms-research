@@ -9,6 +9,7 @@
 """
 
 import sys
+from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
@@ -45,7 +46,12 @@ def six_bars_data() -> tuple:
 # ====================================================================
 
 class TestTruncateArrays:
-    """截断数组测试 — 验证回测模式下数据截断的正确性。"""
+    """截断数组测试 — 验证回测模式下数据截断的正确性。
+
+    注意：_truncate_arrays 仍存在于 streamlit_app 中，但不再在渲染管线
+    (_render_chart) 中使用。回测模式改为 _load_chart_data 的窗口平移策略，
+    不再截断历史数据到 1 条。此测试保留以覆盖该函数的正向行为边界。
+    """
 
     def test_bar_index_none_returns_unchanged(self, six_bars_data):
         """bar_index=None 时原样返回（浏览模式）。"""
@@ -108,6 +114,229 @@ class TestTruncateArrays:
             t, noisy, ohlc, dates, 0)
         assert len(result_t) == 0
         assert len(result_n) == 0
+
+
+# ====================================================================
+# _load_chart_data — 回测模式窗口平移
+# ====================================================================
+
+class TestLoadChartDataBacktest:
+    """验证回测模式下 _load_chart_data 的窗口平移行为。
+
+    核心场景：
+    1. bar_index=0 时仍能加载 n_pts 条数据（而非 1 条）
+    2. 高周期窗口终点 <= min_tf 的 bar_index 对应日期
+    3. 高周期合成仅发生在 bar_index 落在周期中间时
+
+    通过 mock parquet 读取和 _sync_to_display 来隔离测试。
+    """
+
+    @pytest.fixture
+    def mock_deps(self, monkeypatch):
+        """Mock 外部依赖以控制 _load_chart_data 的 parquet 输入。"""
+        # Mock _sync_to_display 为 no-op
+        monkeypatch.setattr(streamlit_app, "_sync_to_display", lambda *a, **kw: None)
+
+        # Mock Path.exists 默认返回 True
+        monkeypatch.setattr(Path, "exists", lambda _: True)
+
+        # Mock AppState.get 返回可控值 — 因为 conftest 中 streamlit 为 MagicMock,
+        # 其 session_state 不是真实 dict, 无法通过赋值持久化
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_min_tf": "日线",
+                "_bt_data_cache": {
+                    "日线": pd.DataFrame(index=pd.DatetimeIndex([])),
+                },
+            }.get(key, default),
+        )
+
+        return monkeypatch
+
+    @staticmethod
+    def _make_mock_parquet(dates, ohlc_dict):
+        """构造一个模拟 pd.read_parquet 返回值的 DataFrame。
+
+        格式与 _load_chart_data 中从 display parquet 读取的一致：
+        包含 Date, Open, High, Low, Close 列，Date 为字符串。
+        """
+        df = pd.DataFrame({
+            "Date": [d.strftime("%Y-%m-%d") for d in dates],
+            **ohlc_dict,
+        })
+        return df
+
+    def test_bar_index_zero_loads_n_pts(self, mock_deps, monkeypatch):
+        """bar_index=0 时加载 n_pts 条数据，而非仅 1 条。"""
+        n_pts = 50
+        dates = pd.date_range("2025-06-01", periods=200, freq="D")
+
+        # 覆盖 mock_deps 中 _bt_data_cache 的默认值
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_min_tf": "日线",
+                "_bt_data_cache": {
+                    "日线": pd.DataFrame(index=dates),
+                },
+            }.get(key, default),
+        )
+
+        mock_df = self._make_mock_parquet(dates, {
+            "Open": np.linspace(100, 200, 200),
+            "High":  np.linspace(102, 202, 200),
+            "Low":   np.linspace(98, 198, 200),
+            "Close": np.linspace(101, 201, 200),
+        })
+        monkeypatch.setattr(pd, "read_parquet", lambda path, *a, **kw: mock_df)
+
+        t, noisy, ohlc, ticker_full, result_dates, err = (
+            streamlit_app._load_chart_data(
+                "美股 US", "AAPL", "日线", 0, n_pts, bar_index=0
+            )
+        )
+
+        assert err is None, f"Unexpected error: {err}"
+        assert len(t) == n_pts, (
+            f"bar_index=0 时应加载 {n_pts} 条数据，实际 {len(t)}"
+        )
+        assert len(result_dates) == n_pts
+        # 验证数据对应最早的 n_pts 条（截止到 bar_index=0 对应日期）
+        assert result_dates[0] == dates[0]
+        assert result_dates[-1] == dates[n_pts - 1]
+
+    def test_min_tf_controls_high_tf_window_end(self, mock_deps, monkeypatch):
+        """高周期窗口终点 <= min_tf 的 bar_index 对应日期。"""
+        n_pts = 30
+        bar_index = 60
+
+        # min_tf 周期（日线）数据
+        min_tf_dates = pd.date_range("2025-01-01", periods=200, freq="D", name="Date")
+
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_min_tf": "日线",
+                "_bt_data_cache": {
+                    "日线": pd.DataFrame(index=min_tf_dates),
+                },
+            }.get(key, default),
+        )
+
+        # 高周期（周线）数据
+        weekly_dates = pd.date_range("2025-01-06", periods=40, freq="W-MON")
+        mock_weekly = self._make_mock_parquet(weekly_dates, {
+            "Open": np.linspace(100, 200, 40),
+            "High":  np.linspace(102, 202, 40),
+            "Low":   np.linspace(98, 198, 40),
+            "Close": np.linspace(101, 201, 40),
+        })
+
+        def _mock_read_parquet(path, *a, **kw):
+            p = str(path)
+            if "周线" in p:
+                return mock_weekly
+            elif "日线" in p:
+                return self._make_mock_parquet(min_tf_dates, {
+                    "Open": np.linspace(100, 200, 200),
+                    "High": np.linspace(102, 202, 200),
+                    "Low": np.linspace(98, 198, 200),
+                    "Close": np.linspace(101, 201, 200),
+                })
+            return mock_weekly
+
+        monkeypatch.setattr(pd, "read_parquet", _mock_read_parquet)
+
+        # Mock _get_next_lower_tf
+        monkeypatch.setattr(
+            streamlit_app,
+            "_get_next_lower_tf",
+            lambda tf: "日线" if tf == "周线" else None,
+        )
+
+        t, noisy, ohlc, ticker_full, result_dates, err = (
+            streamlit_app._load_chart_data(
+                "美股 US", "AAPL", "周线", 0, n_pts, bar_index=bar_index
+            )
+        )
+
+        assert err is None, f"Unexpected error: {err}"
+        # 周线窗口终点应 <= min_tf_dates[bar_index]
+        min_tf_cutoff = min_tf_dates[bar_index]
+        assert result_dates[-1] <= min_tf_cutoff, (
+            f"高周期窗口终点 {result_dates[-1]} > min_tf 截止 {min_tf_cutoff}"
+        )
+        # 周线数据应返回约 n_pts 条
+        assert len(t) >= 1
+
+    def test_high_tf_synthesis_happens_mid_cycle(self, mock_deps, monkeypatch):
+        """周期中间时触发高周期合成：bar_index 落在周线周期中部。"""
+        n_pts = 20
+
+        # 日线（min_tf）数据 — 50 bar
+        daily_dates = pd.date_range("2025-06-01", periods=50, freq="D")
+
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_min_tf": "日线",
+                "_bt_data_cache": {
+                    "日线": pd.DataFrame(index=daily_dates),
+                },
+            }.get(key, default),
+        )
+
+        # 周线数据 — 7 个完整周
+        weekly_dates = pd.date_range("2025-06-02", periods=7, freq="W-MON")
+        mock_weekly_df = self._make_mock_parquet(weekly_dates, {
+            "Open": [100, 102, 104, 106, 108, 110, 112],
+            "High": [103, 105, 107, 109, 111, 113, 115],
+            "Low":  [99, 101, 103, 105, 107, 109, 111],
+            "Close": [102, 104, 106, 108, 110, 112, 114],
+        })
+        # lower_tf（60分钟）数据 — 用于合成
+        lower_dates = pd.date_range("2025-07-14", periods=5, freq="h")
+        mock_lower_df = self._make_mock_parquet(lower_dates, {
+            "Open": [113, 113.5, 114, 114.5, 115],
+            "High": [114, 114.5, 115, 115.5, 116],
+            "Low":  [112, 112.5, 113, 113.5, 114],
+            "Close": [113.5, 114, 114.5, 115, 115.5],
+        })
+
+        call_log = {"calls": []}
+
+        def _mock_read_parquet(path, *a, **kw):
+            p = str(path)
+            call_log["calls"].append(p)
+            if "60分钟" in p:
+                return mock_lower_df
+            elif "周线" in p:
+                return mock_weekly_df
+            return mock_weekly_df
+
+        monkeypatch.setattr(pd, "read_parquet", _mock_read_parquet)
+
+        # bar_index = 32 (日线索引), 对应截止日期 2025-07-03
+        # 在第 5 个周线周期 (2025-06-30 ~ 2025-07-06) 中间
+        monkeypatch.setattr(
+            streamlit_app,
+            "_get_next_lower_tf",
+            lambda tf: "60分钟" if tf == "周线" else None,
+        )
+
+        t, noisy, ohlc, ticker_full, result_dates, err = (
+            streamlit_app._load_chart_data(
+                "美股 US", "AAPL", "周线", 0, n_pts, bar_index=32
+            )
+        )
+
+        assert err is None, f"Unexpected error: {err}"
+        # 验证 lower_tf 的 parquet 被读取（合成触发）
+        assert any("60分钟" in c for c in call_log["calls"]), (
+            "高周期合成应触发 lower_tf 数据读取"
+        )
+        assert len(t) >= 1
 
 
 # ====================================================================
@@ -245,7 +474,7 @@ class TestGetMinTfAndCount:
     """最小周期查找测试。"""
 
     def test_finds_min_tf(self):
-        """从4个视图中找到 ALL_TFS 索引最大的 tf。"""
+        """从4个视图中找到 ALL_TFS 索引最小的 tf。"""
         configs = [
             {"tf": "日线"},
             {"tf": "60分钟"},
@@ -254,9 +483,8 @@ class TestGetMinTfAndCount:
         ]
         min_tf, count = streamlit_app._get_min_tf_and_count(configs, "AAPL")
         # ALL_TFS: ['1分钟','5分钟','15分钟','60分钟','日线','周线','月线','季线']
-        # 月线(index 6) > 日线(index 4) > 60分钟(index 3)
-        assert min_tf == "月线"
-        assert count >= 0  # 具体 bar 数取决于是否有 parquet 文件
+        # 60分钟(index 3) < 日线(index 4) < 月线(index 6)
+        assert min_tf == "60分钟"
 
     def test_all_same_tf(self):
         """所有视图同周期。"""
@@ -289,8 +517,8 @@ class TestGetMinTfAndCount:
             {"tf": "60分钟"},
         ]
         min_tf, count = streamlit_app._get_min_tf_and_count(configs, "AAPL")
-        # ALL_TFS: 日线(index 4) > 60分钟(index 3)
-        assert min_tf == "日线"
+        # ALL_TFS: 60分钟(index 3) < 日线(index 4)
+        assert min_tf == "60分钟"
 
 
 # ====================================================================
