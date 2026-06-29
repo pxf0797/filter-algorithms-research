@@ -252,24 +252,21 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None)
     min_tf = AppState.get("_min_tf", "")
     bt_cache = AppState.get("_bt_data_cache", {})
     min_tf_raw = bt_cache.get(min_tf)
-    if isinstance(min_tf_raw, pd.DataFrame):
-        if "Date" in min_tf_raw.columns and not isinstance(min_tf_raw.index, pd.DatetimeIndex):
-            min_tf_dates = pd.to_datetime(min_tf_raw["Date"]).values
-        elif isinstance(min_tf_raw.index, pd.DatetimeIndex):
+    # 始终构造 DatetimeIndex，杜绝 int/object 混入
+    if isinstance(min_tf_raw, pd.DataFrame) and len(min_tf_raw) > 0:
+        if isinstance(min_tf_raw.index, pd.DatetimeIndex):
             min_tf_dates = min_tf_raw.index
+        elif "Date" in min_tf_raw.columns:
+            min_tf_dates = pd.DatetimeIndex(pd.to_datetime(min_tf_raw["Date"]))
         else:
-            # 缓存df有 RangeIndex，从 Date 列重建
-            min_tf_dates = pd.to_datetime(min_tf_raw["Date"]) if "Date" in min_tf_raw.columns else pd.DatetimeIndex([])
+            min_tf_dates = pd.DatetimeIndex([])
     else:
         min_tf_dates = pd.DatetimeIndex([])
 
     if len(min_tf_dates) <= bar_index:
-        cutoff = df.index[-1]
+        cutoff = df.index[-1]                       # DatetimeIndex → Timestamp
     else:
-        cutoff = min_tf_dates[bar_index]
-    # 确保 cutoff 是 Timestamp（防御性转换）
-    if not isinstance(cutoff, pd.Timestamp):
-        cutoff = pd.Timestamp(cutoff)
+        cutoff = min_tf_dates[bar_index]            # DatetimeIndex → Timestamp
 
     # Step 2: 确定窗口 – 使用日期定位确保高周期对齐
     cutoff_idx = int(np.searchsorted(df.index, cutoff, side="right") - 1)
