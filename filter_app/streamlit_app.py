@@ -277,7 +277,11 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None)
     cutoff = pd.Timestamp(cutoff)
 
     # Step 2: 确定窗口 – 使用日期定位确保高周期对齐
-    cutoff_idx = int(np.searchsorted(df.index, cutoff, side="right") - 1)
+    # ⚠️ 双重类型保障：df.index 和 cutoff 都必须强制为日期类型
+    #    仅保护 cutoff 不够——parquet 读出的 df.index 也可能是 RangeIndex(int)
+    _search_idx = df.index if isinstance(df.index, pd.DatetimeIndex) else pd.DatetimeIndex(df.index)
+    _search_val = cutoff if isinstance(cutoff, pd.Timestamp) else pd.Timestamp(cutoff)
+    cutoff_idx = int(np.searchsorted(_search_idx, _search_val, side="right") - 1)
     cutoff_idx = max(0, min(cutoff_idx, len(df) - 1))
 
     if tf == min_tf:
