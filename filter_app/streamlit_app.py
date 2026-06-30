@@ -74,7 +74,10 @@ def _cached_fetch_stock(market, code, tf, n_pts, force_period=None):
 def _truncate_arrays(t, noisy, ohlc, dates, bar_index):
     """回测模式：截断所有数组到 [:bar_index+1]。
     当 bar_index 为 None 时直接返回原数组（浏览模式）。
-    返回 (t, noisy, ohlc, dates) —— 可能截断后的副本。"""
+    返回 (t, noisy, ohlc, dates) —— 可能截断后的副本。
+
+    注意：此函数保留以兼容测试。回测模式的渲染管线不再调用此函数，
+    bar_index 仅用于视觉叠加（_add_backtest_overlay）。"""
     if bar_index is None:
         return t, noisy, ohlc, dates
     return t[:bar_index + 1], noisy[:bar_index + 1], ohlc.iloc[:bar_index + 1], dates[:bar_index + 1]
@@ -209,133 +212,30 @@ def _get_next_lower_tf(tf):
 def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None) -> tuple:
     """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err).
 
-    回测模式下（bar_index 非 None）：
-    窗口平移策略 — 以 bar_index 对应的 min_tf 日期为截止点，
-    确保始终返回 n_pts 条（或尽可能多）数据，永不截断到 1 条。
-    高周期最后一 bar 若处于未完成周期，从低周期合成。
-    浏览模式下行为完全不变（向后兼容）。"""
-    # 浏览模式（标准加载）
-    if bar_index is None:
-        _sync_to_display(ticker_code, tf, day_offset, n_pts)
-        display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
-        err = None
-        if display_path.exists():
-            try:
-                df = pd.read_parquet(display_path)
-                if "Date" in df.columns and "Close" in df.columns and len(df) >= 5:
-                    df["Date"] = pd.to_datetime(df["Date"])
-                    df = df.set_index("Date").sort_index()
-                    t = np.arange(len(df), dtype=float)
-                    noisy = df["Close"].values.ravel()
-                    ohlc = df[["Open", "High", "Low", "Close"]] if all(c in df.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=df.index)
-                    return t, noisy, ohlc, ticker_code, df.index, None
-                else:
-                    err = "数据不足"
-            except Exception as e:
-                err = str(e)
-        if err is not None:
-            return None, None, None, None, None, err
-        return _cached_fetch_stock(market, ticker_code, tf, n_pts)
-
-    # ── 回测模式：窗口平移 ──
-    _sync_to_display(ticker_code, tf, 0, n_pts)
+    bar_index 参数仅保留签名兼容性，内部不使用。
+    回测模式和浏览模式使用完全相同的加载逻辑。"""
+    # 回测模式和浏览模式使用相同的加载逻辑
+    # bar_index 参数仅保留签名兼容性，内部不使用
+    _sync_to_display(ticker_code, tf, day_offset, n_pts)
     display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
-    if not display_path.exists():
-        return None, None, None, None, None, f"显示缓存不存在: {tf}"
-    df = pd.read_parquet(display_path)
-    if "Date" not in df.columns or "Close" not in df.columns or len(df) < 5:
-        return None, None, None, None, None, "数据不足"
-    df["Date"] = pd.to_datetime(df["Date"])
-    df = df.set_index("Date").sort_index()
-
-    # Step 1: 获取 bar_index 对应的截止日期
-    # 直接从 parquet 读取 min_tf 日期（绕过 _bt_data_cache 类型不确定性）
-    min_tf = AppState.get("_min_tf", "")
-    min_tf_dates = pd.DatetimeIndex([])
-    if min_tf and min_tf != tf:
-        min_path = Path(__file__).parent.parent / "data" / "display" / f"{min_tf}.parquet"
-        if min_path.exists():
-            try:
-                min_df = pd.read_parquet(min_path, columns=["Date"])
-                if "Date" in min_df.columns and len(min_df) > 0:
-                    raw_dates = pd.to_datetime(min_df["Date"])
-                    min_tf_dates = raw_dates if isinstance(raw_dates, pd.DatetimeIndex) else pd.DatetimeIndex(raw_dates)
-            except Exception:
-                min_tf_dates = pd.DatetimeIndex([])
-    elif min_tf == tf:
-        # 同一周期时直接复用 df 的索引（相同 parquet，类型已保证）
-        min_tf_dates = df.index
-
-    # 双重保障：确保 df.index / cutoff 均为日期类型
-    bar_index_int = int(bar_index)
-    if len(min_tf_dates) <= bar_index_int:
-        cutoff = df.index[-1]                       # DatetimeIndex → Timestamp
-    else:
-        cutoff = min_tf_dates[bar_index_int]        # DatetimeIndex → Timestamp
-
-    # === 强制 Timestamp 转换（防御性：防止任何 int/其他类型混入）===
-    cutoff = pd.Timestamp(cutoff)
-
-    # Step 2: 确定窗口 – 使用 pandas 布尔索引（避免 np.searchsorted 的类型敏感性）
-    # np.searchsorted 在 DatetimeIndex 和 Timestamp 之间执行 C 级别比较，
-    # 在特定 numpy/pandas 版本下因类型转换不稳定引发 TypeError。
-    # 改用 pandas DatetimeIndex.__le__ 原生比较，不经过 numpy C 级别类型转换。
-    # 等价于 np.searchsorted(df.index, cutoff, side='right') - 1
-    _cutoff_ts = pd.Timestamp(cutoff).asm8  # numpy datetime64[ns]，匹配 df.index 的 dtype
-    cutoff_idx = int((df.index <= _cutoff_ts).sum()) - 1
-    cutoff_idx = max(0, min(cutoff_idx, len(df) - 1))
-
-    if tf == min_tf:
-        # 最小周期：窗口终点 = bar_index 对应日期
-        # 当 bar_index < n_pts 时窗口从数据起点开始，
-        # 确保 bar_index=0 也能加载 n_pts 条数据（而非仅 1 条）
-        end_idx = cutoff_idx
-        if bar_index < n_pts:
-            # 数据起点附近：从 data[0] 开始取 n_pts 条
-            start_idx = 0
-            end_idx = max(end_idx, min(n_pts - 1, len(df) - 1))
-        else:
-            start_idx = max(0, end_idx - n_pts + 1)
-    else:
-        # 高周期：窗口终点 <= min_tf 的截止时间
-        start_idx = max(0, cutoff_idx - n_pts + 1)
-        end_idx = cutoff_idx
-
-    n_pts_slice = df.iloc[start_idx:end_idx + 1]
-
-    # Step 3: 高周期最后一 bar 合成
-    if tf != min_tf:
-        lower_tf = _get_next_lower_tf(tf)
-        if lower_tf:
-            lower_path = Path(__file__).parent.parent / "data" / "display" / f"{lower_tf}.parquet"
-            if lower_path.exists():
-                lower_df = pd.read_parquet(lower_path)
-                if "Date" in lower_df.columns and "Close" in lower_df.columns:
-                    lower_df["Date"] = pd.to_datetime(lower_df["Date"])
-                    lower_df = lower_df.set_index("Date").sort_index()
-                    if len(n_pts_slice) > 0:
-                        last_bar_end = n_pts_slice.index[-1]
-                        # 取 lower_tf 中 > last_bar_end 且 <= cutoff 的数据
-                        synthetic_bars = lower_df[
-                            (lower_df.index > last_bar_end) & (lower_df.index <= cutoff)
-                        ]
-                        if len(synthetic_bars) >= 2:
-                            syn = _synthesize_higher_tf_bar(synthetic_bars, tf)
-                            if syn is not None:
-                                # 追加合成 bar
-                                syn_date = synthetic_bars.index[-1]
-                                syn_row = pd.DataFrame(
-                                    [[syn["Open"], syn["High"], syn["Low"], syn["Close"]]],
-                                    columns=["Open", "High", "Low", "Close"],
-                                    index=[syn_date],
-                                )
-                                n_pts_slice = pd.concat([n_pts_slice, syn_row])
-
-    # Step 4: 返回
-    t = np.arange(len(n_pts_slice), dtype=float)
-    noisy = n_pts_slice["Close"].values.ravel()
-    ohlc = n_pts_slice[["Open", "High", "Low", "Close"]] if all(c in n_pts_slice.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=n_pts_slice.index)
-    return t, noisy, ohlc, ticker_code, n_pts_slice.index, None
+    err = None
+    if display_path.exists():
+        try:
+            df = pd.read_parquet(display_path)
+            if "Date" in df.columns and "Close" in df.columns and len(df) >= 5:
+                df["Date"] = pd.to_datetime(df["Date"])
+                df = df.set_index("Date").sort_index()
+                t = np.arange(len(df), dtype=float)
+                noisy = df["Close"].values.ravel()
+                ohlc = df[["Open", "High", "Low", "Close"]] if all(c in df.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=df.index)
+                return t, noisy, ohlc, ticker_code, df.index, None
+            else:
+                err = "数据不足"
+        except Exception as e:
+            err = str(e)
+    if err is not None:
+        return None, None, None, None, None, err
+    return _cached_fetch_stock(market, ticker_code, tf, n_pts)
 
 
 def _read_display_parquet(display_path, ticker_code) -> tuple:
@@ -617,7 +517,7 @@ def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row) -> None
 @st.fragment
 def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, bar_index=None) -> None:
     """Fragment wrapper for _render_chart — enables per-view independent re-rendering.
-    bar_index: 回测模式下传递的 playhead 位置，用于数据截断。"""
+    bar_index: 回测模式下传递的 playhead 位置，仅用于视觉叠加。"""
     _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl, bar_index=bar_index)
 
 
@@ -636,18 +536,11 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         _raw_higher = st.session_state.get(f"_pnl_{_higher_tf}")
 
     # ── Step 1: Load chart data ──
-    # 回测模式：窗口平移（day_offset=0，通过 bar_index 定位截止日期）
-    if bar_index is not None:
-        t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, 0, n_pts, bar_index=bar_index)
-    else:
-        t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=bar_index)
+    # bar_index 仅保留签名兼容，数据加载与浏览模式完全一致
+    t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=bar_index)
     if err is not None:
         st.error(err)
         return
-
-    # 回测模式：数据点不足时友好提示（非阻断）
-    if bar_index is not None and len(t) < 2:
-        st.caption("⚠️ 位于数据起始位置，可用历史有限")
 
     # ── Step 2: Date markers ──
     marker_positions, marker_labels = _date_markers(dates, cfg["tf"])
@@ -771,10 +664,9 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     if ar is not None:
         fig.update_yaxes(title_text="加速度", row=ar, col=1)
 
-    # 回测模式：添加标注（窗口最后位置 = bar_index）
+    # 回测模式：添加标注（bar_index 直接映射到数据位置）
     if bar_index is not None:
-        local_pos = len(t) - 1  # 窗口的最后位置 = 回测当前位置
-        _add_backtest_overlay(fig, local_pos, len(t), dates, cfg.get("tf", ""))
+        _add_backtest_overlay(fig, bar_index, len(t), dates, cfg.get("tf", ""))
 
     _render_plotly(fig, height=fh + 30, dates=dates)
 
