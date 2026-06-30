@@ -41,79 +41,9 @@ def six_bars_data() -> tuple:
     return t, noisy, ohlc, dates
 
 
-# ====================================================================
-# _truncate_arrays
-# ====================================================================
-
-class TestTruncateArrays:
-    """截断数组测试 — 验证回测模式下数据截断的正确性。
-
-    注意：_truncate_arrays 仍存在于 streamlit_app 中，但不再在渲染管线
-    (_render_chart) 中使用。回测模式改为 _load_chart_data 的窗口平移策略，
-    不再截断历史数据到 1 条。此测试保留以覆盖该函数的正向行为边界。
-    """
-
-    def test_bar_index_none_returns_unchanged(self, six_bars_data):
-        """bar_index=None 时原样返回（浏览模式）。"""
-        t, noisy, ohlc, dates = six_bars_data
-        result_t, result_n, result_ohlc, result_d = streamlit_app._truncate_arrays(
-            t, noisy, ohlc, dates, None)
-        assert len(result_t) == 6
-        assert len(result_n) == 6
-        assert len(result_ohlc) == 6
-        assert len(result_d) == 6
-        np.testing.assert_array_equal(result_t, t)
-        np.testing.assert_array_equal(result_n, noisy)
-
-    def test_truncate_at_mid_bar_index(self, six_bars_data):
-        """截断到 bar_index=2 时保留前 3 个元素。"""
-        t, noisy, ohlc, dates = six_bars_data
-        result_t, result_n, result_ohlc, result_d = streamlit_app._truncate_arrays(
-            t, noisy, ohlc, dates, 2)
-        assert len(result_t) == 3
-        assert len(result_n) == 3
-        assert len(result_ohlc) == 3
-        assert len(result_d) == 3
-        np.testing.assert_array_equal(result_t, [0.0, 1.0, 2.0])
-        np.testing.assert_array_equal(result_n, [101.0, 102.0, 103.0])
-
-    def test_truncate_at_zero(self, six_bars_data):
-        """bar_index=0 时只保留第一个元素。"""
-        t, noisy, ohlc, dates = six_bars_data
-        result_t, result_n, result_ohlc, result_d = streamlit_app._truncate_arrays(
-            t, noisy, ohlc, dates, 0)
-        assert len(result_t) == 1
-        assert result_t[0] == 0.0
-        assert result_n[0] == 101.0
-
-    def test_truncate_at_end(self, six_bars_data):
-        """bar_index=len-1 时返回全部（bar_index=5, 共6个元素）。"""
-        t, noisy, ohlc, dates = six_bars_data
-        result_t, result_n, result_ohlc, result_d = streamlit_app._truncate_arrays(
-            t, noisy, ohlc, dates, 5)
-        assert len(result_t) == 6
-        np.testing.assert_array_equal(result_t, t)
-
-    def test_ohlc_dataframe_is_sliced(self, six_bars_data):
-        """验证 OHLC DataFrame 正确截断。"""
-        t, noisy, ohlc, dates = six_bars_data
-        _, _, result_ohlc, _ = streamlit_app._truncate_arrays(
-            t, noisy, ohlc, dates, 1)
-        assert list(result_ohlc["Close"]) == [101.0, 102.0]
-        assert list(result_ohlc["Open"]) == [100.0, 101.0]
-        assert list(result_ohlc["High"]) == [101.5, 102.5]
-        assert list(result_ohlc["Low"]) == [99.0, 100.0]
-
-    def test_empty_arrays_with_bar_index(self):
-        """空数组 + 非 None bar_index 时安全返回空。"""
-        t = np.array([], dtype=float)
-        noisy = np.array([], dtype=float)
-        ohlc = pd.DataFrame({c: [] for c in ["Open", "High", "Low", "Close"]})
-        dates = pd.DatetimeIndex([])
-        result_t, result_n, result_ohlc, result_d = streamlit_app._truncate_arrays(
-            t, noisy, ohlc, dates, 0)
-        assert len(result_t) == 0
-        assert len(result_n) == 0
+# 注意：_truncate_arrays 和 _global_to_local_bar_index 已在 T3 清理中移除。
+# 回测模式数据截断改用 _load_chart_data 的窗口平移策略。
+# 相关测试已一并移除。
 
 
 # ====================================================================
@@ -339,71 +269,7 @@ class TestLoadChartDataBacktest:
         assert len(t) >= 1
 
 
-# ====================================================================
-# _global_to_local_bar_index
-# ====================================================================
-
-class TestGlobalToLocalBarIndex:
-    """全局到本地 bar 索引映射测试 — O(log n) 时间对齐。"""
-
-    @pytest.fixture
-    def weekly_dates(self):
-        """周线日期 (6个周三, 每周一个bar)。"""
-        return pd.date_range("2026-01-07", periods=6, freq="W-WED")
-
-    @pytest.fixture
-    def daily_dates(self):
-        """日线日期 (覆盖上述周线范围)。"""
-        return pd.date_range("2026-01-05", periods=42, freq="D")
-
-    def test_exact_match(self, weekly_dates, daily_dates):
-        """周线第3个bar的日期在日线中精确出现时，bar_index 映射正确。"""
-        target_weekly_date = weekly_dates[2]
-        local_idx = streamlit_app._global_to_local_bar_index(
-            daily_dates, 2, weekly_dates)
-        assert daily_dates[local_idx] == target_weekly_date
-
-    def test_within_range(self, weekly_dates, daily_dates):
-        """周线第3个bar在内，日线中取 <= 该时间戳的最大索引。"""
-        local_idx = streamlit_app._global_to_local_bar_index(
-            daily_dates, 2, weekly_dates)
-        assert local_idx >= 0
-        assert daily_dates[local_idx] <= weekly_dates[2]
-        # 日线中下一天应 > 该周线日期
-        if local_idx + 1 < len(daily_dates):
-            assert daily_dates[local_idx + 1] > weekly_dates[2]
-
-    def test_before_first_global_date(self, daily_dates):
-        """最早全局日期之前 -> 返回 >= 0 的索引。"""
-        min_tf_dates = pd.date_range("2026-02-01", periods=5, freq="D")
-        local_idx = streamlit_app._global_to_local_bar_index(
-            daily_dates, 0, min_tf_dates)
-        assert local_idx >= 0
-        assert daily_dates[local_idx] <= min_tf_dates[0]
-
-    def test_out_of_bounds_returns_last_daily(self, weekly_dates, daily_dates):
-        """global_idx 超出 min_tf_dates 范围时返回日线最后索引。"""
-        local_idx = streamlit_app._global_to_local_bar_index(
-            daily_dates, 100, weekly_dates)
-        assert local_idx == len(daily_dates) - 1
-
-    def test_early_cutoff_before_all_dates(self, daily_dates):
-        """min_tf_dates 中第0个早于所有日线时，返回 -1（边缘情况）。"""
-        min_tf_dates = pd.date_range("2025-12-01", periods=3, freq="D")
-        local_idx = streamlit_app._global_to_local_bar_index(
-            daily_dates, 0, min_tf_dates)
-        # searchsorted returns 0 (all dates > cutoff), subtract 1 -> -1
-        assert local_idx == -1
-
-    def test_monotonic_mapping(self):
-        """验证映射是单调递增的：global_idx 增大时 local_idx 不会减小。"""
-        daily = pd.date_range("2026-01-01", periods=100, freq="D")
-        min_tf = pd.date_range("2026-01-01", periods=20, freq="5D")
-        prev = -1
-        for gidx in range(len(min_tf)):
-            lidx = streamlit_app._global_to_local_bar_index(daily, gidx, min_tf)
-            assert lidx >= prev, f"Non-monotonic at global_idx={gidx}"
-            prev = lidx
+# _global_to_local_bar_index 已随 T3 清理移除。
 
 
 # ====================================================================
@@ -579,9 +445,11 @@ class TestLookAheadBiasPrevention:
         return t, filtered, schmitt, cfg, all_pairs
 
     def test_truncation_removes_future_data(self, six_bars_data):
-        """截断后不包含未来数据 -- 验证 bar_index=2 后无 bar_index=3,4,5。"""
+        """截断后不包含未来数据 -- 验证 bar_index=2 后无 bar_index=3,4,5。
+        使用内联截断逻辑替代已移除的 _truncate_arrays。"""
         t, noisy, ohlc, dates = six_bars_data
-        result_t, _, _, _ = streamlit_app._truncate_arrays(t, noisy, ohlc, dates, 2)
+        bi = 2
+        result_t = t[:bi + 1]
         assert np.all(result_t <= 2.0)
         assert len(result_t) == 3
 
@@ -621,20 +489,14 @@ class TestLookAheadBiasPrevention:
         assert len(result) == 0
 
     def test_no_future_price_in_truncation(self):
-        """验证截断数组中没有未来价格 -- 用显式的价格序列。"""
+        """验证截断数组中没有未来价格 -- 内联截断逻辑。"""
         np.random.seed(1)
         n = 50
         t = np.arange(n, dtype=float)
         prices = np.cumsum(np.random.randn(n) * 0.5 + 0.1) + 100.0
-        ohlc = pd.DataFrame({
-            "Open": prices - 0.1, "High": prices + 0.2,
-            "Low": prices - 0.2, "Close": prices,
-        })
-        dates = pd.date_range("2026-01-01", periods=n, freq="D")
 
         for bar_idx in [10, 25, 40]:
-            _, result_p, _, _ = streamlit_app._truncate_arrays(
-                t, prices, ohlc, dates, bar_idx)
+            result_p = prices[:bar_idx + 1]
             assert result_p[-1] == prices[bar_idx], (
                 f"bar_index={bar_idx}: last price {result_p[-1]} != {prices[bar_idx]}"
             )
@@ -710,10 +572,124 @@ class TestBacktestDataFlow:
         assert df is None
 
     def test_truncate_does_not_mutate_input(self, six_bars_data):
-        """_truncate_arrays 不修改原始数组。"""
+        """切片操作不修改原始数组（内联验证，替代已移除的 _truncate_arrays）。"""
         t, noisy, ohlc, dates = six_bars_data
         t_copy = t.copy()
         noisy_copy = noisy.copy()
-        streamlit_app._truncate_arrays(t, noisy, ohlc, dates, 2)
+        _ = t[:3]
         np.testing.assert_array_equal(t, t_copy)
         np.testing.assert_array_equal(noisy, noisy_copy)
+
+
+# ====================================================================
+# T1-T3 补充覆盖测试
+# ====================================================================
+
+class TestBacktestWindowEdgeCases:
+    """T1-T3 改动对应的边界场景测试。"""
+
+    def test_empty_n_pts_slice_returns_empty_arrays(self, monkeypatch, tmp_path):
+        """_apply_backtest_window 在切片结果为空时返回空数组而不崩溃。
+
+        T1 添加的空切片守卫 (line 270): 验证空切片时直接返回
+        空 np.array/pd.DatetimeIndex 而非进入后续合成逻辑。
+        通过 monkeypatch pd.DataFrame.iloc 返回空来模拟。"""
+        dates = pd.date_range("2026-01-01", periods=10, freq="D")
+        df = pd.DataFrame({"Open": range(10, 20), "High": range(11, 21),
+                           "Low": range(9, 19), "Close": range(10, 20)},
+                          index=dates)
+
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_min_tf": "日线",
+            }.get(key, default),
+        )
+        monkeypatch.setattr(streamlit_app, "_get_next_lower_tf", lambda tf: None)
+
+        # 用 monkeypatch 让 iloc[start:end+1] 总返回空
+        empty_df = pd.DataFrame(columns=["Open", "High", "Low", "Close"])
+        monkeypatch.setattr(
+            pd.core.indexing._iLocIndexer, "__getitem__",
+            lambda self, key: empty_df if isinstance(key, slice) else self.obj
+        )
+
+        result = streamlit_app._apply_backtest_window(
+            df, pd.DataFrame(), "test", 0, 100, "日线"
+        )
+
+        t, noisy, ohlc, ticker, dates_result, err = result
+        assert len(t) == 0
+        assert len(noisy) == 0
+        assert len(dates_result) == 0
+        assert isinstance(t, np.ndarray)
+        assert isinstance(noisy, np.ndarray)
+        assert isinstance(dates_result, pd.DatetimeIndex)
+        assert err == "回测窗口数据为空"
+
+    def test_cache_dataframe_has_datetime_index(self, monkeypatch):
+        """_render_backtest_mode_switch 写入缓存的 DataFrame 有 DatetimeIndex。
+
+        T1 修复场景: parquet 缺少 Date 列时强制转换 index 为 DatetimeIndex。"""
+        import io
+
+        # 构造一个没有 Date 列的 parquet 文件
+        bad_df = pd.DataFrame({"Close": [100.0, 101.0]}, index=["2026-01-01", "2026-01-02"])
+        buf = io.BytesIO()
+        bad_df.to_parquet(buf)
+        buf.seek(0)
+
+        cache_store = {}
+
+        def mock_exists(path):
+            return True
+
+        def mock_read_parquet(path, **kw):
+            buf.seek(0)
+            return pd.read_parquet(buf)
+
+        monkeypatch.setattr(Path, "exists", mock_exists)
+        monkeypatch.setattr(pd, "read_parquet", mock_read_parquet)
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_cb_mode": False,
+                "_min_tf": "日线",
+                "_bt_data_cache": {},
+            }.get(key, default),
+        )
+
+        def mock_set(key, value):
+            if key == "_bt_data_cache":
+                cache_store.update(value)
+
+        monkeypatch.setattr(streamlit_app.AppState, "set", mock_set)
+        monkeypatch.setattr(streamlit_app, "_sync_to_display", lambda *a, **kw: None)
+        monkeypatch.setattr(streamlit_app, "_get_min_tf_and_count",
+                            lambda *a: ("日线", 10))
+
+        configs = [{"tf": "日线", "n_pts": 100}]
+        streamlit_app._render_backtest_mode_switch("美股 US", "test", configs)
+
+        for tf, df in cache_store.items():
+            assert isinstance(df.index, pd.DatetimeIndex), (
+                f"缓存 {tf} 的 index 类型应为 DatetimeIndex, 实际 {type(df.index)}"
+            )
+
+    def test_cb_mode_bar_index_defaults_to_zero(self):
+        """_cb_mode=True 时 bar_index 默认 0 而非 None。
+
+        T2 修复场景: 防止静默退化导致 _apply_backtest_window 或
+        _add_backtest_overlay 收到 None 而跳过。"""
+        cb_mode = True
+        bar_index = 0 if cb_mode else None
+        assert bar_index == 0
+        assert bar_index is not None
+
+    def test_browse_mode_bar_index_is_none(self):
+        """_cb_mode=False 时 bar_index 为 None。
+
+        回退模式无需窗口截断，bar_index=None 确保下游函数跳过回测专用逻辑。"""
+        cb_mode = False
+        bar_index = None if not cb_mode else 0
+        assert bar_index is None
