@@ -281,7 +281,7 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None)
     # 在特定 numpy/pandas 版本下因类型转换不稳定引发 TypeError。
     # 改用 pandas DatetimeIndex.__le__ 原生比较，不经过 numpy C 级别类型转换。
     # 等价于 np.searchsorted(df.index, cutoff, side='right') - 1
-    _cutoff_ts = pd.Timestamp(cutoff)
+    _cutoff_ts = pd.Timestamp(cutoff).asm8  # numpy datetime64[ns]，匹配 df.index 的 dtype
     cutoff_idx = int((df.index <= _cutoff_ts).sum()) - 1
     cutoff_idx = max(0, min(cutoff_idx, len(df) - 1))
 
