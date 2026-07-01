@@ -72,6 +72,7 @@ class TestLoadChartDataBacktest:
 
         # Mock AppState.get 返回可控值 — 因为 conftest 中 streamlit 为 MagicMock,
         # 其 session_state 不是真实 dict, 无法通过赋值持久化
+        # 空 DataFrame 不含 OHLC 列，用于触发 _load_backtest_window 空返回
         monkeypatch.setattr(
             streamlit_app.AppState, "get",
             lambda key, default=None: {
@@ -103,22 +104,26 @@ class TestLoadChartDataBacktest:
         dates = pd.date_range("2025-06-01", periods=200, freq="D")
 
         # 覆盖 mock_deps 中 _bt_data_cache 的默认值
+        # _load_backtest_window 从缓存取 DataFrame，需要 OHLC 列才返回有效数据
+        ohlc_data = {
+            "Open": np.linspace(100, 200, 200),
+            "High": np.linspace(102, 202, 200),
+            "Low": np.linspace(98, 198, 200),
+            "Close": np.linspace(101, 201, 200),
+        }
         monkeypatch.setattr(
             streamlit_app.AppState, "get",
             lambda key, default=None: {
                 "_min_tf": "日线",
                 "_bt_data_cache": {
-                    "日线": pd.DataFrame(index=dates),
+                    "日线": pd.DataFrame(ohlc_data, index=dates),
                 },
             }.get(key, default),
         )
 
-        mock_df = self._make_mock_parquet(dates, {
-            "Open": np.linspace(100, 200, 200),
-            "High":  np.linspace(102, 202, 200),
-            "Low":   np.linspace(98, 198, 200),
-            "Close": np.linspace(101, 201, 200),
-        })
+        # _load_backtest_window 使用缓存/parquet，但此测试 tf == min_tf，
+        # 缓存中已有数据，不会走到 parquet 读取，mock 仅做兜底
+        mock_df = self._make_mock_parquet(dates, ohlc_data)
         monkeypatch.setattr(pd, "read_parquet", lambda path, *a, **kw: mock_df)
 
         t, noisy, ohlc, ticker_full, result_dates, err = (
@@ -587,44 +592,45 @@ class TestBacktestDataFlow:
 class TestBacktestWindowEdgeCases:
     """T1-T3 改动对应的边界场景测试。"""
 
-    def test_empty_n_pts_slice_returns_empty_arrays(self, monkeypatch, tmp_path):
-        """_apply_backtest_window 在切片结果为空时返回空数组而不崩溃。
+    def test_empty_backtest_window_returns_error(self, monkeypatch, tmp_path):
+        """回测模式 _load_backtest_window 返回空 DataFrame 时 _load_chart_data 直接返回错误。
 
-        T1 添加的空切片守卫 (line 270): 验证空切片时直接返回
-        空 np.array/pd.DatetimeIndex 而非进入后续合成逻辑。
-        通过 monkeypatch pd.DataFrame.iloc 返回空来模拟。"""
-        dates = pd.date_range("2026-01-01", periods=10, freq="D")
-        df = pd.DataFrame({"Open": range(10, 20), "High": range(11, 21),
-                           "Low": range(9, 19), "Close": range(10, 20)},
-                          index=dates)
+        旧实现退化到 _apply_backtest_window（已删除），
+        新实现直接返回错误，不静默退化。"""
+        monkeypatch.setattr(streamlit_app, "_sync_to_display", lambda *a, **kw: None)
+        monkeypatch.setattr(Path, "exists", lambda _: True)
 
+        # _load_backtest_window 返回空: min_tf 缓存中没有该 tf, parquet 也不存在
+        # 设 bar_index 超出范围触发空返回
+        dates = pd.date_range("2026-01-01", periods=5, freq="D")
         monkeypatch.setattr(
             streamlit_app.AppState, "get",
             lambda key, default=None: {
                 "_min_tf": "日线",
+                "_bt_data_cache": {
+                    "日线": pd.DataFrame(index=dates),
+                },
             }.get(key, default),
         )
-        monkeypatch.setattr(streamlit_app, "_get_next_lower_tf", lambda tf: None)
 
-        # 用 monkeypatch 让 iloc[start:end+1] 总返回空
-        empty_df = pd.DataFrame(columns=["Open", "High", "Low", "Close"])
-        monkeypatch.setattr(
-            pd.core.indexing._iLocIndexer, "__getitem__",
-            lambda self, key: empty_df if isinstance(key, slice) else self.obj
+        mock_df = pd.DataFrame({
+            "Date": ["2026-01-01", "2026-01-02"],
+            "Open": [100.0, 101.0],
+            "High": [102.0, 103.0],
+            "Low": [99.0, 100.0],
+            "Close": [101.0, 102.0],
+        })
+        monkeypatch.setattr(pd, "read_parquet", lambda path, *a, **kw: mock_df)
+
+        t, noisy, ohlc, ticker, dates_result, err = (
+            streamlit_app._load_chart_data(
+                "美股 US", "TEST", "周线", 0, 100, bar_index=999
+            )
         )
 
-        result = streamlit_app._apply_backtest_window(
-            df, pd.DataFrame(), "test", 0, 100, "日线"
-        )
-
-        t, noisy, ohlc, ticker, dates_result, err = result
-        assert len(t) == 0
-        assert len(noisy) == 0
-        assert len(dates_result) == 0
-        assert isinstance(t, np.ndarray)
-        assert isinstance(noisy, np.ndarray)
-        assert isinstance(dates_result, pd.DatetimeIndex)
         assert err == "回测窗口数据为空"
+        assert t is None
+        assert noisy is None
 
     def test_cache_dataframe_has_datetime_index(self, monkeypatch):
         """_render_backtest_mode_switch 写入缓存的 DataFrame 有 DatetimeIndex。
@@ -678,8 +684,7 @@ class TestBacktestWindowEdgeCases:
     def test_cb_mode_bar_index_defaults_to_zero(self):
         """_cb_mode=True 时 bar_index 默认 0 而非 None。
 
-        T2 修复场景: 防止静默退化导致 _apply_backtest_window 或
-        _add_backtest_overlay 收到 None 而跳过。"""
+        T2 修复场景: 确保 _load_chart_data 回测模式不收到 None bar_index。"""
         cb_mode = True
         bar_index = 0 if cb_mode else None
         assert bar_index == 0

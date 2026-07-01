@@ -336,8 +336,9 @@ def _load_backtest_window(tf, bar_index, n_pts) -> pd.DataFrame:
         boundary = _get_period_boundary(cutoff, tf)
         if cutoff != boundary:
             # cutoff 不在周期边界，需要合成最后一根未完成的高周期 bar
-            lower_tf = _get_next_lower_tf(tf)
-            if lower_tf:
+            # 设计规定：始终从 min_tf 合成高周期最后一根 bar（不逐级向上）
+            lower_tf = min_tf
+            if lower_tf and lower_tf != tf:
                 lower_df = None
                 if lower_tf in cache:
                     lower_df = cache[lower_tf]
@@ -383,15 +384,15 @@ def _load_backtest_window(tf, bar_index, n_pts) -> pd.DataFrame:
 def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None) -> tuple:
     """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err).
 
-    先用统一路径加载数据（原浏览模式），
-    若 bar_index 非 None（回测模式），再对已加载数据应用窗口切片 + 高周期合成。
-    浏览模式下行为完全不变（向后兼容）。"""
+    回测模式（bar_index 非 None）: 仅通过 _load_backtest_window 加载窗口切片。
+    浏览模式（bar_index=None）: 从 display parquet 直接读取。
+    _load_backtest_window 返回空时直接返回错误，无退化回退。"""
     _sync_to_display(ticker_code, tf, day_offset, n_pts)
     display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
     err = None
     if display_path.exists():
         try:
-            # ── 回测模式：通过 _load_backtest_window 加载窗口切片 ──
+            # ── 回测模式：仅通过 _load_backtest_window ──
             if bar_index is not None:
                 window_df = _load_backtest_window(tf, bar_index, n_pts)
                 if len(window_df) > 0 and "Close" in window_df.columns:
@@ -399,8 +400,9 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None)
                     noisy = window_df["Close"].values.ravel()
                     ohlc = window_df[["Open", "High", "Low", "Close"]]
                     return t, noisy, ohlc, ticker_code, window_df.index, None
+                return None, None, None, None, None, "回测窗口数据为空"
 
-            # ── 浏览模式（或回测模式窗口为空时的回退）：原生数据加载 ──
+            # ── 浏览模式：原生数据加载 ──
             df = pd.read_parquet(display_path)
             if "Date" in df.columns and "Close" in df.columns and len(df) >= 5:
                 df["Date"] = pd.to_datetime(df["Date"])
@@ -408,14 +410,8 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None)
                 t = np.arange(len(df), dtype=float)
                 noisy = df["Close"].values.ravel()
                 ohlc = df[["Open", "High", "Low", "Close"]] if all(c in df.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=df.index)
-                # 浏览模式：直接返回
-                if bar_index is None:
-                    return t, noisy, ohlc, ticker_code, df.index, None
-                # ── 回测模式：窗口切片 + 高周期合成（含合成） ──
-                if bar_index is not None:
-                    return _apply_backtest_window(df, ohlc, ticker_code, bar_index, n_pts, tf)
-            else:
-                err = "数据不足"
+                return t, noisy, ohlc, ticker_code, df.index, None
+            err = "数据不足"
         except Exception as e:
             err = str(e)
     if err is not None:
@@ -423,90 +419,6 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None)
     return _cached_fetch_stock(market, ticker_code, tf, n_pts)
 
 
-def _apply_backtest_window(df, ohlc, ticker_code, bar_index, n_pts, tf) -> tuple:
-    """对已加载的 DataFrame 应用回测窗口切片 + 高周期合成。
-    返回 (t, noisy, ohlc, ticker_full, dates, err)。"""
-    # Step 1: 获取 bar_index 对应的截止日期
-    min_tf = AppState.get("_min_tf", "")
-    min_tf_dates = pd.DatetimeIndex([])
-    if min_tf and min_tf != tf:
-        min_path = Path(__file__).parent.parent / "data" / "display" / f"{min_tf}.parquet"
-        if min_path.exists():
-            try:
-                min_df = pd.read_parquet(min_path, columns=["Date"])
-                if "Date" in min_df.columns and len(min_df) > 0:
-                    raw_dates = pd.to_datetime(min_df["Date"])
-                    min_tf_dates = raw_dates if isinstance(raw_dates, pd.DatetimeIndex) else pd.DatetimeIndex(raw_dates)
-            except Exception:
-                min_tf_dates = pd.DatetimeIndex([])
-    elif min_tf == tf:
-        min_tf_dates = df.index
-
-    bar_index_int = int(bar_index)
-    if len(min_tf_dates) <= bar_index_int:
-        cutoff = df.index[-1]
-    else:
-        cutoff = min_tf_dates[bar_index_int]
-    cutoff = pd.Timestamp(cutoff)
-
-    # Step 2: 确定窗口
-    cutoff_idx = int(np.searchsorted(df.index, cutoff, side="right") - 1)
-    cutoff_idx = max(0, min(cutoff_idx, len(df) - 1))
-
-    # 始终以 cutoff_idx 为窗口终点，往前取 n_pts 条
-    end_idx = cutoff_idx
-    start_idx = max(0, end_idx - n_pts + 1)
-
-    n_pts_slice = df.iloc[start_idx:end_idx + 1]
-
-    # 空切片守卫
-    if len(n_pts_slice) == 0:
-        t = np.array([], dtype=float)
-        noisy = np.array([], dtype=float)
-        ohlc = pd.DataFrame(columns=["Open", "High", "Low", "Close"])
-        return t, noisy, ohlc, ticker_code, pd.DatetimeIndex([]), "回测窗口数据为空"
-
-    # Step 3: 高周期最后一 bar 合成
-    if tf != min_tf:
-        lower_tf = _get_next_lower_tf(tf)
-        if lower_tf:
-            lower_path = Path(__file__).parent.parent / "data" / "display" / f"{lower_tf}.parquet"
-            if lower_path.exists():
-                lower_df = pd.read_parquet(lower_path)
-                if "Date" in lower_df.columns and "Close" in lower_df.columns:
-                    lower_df["Date"] = pd.to_datetime(lower_df["Date"])
-                    lower_df = lower_df.set_index("Date").sort_index()
-                    if len(n_pts_slice) > 0:
-                        last_bar_end = n_pts_slice.index[-1]
-                        # 统一时区后再比较，避免 tz-naive vs tz-aware TypeError
-                        _lower_idx = lower_df.index
-                        _last_end = last_bar_end
-                        _cutoff = cutoff
-                        if _lower_idx.tz is not None:
-                            _lower_idx = _lower_idx.tz_localize(None)
-                        if hasattr(_last_end, 'tz') and _last_end.tz is not None:
-                            _last_end = _last_end.tz_localize(None)
-                        if hasattr(_cutoff, 'tz') and _cutoff.tz is not None:
-                            _cutoff = _cutoff.tz_localize(None)
-                        synthetic_bars = lower_df.loc[
-                            (_lower_idx > _last_end) & (_lower_idx <= _cutoff)
-                        ]
-                        if len(synthetic_bars) >= 2:
-                            syn = _synthesize_higher_tf_bar(synthetic_bars, tf)
-                            if syn is not None:
-                                syn_date = synthetic_bars.index[-1]
-                                syn_row = pd.DataFrame(
-                                    [[syn["Open"], syn["High"], syn["Low"], syn["Close"]]],
-                                    columns=["Open", "High", "Low", "Close"],
-                                    index=[syn_date],
-                                )
-                                n_pts_slice = pd.concat([n_pts_slice, syn_row])
-
-    # Step 4: 返回
-    t = np.arange(len(n_pts_slice), dtype=float)
-    noisy = n_pts_slice["Close"].values.ravel()
-    ohlc = n_pts_slice[["Open", "High", "Low", "Close"]] if all(c in n_pts_slice.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=n_pts_slice.index)
-    return t, noisy, ohlc, ticker_code, n_pts_slice.index, None
 
 
 def _read_display_parquet(display_path, ticker_code) -> tuple:
@@ -1396,6 +1308,10 @@ def _get_min_tf_and_count(configs, ticker_code) -> tuple:
             df = pd.read_parquet(display_path)
             bar_count = len(df)
         else:
+            logger.warning(f"_get_min_tf_and_count: {min_tf} parquet 不存在 ({display_path})")
+            existing = list(display_path.parent.glob("*.parquet"))
+            existing_tfs = [p.stem for p in existing]
+            logger.info(f"display 目录现有 parquet: {existing_tfs}")
             bar_count = 0
     except Exception as e:
         logger.error(f"_get_min_tf_and_count 读取 {min_tf} parquet 失败: {e}")
@@ -1506,7 +1422,11 @@ def _render_backtest_controls() -> None:
     total_bars = AppState.get("_min_tf_bar_count", 0)
     min_tf = AppState.get("_min_tf", "")
     if total_bars == 0:
-        st.warning(f"⚠️ 回测数据未就绪：最小周期 `{min_tf}` 的 display 缓存不存在或为空。请先切换回浏览模式加载数据。")
+        display_dir = Path(__file__).parent.parent / "data" / "display"
+        st.warning(f"⚠️ 回测数据未就绪\n\n"
+                   f"最小周期 `{min_tf}` 的缓存文件不存在。\n"
+                   f"预期路径: `{display_dir / f'{min_tf}.parquet'}`\n\n"
+                   f"**操作**: 请先切换到浏览模式，确保所有周期数据已加载后再进入回测。")
         # 仍渲染 disabled 按钮框架让用户知道控件存在
         cols = st.columns([1, 1, 1.2, 1, 1, 1.5])
         for col, label, _ in [(cols[0], "⏮", True), (cols[1], "◀", True), (cols[2], "▶ 播放", True), (cols[3], "▶▶", True), (cols[4], "⏭", True)]:
