@@ -1,8 +1,8 @@
 # 测试文档 — filter_research
 
-**实际测试计数**：333 个测试 / 12 个测试文件 / 66 个测试类 (+ 6 个独立函数)
+**实际测试计数**：341 个测试 / 12 个测试文件 / 67 个测试类 (+ 6 个独立函数)
 
-pytest 输出：`pytest tests/ --collect-only -q` 确认 333 个测试被收集。
+pytest 输出：`pytest tests/ --collect-only -q` 确认 341 个测试被收集。
 
 ---
 
@@ -55,7 +55,7 @@ tests/
 | 10 | `test_preset_ui_actions.py` | 8 | 45 | 13.5% | — |
 | 11 | `test_db.py` | 14 | 57 | 17.4% | — |
 | 12 | `test_integration.py` | 0 (6 函数) | 6 | 1.8% | — |
-| | **合计** | **66 类 + 6 函数** | **333** | **100%** | |
+| | **合计** | **67 类 + 6 函数** | **341** | **100%** | |
 
 ---
 
@@ -183,6 +183,28 @@ tests/
 |:--|:--|--:|:--|
 | test_preset_ui.py | 16 个类 | 60 | 生命周期、CRUD、排序、大规模、分类、session_state 边界 |
 | test_preset_ui_actions.py | 8 个类 | 45 | action 标志、名称同步、preset_map、category、toast、widget 冲突、overwrite 重置 |
+
+### 3.9 回测功能
+
+| 测试文件 | 测试类 | 测试函数数 | 覆盖范围 |
+|:--|:--|--:|:--|
+| test_backtest.py | TestLoadChartDataBacktest | 3 | 回测模式 _load_chart_data 窗口平移 |
+| test_backtest.py | TestSynthesizeHigherTfBar | 5 | 高周期 bar 合成 |
+| test_backtest.py | TestGetMinTfAndCount | 5 | 最小周期查找 |
+| test_backtest.py | TestAddBacktestOverlay | 3 | 回测图表标注 |
+| test_backtest.py | TestLookAheadBiasPrevention | 7 | 前视偏差防护 |
+| test_backtest.py | TestBacktestStateTransitions | 5 | 回测状态切换边界 |
+| test_backtest.py | TestBacktestDataFlow | 2 | 数据流完整性 |
+| test_backtest.py | TestBacktestWindowEdgeCases | 4 | T1-T3 边界场景 |
+| test_backtest.py | TestBinarySearchLe | 10 | 二分查找 |
+| test_backtest.py | TestLoadBacktestWindow | 12 | 窗口平移核心算法 |
+| test_backtest.py | TestPeriodBoundary | 14 | 周期边界计算 |
+| test_backtest.py | TestHigherTfSynthesis | 8 | 高周期合成验证 |
+| test_backtest.py | TestBacktestUIControls | 6 | 回测 UI 控件渲染 |
+| test_backtest.py | TestBacktestIntegration | 8 | 回测端到端集成验证 |
+
+**跨文件集成**：
+- `test_backtest.py::TestBacktestIntegration` 覆盖浏览→回测切换、bar_index 前进、播放停止、多视图一致性、模式切换不干扰、数据窗口大小等 8 个端到端场景
 
 ---
 

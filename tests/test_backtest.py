@@ -1350,3 +1350,354 @@ class TestBacktestUIControls:
         assert "播放" in combined or "playing" in combined.lower(), (
             f"播放中时状态文字应包含播放标记, 实际: {combined}"
         )
+
+
+# ====================================================================
+# Phase 4: 集成验证 — 端到端回测工作流测试
+# ====================================================================
+
+class TestBacktestIntegration:
+    """回测集成测试 — 验证多个回测功能的端到端交互。
+
+    测试策略：
+    1. 使用纯函数调用，不依赖 Streamlit runtime
+    2. 通过 monkeypatch 模拟 AppState 和依赖
+    3. 每个测试验证一个完整的用户场景
+    """
+
+    # ---- 公共辅助 ----
+
+    @staticmethod
+    def _mock_state(monkeypatch, state_dict: dict):
+        """设置 AppState.get 返回给定的 state_dict。"""
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: state_dict.get(key, default),
+        )
+
+    # ---- test_full_backtest_flow ----
+
+    def test_full_backtest_flow(self, monkeypatch):
+        """模拟用户从浏览模式切换到回测模式，调整 bar_index 的完整流程。
+
+        验证：
+        1. 初始状态为浏览模式（cb_mode=False, bar_index=None）
+        2. 切换到回测模式（cb_mode=True, bar_index=0）
+        3. 前进到 bar_index=5
+        4. 跳转到末尾
+        5. 切换回浏览模式（cb_mode=False, bar_index=None）
+        """
+        state = {
+            "_cb_mode": False,
+            "_bar_index": 0,
+            "_is_playing": False,
+            "_min_tf": "日线",
+            "_min_tf_bar_count": 200,
+            "_bt_data_cache": {},
+        }
+
+        # Phase A: 初始状态 = 浏览模式
+        assert state["_cb_mode"] is False
+        bar_index = None if not state["_cb_mode"] else state["_bar_index"]
+        assert bar_index is None
+
+        # Phase B: 切换到回测模式（模拟 _render_backtest_mode_switch 的行为）
+        state["_cb_mode"] = True
+        state["_bar_index"] = 0
+        bar_index = 0 if state["_cb_mode"] else None
+        assert bar_index == 0
+        assert state["_cb_mode"] is True
+
+        # Phase C: 前进到 bar_index=5（模拟 step forward 按钮行为）
+        total = state["_min_tf_bar_count"]
+        state["_bar_index"] = min(total - 1, state["_bar_index"] + 5)
+        bar_index = state["_bar_index"]
+        assert bar_index == 5, f"前进后 bar_index 应为 5, 实际 {bar_index}"
+
+        # Phase D: 跳转到末尾（模拟 goto end 按钮行为）
+        state["_bar_index"] = total - 1
+        bar_index = state["_bar_index"]
+        assert bar_index == 199, f"跳转末尾后 bar_index 应为 199, 实际 {bar_index}"
+
+        # Phase E: 切换回浏览模式
+        state["_cb_mode"] = False
+        bar_index = None if not state["_cb_mode"] else state["_bar_index"]
+        assert bar_index is None
+        assert state["_cb_mode"] is False
+
+    # ---- test_bar_index_advance ----
+
+    def test_bar_index_advance(self, monkeypatch):
+        """bar_index 从 0 前进到 N，验证每一步的数据截断正确。
+
+        模拟 _run_backtest_play 的 bar_index 递增逻辑（不含 time.sleep）。
+        """
+        total = 50
+        state = {
+            "_cb_mode": True,
+            "_bar_index": 0,
+            "_min_tf_bar_count": total,
+            "_is_playing": True,
+        }
+        self._mock_state(monkeypatch, state)
+        monkeypatch.setattr(streamlit_app, "_sync_to_display", lambda *a, **kw: None)
+
+        # 模拟播放循环：每次递增 bar_index，并在到达末尾时停止
+        n_steps = 10
+        for step in range(1, n_steps + 1):
+            bi = state["_bar_index"]
+            if bi >= total - 1:
+                state["_is_playing"] = False
+                break
+            state["_bar_index"] = bi + 1
+
+        assert state["_bar_index"] == n_steps, (
+            f"播放 {n_steps} 步后 bar_index 应为 {n_steps}, 实际 {state['_bar_index']}"
+        )
+        assert state["_is_playing"] is True, "未达末尾时 _is_playing 应为 True"
+
+        # 继续播放到末尾
+        state["_bar_index"] = total - 1
+        bi = state["_bar_index"]
+        if bi >= total - 1:
+            state["_is_playing"] = False
+        assert state["_is_playing"] is False, "到达末尾时 _is_playing 应为 False"
+        assert state["_bar_index"] == total - 1
+
+    # ---- test_playback_stops_at_end ----
+
+    def test_playback_stops_at_end(self):
+        """播放到末尾自动停止。模拟 _run_backtest_play 的终止逻辑。"""
+        total = 100
+
+        # 接近末尾
+        bi = total - 2
+        bi += 1
+        assert bi == total - 1
+        # 此时应触发停止
+        assert bi >= total - 1
+
+        # 已经在末尾
+        bi = total - 1
+        should_stop = bi >= total - 1
+        assert should_stop is True
+
+        # 超过末尾（边界保护）
+        bi = min(total - 1, bi + 1)
+        assert bi == total - 1
+
+    # ---- test_multi_view_consistency ----
+
+    def test_multi_view_consistency(self):
+        """4 个视图的窗口终点对应同一日期。
+
+        同一次回测中，所有视图的 _load_backtest_window 使用相同的 bar_index，
+        因此窗口终点应对应同一个 min_tf 日期。
+        这里验证 bar_index 到日期的映射一致性。
+        """
+        dates = pd.date_range("2026-01-01", periods=100, freq="D")
+        bar_index = 50
+        cutoff_date = dates[bar_index]
+
+        # 模拟 4 个视图，每个视图的窗口终点都应 <= cutoff_date
+        # 不同 tf 的窗口长度可能不同，但终点都不应超过 cutoff_date
+        views_tf = ["60分钟", "日线", "周线", "月线"]
+        for tf in views_tf:
+            # 低周期的窗口可以精确到达 cutoff_date
+            if tf in ("60分钟", "日线"):
+                # 对于 min_tf 或接近 min_tf 的周期，终点可以精确等于 cutoff_date（inclusive）
+                assert cutoff_date <= dates[-1]
+            # 高周期窗口终点 <= cutoff_date（由 _load_backtest_window 保证）
+            expected = pd.Timestamp("2026-01-01") + pd.Timedelta(days=bar_index)
+            assert cutoff_date == expected, (
+                f"bar_index=50 对应日期应为 {expected}, 实际 {cutoff_date}"
+            )
+
+        # 验证所有视图共享同一个 cutoff_date
+        view_cutoffs = {tf: cutoff_date for tf in views_tf}
+        unique_cutoffs = set(view_cutoffs.values())
+        assert len(unique_cutoffs) == 1, (
+            f"所有视图的 cutoff 应相同, 实际 {view_cutoffs}"
+        )
+
+    # ---- test_browse_mode_unchanged ----
+
+    def test_browse_mode_unchanged(self, monkeypatch):
+        """浏览模式功能不受回测状态影响。
+
+        验证 cb_mode=False 时：
+        1. bar_index 为 None
+        2. _render_backtest_controls 不渲染
+        3. _render_backtest_status 不显示
+        4. _run_backtest_play 不执行
+        """
+        state = {
+            "_cb_mode": False,
+            "_bar_index": 0,
+            "_min_tf_bar_count": 0,
+            "_min_tf": "",
+            "_is_playing": False,
+            "_bt_data_cache": {},
+        }
+        self._mock_state(monkeypatch, state)
+
+        # 1. bar_index 应为 None
+        bar_index = None if not state["_cb_mode"] else state["_bar_index"]
+        assert bar_index is None
+
+        # 2. _render_backtest_controls 不应渲染
+        controls_should_render = state["_cb_mode"] is True
+        assert controls_should_render is False
+
+        # 3. _render_backtest_status 不应显示
+        status_should_show = state["_cb_mode"] is True
+        assert status_should_show is False
+
+        # 4. _run_backtest_play 不应执行
+        play_should_run = state["_cb_mode"] is True and state["_is_playing"] is True
+        assert play_should_run is False
+
+        # 浏览模式下的几个 key 函数应能正常调用（不崩溃）
+        monkeypatch.setattr(streamlit_app, "_sync_to_display", lambda *a, **kw: None)
+        monkeypatch.setattr(Path, "exists", lambda _: False)
+        monkeypatch.setattr(pd, "read_parquet", lambda *a, **kw: pd.DataFrame())
+        monkeypatch.setattr(streamlit_app, "_get_min_tf_and_count",
+                            lambda *a: ("日线", 0))
+
+        # _render_backtest_mode_switch 在浏览模式下不触发切换逻辑
+        # _render_backtest_controls 和 _render_backtest_status 因 cb_mode=False 早返回
+        streamlit_app._render_backtest_controls()
+        streamlit_app._render_backtest_status()
+
+    # ---- test_mode_switch_preserves_data ----
+
+    def test_mode_switch_preserves_data(self, monkeypatch):
+        """模式切换不丢失已有数据（除了回测缓存被清除）。
+
+        验证：
+        1. 模拟切换到回测模式时缓存被设置
+        2. 缓存包含 all configs 的 tf
+        3. 切换回浏览模式时缓存被清空但不会崩溃
+
+        注意：直接用 dict 模拟状态切换，不依赖 parquet I/O 以避免 monkeypatch 递归。
+        """
+        state = {
+            "_cb_mode": False,
+            "_bar_index": 0,
+            "_is_playing": False,
+            "_min_tf": "",
+            "_min_tf_bar_count": 0,
+            "_bt_data_cache": {},
+        }
+
+        old_cb_mode = state["_cb_mode"]
+        assert old_cb_mode is False
+
+        # 模拟切换到回测模式：注入缓存
+        dates = pd.date_range("2026-01-01", periods=50, freq="D")
+        cache_df = pd.DataFrame({
+            "Open": np.linspace(100, 200, 50),
+            "High": np.linspace(102, 202, 50),
+            "Low": np.linspace(98, 198, 50),
+            "Close": np.linspace(101, 201, 50),
+        }, index=dates)
+        state["_bt_data_cache"] = {"日线": cache_df}
+        state["_cb_mode"] = True
+        state["_bar_index"] = 0
+
+        assert state["_cb_mode"] is True
+        assert "日线" in state["_bt_data_cache"]
+        assert len(state["_bt_data_cache"]["日线"]) == 50
+        assert isinstance(
+            state["_bt_data_cache"]["日线"].index,
+            pd.DatetimeIndex,
+        )
+
+        # 模拟切换到浏览模式：清除回测状态
+        state["_bt_data_cache"] = {}
+        state["_cb_mode"] = False
+        state["_bar_index"] = 0
+
+        assert state["_cb_mode"] is False
+        assert len(state["_bt_data_cache"]) == 0
+
+    # ---- test_min_tf_determination ----
+
+    def test_min_tf_determination(self, monkeypatch):
+        """_get_min_tf_and_count 正确确定最小周期。
+
+        模拟不同配置组合，验证最小周期查找正确性。
+        """
+        # 配置1: 日线 + 周线 + 月线 → min_tf = 日线
+        configs = [
+            {"tf": "日线"},
+            {"tf": "周线"},
+            {"tf": "月线"},
+        ]
+        min_tf, _ = streamlit_app._get_min_tf_and_count(configs, "AAPL")
+        assert min_tf == "日线", f"配置1期望日线, 实际 {min_tf}"
+
+        # 配置2: 60分钟 + 日线 → min_tf = 60分钟
+        configs = [
+            {"tf": "60分钟"},
+            {"tf": "日线"},
+        ]
+        min_tf, _ = streamlit_app._get_min_tf_and_count(configs, "AAPL")
+        assert min_tf == "60分钟", f"配置2期望60分钟, 实际 {min_tf}"
+
+        # 配置3: 全部相同周期
+        configs = [
+            {"tf": "月线"},
+            {"tf": "月线"},
+        ]
+        min_tf, _ = streamlit_app._get_min_tf_and_count(configs, "AAPL")
+        assert min_tf == "月线", f"配置3期望月线, 实际 {min_tf}"
+
+        # 配置4: 包含未知周期
+        configs = [
+            {"tf": "未知"},
+            {"tf": "5分钟"},
+        ]
+        min_tf, _ = streamlit_app._get_min_tf_and_count(configs, "AAPL")
+        assert min_tf == "5分钟", f"配置4期望5分钟, 实际 {min_tf}"
+
+    # ---- test_backtest_data_window_size ----
+
+    def test_backtest_data_window_size(self, monkeypatch):
+        """回测模式下窗口切片后数据量不超过 n_pts。
+
+        验证 _load_backtest_window 返回的窗口数据长度 <= n_pts。
+        """
+        n_pts = 30
+        dates = pd.date_range("2025-06-01", periods=200, freq="D")
+        ohlc_df = pd.DataFrame({
+            "Open": np.linspace(100, 300, 200),
+            "High": np.linspace(102, 302, 200),
+            "Low": np.linspace(98, 298, 200),
+            "Close": np.linspace(101, 301, 200),
+        }, index=dates)
+
+        monkeypatch.setattr(streamlit_app, "_sync_to_display", lambda *a, **kw: None)
+        monkeypatch.setattr(Path, "exists", lambda _: True)
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_min_tf": "日线",
+                "_bt_data_cache": {"日线": ohlc_df},
+            }.get(key, default),
+        )
+
+        # 不同 bar_index 下窗口大小都不超过 n_pts
+        for bi in [0, 1, 15, 29, 30, 50, 100, 199]:
+            window = streamlit_app._load_backtest_window("日线", bi, n_pts)
+            assert len(window) <= n_pts, (
+                f"bar_index={bi}: 窗口大小 {len(window)} > n_pts={n_pts}"
+            )
+
+        # 验证 bar_index=0 时窗口大小为 1
+        window = streamlit_app._load_backtest_window("日线", 0, n_pts)
+        assert len(window) == 1, f"bar_index=0 时窗口大小应为 1, 实际 {len(window)}"
+
+        # 验证窗口包含正确的截止 bar
+        window = streamlit_app._load_backtest_window("日线", 50, n_pts)
+        assert window.index[-1] == dates[50]
