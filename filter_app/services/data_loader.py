@@ -100,6 +100,11 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.droplevel(1)
 
+    # ── 统一时区：yfinance 日内周期(1m/5m/15m/60m)返回 tz-aware(America/New_York)，
+    #    日线及以上返回 tz-naive。统一转 tz-naive 避免跨周期比较 TypeError。
+    if data.index.tz is not None:
+        data.index = data.index.tz_localize(None)
+
     # ── 日线 Close 回退：Yahoo 日线 API 最后一条 bar 的 Close 偶尔未结算(nan)，
     #    但 Yahoo 周线 API 已通过实时行情计算出本周 Close。
     #    用周线 Close 回填日线，解决 A 股/港股收盘价 1-2 天延迟问题。
