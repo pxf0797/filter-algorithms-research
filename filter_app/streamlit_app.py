@@ -192,6 +192,91 @@ def _get_next_lower_tf(tf):
     return None
 
 
+def _binary_search_le(dates, cutoff):
+    """在 DatetimeIndex 中二分查找 <= cutoff 的最大索引。等价于 searchsorted(side='right')-1。
+
+    纯 Python 实现，不依赖 np.searchsorted（避免之前 min_tf_dates 的类型问题）。
+    返回 int（索引）或 -1（无匹配）。"""
+    if len(dates) == 0:
+        return -1
+    lo, hi = 0, len(dates) - 1
+    result = -1
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if dates[mid] <= cutoff:
+            result = mid
+            lo = mid + 1
+        else:
+            hi = mid - 1
+    return result
+
+
+def _load_backtest_window(tf, bar_index, n_pts) -> pd.DataFrame:
+    """回测窗口平移：以 min_tf_dates[bar_index] 为截止点，返回满 n_pts 条的 DataFrame。
+
+    算法:
+    1. 从 _bt_data_cache 或 display parquet 读取 tf 的原始 DataFrame (DatetimeIndex)
+    2. cutoff_date = min_tf_dates[bar_index]
+    3. end_idx = _binary_search_le(df.index, cutoff_date)
+    4. start_idx = max(0, end_idx - n_pts + 1)
+    5. Return df.iloc[start_idx:end_idx+1]
+
+    返回原始 DataFrame 的切片（列保持原样），index 为 DatetimeIndex。
+    边界: bar_index=0 时可能不足 n_pts 条，有多少返回多少。
+    cutoff_idx=-1 时返回空 DataFrame。"""
+    # 优先从缓存读取已处理好的 DataFrame（含 DatetimeIndex）
+    cache = AppState.get("_bt_data_cache", {})
+    if tf in cache:
+        df = cache[tf]
+    else:
+        display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
+        if not display_path.exists():
+            return pd.DataFrame()
+        df = pd.read_parquet(display_path)
+        if len(df) == 0:
+            return pd.DataFrame()
+        if "Date" in df.columns:
+            df["Date"] = pd.to_datetime(df["Date"])
+            df = df.set_index("Date").sort_index()
+        if not isinstance(df.index, pd.DatetimeIndex):
+            return pd.DataFrame()
+
+    # 获取 min_tf 截止日期
+    min_tf = AppState.get("_min_tf", "")
+    min_tf_dates = pd.DatetimeIndex([])
+    if min_tf:
+        min_cache = AppState.get("_bt_data_cache", {})
+        if min_tf in min_cache:
+            min_tf_dates = min_cache[min_tf].index
+        else:
+            min_path = Path(__file__).parent.parent / "data" / "display" / f"{min_tf}.parquet"
+            if min_path.exists():
+                try:
+                    min_df = pd.read_parquet(min_path, columns=["Date"])
+                    if "Date" in min_df.columns and len(min_df) > 0:
+                        raw_dates = pd.to_datetime(min_df["Date"])
+                        min_tf_dates = raw_dates if isinstance(raw_dates, pd.DatetimeIndex) else pd.DatetimeIndex(raw_dates)
+                except Exception:
+                    min_tf_dates = pd.DatetimeIndex([])
+
+    if len(min_tf_dates) == 0 and min_tf == tf:
+        min_tf_dates = df.index
+
+    bar_index_int = int(bar_index)
+    if len(min_tf_dates) <= bar_index_int:
+        return pd.DataFrame()
+
+    cutoff = min_tf_dates[bar_index_int]
+    cutoff = pd.Timestamp(cutoff)
+
+    end_idx = _binary_search_le(df.index, cutoff)
+    if end_idx < 0:
+        return pd.DataFrame()
+
+    start_idx = max(0, end_idx - n_pts + 1)
+    return df.iloc[start_idx:end_idx + 1].copy()
+
+
 def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None) -> tuple:
     """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err).
 
@@ -203,6 +288,16 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None)
     err = None
     if display_path.exists():
         try:
+            # ── 回测模式：通过 _load_backtest_window 加载窗口切片 ──
+            if bar_index is not None:
+                window_df = _load_backtest_window(tf, bar_index, n_pts)
+                if len(window_df) > 0 and "Close" in window_df.columns:
+                    t = np.arange(len(window_df), dtype=float)
+                    noisy = window_df["Close"].values.ravel()
+                    ohlc = window_df[["Open", "High", "Low", "Close"]]
+                    return t, noisy, ohlc, ticker_code, window_df.index, None
+
+            # ── 浏览模式（或回测模式窗口为空时的回退）：原生数据加载 ──
             df = pd.read_parquet(display_path)
             if "Date" in df.columns and "Close" in df.columns and len(df) >= 5:
                 df["Date"] = pd.to_datetime(df["Date"])
@@ -213,8 +308,9 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None)
                 # 浏览模式：直接返回
                 if bar_index is None:
                     return t, noisy, ohlc, ticker_code, df.index, None
-                # ── 回测模式：窗口切片 + 高周期合成 ──
-                return _apply_backtest_window(df, ohlc, ticker_code, bar_index, n_pts, tf)
+                # ── 回测模式：窗口切片 + 高周期合成（含合成） ──
+                if bar_index is not None:
+                    return _apply_backtest_window(df, ohlc, ticker_code, bar_index, n_pts, tf)
             else:
                 err = "数据不足"
         except Exception as e:

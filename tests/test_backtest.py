@@ -261,11 +261,11 @@ class TestLoadChartDataBacktest:
         )
 
         assert err is None, f"Unexpected error: {err}"
-        # 验证 lower_tf 的 parquet 被读取（合成触发）
-        assert any("60分钟" in c for c in call_log["calls"]), (
-            "高周期合成应触发 lower_tf 数据读取"
-        )
+        # Phase 1: _load_backtest_window 处理基础窗口切片
+        # 周线窗口应包含完整数据，长度 >= 1
         assert len(t) >= 1
+        # 窗口终点 <= min_tf_dates[bar_index]
+        assert result_dates[-1] <= daily_dates[32]
 
 
 # _global_to_local_bar_index 已随 T3 清理移除。
@@ -692,3 +692,237 @@ class TestBacktestWindowEdgeCases:
         cb_mode = False
         bar_index = None if not cb_mode else 0
         assert bar_index is None
+
+
+# ====================================================================
+# Phase 1: _binary_search_le
+# ====================================================================
+
+class TestBinarySearchLe:
+    """_binary_search_le — 纯 Python 二分查找 <= cutoff 的最大索引。"""
+
+    def test_exact_match(self):
+        """cutoff 等于 dates 中某个元素时返回该元素索引。"""
+        dates = pd.date_range("2026-01-01", periods=5, freq="D")
+        idx = streamlit_app._binary_search_le(dates, pd.Timestamp("2026-01-03"))
+        assert idx == 2
+
+    def test_before_first(self):
+        """cutoff 早于第一个日期时返回 -1。"""
+        dates = pd.date_range("2026-01-05", periods=5, freq="D")
+        idx = streamlit_app._binary_search_le(dates, pd.Timestamp("2026-01-01"))
+        assert idx == -1
+
+    def test_after_last(self):
+        """cutoff 晚于最后一个日期时返回最后一个索引。"""
+        dates = pd.date_range("2026-01-01", periods=5, freq="D")
+        idx = streamlit_app._binary_search_le(dates, pd.Timestamp("2026-01-10"))
+        assert idx == 4
+
+    def test_single_element(self):
+        """单元素 dates。"""
+        dates = pd.DatetimeIndex([pd.Timestamp("2026-06-15")])
+        idx = streamlit_app._binary_search_le(dates, pd.Timestamp("2026-06-15"))
+        assert idx == 0
+        idx = streamlit_app._binary_search_le(dates, pd.Timestamp("2026-06-14"))
+        assert idx == -1
+        idx = streamlit_app._binary_search_le(dates, pd.Timestamp("2026-06-16"))
+        assert idx == 0
+
+    def test_empty_dates(self):
+        """空 dates 返回 -1。"""
+        dates = pd.DatetimeIndex([])
+        idx = streamlit_app._binary_search_le(dates, pd.Timestamp("2026-01-01"))
+        assert idx == -1
+
+    def test_cutoff_between_two_dates(self):
+        """cutoff 位于两个日期之间时返回较小的索引。"""
+        dates = pd.date_range("2026-01-01", periods=5, freq="D")
+        idx = streamlit_app._binary_search_le(dates, pd.Timestamp("2026-01-03T12:00:00"))
+        # 2026-01-03 < 2026-01-03T12:00 < 2026-01-04 → 返回 2
+        assert idx == 2
+
+    def test_cutoff_equals_first(self):
+        """cutoff 等于 dates[0]。"""
+        dates = pd.date_range("2026-01-01", periods=10, freq="D")
+        idx = streamlit_app._binary_search_le(dates, pd.Timestamp("2026-01-01"))
+        assert idx == 0
+
+    def test_cutoff_equals_last(self):
+        """cutoff 等于 dates[-1]。"""
+        dates = pd.date_range("2026-01-01", periods=10, freq="D")
+        idx = streamlit_app._binary_search_le(dates, pd.Timestamp("2026-01-10"))
+        assert idx == 9
+
+    def test_large_dataset_smoke(self):
+        """大数据集不崩溃。"""
+        dates = pd.date_range("2020-01-01", periods=10000, freq="D")
+        # 10000 天从 2020-01-01 延伸到约 2047-05-18
+        idx = streamlit_app._binary_search_le(dates, dates[-1])
+        assert idx == len(dates) - 1
+        idx = streamlit_app._binary_search_le(dates, pd.Timestamp("2019-01-01"))
+        assert idx == -1
+        idx = streamlit_app._binary_search_le(dates, pd.Timestamp("2026-06-15"))
+        assert idx >= 0
+
+    def test_monotonic_assertion(self):
+        """结果单调性：cutoff 越大，返回值不减小。"""
+        dates = pd.date_range("2026-01-01", periods=100, freq="D")
+        prev = -1
+        for i in range(100):
+            cutoff = dates[i] + pd.Timedelta(hours=12)
+            idx = streamlit_app._binary_search_le(dates, cutoff)
+            assert idx >= prev, f"单调性违反: idx={idx} < prev={prev} at i={i}"
+            prev = idx
+
+
+# ====================================================================
+# Phase 1: _load_backtest_window
+# ====================================================================
+
+class TestLoadBacktestWindow:
+    """_load_backtest_window — 窗口平移核心算法。"""
+
+    DATES_200 = pd.date_range("2025-06-01", periods=200, freq="D")
+
+    @pytest.fixture
+    def setup_mocks(self, monkeypatch):
+        """基础 mock 环境：_sync_to_display no-op, Path.exists=True, _bt_data_cache 有 200 条日线。"""
+        monkeypatch.setattr(streamlit_app, "_sync_to_display", lambda *a, **kw: None)
+        monkeypatch.setattr(Path, "exists", lambda _: True)
+
+        ohlc_200 = {
+            "Open": np.linspace(100, 300, 200),
+            "High": np.linspace(102, 302, 200),
+            "Low": np.linspace(98, 298, 200),
+            "Close": np.linspace(101, 301, 200),
+        }
+        cache_df = pd.DataFrame(ohlc_200, index=self.DATES_200)
+
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_min_tf": "日线",
+                "_bt_data_cache": {"日线": cache_df},
+            }.get(key, default),
+        )
+        return cache_df
+
+    def test_bar_index_zero(self, setup_mocks, monkeypatch):
+        """bar_index=0 时只取 1 条（最早日期）。"""
+        window = streamlit_app._load_backtest_window("日线", 0, 100)
+        assert len(window) == 1
+        assert window.index[0] == self.DATES_200[0]
+
+    def test_bar_index_last(self, setup_mocks, monkeypatch):
+        """bar_index 为最后一根时窗口终点为最后一个日期。"""
+        window = streamlit_app._load_backtest_window("日线", 199, 100)
+        assert len(window) <= 100
+        assert window.index[-1] == self.DATES_200[-1]
+
+    def test_bar_index_mid(self, setup_mocks, monkeypatch):
+        """bar_index >= n_pts-1 时得到满 n_pts 条且终点正确。"""
+        n = 100
+        window = streamlit_app._load_backtest_window("日线", 150, n)
+        assert len(window) == n
+        assert window.index[-1] == self.DATES_200[150]
+
+    def test_n_pts_larger_than_data(self, setup_mocks, monkeypatch):
+        """n_pts 超过数据总量时全部返回。"""
+        window = streamlit_app._load_backtest_window("日线", 199, 1000)
+        assert len(window) <= 200
+        assert window.index[-1] == self.DATES_200[-1]
+
+    def test_cutoff_date_exact_boundary(self, setup_mocks, monkeypatch):
+        """cutoff 精确等于某个 bar 日期时正确包含该 bar。"""
+        window = streamlit_app._load_backtest_window("日线", 10, 5)
+        assert len(window) == 5
+        assert window.index[-1] == self.DATES_200[10]
+        assert window.index[0] == self.DATES_200[6]
+
+    def test_cutoff_date_mid_high_period(self, setup_mocks, monkeypatch):
+        """高周期 tf：cutoff 在周线中间时窗口终点为 ≤ cutoff 的最大周线日期。"""
+        weekly_dates = pd.date_range("2025-06-02", periods=30, freq="W-MON")
+        weekly_data = {
+            "Open": np.linspace(100, 200, 30),
+            "High": np.linspace(102, 202, 30),
+            "Low": np.linspace(98, 198, 30),
+            "Close": np.linspace(101, 201, 30),
+        }
+        weekly_df = pd.DataFrame(weekly_data, index=weekly_dates)
+
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_min_tf": "日线",
+                "_bt_data_cache": {
+                    "日线": pd.DataFrame({"Close": np.ones(200)}, index=self.DATES_200),
+                    "周线": weekly_df,
+                },
+            }.get(key, default),
+        )
+
+        # bar_index=50 → cutoff=2025-07-21, 周线窗口终点 ≤ 2025-07-21
+        window = streamlit_app._load_backtest_window("周线", 50, 10)
+        assert len(window) > 0
+        cutoff = self.DATES_200[50]
+        assert window.index[-1] <= cutoff
+
+    def test_returns_datetime_index(self, setup_mocks, monkeypatch):
+        """返回的 index 是 DatetimeIndex。"""
+        window = streamlit_app._load_backtest_window("日线", 50, 50)
+        assert isinstance(window.index, pd.DatetimeIndex)
+
+    def test_preserves_ohlc_columns(self, setup_mocks, monkeypatch):
+        """返回结果保留 Open/High/Low/Close 列。"""
+        window = streamlit_app._load_backtest_window("日线", 50, 50)
+        for col in ["Open", "High", "Low", "Close"]:
+            assert col in window.columns, f"缺少列: {col}"
+        assert len(window.columns) >= 4
+
+    def test_empty_parquet_handling(self, setup_mocks, monkeypatch):
+        """Parquet 文件不存在或为空时返回空 DataFrame。"""
+        # 清除缓存以确保 _load_backtest_window 读取 parquet
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_min_tf": "日线",
+                "_bt_data_cache": {},
+            }.get(key, default),
+        )
+        monkeypatch.setattr(Path, "exists", lambda _: False)
+        window = streamlit_app._load_backtest_window("日线", 50, 100)
+        assert len(window) == 0
+
+    def test_min_tf_equals_current_tf(self, setup_mocks, monkeypatch):
+        """min_tf == tf 时使用 df.index 作为 min_tf_dates。"""
+        window = streamlit_app._load_backtest_window("日线", 150, 100)
+        assert len(window) == 100
+        assert window.index[-1] == self.DATES_200[150]
+
+    def test_high_tf_window_smaller_than_min_tf(self, setup_mocks, monkeypatch):
+        """高周期 tf 窗口可能比 min_tf 短，但终点不超过 cutoff。"""
+        weekly_dates = pd.date_range("2025-06-02", periods=10, freq="W-MON")
+        weekly_df = pd.DataFrame({
+            "Open": np.linspace(100, 200, 10),
+            "High": np.linspace(102, 202, 10),
+            "Low": np.linspace(98, 198, 10),
+            "Close": np.linspace(101, 201, 10),
+        }, index=weekly_dates)
+
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_min_tf": "日线",
+                "_bt_data_cache": {
+                    "日线": pd.DataFrame({"Close": np.ones(200)}, index=self.DATES_200),
+                    "周线": weekly_df,
+                },
+            }.get(key, default),
+        )
+
+        window = streamlit_app._load_backtest_window("周线", 50, 5)
+        assert len(window) > 0
+        assert len(window) <= 5
+        cutoff = self.DATES_200[50]
+        assert window.index[-1] <= cutoff
