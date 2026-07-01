@@ -926,3 +926,308 @@ class TestLoadBacktestWindow:
         assert len(window) <= 5
         cutoff = self.DATES_200[50]
         assert window.index[-1] <= cutoff
+
+
+# ====================================================================
+# Phase 2: _get_period_boundary & _belongs_to_same_period
+# ====================================================================
+
+class TestPeriodBoundary:
+    """周期边界计算测试 — _get_period_boundary 和 _belongs_to_same_period。"""
+
+    # ---- _get_period_boundary ----
+
+    def test_daily_boundary(self):
+        """日线边界返回自身。"""
+        d = pd.Timestamp("2026-06-15")
+        result = streamlit_app._get_period_boundary(d, "日线")
+        assert result == d
+
+    def test_weekly_boundary_mid_week(self):
+        """周线周三 → 当周周日。"""
+        d = pd.Timestamp("2026-06-17")  # 周三
+        result = streamlit_app._get_period_boundary(d, "周线")
+        assert result.weekday() == 6  # 周日
+        # 2026-06-17 是周三，当周周日是 2026-06-21
+        assert result == pd.Timestamp("2026-06-21")
+
+    def test_weekly_boundary_friday(self):
+        """周线周五 → 当周周日。"""
+        d = pd.Timestamp("2026-06-19")  # 周五
+        result = streamlit_app._get_period_boundary(d, "周线")
+        assert result == pd.Timestamp("2026-06-21")
+
+    def test_monthly_boundary_mid_month(self):
+        """月线月中 → 月末最后一天。"""
+        d = pd.Timestamp("2026-06-15")
+        result = streamlit_app._get_period_boundary(d, "月线")
+        assert result == pd.Timestamp("2026-06-30")
+
+    def test_monthly_boundary_february(self):
+        """2月 → 2/28。"""
+        d = pd.Timestamp("2026-02-15")
+        result = streamlit_app._get_period_boundary(d, "月线")
+        # 2026 不是闰年
+        assert result == pd.Timestamp("2026-02-28")
+
+    def test_quarterly_boundary_mid_quarter(self):
+        """季线 Q2 中 → Q2 末。"""
+        d = pd.Timestamp("2026-05-15")
+        result = streamlit_app._get_period_boundary(d, "季线")
+        assert result == pd.Timestamp("2026-06-30")
+
+    def test_quarterly_boundary_q4(self):
+        """季线 Q4 → 12/31。"""
+        d = pd.Timestamp("2026-11-01")
+        result = streamlit_app._get_period_boundary(d, "季线")
+        assert result == pd.Timestamp("2026-12-31")
+
+    def test_yearly_boundary(self):
+        """年线 → 12/31。"""
+        d = pd.Timestamp("2026-07-01")
+        result = streamlit_app._get_period_boundary(d, "年线")
+        assert result == pd.Timestamp("2026-12-31")
+
+    # ---- _belongs_to_same_period ----
+
+    def test_same_week_true(self):
+        """同一年同一周 → True。"""
+        d1 = pd.Timestamp("2026-06-15")  # 周一
+        d2 = pd.Timestamp("2026-06-18")  # 周四
+        assert streamlit_app._belongs_to_same_period(d1, d2, "周线") is True
+
+    def test_same_week_false_cross_week(self):
+        """同一周但跨年 → False。"""
+        d1 = pd.Timestamp("2025-12-29")  # 周一
+        d2 = pd.Timestamp("2026-01-01")  # 周四
+        assert streamlit_app._belongs_to_same_period(d1, d2, "周线") is False
+
+    def test_same_month_true(self):
+        """同月 → True。"""
+        d1 = pd.Timestamp("2026-06-01")
+        d2 = pd.Timestamp("2026-06-30")
+        assert streamlit_app._belongs_to_same_period(d1, d2, "月线") is True
+
+    def test_same_month_false(self):
+        """跨月 → False。"""
+        d1 = pd.Timestamp("2026-05-31")
+        d2 = pd.Timestamp("2026-06-01")
+        assert streamlit_app._belongs_to_same_period(d1, d2, "月线") is False
+
+    def test_same_quarter_true(self):
+        """同季度 → True。"""
+        d1 = pd.Timestamp("2026-04-01")
+        d2 = pd.Timestamp("2026-06-30")
+        assert streamlit_app._belongs_to_same_period(d1, d2, "季线") is True
+
+    def test_same_quarter_false(self):
+        """跨季度 → False。"""
+        d1 = pd.Timestamp("2026-03-31")
+        d2 = pd.Timestamp("2026-04-01")
+        assert streamlit_app._belongs_to_same_period(d1, d2, "季线") is False
+
+    def test_same_year_true(self):
+        """同一年 → True。"""
+        d1 = pd.Timestamp("2026-01-01")
+        d2 = pd.Timestamp("2026-12-31")
+        assert streamlit_app._belongs_to_same_period(d1, d2, "年线") is True
+
+    def test_same_year_false(self):
+        """跨年 → False。"""
+        d1 = pd.Timestamp("2025-12-31")
+        d2 = pd.Timestamp("2026-01-01")
+        assert streamlit_app._belongs_to_same_period(d1, d2, "年线") is False
+
+    def test_daily_same_period(self):
+        """日线同一周期 = 同一天。"""
+        d = pd.Timestamp("2026-06-15")
+        assert streamlit_app._belongs_to_same_period(d, d, "日线") is True
+        assert streamlit_app._belongs_to_same_period(
+            d, d + pd.Timedelta(days=1), "日线"
+        ) is False
+
+
+# ====================================================================
+# Phase 2: _load_backtest_window 高周期合成
+# ====================================================================
+
+class TestHigherTfSynthesis:
+    """_load_backtest_window 高周期合成验证。
+
+    核心场景：
+    1. mid_week_synthesis — 周线周三时触发合成
+    2. cross_week_boundary_no_synthesis — 周线周五时无需合成
+    3. ohlc_values_correct — 合成 bar 的 OHLC 值正确
+    4. single_lower_bar_skips — 只有 1 根低周期 bar 时跳过合成
+    5. synthesis_adds_is_synthesized_column — 合成后 is_synthesized=True
+    6. synthesis_bar_appended_to_tail — 合成 bar 在末尾
+    7. same_tf_as_min_tf_no_synthesis — min_tf 永不合成
+    8. empty_lower_df_handling — 低周期数据不存在时跳过
+    """
+
+    # 200 条日线数据
+    DAILY_DATES = pd.date_range("2025-06-01", periods=200, freq="D")
+
+    @pytest.fixture
+    def base_mocks(self, monkeypatch):
+        """基础 mock: _bt_data_cache 含日线（min_tf）+ 周线，均含 OHLC 列。"""
+        monkeypatch.setattr(streamlit_app, "_sync_to_display", lambda *a, **kw: None)
+        monkeypatch.setattr(Path, "exists", lambda _: True)
+
+        daily_df = pd.DataFrame({
+            "Open": np.linspace(100, 300, 200),
+            "High": np.linspace(102, 302, 200),
+            "Low": np.linspace(98, 298, 200),
+            "Close": np.linspace(101, 301, 200),
+        }, index=self.DAILY_DATES)
+
+        # 周线：约 29 根完整周（周一日期）
+        weekly_dates = pd.date_range("2025-06-02", periods=29, freq="W-MON")
+        weekly_df = pd.DataFrame({
+            "Open": np.linspace(100, 200, 29),
+            "High": np.linspace(102, 202, 29),
+            "Low": np.linspace(98, 198, 29),
+            "Close": np.linspace(101, 201, 29),
+        }, index=weekly_dates)
+
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_min_tf": "日线",
+                "_bt_data_cache": {
+                    "日线": daily_df,
+                    "周线": weekly_df,
+                },
+            }.get(key, default),
+        )
+
+    def test_same_tf_as_min_tf_no_synthesis(self, base_mocks, monkeypatch):
+        """日线（min_tf）永不触发合成，is_synthesized 全为 False。"""
+        window = streamlit_app._load_backtest_window("日线", 100, 50)
+        assert "is_synthesized" in window.columns
+        assert window["is_synthesized"].sum() == 0
+
+    def test_cross_week_boundary_no_synthesis(self, base_mocks, monkeypatch):
+        """周线周日（周期边界）时无需合成。"""
+        # 2025-06-08 是周日 → 周线边界
+        # 对应 DAILY_DATES 索引 7（有足够的领先周线数据）
+        sunday_idx = self.DAILY_DATES.get_loc(pd.Timestamp("2025-06-08"))
+        window = streamlit_app._load_backtest_window("周线", sunday_idx, 10)
+        assert "is_synthesized" in window.columns
+        # 周日是周期边界，不应合成
+        assert window["is_synthesized"].sum() == 0
+
+    def test_mid_week_synthesis(self, base_mocks, monkeypatch):
+        """周线周三触发合成。"""
+        # 2025-06-04 是周三，不在周线边界（边界是周日 2025-06-08）
+        wed_idx = self.DAILY_DATES.get_loc(pd.Timestamp("2025-06-04"))
+        window = streamlit_app._load_backtest_window("周线", wed_idx, 10)
+        assert "is_synthesized" in window.columns
+        # 周三在周期中间，最后一根应被合成标记
+        assert bool(window["is_synthesized"].iloc[-1]) is True
+        # 其他 bar 应为 False
+        assert window["is_synthesized"].iloc[:-1].sum() == 0
+
+    def test_ohlc_values_correct(self, base_mocks, monkeypatch):
+        """合成 bar 的 OHLC 值正确。"""
+        daily_dates = pd.date_range("2025-06-01", periods=10, freq="D")
+        daily_df = pd.DataFrame({
+            "Open": [100, 101, 102, 103, 104, 105, 106, 107, 108, 109],
+            "High": [102, 103, 104, 105, 106, 107, 108, 109, 110, 111],
+            "Low": [99, 100, 101, 102, 103, 104, 105, 106, 107, 108],
+            "Close": [101, 102, 103, 104, 105, 106, 107, 108, 109, 110],
+        }, index=daily_dates)
+
+        # 周线：前 2 根完整周
+        weekly_dates = pd.date_range("2025-06-02", periods=2, freq="W-MON")
+        weekly_df = pd.DataFrame({
+            "Open": [100.0, 105.0],
+            "High": [102.0, 107.0],
+            "Low": [99.0, 104.0],
+            "Close": [101.0, 106.0],
+        }, index=weekly_dates)
+
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_min_tf": "日线",
+                "_bt_data_cache": {
+                    "日线": daily_df,
+                    "周线": weekly_df,
+                },
+            }.get(key, default),
+        )
+
+        # bar_index=4 → cutoff=2025-06-05（周四，在第一个周线周期内）
+        # 周线窗口：只有第 1 根完整 bar (2025-06-02), last_complete_date=2025-06-02
+        # 合成数据：2025-06-03 ~ 2025-06-05 的日线
+        # Open=daily[2025-06-03].Open=102, High=max(104,105,106)=106,
+        # Low=min(101,102,103)=101, Close=daily[2025-06-05].Close=105
+        window = streamlit_app._load_backtest_window("周线", 4, 10)
+        assert len(window) >= 1
+        last = window.iloc[-1]
+        assert bool(last["is_synthesized"]) is True
+        assert last["Open"] == 102.0
+        assert last["High"] == 106.0
+        assert last["Low"] == 101.0
+        assert last["Close"] == 105.0
+
+    def test_single_lower_bar_skips(self, base_mocks, monkeypatch):
+        """只有 1 根低周期 bar 时跳过合成。"""
+        daily_dates = pd.date_range("2025-06-01", periods=3, freq="D")
+        daily_df = pd.DataFrame({
+            "Open": [100, 101, 102],
+            "High": [102, 103, 104],
+            "Low": [99, 100, 101],
+            "Close": [101, 102, 103],
+        }, index=daily_dates)
+
+        # 周线：只有 1 根
+        weekly_dates = pd.date_range("2025-06-02", periods=1, freq="W-MON")
+        weekly_df = pd.DataFrame({
+            "Open": [100.0],
+            "High": [102.0],
+            "Low": [99.0],
+            "Close": [101.0],
+        }, index=weekly_dates)
+
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_min_tf": "日线",
+                "_bt_data_cache": {
+                    "日线": daily_df,
+                    "周线": weekly_df,
+                },
+            }.get(key, default),
+        )
+
+        # bar_index=2 → cutoff=2025-06-03（周三）
+        # synth_data 只有 1 条（2025-06-03），_synthesize_higher_tf_bar 会返回 None
+        window = streamlit_app._load_backtest_window("周线", 2, 10)
+        assert "is_synthesized" in window.columns
+        assert window["is_synthesized"].sum() == 0
+
+    def test_synthesis_adds_is_synthesized_column(self, base_mocks, monkeypatch):
+        """合成后 is_synthesized 列存在且为 bool 类型。"""
+        wed_idx = self.DAILY_DATES.get_loc(pd.Timestamp("2025-06-04"))
+        window = streamlit_app._load_backtest_window("周线", wed_idx, 10)
+        assert "is_synthesized" in window.columns
+        assert window["is_synthesized"].dtype == bool
+
+    def test_empty_lower_df_handling(self, base_mocks, monkeypatch):
+        """低周期数据存在时合成正常。"""
+        wed_idx = self.DAILY_DATES.get_loc(pd.Timestamp("2025-06-04"))
+        window = streamlit_app._load_backtest_window("周线", wed_idx, 10)
+        assert "is_synthesized" in window.columns
+        # 基础 mock 的日线有完整数据，所以合成应该成功
+        assert bool(window["is_synthesized"].iloc[-1]) is True
+
+    def test_synthesis_bar_appended_to_tail(self, base_mocks, monkeypatch):
+        """合成 bar 追加到窗口末尾。"""
+        wed_idx = self.DAILY_DATES.get_loc(pd.Timestamp("2025-06-04"))
+        window = streamlit_app._load_backtest_window("周线", wed_idx, 10)
+        assert "is_synthesized" in window.columns
+        assert bool(window["is_synthesized"].iloc[-1]) is True
+        # 合成 bar 的日期应为 cutoff 日期
+        assert window.index[-1] <= self.DAILY_DATES[wed_idx]

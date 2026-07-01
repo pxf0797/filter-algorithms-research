@@ -76,18 +76,19 @@ def _cached_fetch_stock(market, code, tf, n_pts, force_period=None):
 # 相关测试已更新为引用保留副本。
 
 
-def _synthesize_higher_tf_bar(lower_ohlc_df, higher_tf_name):
+def _synthesize_higher_tf_bar(lower_df, higher_tf_name, last_complete_date=None, cutoff_date=None):
     """从低周期 OHLC DataFrame 合成高周期最后一根 bar。
     合成规则：Open=首个Open, High=max(Highs), Low=min(Lows), Close=末个Close。
     仅当低周期数据量 >= 2 时合成，否则返回 None。
+    last_complete_date 和 cutoff_date 仅用于日志标记，不参与 OHLC 计算。
     返回 {"Open": float, "High": float, "Low": float, "Close": float} 或 None。"""
-    if lower_ohlc_df is None or len(lower_ohlc_df) < 2:
+    if lower_df is None or len(lower_df) < 2:
         return None
     return {
-        "Open": float(lower_ohlc_df["Open"].iloc[0]),
-        "High": float(lower_ohlc_df["High"].max()),
-        "Low": float(lower_ohlc_df["Low"].min()),
-        "Close": float(lower_ohlc_df["Close"].iloc[-1]),
+        "Open": float(lower_df["Open"].iloc[0]),
+        "High": float(lower_df["High"].max()),
+        "Low": float(lower_df["Low"].min()),
+        "Close": float(lower_df["Close"].iloc[-1]),
     }
 
 
@@ -192,6 +193,58 @@ def _get_next_lower_tf(tf):
     return None
 
 
+def _get_period_boundary(date, tf):
+    """返回 date 所在 tf 周期的日历边界日期（当前周期的最后一天）。
+
+    当 cutoff_date == 所在周期的边界时，最后一根高周期 bar 已完成，无需合成。
+    简化版：返回日历周期结束日（而非交易日）。
+
+    示例:
+        date=周三, tf='周线' → 当周日 (weekday=6)
+        date=周五, tf='周线' → 当周日
+        date=6/15, tf='月线' → 6/30
+    """
+    d = pd.Timestamp(date)
+    if tf in ("日线", "60分钟", "15分钟", "5分钟", "1分钟"):
+        return d
+    if tf == "周线":
+        # 周日 (weekday=6) 为周结束日
+        return d + pd.Timedelta(days=6 - d.weekday())
+    if tf == "月线":
+        # pd.offsets.MonthEnd(0) 返回当月最后一天（不滚动到下个月）
+        return d + pd.offsets.MonthEnd(0)
+    if tf == "季线":
+        # pd.offsets.QuarterEnd(0) 返回当季最后一天
+        return d + pd.offsets.QuarterEnd(0)
+    if tf == "年线":
+        return pd.Timestamp(year=d.year, month=12, day=31)
+    return d
+
+
+def _belongs_to_same_period(date1, date2, tf):
+    """判断两个日期是否属于同一个 tf 周期。
+
+    根据第2.2.5节的规则：
+    - 周线: iso周相同且年份相同
+    - 月线: 年月都相同
+    - 季线: 同一季度
+    - 年线: 同一年
+    - 其他: 当日
+    """
+    d1 = pd.Timestamp(date1)
+    d2 = pd.Timestamp(date2)
+    if tf == "周线":
+        return d1.isocalendar()[1] == d2.isocalendar()[1] and d1.year == d2.year
+    if tf == "月线":
+        return d1.year == d2.year and d1.month == d2.month
+    if tf == "季线":
+        return d1.year == d2.year and (d1.month - 1) // 3 == (d2.month - 1) // 3
+    if tf == "年线":
+        return d1.year == d2.year
+    # 日线及以下周期：相同日期才视为同一周期
+    return d1 == d2
+
+
 def _binary_search_le(dates, cutoff):
     """在 DatetimeIndex 中二分查找 <= cutoff 的最大索引。等价于 searchsorted(side='right')-1。
 
@@ -274,7 +327,57 @@ def _load_backtest_window(tf, bar_index, n_pts) -> pd.DataFrame:
         return pd.DataFrame()
 
     start_idx = max(0, end_idx - n_pts + 1)
-    return df.iloc[start_idx:end_idx + 1].copy()
+    df_slice = df.iloc[start_idx:end_idx + 1].copy()
+    df_slice["is_synthesized"] = False
+    slice_length = len(df_slice)
+
+    # ── Phase 2: 高周期合成 ──
+    if tf != min_tf and slice_length > 0:
+        boundary = _get_period_boundary(cutoff, tf)
+        if cutoff != boundary:
+            # cutoff 不在周期边界，需要合成最后一根未完成的高周期 bar
+            lower_tf = _get_next_lower_tf(tf)
+            if lower_tf:
+                lower_df = None
+                if lower_tf in cache:
+                    lower_df = cache[lower_tf]
+                else:
+                    lower_path = Path(__file__).parent.parent / "data" / "display" / f"{lower_tf}.parquet"
+                    if lower_path.exists():
+                        try:
+                            lower_df = pd.read_parquet(lower_path)
+                            if "Date" in lower_df.columns:
+                                lower_df["Date"] = pd.to_datetime(lower_df["Date"])
+                                lower_df = lower_df.set_index("Date").sort_index()
+                        except Exception:
+                            lower_df = None
+
+                if lower_df is not None and len(lower_df) > 0 and "Open" in lower_df.columns:
+                    last_complete_date = df_slice.index[-1]
+                    synth_data = lower_df.loc[
+                        (lower_df.index > last_complete_date)
+                        & (lower_df.index <= cutoff)
+                    ]
+                    if len(synth_data) > 0:
+                        syn_bar = _synthesize_higher_tf_bar(synth_data, tf, last_complete_date, cutoff)
+                        if syn_bar is not None:
+                            syn_date = cutoff
+                            syn_row = pd.DataFrame(
+                                [[syn_bar["Open"], syn_bar["High"], syn_bar["Low"], syn_bar["Close"], True]],
+                                columns=["Open", "High", "Low", "Close", "is_synthesized"],
+                                index=[syn_date],
+                            )
+                            if _belongs_to_same_period(last_complete_date, cutoff, tf):
+                                # 同一周期内：替换最后一根 bar
+                                df_slice.iloc[-1] = syn_row.iloc[0]
+                            else:
+                                # 跨周期：追加（超出 n_pts 则丢弃最早的）
+                                df_slice = pd.concat([df_slice, syn_row])
+                                if len(df_slice) > n_pts:
+                                    df_slice = df_slice.iloc[1:]
+                            slice_length = len(df_slice)
+
+    return df_slice
 
 
 def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None) -> tuple:
