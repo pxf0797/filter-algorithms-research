@@ -1612,13 +1612,23 @@ def _run_backtest_play() -> None:
 
 def _render_time_nav(configs, ticker_code) -> int:
     """Render time window navigation. Returns day_offset.
-    回测模式下隐藏 day_offset 控件，返回 day_offset=0。"""
+    回测模式下隐藏 day_offset 操作控件，但保留数据范围信息显示。"""
     st.sidebar.markdown("---")
     st.sidebar.caption("⏪ 时间窗口（按天移动）")
 
-    # 回测模式：隐藏 day_offset 控件，回测导航由 _render_backtest_controls 提供
+    # 获取数据范围（回测和浏览模式共用）
+    data_start = data_end = None
+    date_range = get_date_range(ticker_code)
+    if date_range:
+        data_start = pd.Timestamp(date_range[0][:10]).date()
+        data_end = pd.Timestamp(date_range[1][:10]).date()
+
+    # 回测模式：隐藏 day_offset 操作控件，回测导航由 _render_backtest_controls 提供
+    # 但仍显示数据范围信息
     if AppState.get("_cb_mode", False):
         AppState.set("_day_offset", 0)
+        if data_start and data_end:
+            st.sidebar.caption(f"数据范围: {data_start} ~ {data_end}")
         return 0
 
     # 浏览模式：保持现有功能不变
@@ -1627,11 +1637,6 @@ def _render_time_nav(configs, ticker_code) -> int:
     step_days = st.sidebar.selectbox("移动步长", [1, 3, 5, 10, 20, 30, 60, 90, 180, 365],
                                       index=4, key="day_step",
                                       format_func=lambda x: f"{x}天")
-    data_start = data_end = None
-    date_range = get_date_range(ticker_code)
-    if date_range:
-        data_start = pd.Timestamp(date_range[0][:10]).date()
-        data_end = pd.Timestamp(date_range[1][:10]).date()
     cur_offset = AppState.get("_day_offset", 0)
     n_pts = configs[0]["n_pts"] if configs else 120
     if data_end:

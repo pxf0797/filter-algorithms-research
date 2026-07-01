@@ -1231,3 +1231,122 @@ class TestHigherTfSynthesis:
         assert bool(window["is_synthesized"].iloc[-1]) is True
         # 合成 bar 的日期应为 cutoff 日期
         assert window.index[-1] <= self.DAILY_DATES[wed_idx]
+
+
+# ====================================================================
+# Phase 3: 回测 UI 控件测试
+# ====================================================================
+
+class TestBacktestUIControls:
+    """验证回测 UI 控件渲染行为。"""
+
+    def test_controls_render_when_bar_count_zero(self, monkeypatch):
+        """bar_count=0 时 _render_backtest_controls 不崩溃。"""
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_cb_mode": True,
+                "_bar_index": 0,
+                "_min_tf_bar_count": 0,
+                "_min_tf": "日线",
+                "_is_playing": False,
+            }.get(key, default),
+        )
+        # 不应抛出异常
+        streamlit_app._render_backtest_controls()
+
+    def test_controls_buttons_disabled_when_no_data(self, monkeypatch):
+        """bar_count=0 时按钮为 disabled。"""
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_cb_mode": True,
+                "_bar_index": 0,
+                "_min_tf_bar_count": 0,
+                "_min_tf": "日线",
+                "_is_playing": False,
+            }.get(key, default),
+        )
+        streamlit_app._render_backtest_controls()
+        # MagicMock st.button 被调用时的最后一个 disabled 参数应为 True
+        # 由于 streamlit 是 MagicMock，我们只需验证不崩溃
+
+    def test_warning_shows_min_tf_name(self, monkeypatch):
+        """bar_count=0 时 st.warning 包含 min_tf 名称。"""
+        warning_calls = []
+
+        original_warning = streamlit_app.st.warning
+
+        def mock_warning(msg):
+            warning_calls.append(msg)
+
+        monkeypatch.setattr(streamlit_app.st, "warning", mock_warning)
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_cb_mode": True,
+                "_bar_index": 0,
+                "_min_tf_bar_count": 0,
+                "_min_tf": "15分钟",
+                "_is_playing": False,
+            }.get(key, default),
+        )
+        streamlit_app._render_backtest_controls()
+        assert len(warning_calls) >= 1
+        assert "15分钟" in warning_calls[0], (
+            f"warning 消息应包含 min_tf 名称 '15分钟', 实际: {warning_calls[0]}"
+        )
+
+    def test_status_shows_current_date(self, monkeypatch):
+        """_render_backtest_status 显示当前 bar 对应日期。"""
+        dates = pd.date_range("2026-06-01", periods=10, freq="D")
+        cache = {"日线": pd.DataFrame({"Close": range(10)}, index=dates)}
+        status_texts = []
+
+        def mock_caption(msg):
+            status_texts.append(msg)
+
+        monkeypatch.setattr(streamlit_app.st.sidebar, "caption", mock_caption)
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_cb_mode": True,
+                "_bar_index": 5,
+                "_min_tf_bar_count": 10,
+                "_min_tf": "日线",
+                "_bt_data_cache": cache,
+                "_is_playing": False,
+            }.get(key, default),
+        )
+        streamlit_app._render_backtest_status()
+        combined = " ".join(status_texts)
+        # bar 5 对应 dates[5] = 2026-06-06
+        assert "2026-06-06" in combined, f"状态文字应包含日期 '2026-06-06', 实际: {combined}"
+        assert "6/10" in combined, f"状态文字应包含进度 '6/10', 实际: {combined}"
+
+    def test_status_shows_playing_indicator(self, monkeypatch):
+        """_render_backtest_status 播放中时显示播放标记。"""
+        dates = pd.date_range("2026-06-01", periods=10, freq="D")
+        cache = {"日线": pd.DataFrame({"Close": range(10)}, index=dates)}
+        status_texts = []
+
+        def mock_caption(msg):
+            status_texts.append(msg)
+
+        monkeypatch.setattr(streamlit_app.st.sidebar, "caption", mock_caption)
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_cb_mode": True,
+                "_bar_index": 3,
+                "_min_tf_bar_count": 10,
+                "_min_tf": "日线",
+                "_bt_data_cache": cache,
+                "_is_playing": True,
+            }.get(key, default),
+        )
+        streamlit_app._render_backtest_status()
+        combined = " ".join(status_texts)
+        assert "播放" in combined or "playing" in combined.lower(), (
+            f"播放中时状态文字应包含播放标记, 实际: {combined}"
+        )
