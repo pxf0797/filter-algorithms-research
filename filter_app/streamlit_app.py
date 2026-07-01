@@ -297,23 +297,32 @@ def _load_backtest_window(tf, bar_index, n_pts) -> pd.DataFrame:
     # 获取 min_tf 截止日期
     min_tf = AppState.get("_min_tf", "")
     min_tf_dates = pd.DatetimeIndex([])
-    if min_tf:
-        min_cache = AppState.get("_bt_data_cache", {})
-        if min_tf in min_cache:
-            min_tf_dates = min_cache[min_tf].index
-        else:
-            min_path = Path(__file__).parent.parent / "data" / "display" / f"{min_tf}.parquet"
-            if min_path.exists():
-                try:
-                    min_df = pd.read_parquet(min_path, columns=["Date"])
-                    if "Date" in min_df.columns and len(min_df) > 0:
-                        raw_dates = pd.to_datetime(min_df["Date"])
-                        min_tf_dates = raw_dates if isinstance(raw_dates, pd.DatetimeIndex) else pd.DatetimeIndex(raw_dates)
-                except Exception:
-                    min_tf_dates = pd.DatetimeIndex([])
 
+    # 方案 A: 从 _bt_data_cache 取
+    bt_cache = AppState.get("_bt_data_cache", {})
+    if min_tf and min_tf in bt_cache:
+        min_tf_df = bt_cache[min_tf]
+        if isinstance(min_tf_df.index, pd.DatetimeIndex):
+            min_tf_dates = min_tf_df.index
+        elif "Date" in min_tf_df.columns:
+            min_tf_dates = pd.DatetimeIndex(pd.to_datetime(min_tf_df["Date"]))
+
+    # 方案 B: 从 parquet 直接读（columns 参数会丢失 index，读完整 df）
+    if len(min_tf_dates) == 0 and min_tf:
+        min_path = Path(__file__).parent.parent / "data" / "display" / f"{min_tf}.parquet"
+        if min_path.exists():
+            min_df = pd.read_parquet(min_path)
+            if "Date" in min_df.columns:
+                min_tf_dates = pd.DatetimeIndex(pd.to_datetime(min_df["Date"]))
+
+    # 方案 C: 当前 tf 就是 min_tf，直接用 df.index
     if len(min_tf_dates) == 0 and min_tf == tf:
         min_tf_dates = df.index
+
+    if len(min_tf_dates) == 0:
+        err_msg = f"无法获取最小周期 {min_tf} 的日期序列"
+        logger.error(err_msg)
+        return pd.DataFrame()
 
     bar_index_int = int(bar_index)
     if len(min_tf_dates) <= bar_index_int:
@@ -330,6 +339,13 @@ def _load_backtest_window(tf, bar_index, n_pts) -> pd.DataFrame:
     df_slice = df.iloc[start_idx:end_idx + 1].copy()
     df_slice["is_synthesized"] = False
     slice_length = len(df_slice)
+
+    # ── 满 bar 守卫：窗口不足 n_pts 时诊断日志 ──
+    if slice_length < n_pts:
+        logger.warning(
+            f"_load_backtest_window: {tf} 窗口不满 bar ({slice_length}/{n_pts}), "
+            f"bar_index={bar_index}, df_total={len(df)}"
+        )
 
     # ── Phase 2: 高周期合成 ──
     if tf != min_tf and slice_length > 0:
@@ -1498,6 +1514,12 @@ def _render_backtest_controls() -> None:
         if is_playing:
             AppState.set("_is_playing", False)  # 拖拽进度条时自动暂停
         st.rerun()
+
+    # ── 边界提示 ──
+    if bar_index == 0:
+        st.caption("位于数据起始边界")
+    elif bar_index >= total_bars - 1:
+        st.caption("位于数据结束边界")
 
 
 def _run_backtest_play() -> None:

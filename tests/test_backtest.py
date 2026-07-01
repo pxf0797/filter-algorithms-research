@@ -1706,3 +1706,66 @@ class TestBacktestIntegration:
         # 验证窗口包含正确的截止 bar
         window = streamlit_app._load_backtest_window("日线", 50, n_pts)
         assert window.index[-1] == dates[50]
+
+
+# ====================================================================
+# 满 bar 守卫测试
+# ====================================================================
+
+class TestFullBarGuard:
+    """_load_backtest_window 满 bar 守卫测试。
+
+    数据总量小于 n_pts 时窗口不满 bar，应返回部分数据而非报错。
+    数据总量 >= n_pts 时返回满 n_pts 条。
+    """
+
+    DATES_50 = pd.date_range("2025-06-01", periods=50, freq="D")
+
+    @pytest.fixture
+    def setup_mocks(self, monkeypatch):
+        """基础 mock: 50 条日线数据, min_tf=日线。"""
+        monkeypatch.setattr(streamlit_app, "_sync_to_display", lambda *a, **kw: None)
+        monkeypatch.setattr(Path, "exists", lambda _: True)
+
+        ohlc = {
+            "Open": np.linspace(100, 150, 50),
+            "High": np.linspace(102, 152, 50),
+            "Low": np.linspace(98, 148, 50),
+            "Close": np.linspace(101, 151, 50),
+        }
+        cache_df = pd.DataFrame(ohlc, index=self.DATES_50)
+
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_min_tf": "日线",
+                "_bt_data_cache": {"日线": cache_df},
+            }.get(key, default),
+        )
+        return cache_df
+
+    def test_window_partial_when_data_insufficient(self, setup_mocks):
+        """数据不足 n_pts 时返回部分数据而非报错。
+
+        总数据量 50 < n_pts 120，即使 bar_index 在末尾也只返回 50 条。
+        """
+        n_pts = 120
+        # bar_index=49（末尾）→ 窗口应返回所有 50 条
+        window = streamlit_app._load_backtest_window("日线", 49, n_pts)
+        assert len(window) == 50, (
+            f"数据不足时窗口应为全部数据(50), 实际 {len(window)}"
+        )
+        assert window.index[0] == self.DATES_50[0]
+        assert window.index[-1] == self.DATES_50[-1]
+
+    def test_window_full_when_data_sufficient(self, setup_mocks):
+        """数据足够时返回满 n_pts 条。
+
+        总数据量 50, n_pts=30, bar_index 在中间时返回 30 条。
+        """
+        n_pts = 30
+        window = streamlit_app._load_backtest_window("日线", 40, n_pts)
+        assert len(window) == n_pts, (
+            f"数据充足时窗口应为满 {n_pts}, 实际 {len(window)}"
+        )
+        assert window.index[-1] == self.DATES_50[40]
