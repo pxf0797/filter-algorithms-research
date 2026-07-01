@@ -97,8 +97,8 @@ class TestLoadChartDataBacktest:
         })
         return df
 
-    def test_bar_index_zero_loads_n_pts(self, mock_deps, monkeypatch):
-        """bar_index=0 时加载 n_pts 条数据，而非仅 1 条。"""
+    def test_bar_index_zero_loads_one_bar(self, mock_deps, monkeypatch):
+        """bar_index=0 时只加载 1 条数据（窗口不向未来扩展）。"""
         n_pts = 50
         dates = pd.date_range("2025-06-01", periods=200, freq="D")
 
@@ -128,13 +128,12 @@ class TestLoadChartDataBacktest:
         )
 
         assert err is None, f"Unexpected error: {err}"
-        assert len(t) == n_pts, (
-            f"bar_index=0 时应加载 {n_pts} 条数据，实际 {len(t)}"
+        # cutoff_idx=0 → start_idx=0, end_idx=0 → 1 bar
+        assert len(t) == 1, (
+            f"bar_index=0 时应加载 1 条数据，实际 {len(t)}"
         )
-        assert len(result_dates) == n_pts
-        # 验证数据对应最早的 n_pts 条（截止到 bar_index=0 对应日期）
+        assert len(result_dates) == 1
         assert result_dates[0] == dates[0]
-        assert result_dates[-1] == dates[n_pts - 1]
 
     def test_min_tf_controls_high_tf_window_end(self, mock_deps, monkeypatch):
         """高周期窗口终点 <= min_tf 的 bar_index 对应日期。"""

@@ -92,7 +92,8 @@ def _synthesize_higher_tf_bar(lower_ohlc_df, higher_tf_name):
 
 
 def _add_backtest_overlay(fig, bar_index, total_bars, dates, tf):
-    """在 Plotly Figure 上添加回测标注：
+    """暂不使用。保留供将来恢复。
+    在 Plotly Figure 上添加回测标注：
     1. 金色竖线 (line_color="gold", width=2.5) 标记 bar_index 位置
     2. 未来区域灰色半透明遮罩 (x0=bar_index 到 x1=total_bars-1)
     3. 右上角 "回测模式" 注解
@@ -253,16 +254,9 @@ def _apply_backtest_window(df, ohlc, ticker_code, bar_index, n_pts, tf) -> tuple
     cutoff_idx = int(np.searchsorted(df.index, cutoff, side="right") - 1)
     cutoff_idx = max(0, min(cutoff_idx, len(df) - 1))
 
-    if tf == min_tf:
-        end_idx = cutoff_idx
-        if bar_index < n_pts:
-            start_idx = 0
-            end_idx = max(end_idx, min(n_pts - 1, len(df) - 1))
-        else:
-            start_idx = max(0, end_idx - n_pts + 1)
-    else:
-        start_idx = max(0, cutoff_idx - n_pts + 1)
-        end_idx = cutoff_idx
+    # 始终以 cutoff_idx 为窗口终点，往前取 n_pts 条
+    end_idx = cutoff_idx
+    start_idx = max(0, end_idx - n_pts + 1)
 
     n_pts_slice = df.iloc[start_idx:end_idx + 1]
 
@@ -285,8 +279,18 @@ def _apply_backtest_window(df, ohlc, ticker_code, bar_index, n_pts, tf) -> tuple
                     lower_df = lower_df.set_index("Date").sort_index()
                     if len(n_pts_slice) > 0:
                         last_bar_end = n_pts_slice.index[-1]
-                        synthetic_bars = lower_df[
-                            (lower_df.index > last_bar_end) & (lower_df.index <= cutoff)
+                        # 统一时区后再比较，避免 tz-naive vs tz-aware TypeError
+                        _lower_idx = lower_df.index
+                        _last_end = last_bar_end
+                        _cutoff = cutoff
+                        if _lower_idx.tz is not None:
+                            _lower_idx = _lower_idx.tz_localize(None)
+                        if hasattr(_last_end, 'tz') and _last_end.tz is not None:
+                            _last_end = _last_end.tz_localize(None)
+                        if hasattr(_cutoff, 'tz') and _cutoff.tz is not None:
+                            _cutoff = _cutoff.tz_localize(None)
+                        synthetic_bars = lower_df.loc[
+                            (_lower_idx > _last_end) & (_lower_idx <= _cutoff)
                         ]
                         if len(synthetic_bars) >= 2:
                             syn = _synthesize_higher_tf_bar(synthetic_bars, tf)
@@ -737,9 +741,10 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         fig.update_yaxes(title_text="加速度", row=ar, col=1)
 
     # 回测模式：添加标注（窗口最后位置 = bar_index）
-    if bar_index is not None:
-        local_pos = len(t) - 1  # 窗口的最后位置 = 回测当前位置
-        _add_backtest_overlay(fig, local_pos, len(t), dates, cfg.get("tf", ""))
+    # 已禁用：金线标注和遮罩用户不需要
+    # if bar_index is not None:
+    #     local_pos = len(t) - 1  # 窗口的最后位置 = 回测当前位置
+    #     _add_backtest_overlay(fig, local_pos, len(t), dates, cfg.get("tf", ""))
 
     _render_plotly(fig, height=fh + 30, dates=dates)
 
@@ -1193,7 +1198,8 @@ def _get_min_tf_and_count(configs, ticker_code) -> tuple:
             bar_count = len(df)
         else:
             bar_count = 0
-    except Exception:
+    except Exception as e:
+        logger.error(f"_get_min_tf_and_count 读取 {min_tf} parquet 失败: {e}")
         bar_count = 0
 
     return min_tf, bar_count
@@ -1299,8 +1305,13 @@ def _render_backtest_controls() -> None:
 
     bar_index = AppState.get("_bar_index", 0)
     total_bars = AppState.get("_min_tf_bar_count", 0)
+    min_tf = AppState.get("_min_tf", "")
     if total_bars == 0:
-        st.caption("回测数据未就绪")
+        st.warning(f"⚠️ 回测数据未就绪：最小周期 `{min_tf}` 的 display 缓存不存在或为空。请先切换回浏览模式加载数据。")
+        # 仍渲染 disabled 按钮框架让用户知道控件存在
+        cols = st.columns([1, 1, 1.2, 1, 1, 1.5])
+        for col, label, _ in [(cols[0], "⏮", True), (cols[1], "◀", True), (cols[2], "▶ 播放", True), (cols[3], "▶▶", True), (cols[4], "⏭", True)]:
+            col.button(label, disabled=True, use_container_width=True, key=f"bt_disabled_{label}")
         return
 
     is_playing = AppState.get("_is_playing", False)
