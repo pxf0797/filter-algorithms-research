@@ -780,6 +780,21 @@ class TestBinarySearchLe:
             assert idx >= prev, f"单调性违反: idx={idx} < prev={prev} at i={i}"
             prev = idx
 
+    def test_duplicate_values_returns_max_index(self):
+        """重复值时返回满足 <= cutoff 的最大索引。"""
+        dates = pd.DatetimeIndex([
+            pd.Timestamp("2026-01-01"),
+            pd.Timestamp("2026-01-02"),
+            pd.Timestamp("2026-01-02"),  # 重复
+            pd.Timestamp("2026-01-03"),
+        ])
+        # cutoff 精确等于重复的日期 → 返回最大索引 2
+        idx = streamlit_app._binary_search_le(dates, pd.Timestamp("2026-01-02"))
+        assert idx == 2, f"重复值应返回最大索引 2, 实际 {idx}"
+        # cutoff 在重复日期之后 → 依然返回 2
+        idx = streamlit_app._binary_search_le(dates, pd.Timestamp("2026-01-02T12:00:00"))
+        assert idx == 2
+
 
 # ====================================================================
 # Phase 1: _load_backtest_window
@@ -932,6 +947,38 @@ class TestLoadBacktestWindow:
         cutoff = self.DATES_200[50]
         assert window.index[-1] <= cutoff
 
+    def test_cutoff_before_all_tf_data(self, setup_mocks, monkeypatch):
+        """tf 数据全部在 cutoff_date 之后时返回空 DataFrame。
+
+        模拟场景：周线数据最早日期晚于 min_tf 的 cutoff_date，
+        _binary_search_le 返回 -1，触发空窗口。
+        """
+        # 周线数据从 2026-01-05 开始（未来）
+        weekly_dates = pd.date_range("2026-01-05", periods=10, freq="W-MON")
+        weekly_df = pd.DataFrame({
+            "Open": np.linspace(100, 200, 10),
+            "High": np.linspace(102, 202, 10),
+            "Low": np.linspace(98, 198, 10),
+            "Close": np.linspace(101, 201, 10),
+        }, index=weekly_dates)
+
+        monkeypatch.setattr(
+            streamlit_app.AppState, "get",
+            lambda key, default=None: {
+                "_min_tf": "日线",
+                "_bt_data_cache": {
+                    "日线": pd.DataFrame({"Close": np.ones(200)}, index=self.DATES_200),
+                    "周线": weekly_df,
+                },
+            }.get(key, default),
+        )
+
+        # bar_index=0 → cutoff=2025-06-01, 周线数据最早 2026-01-05 → 全在 cutoff 之后
+        window = streamlit_app._load_backtest_window("周线", 0, 10)
+        assert len(window) == 0, (
+            f"数据全在 cutoff 之后应返回空 DataFrame, 实际 {len(window)} 条"
+        )
+
 
 # ====================================================================
 # Phase 2: _get_period_boundary & _belongs_to_same_period
@@ -974,6 +1021,12 @@ class TestPeriodBoundary:
         result = streamlit_app._get_period_boundary(d, "月线")
         # 2026 不是闰年
         assert result == pd.Timestamp("2026-02-28")
+
+    def test_monthly_boundary_month_end(self):
+        """月线月末日期返回自身。"""
+        d = pd.Timestamp("2026-06-30")
+        result = streamlit_app._get_period_boundary(d, "月线")
+        assert result == d, f"月末日期应返回自身, 期望 {d}, 实际 {result}"
 
     def test_quarterly_boundary_mid_quarter(self):
         """季线 Q2 中 → Q2 末。"""

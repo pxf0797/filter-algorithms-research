@@ -352,7 +352,9 @@ def _load_backtest_window(tf, bar_index, n_pts) -> pd.DataFrame:
         boundary = _get_period_boundary(cutoff, tf)
         if cutoff != boundary:
             # cutoff 不在周期边界，需要合成最后一根未完成的高周期 bar
-            # 设计规定：始终从 min_tf 合成高周期最后一根 bar（不逐级向上）
+            # 策略选择：始终从 min_tf 直接合成（不逐级向上）。
+            # 理由：从 min_tf 的 OHLC 直接计算高周期 bar 与逐级合成结果完全等价
+            # （OHLC 聚合满足结合律），且代码路径更短、更易验证。
             lower_tf = min_tf
             if lower_tf and lower_tf != tf:
                 lower_df = None
@@ -744,6 +746,8 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     # 回测模式：数据点不足时友好提示（非阻断）
     if bar_index is not None and len(t) < 2:
         st.caption("⚠️ 位于数据起始位置，可用历史有限")
+    elif bar_index is not None and len(t) < n_pts:
+        st.warning(f"⚠️ 回测早期：{tf} 窗口仅 {len(t)}/{n_pts} 根 bar")
 
     # ── Step 2: Date markers ──
     marker_positions, marker_labels = _date_markers(dates, cfg["tf"])
@@ -867,8 +871,8 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     if ar is not None:
         fig.update_yaxes(title_text="加速度", row=ar, col=1)
 
-    # 回测模式：添加标注（窗口最后位置 = bar_index）
-    # 已禁用：金线标注和遮罩用户不需要
+    # 回测模式：金线标注 + 未来遮罩（用户反馈不需要，已禁用）
+    # 如需启用，取消下方注释即可：
     # if bar_index is not None:
     #     local_pos = len(t) - 1  # 窗口的最后位置 = 回测当前位置
     #     _add_backtest_overlay(fig, local_pos, len(t), dates, cfg.get("tf", ""))

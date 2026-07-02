@@ -43,7 +43,8 @@ SYSTEM_KEYS: Dict[str, Any] = {
     "_cb_mode": False,           # 回测模式开关
     "_bar_index": 0,             # 当前 bar 位置 (0-indexed)
     "_is_playing": False,        # 是否自动播放中
-    "_play_speed": 0.5,          # 播放速度（秒/步）
+    "_play_speed": 1.0,          # 播放速度（秒/步）
+    "_play_speed_label": "1x",
     "_min_tf": "",               # 4 视图中最小周期名称
     "_min_tf_bar_count": 0,      # 最小周期总 bar 数
     "_bt_data_cache": {},        # 回测全量数据缓存 (key: tf)
