@@ -20,12 +20,16 @@
 
 | 维度 | 浏览模式 | 回测模式 |
 |------|---------|---------|
+| 图表渲染 | 2×2 网格（日线/60分钟/15分钟/5分钟） | 2×2 网格（完全相同） |
+| K 线 + 滤波 | 全量数据显示 | 窗口切片（≤n_pts 根 bar），渲染方式一致 |
 | 时间视角 | 始终看到最新数据（含 day_offset） | 站在历史的某个时刻往前看 |
 | 数据窗口 | `day_offset` 控制起点，始终显示最新 n_pts 根 bar | `bar_index` 控制窗口终点，严格屏蔽 bar_index 之后的数据 |
 | 高周期数据 | 从 Parquet 直读，最后一根可能已完成 | 可能需要合成未完成的高周期 bar |
 | 预测显示 | 显示全部预测 | 只显示 bar_index 之前的预测对 |
-| 时间导航 | day_offset + 前后按钮 | bar_index slider + 播放控件 |
-| 数据源 | 同一套 Parquet 文件 | 同一套 Parquet 文件 |
+| 时间导航 | day_offset + 前后按钮（侧边栏） | 隐藏 day_offset 控件；bar_index slider + 播放控件（主区域控制条） |
+| 控制条 | 无 | ⏮ ◀ ▶/⏸ ▶▶ ⏭ + 速度选择 + 进度 slider |
+| 滤波/触发计算 | `_compute_filters` + `_compute_schmitt_trigger`（全量计算） | 同一函数（数据子集不同但算法一致） |
+| 数据源 | `data/display/{tf}.parquet` | 同一套 Parquet 文件 |
 
 ### 1.3 设计原则
 
@@ -221,7 +225,8 @@ if meta["is_synthesized_last"]:
 | `_cb_mode` | `bool` | `False` | 回测模式开关。True 时整个应用处于回测模式 |
 | `_bar_index` | `int` | `0` | 当前回测位置。始终对应 min_tf 的 bar 索引 |
 | `_is_playing` | `bool` | `False` | 自动播放状态。True 时 `_run_backtest_play` 循环推进 |
-| `_play_speed` | `float` | `0.5` | 播放速度（秒/步）。控制每步的 time.sleep 延迟 |
+| `_play_speed` | `float` | `1.0` | 播放速度（秒/步）。控制每步的 time.sleep 延迟 |
+| `_play_speed_label` | `str` | `"1x"` | 播放速度标签。对应速度选择器的选中值，用于 speed_map 查找 |
 | `_min_tf` | `str` | `""` | 4 个视图中的最小周期名（如 "5分钟"） |
 | `_min_tf_bar_count` | `int` | `0` | min_tf 的总 bar 数（= total_bars） |
 | `_bt_data_cache` | `dict[str, DataFrame]` | `{}` | 各 TF 的完整 DataFrame 缓存。key=tf, value=从 Parquet 读取的 df |
@@ -641,7 +646,7 @@ function _get_min_tf_and_count(configs, ticker_code):
 ```
 主区域:
   ┌─ _render_backtest_controls()  ← 仅 _cb_mode=True 时渲染
-  │   第一行: ⏮  ◀  ▶/⏸  ▶▶  ⏭  速度选择
+  │   第一行: ⏮  │  ◀  ▶/⏸  ▶▶  │  ⏭  速度选择
   │   第二行: ▬▬▬▬▬●▬▬▬▬▬ 进度 slider
   └─ 2×2 图表网格
        for row in [0, 1]:
@@ -662,6 +667,8 @@ function _get_min_tf_and_count(configs, ticker_code):
 | 4 | 前进一步 | ▶▶ | `st.button` | `bar_index = min(total-1, bar_index+1); st.rerun()` | `bar_index >= total_bars - 1` |
 | 5 | 跳到最新 | ⏭ | `st.button` | `bar_index = total_bars - 1; st.rerun()` | 无 |
 | 6 | 速度选择 | — | `st.selectbox` | 写入 `_play_speed_label` + `_play_speed`（不 rerun） | 无 |
+
+> **播放按钮状态切换**：按钮文案和图标根据 `_is_playing` 动态切换：`False` 时显示 ▶，`True` 时显示 ⏸。
 
 #### 4.2.2 速度映射表
 
@@ -696,10 +703,10 @@ function _get_min_tf_and_count(configs, ticker_code):
 #### 4.3.1 显示格式
 
 ```
-📍 bar {bar_index + 1}/{total_bars} | {formatted_date}
+📍 bar {bar_index + 1}/{total_bars}
+📅 {formatted_date}
+▶ 播放中  （播放时追加，绿色：:green[▶ 播放中]）
 ```
-
-- 播放中追加 `| ▶ 播放中`（绿色 markdown：`:green[▶ 播放中]`）
 
 #### 4.3.2 日期格式化逻辑
 

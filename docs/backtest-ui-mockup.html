@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>回测模式 UI 效果图 — 浏览 vs 回测对比</title>
+<style>
+  :root {
+    --bg: #0e1117;
+    --sidebar-bg: #161b22;
+    --card-bg: #1c2128;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --orange: #d2991d;
+    --red: #f85149;
+    --purple: #a371f7;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 20px;
+  }
+
+  /* Page header */
+  .page-header {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  .page-header h1 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .page-header .subtitle {
+    color: var(--text-dim);
+    font-size: 14px;
+  }
+
+  /* Comparison container */
+  .comparison {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+
+  /* Mode panel */
+  .mode-panel {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .mode-panel.browse {
+    border-top: 3px solid var(--accent);
+  }
+  .mode-panel.backtest {
+    border-top: 3px solid var(--green);
+  }
+  .panel-header {
+    padding: 12px 16px;
+    font-weight: 600;
+    font-size: 15px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .panel-header .badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+  }
+  .browse .badge { background: rgba(88,166,255,0.15); color: var(--accent); }
+  .backtest .badge { background: rgba(63,185,80,0.15); color: var(--green); }
+
+  /* App layout inside each panel */
+  .app-layout {
+    display: flex;
+    height: 680px;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 240px;
+    min-width: 240px;
+    background: var(--sidebar-bg);
+    border-right: 1px solid var(--border);
+    padding: 12px;
+    overflow-y: auto;
+    font-size: 12px;
+  }
+  .sidebar-section {
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .sidebar-section:last-child { border-bottom: none; }
+  .sidebar-label {
+    color: var(--text-dim);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+  .sidebar-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 12px;
+  }
+  .sidebar select, .sidebar input {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+  }
+
+  /* Mode switch radio */
+  .mode-switch {
+    display: flex;
+    background: var(--bg);
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .mode-switch .option {
+    flex: 1;
+    text-align: center;
+    padding: 5px 0;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+    color: var(--text-dim);
+  }
+  .mode-switch .option.active {
+    background: var(--accent);
+    color: #fff;
+    font-weight: 500;
+  }
+  .mode-switch .option.active.bt {
+    background: var(--green);
+  }
+
+  /* Backtest status */
+  .bt-status {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+  }
+  .bt-status .playing {
+    color: var(--green);
+    font-weight: 500;
+  }
+
+  /* Day nav buttons */
+  .day-nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .day-nav button {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .day-nav .offset-display {
+    font-family: monospace;
+    font-size: 12px;
+    color: var(--accent);
+    min-width: 40px;
+    text-align: center;
+  }
+
+  /* Main area */
+  .main-area {
+    flex: 1;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow: hidden;
+  }
+
+  /* Controls bar — KEY DIFFERENCE */
+  .controls-bar {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .controls-bar .ctrl-btn {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+  .controls-bar .ctrl-btn:hover { border-color: var(--text-dim); }
+  .controls-bar .ctrl-btn.play-btn {
+    width: 38px;
+    height: 38px;
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+  }
+  .controls-bar .ctrl-btn.play-btn.playing {
+    background: var(--orange);
+    border-color: var(--orange);
+  }
+  .controls-bar .ctrl-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  .controls-bar .speed-select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    margin-left: auto;
+  }
+  .controls-bar .divider {
+    width: 1px;
+    height: 20px;
+    background: var(--border);
+    margin: 0 2px;
+  }
+
+  /* Slider row */
+  .slider-row {
+    padding: 0 4px;
+    flex-shrink: 0;
+  }
+  .slider-row input[type="range"] {
+    width: 100%;
+    accent-color: var(--green);
+  }
+  .slider-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 2px;
+  }
+
+  /* Browse mode hint — where controls would be */
+  .browse-controls-placeholder {
+    background: var(--bg);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 11px;
+    color: var(--text-dim);
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  /* Chart grid */
+  .chart-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 6px;
+    flex: 1;
+    min-height: 0;
+  }
+  .chart-cell {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+  .chart-cell .chart-title {
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-dim);
+    border-bottom: 1px solid rgba(48,54,61,0.5);
+    flex-shrink: 0;
+  }
+  .chart-cell .chart-body {
+    flex: 1;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Chart canvas simulation */
+  .chart-canvas {
+    width: 100%;
+    height: 100%;
+    position: relative;
+  }
+
+  /* Candlestick mock */
+  .kline-area {
+    position: absolute;
+    top: 10px; left: 40px; right: 10px; bottom: 30px;
+  }
+  .kline-row {
+    position: absolute;
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 100%;
+  }
+
+  /* Difference highlight overlay */
+  .diff-highlight {
+    position: absolute;
+    border: 2px dashed var(--orange);
+    border-radius: 6px;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .diff-label {
+    position: absolute;
+    top: -22px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--orange);
+    color: #000;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 8px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+
+  /* Same highlight */
+  .same-highlight {
+    position: absolute;
+    border: 2px solid var(--green);
+    border-radius: 6px;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .same-label {
+    position: absolute;
+    top: -22px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--green);
+    color: #000;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 8px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+
+  /* SVG chart simulation */
+  svg.mock-chart {
+    width: 100%;
+    height: 100%;
+  }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    margin-top: 24px;
+    font-size: 13px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+
+  /* Summary box */
+  .summary-box {
+    max-width: 1600px;
+    margin: 24px auto 0;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+  }
+  .summary-box h3 {
+    font-size: 16px;
+    margin-bottom: 12px;
+  }
+  .summary-box table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .summary-box th {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-dim);
+    font-weight: 500;
+    font-size: 12px;
+  }
+  .summary-box td {
+    padding: 8px 12px;
+    border-bottom: 1px solid rgba(48,54,61,0.4);
+  }
+  .summary-box .same { color: var(--green); }
+  .summary-box .diff { color: var(--orange); }
+
+  @media (max-width: 1200px) {
+    .comparison { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>回测模式 UI 效果图</h1>
+  <p class="subtitle">核心理念：回测展示 ≡ 浏览展示（图表完全一致） + 控制条差异（bar_index 导航 + 播放）</p>
+</div>
+
+<div class="comparison">
+
+  <!-- ============ BROWSE MODE ============ -->
+  <div class="mode-panel browse">
+    <div class="panel-header">
+      📊 浏览模式（现有）
+      <span class="badge">day_offset 控制时间窗口</span>
+    </div>
+    <div class="app-layout">
+      <!-- Sidebar -->
+      <div class="sidebar">
+        <div class="sidebar-section">
+          <div class="sidebar-label">市场 &amp; 股票</div>
+          <select><option>🇭🇰 HK</option></select>
+          <select style="margin-top:4px"><option>00700 腾讯控股</option></select>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-label">时间导航</div>
+          <div class="day-nav">
+            <button>◀◀ 前移</button>
+            <button>◀</button>
+            <span class="offset-display">day_offset=0</span>
+            <button>▶</button>
+            <button>最新 ▶▶</button>
+          </div>
+          <div style="margin-top:4px;font-size:10px;color:var(--text-dim)">步长: 1 | 数据范围: 2024-01-02 ~ 2026-06-30</div>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-label">模式切换</div>
+          <div class="mode-switch">
+            <div class="option active">浏览</div>
+            <div class="option">回测</div>
+          </div>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-label">滤波器参数 (2×2)</div>
+          <div style="font-size:10px;color:var(--text-dim)">日线: MA(20,40) | 60分钟: EMA(12,26)<br>15分钟: BB(20,2) | 5分钟: RSI(14)</div>
+        </div>
+      </div>
+      <!-- Main -->
+      <div class="main-area">
+        <!-- NO controls bar in browse mode -->
+        <div class="browse-controls-placeholder">
+          ⬆ 浏览模式无控制条 — 时间导航在侧边栏
+        </div>
+        <!-- Chart grid — SAME as backtest -->
+        <div class="chart-grid" style="position:relative">
+          <div class="same-highlight" style="top:-2px;left:-2px;right:-2px;bottom:-2px;border-radius:10px">
+            <div class="same-label">✅ 图表区域完全一致</div>
+          </div>
+          <div class="chart-cell">
+            <div class="chart-title">📈 日线</div>
+            <div class="chart-body">
+              <svg class="mock-chart" viewBox="0 0 320 140">
+                <rect width="320" height="140" fill="#0d1117"/>
+                <!-- grid -->
+                <line x1="35" y1="10" x2="310" y2="10" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="40" x2="310" y2="40" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="70" x2="310" y2="70" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="100" x2="310" y2="100" stroke="#161b22" stroke-width="0.5"/>
+                <!-- price line -->
+                <polyline points="40,90 55,80 70,75 85,60 100,70 115,55 130,65 145,50 160,45 175,55 190,40 205,50 220,35 235,45 250,30 265,40 280,25 295,35 310,20" fill="none" stroke="#58a6ff" stroke-width="1.5"/>
+                <!-- filter line -->
+                <polyline points="40,95 55,82 70,78 85,65 100,72 115,58 130,68 145,52 160,48 175,58 190,42 205,52 220,38 235,47 250,33 265,42 280,28 295,37 310,22" fill="none" stroke="#3fb950" stroke-width="1" stroke-dasharray="3,3"/>
+                <!-- buy/sell markers -->
+                <circle cx="100" cy="70" r="3" fill="#3fb950"/><text x="100" y="66" font-size="6" fill="#3fb950">B</text>
+                <circle cx="205" cy="50" r="3" fill="#f85149"/><text x="205" y="46" font-size="6" fill="#f85149">S</text>
+                <!-- prediction pairs -->
+                <line x1="118" y1="48" x2="190" y2="30" stroke="#a371f7" stroke-width="0.7" stroke-dasharray="2,2"/>
+                <line x1="120" y1="62" x2="192" y2="42" stroke="#a371f7" stroke-width="0.7" stroke-dasharray="2,2"/>
+                <!-- axes -->
+                <text x="5" y="14" font-size="7" fill="#8b949e">420</text>
+                <text x="5" y="44" font-size="7" fill="#8b949e">380</text>
+                <text x="5" y="74" font-size="7" fill="#8b949e">340</text>
+                <text x="5" y="104" font-size="7" fill="#8b949e">300</text>
+              </svg>
+            </div>
+          </div>
+          <div class="chart-cell">
+            <div class="chart-title">📈 60分钟</div>
+            <div class="chart-body">
+              <svg class="mock-chart" viewBox="0 0 320 140">
+                <rect width="320" height="140" fill="#0d1117"/>
+                <line x1="35" y1="10" x2="310" y2="10" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="40" x2="310" y2="40" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="70" x2="310" y2="70" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="100" x2="310" y2="100" stroke="#161b22" stroke-width="0.5"/>
+                <polyline points="40,85 55,75 70,80 85,65 100,70 115,55 130,60 145,45 160,50 175,35 190,45 205,30 220,40 235,25 250,35 265,20 280,30 295,15 310,25" fill="none" stroke="#58a6ff" stroke-width="1.5"/>
+                <polyline points="40,87 55,77 70,82 85,67 100,72 115,57 130,62 145,47 160,52 175,37 190,47 205,32 220,42 235,27 250,37 265,22 280,32 295,17 310,27" fill="none" stroke="#3fb950" stroke-width="1" stroke-dasharray="3,3"/>
+              </svg>
+            </div>
+          </div>
+          <div class="chart-cell">
+            <div class="chart-title">📈 15分钟</div>
+            <div class="chart-body">
+              <svg class="mock-chart" viewBox="0 0 320 140">
+                <rect width="320" height="140" fill="#0d1117"/>
+                <line x1="35" y1="10" x2="310" y2="10" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="40" x2="310" y2="40" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="70" x2="310" y2="70" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="100" x2="310" y2="100" stroke="#161b22" stroke-width="0.5"/>
+                <polyline points="40,90 55,82 70,75 85,70 100,62 115,68 130,55 145,60 160,48 175,55 190,42 205,50 220,38 235,45 250,32 265,40 280,28 295,35 310,22" fill="none" stroke="#58a6ff" stroke-width="1.5"/>
+                <polyline points="40,92 55,84 70,77 85,72 100,64 115,70 130,57 145,62 160,50 175,57 190,44 205,52 220,40 235,47 250,34 265,42 280,30 295,37 310,24" fill="none" stroke="#3fb950" stroke-width="1" stroke-dasharray="3,3"/>
+              </svg>
+            </div>
+          </div>
+          <div class="chart-cell">
+            <div class="chart-title">📈 5分钟</div>
+            <div class="chart-body">
+              <svg class="mock-chart" viewBox="0 0 320 140">
+                <rect width="320" height="140" fill="#0d1117"/>
+                <line x1="35" y1="10" x2="310" y2="10" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="40" x2="310" y2="40" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="70" x2="310" y2="70" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="100" x2="310" y2="100" stroke="#161b22" stroke-width="0.5"/>
+                <polyline points="40,88 52,78 64,82 76,70 88,72 100,58 112,64 124,50 136,56 148,42 160,50 172,38 184,46 196,34 208,42 220,30 232,38 244,26 256,34 268,22 280,30 292,18 310,24" fill="none" stroke="#58a6ff" stroke-width="1.5"/>
+                <polyline points="40,90 52,80 64,84 76,72 88,74 100,60 112,66 124,52 136,58 148,44 160,52 172,40 184,48 196,36 208,44 220,32 232,40 244,28 256,36 268,24 280,32 292,20 310,26" fill="none" stroke="#3fb950" stroke-width="1" stroke-dasharray="3,3"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ BACKTEST MODE ============ -->
+  <div class="mode-panel backtest">
+    <div class="panel-header">
+      ⏮ 回测模式（新）
+      <span class="badge">bar_index + 播放控制</span>
+    </div>
+    <div class="app-layout">
+      <!-- Sidebar -->
+      <div class="sidebar">
+        <div class="sidebar-section">
+          <div class="sidebar-label">市场 &amp; 股票</div>
+          <select><option>🇭🇰 HK</option></select>
+          <select style="margin-top:4px"><option>00700 腾讯控股</option></select>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-label">时间导航</div>
+          <div style="font-size:10px;color:var(--text-dim);padding:4px 0">
+            ⚠️ 回测模式下隐藏 — day_offset 恒为 0
+          </div>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-label">模式切换</div>
+          <div class="mode-switch">
+            <div class="option">浏览</div>
+            <div class="option active bt">回测</div>
+          </div>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-label">回测状态</div>
+          <div class="bt-status">
+            📍 bar <strong>427</strong>/1250<br>
+            <span style="font-size:11px">📅 2025-09-15 14:30</span><br>
+            <span class="playing">▶ 播放中</span>
+          </div>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-label">滤波器参数 (2×2)</div>
+          <div style="font-size:10px;color:var(--text-dim)">日线: MA(20,40) | 60分钟: EMA(12,26)<br>15分钟: BB(20,2) | 5分钟: RSI(14)</div>
+        </div>
+      </div>
+      <!-- Main -->
+      <div class="main-area">
+        <!-- CONTROLS BAR — THE KEY DIFFERENCE -->
+        <div class="diff-highlight" style="top:0;left:0;right:0;bottom:0;pointer-events:none;border:none;">
+          <div style="position:absolute;top:6px;left:4px;right:4px;bottom:46px;border:2px dashed var(--orange);border-radius:8px;pointer-events:none">
+            <div class="diff-label">🆕 控制条 + 进度条（仅回测模式）</div>
+          </div>
+        </div>
+        <div class="controls-bar" style="position:relative;z-index:1">
+          <button class="ctrl-btn" title="跳到开头">⏮</button>
+          <div class="divider"></div>
+          <button class="ctrl-btn" title="后退一步">◀</button>
+          <button class="ctrl-btn play-btn playing" title="暂停">⏸</button>
+          <button class="ctrl-btn" title="前进一步">▶▶</button>
+          <div class="divider"></div>
+          <button class="ctrl-btn" title="跳到最新">⏭</button>
+          <select class="speed-select">
+            <option>0.25x</option><option>0.5x</option><option selected>1x</option>
+            <option>2x</option><option>5x</option><option>10x</option>
+          </select>
+        </div>
+        <div class="slider-row" style="position:relative;z-index:1">
+          <input type="range" min="0" max="1250" value="427" style="width:100%">
+          <div class="slider-labels">
+            <span>2024-01-02</span><span>2025-09-15</span><span>2026-06-30</span>
+          </div>
+        </div>
+        <!-- Chart grid — IDENTICAL to browse -->
+        <div class="chart-grid" style="position:relative">
+          <div class="same-highlight" style="top:-2px;left:-2px;right:-2px;bottom:-2px;border-radius:10px">
+            <div class="same-label">✅ 图表区域完全一致</div>
+          </div>
+          <div class="chart-cell">
+            <div class="chart-title">📈 日线 <span style="font-size:9px;color:var(--text-dim)">(前 100 根 bar)</span></div>
+            <div class="chart-body">
+              <svg class="mock-chart" viewBox="0 0 320 140">
+                <rect width="320" height="140" fill="#0d1117"/>
+                <line x1="35" y1="10" x2="310" y2="10" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="40" x2="310" y2="40" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="70" x2="310" y2="70" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="100" x2="310" y2="100" stroke="#161b22" stroke-width="0.5"/>
+                <!-- Different segment of the same price series -->
+                <polyline points="40,75 55,65 70,70 85,55 100,60 115,45 130,50 145,35 160,40 175,28 190,35 205,22 220,30 235,18 250,25 265,12 280,20 295,8 310,15" fill="none" stroke="#58a6ff" stroke-width="1.5"/>
+                <polyline points="40,77 55,67 70,72 85,57 100,62 115,47 130,52 145,37 160,42 175,30 190,37 205,24 220,32 235,20 250,27 265,14 280,22 295,10 310,17" fill="none" stroke="#3fb950" stroke-width="1" stroke-dasharray="3,3"/>
+                <!-- buy markers — same positions relative to visible window -->
+                <circle cx="130" cy="50" r="3" fill="#3fb950"/><text x="130" y="46" font-size="6" fill="#3fb950">B</text>
+                <!-- prediction pairs — note: only shows pairs where t <= bar_index -->
+                <line x1="148" y1="30" x2="220" y2="12" stroke="#a371f7" stroke-width="0.7" stroke-dasharray="2,2"/>
+                <line x1="150" y1="44" x2="222" y2="26" stroke="#a371f7" stroke-width="0.7" stroke-dasharray="2,2"/>
+                <!-- cutoff line -->
+                <line x1="290" y1="5" x2="290" y2="125" stroke="#d2991d" stroke-width="1.5" stroke-dasharray="4,2"/>
+                <text x="260" y="12" font-size="7" fill="#d2991d">← bar_index=427</text>
+                <!-- axes -->
+                <text x="5" y="14" font-size="7" fill="#8b949e">380</text>
+                <text x="5" y="44" font-size="7" fill="#8b949e">360</text>
+                <text x="5" y="74" font-size="7" fill="#8b949e">340</text>
+                <text x="5" y="104" font-size="7" fill="#8b949e">320</text>
+              </svg>
+            </div>
+          </div>
+          <div class="chart-cell">
+            <div class="chart-title">📈 60分钟</div>
+            <div class="chart-body">
+              <svg class="mock-chart" viewBox="0 0 320 140">
+                <rect width="320" height="140" fill="#0d1117"/>
+                <line x1="35" y1="10" x2="310" y2="10" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="40" x2="310" y2="40" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="70" x2="310" y2="70" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="100" x2="310" y2="100" stroke="#161b22" stroke-width="0.5"/>
+                <polyline points="40,80 55,70 70,75 85,60 100,65 115,50 130,55 145,40 160,45 175,30 190,38 205,25 220,33 235,20 250,28 265,15 280,22 295,10 310,18" fill="none" stroke="#58a6ff" stroke-width="1.5"/>
+                <polyline points="40,82 55,72 70,77 85,62 100,67 115,52 130,57 145,42 160,47 175,32 190,40 205,27 220,35 235,22 250,30 265,17 280,24 295,12 310,20" fill="none" stroke="#3fb950" stroke-width="1" stroke-dasharray="3,3"/>
+                <!-- synthesized bar indicator -->
+                <rect x="300" y="8" width="10" height="112" fill="rgba(210,153,29,0.2)" stroke="#d2991d" stroke-width="0.5" stroke-dasharray="2,1" rx="1"/>
+                <text x="296" y="7" font-size="6" fill="#d2991d">合成</text>
+              </svg>
+            </div>
+          </div>
+          <div class="chart-cell">
+            <div class="chart-title">📈 15分钟</div>
+            <div class="chart-body">
+              <svg class="mock-chart" viewBox="0 0 320 140">
+                <rect width="320" height="140" fill="#0d1117"/>
+                <line x1="35" y1="10" x2="310" y2="10" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="40" x2="310" y2="40" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="70" x2="310" y2="70" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="100" x2="310" y2="100" stroke="#161b22" stroke-width="0.5"/>
+                <polyline points="40,85 52,75 64,78 76,65 88,70 100,58 112,62 124,50 136,55 148,42 160,50 172,38 184,46 196,34 208,42 220,30 232,38 244,26 256,34 268,22 280,30 292,18 310,23" fill="none" stroke="#58a6ff" stroke-width="1.5"/>
+                <polyline points="40,87 52,77 64,80 76,67 88,72 100,60 112,64 124,52 136,57 148,44 160,52 172,40 184,48 196,36 208,44 220,32 232,40 244,28 256,36 268,24 280,32 292,20 310,25" fill="none" stroke="#3fb950" stroke-width="1" stroke-dasharray="3,3"/>
+              </svg>
+            </div>
+          </div>
+          <div class="chart-cell">
+            <div class="chart-title">📈 5分钟 <span style="font-size:9px;color:var(--accent)">(min_tf)</span></div>
+            <div class="chart-body">
+              <svg class="mock-chart" viewBox="0 0 320 140">
+                <rect width="320" height="140" fill="#0d1117"/>
+                <line x1="35" y1="10" x2="310" y2="10" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="40" x2="310" y2="40" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="70" x2="310" y2="70" stroke="#161b22" stroke-width="0.5"/>
+                <line x1="35" y1="100" x2="310" y2="100" stroke="#161b22" stroke-width="0.5"/>
+                <polyline points="40,82 52,72 64,76 76,64 88,68 100,55 112,60 124,48 136,53 148,40 160,48 172,36 184,44 196,32 208,40 220,28 232,36 244,24 256,32 268,20 280,28 292,16 310,22" fill="none" stroke="#58a6ff" stroke-width="1.5"/>
+                <polyline points="40,84 52,74 64,78 76,66 88,70 100,57 112,62 124,50 136,55 148,42 160,50 172,38 184,46 196,34 208,42 220,30 232,38 244,26 256,34 268,22 280,30 292,18 310,24" fill="none" stroke="#3fb950" stroke-width="1" stroke-dasharray="3,3"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Summary table -->
+<div class="summary-box">
+  <h3>📋 浏览模式 vs 回测模式 — 差异对照表</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>维度</th>
+        <th>浏览模式</th>
+        <th>回测模式</th>
+        <th>是否一致</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>2×2 图表网格</strong></td>
+        <td>4 视图（日线/60分钟/15分钟/5分钟）</td>
+        <td>4 视图（日线/60分钟/15分钟/5分钟）</td>
+        <td class="same">✅ 完全一致</td>
+      </tr>
+      <tr>
+        <td><strong>K 线 + 滤波 + 买卖点</strong></td>
+        <td>全量数据显示</td>
+        <td>窗口切片（≤n_pts 根 bar）</td>
+        <td class="same">✅ 渲染方式一致</td>
+      </tr>
+      <tr>
+        <td><strong>预测曲线</strong></td>
+        <td>显示全部预测对</td>
+        <td>过滤 t > bar_index 的预测对</td>
+        <td class="diff">⚠️ 数据子集不同（消除前视偏差）</td>
+      </tr>
+      <tr>
+        <td><strong>高周期 bar</strong></td>
+        <td>从 Parquet 直读</td>
+        <td>可能需要合成未完成 bar（is_synthesized）</td>
+        <td class="diff">⚠️ 最后一根可能不同</td>
+      </tr>
+      <tr>
+        <td><strong>侧边栏 — 滤波器参数</strong></td>
+        <td>MA/EMA/BB/RSI 参数面板</td>
+        <td>MA/EMA/BB/RSI 参数面板</td>
+        <td class="same">✅ 完全一致</td>
+      </tr>
+      <tr>
+        <td><strong>侧边栏 — 时间导航</strong></td>
+        <td>前移/后移按钮 + day_offset + day_step</td>
+        <td>隐藏（early return），day_offset 恒为 0</td>
+        <td class="diff">⚠️ 回测模式不显示</td>
+      </tr>
+      <tr>
+        <td><strong>主区域 — 控制条</strong></td>
+        <td>无</td>
+        <td>⏮ ◀ ▶/⏸ ▶▶ ⏭ + 速度选择 + 进度 slider</td>
+        <td class="diff">🆕 回测模式新增</td>
+      </tr>
+      <tr>
+        <td><strong>数据源</strong></td>
+        <td>data/display/{tf}.parquet</td>
+        <td>data/display/{tf}.parquet（同一套）</td>
+        <td class="same">✅ 完全一致</td>
+      </tr>
+      <tr>
+        <td><strong>滤波计算</strong></td>
+        <td>_compute_filters</td>
+        <td>_compute_filters（同一函数）</td>
+        <td class="same">✅ 完全一致</td>
+      </tr>
+      <tr>
+        <td><strong>施密特触发</strong></td>
+        <td>_compute_schmitt_trigger</td>
+        <td>_compute_schmitt_trigger（同一函数）</td>
+        <td class="same">✅ 完全一致</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> 浏览与回测完全一致</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div> 回测模式差异点</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--purple)"></div> 预测对（回测中过滤未来）</div>
+  <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div> bar_index 截断线</div>
+</div>
+
+</body>
+</html>
