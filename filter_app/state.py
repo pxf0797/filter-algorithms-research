@@ -39,6 +39,11 @@ SYSTEM_KEYS: Dict[str, Any] = {
     "_preset_action_id": None,
     "new_preset_name": "",
     "overwrite_preset": False,
+    # 回测模式状态键
+    "_cb_mode": False,
+    "_bar_index": 0,
+    "_min_tf": "",
+    "_min_tf_bar_count": 0,
 }
 
 # 全局参数 — 已在 main() 中由 widget 初始化，这里只做参考

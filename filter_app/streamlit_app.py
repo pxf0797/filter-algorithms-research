@@ -111,7 +111,7 @@ def _date_markers(dates, tf) -> tuple[list, list]:
     return positions, labels
 
 
-def _load_chart_data(market, ticker_code, tf, day_offset, n_pts) -> tuple:
+def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None) -> tuple:
     """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err)."""
     _sync_to_display(ticker_code, tf, day_offset, n_pts)
     display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
@@ -122,6 +122,10 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts) -> tuple:
             if "Date" in df.columns and "Close" in df.columns and len(df) >= 5:
                 df["Date"] = pd.to_datetime(df["Date"])
                 df = df.set_index("Date").sort_index()
+                # 回测模式：截断数据到 bar_index 位置
+                if bar_index is not None and bar_index < len(df):
+                    df = df.iloc[:bar_index + 1]
+
                 t = np.arange(len(df), dtype=float)
                 noisy = df["Close"].values.ravel()
                 ohlc = df[["Open", "High", "Low", "Close"]] if all(c in df.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=df.index)
@@ -385,20 +389,60 @@ def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row) -> None
     fig.update_yaxes(title_text="PnL(%)", row=pnl_row, col=1, ticksuffix="%")
 
 
+def _get_min_tf_and_count(configs, ticker_code) -> tuple:
+    """从4个视图的tf配置中确定最小周期（最精细）和总bar数。
+    遍历configs中各视图的tf字段，取ALL_TFS中索引最小的（最精细的）为_min_tf。
+    读取该tf的parquet文件获取总bar数。
+    返回 (_min_tf, bar_count)。"""
+    if not configs:
+        return "", 0
+
+    # 取索引最小的 tf（最精细周期）
+    min_idx = len(ALL_TFS)
+    min_tf = ""
+    for cfg in configs:
+        tf = cfg.get("tf", "")
+        try:
+            idx = ALL_TFS.index(tf)
+            if idx < min_idx:
+                min_idx = idx
+                min_tf = tf
+        except ValueError:
+            continue
+
+    if not min_tf:
+        return "", 0
+
+    # 读取该 tf 的 parquet 获取总 bar 数
+    try:
+        display_path = Path(__file__).parent.parent / "data" / "display" / f"{min_tf}.parquet"
+        if display_path.exists():
+            df = pd.read_parquet(display_path)
+            bar_count = len(df)
+        else:
+            bar_count = 0
+    except Exception:
+        bar_count = 0
+
+    return min_tf, bar_count
+
+
 # =====================================================================
 # Chart rendering (main figure builder)
 # =====================================================================
 
 @st.fragment
-def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None) -> None:
-    """Fragment wrapper for _render_chart — enables per-view independent re-rendering."""
-    _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl)
+def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, bar_index=None) -> None:
+    """Fragment wrapper for _render_chart — enables per-view independent re-rendering.
+    bar_index: 回测模式下传递的 bar 位置，用于数据截断。"""
+    _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl, bar_index=bar_index)
 
 
-def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None) -> None:
+def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, bar_index=None) -> None:
     """Fetch data + render multi-subplot figure from config.
     优先从本地 Parquet 读取；day_offset=向历史前移N天（各周期独立对齐）。
-    higher_pnl: 高周期PnL数据（来自 _align_pnl_to_current_tf 的输出），非空时新增row 7子图。"""
+    higher_pnl: 高周期PnL数据（来自 _align_pnl_to_current_tf 的输出），非空时新增row 7子图。
+    bar_index: 回测模式下传递的 bar 位置，用于数据截断。"""
     tf = cfg["tf"]
     n_pts = cfg["n_pts"]
     logger.debug(f"Rendering chart: {ticker_code}/{tf} view={key} n_pts={n_pts}")
@@ -410,7 +454,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         _raw_higher = st.session_state.get(f"_pnl_{_higher_tf}")
 
     # ── Step 1: Load chart data ──
-    t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts)
+    t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=bar_index)
     if err is not None:
         st.error(err)
         return
@@ -994,6 +1038,71 @@ def _render_time_nav(configs, ticker_code) -> int:
     return AppState.get("_day_offset", 0)
 
 
+def _render_backtest_mode(market, ticker_code, configs) -> None:
+    """侧边栏回测模式切换 + bar 位置滑块。"""
+    st.sidebar.markdown("---")
+    st.sidebar.caption("🔬 回测模式")
+
+    mode_options = ["浏览模式", "回测模式"]
+    mode_index = 1 if AppState.get("_cb_mode", False) else 0
+    selected = st.sidebar.radio("模式", mode_options, horizontal=True,
+                                 index=mode_index, key="_bt_mode_radio")
+
+    new_cb_mode = (selected == "回测模式")
+    old_cb_mode = AppState.get("_cb_mode", False)
+
+    if new_cb_mode != old_cb_mode:
+        if new_cb_mode:
+            # 切换到回测模式：计算最小周期信息
+            min_tf, bar_count = _get_min_tf_and_count(configs, ticker_code)
+            AppState.set("_min_tf", min_tf)
+            AppState.set("_min_tf_bar_count", bar_count)
+            AppState.set("_bar_index", 0)
+            if bar_count > 0:
+                st.toast(f"回测模式已启用  最小周期: {min_tf} ({bar_count} bars)")
+            else:
+                st.toast("回测模式已启用  数据未就绪")
+        else:
+            # 切换回浏览模式：清除回测状态
+            AppState.set("_bar_index", 0)
+            AppState.set("_min_tf", "")
+            AppState.set("_min_tf_bar_count", 0)
+
+        AppState.set("_cb_mode", new_cb_mode)
+        st.rerun()
+
+    # 回测模式下显示 bar 位置信息
+    if AppState.get("_cb_mode", False):
+        bar_index = AppState.get("_bar_index", 0)
+        total_bars = AppState.get("_min_tf_bar_count", 0)
+        min_tf = AppState.get("_min_tf", "")
+
+        if total_bars > 0:
+            # 显示当前 bar 时间
+            try:
+                display_path = Path(__file__).parent.parent / "data" / "display" / f"{min_tf}.parquet"
+                if display_path.exists():
+                    df = pd.read_parquet(display_path)
+                    if bar_index < len(df):
+                        date_val = df["Date"].iloc[bar_index] if "Date" in df.columns else ""
+                        if date_val:
+                            date_str = pd.Timestamp(date_val).strftime("%Y-%m-%d %H:%M")
+                            st.sidebar.caption(f"📍 bar {bar_index + 1}/{total_bars} | {date_str}")
+            except Exception:
+                pass
+
+            # bar 位置 slider
+            new_bar_index = st.sidebar.slider(
+                "Bar 位置", 0, total_bars - 1, bar_index,
+                key="_bt_bar_slider", label_visibility="visible",
+            )
+            if new_bar_index != bar_index:
+                AppState.set("_bar_index", new_bar_index)
+                st.rerun()
+        else:
+            st.sidebar.warning("回测数据未就绪，请先在浏览模式加载数据")
+
+
 def _render_db_backup() -> None:
     """Render DB backup/restore expander section."""
     with st.sidebar.expander("💾 数据备份与恢复", expanded=False):
@@ -1208,10 +1317,16 @@ def main() -> None:
     # ── Time window navigation ──
     day_offset = _render_time_nav(configs, ticker_code)
 
+    # ── 回测模式切换 ──
+    _render_backtest_mode(market, ticker_code, configs)
+
     # ── DB backup/restore ──
     _render_db_backup()
 
     # ── Pass 2: 2x2 chart views ──
+    cb_mode = AppState.get("_cb_mode", False)
+    bar_index = AppState.get("_bar_index", 0) if cb_mode else None
+
     grid_cols = []
     for row_idx in range(2):
         c1, c2 = st.columns(2)
@@ -1223,7 +1338,7 @@ def main() -> None:
         col_idx = orig_i % 2
         with grid_cols[row_idx][col_idx]:
             _render_chart_fragment(market, ticker_code, cfg, f"v{orig_i}", compact=True,
-                                   day_offset=day_offset)
+                                   day_offset=day_offset, bar_index=bar_index)
 
     # ── Export config ──
     _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code)
