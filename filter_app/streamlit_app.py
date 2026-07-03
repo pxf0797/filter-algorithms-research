@@ -431,7 +431,7 @@ def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row) -> None
 def _get_min_tf_and_count(configs, ticker_code) -> tuple:
     """从4个视图的tf配置中确定最小周期（最精细）和总bar数。
     遍历configs中各视图的tf字段，取ALL_TFS中索引最小的（最精细的）为_min_tf。
-    读取该tf的parquet文件获取总bar数。
+    从 DB 查询该 tf 的全量 bar 数（不使用 parquet，parquet 只有窗口数据）。
     返回 (_min_tf, bar_count)。"""
     if not configs:
         return "", 0
@@ -452,14 +452,15 @@ def _get_min_tf_and_count(configs, ticker_code) -> tuple:
     if not min_tf:
         return "", 0
 
-    # 读取该 tf 的 parquet 获取总 bar 数
+    # 从 DB 查询全量 bar 数（parquet 只含当前窗口数据，不能用作 slider 上限）
     try:
-        display_path = Path(__file__).parent.parent / "data" / "display" / f"{min_tf}.parquet"
-        if display_path.exists():
-            df = pd.read_parquet(display_path)
-            bar_count = len(df)
-        else:
-            bar_count = 0
+        from db import get_conn
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM kline WHERE ticker=? AND timeframe=?",
+                (ticker_code, min_tf),
+            ).fetchone()
+            bar_count = row[0] if row else 0
     except Exception:
         bar_count = 0
 
