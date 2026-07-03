@@ -119,7 +119,7 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None)
     if display_path.exists():
         try:
             df = pd.read_parquet(display_path)
-            if "Date" in df.columns and "Close" in df.columns and len(df) >= 5:
+            if "Date" in df.columns and "Close" in df.columns and len(df) >= 2:
                 df["Date"] = pd.to_datetime(df["Date"])
                 df = df.set_index("Date").sort_index()
                 # 回测模式：按 cutoff_date 对各周期统一截断（日期对齐）
@@ -127,17 +127,24 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None)
                     cutoff_str = AppState.get("_bt_cutoff_date", "")
                     if cutoff_str:
                         try:
-                            cutoff_date = pd.Timestamp(cutoff_str)
-                            # 保留 df.index <= cutoff_date 的数据
-                            df = df[df.index <= cutoff_date]
+                            cutoff_date = pd.Timestamp(cutoff_str).tz_localize(None)
+                            # 统一时区：剥离 tz 避免比较异常
+                            df_idx = df.index.tz_localize(None) if hasattr(df.index, 'tz') and df.index.tz is not None else df.index
+                            df = df[df_idx <= cutoff_date]
                         except Exception:
-                            # 回退：如果 cutoff_date 解析失败，使用数值截断
                             if bar_index < len(df):
                                 df = df.iloc[:bar_index + 1]
                     elif bar_index < len(df):
-                        # 没有 cutoff_date 时回退到数值截断
+                        logger.warning(f"回测 {tf}: cutoff_date 未就绪，回退到数值截断")
                         df = df.iloc[:bar_index + 1]
-
+                    # ★ 空数据守卫：截断后可能为空（高周期数据起始晚于 cutoff_date）
+                    if len(df) < 2:
+                        err = f"{tf} 回测数据不足：截止日期前无足够K线"
+                        return None, None, None, None, None, err
+                # ★ 截断后检查最小长度
+                if len(df) < 2:
+                    err = f"{tf} 数据点不足 ({len(df)})，最少需要 2 个点"
+                    return None, None, None, None, None, err
                 t = np.arange(len(df), dtype=float)
                 noisy = df["Close"].values.ravel()
                 ohlc = df[["Open", "High", "Low", "Close"]] if all(c in df.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=df.index)
@@ -148,7 +155,25 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None)
             err = str(e)
     if err is not None:
         return None, None, None, None, None, err
-    return _cached_fetch_stock(market, ticker_code, tf, n_pts)
+    # API 回退路径也应用截断
+    t, noisy, ohlc, ticker_full, dates, err = _cached_fetch_stock(market, ticker_code, tf, n_pts)
+    if err is None and bar_index is not None and dates is not None and len(dates) > 0:
+        cutoff_str = AppState.get("_bt_cutoff_date", "")
+        if cutoff_str:
+            try:
+                cutoff_date = pd.Timestamp(cutoff_str).tz_localize(None)
+                mask = dates <= cutoff_date
+                if mask.sum() >= 2:
+                    t = t[mask]
+                    noisy = noisy[mask]
+                    if hasattr(ohlc, 'iloc'):
+                        ohlc = ohlc.iloc[mask]
+                    dates = dates[mask]
+                else:
+                    return None, None, None, None, None, f"{tf} 回测数据不足"
+            except Exception:
+                pass  # 截断失败时返回全量数据（比崩溃好）
+    return t, noisy, ohlc, ticker_full, dates, err
 
 
 def _compute_filters(noisy, t, cfg) -> tuple[np.ndarray, np.ndarray | None]:
@@ -184,7 +209,7 @@ def _compute_filters(noisy, t, cfg) -> tuple[np.ndarray, np.ndarray | None]:
 def _compute_schmitt_trigger(filtered, t, cfg) -> dict | None:
     """Compute Schmitt trigger signal. Returns schmitt dict or None.
     Note: Not cached via @st.cache_data because params include unhashable np.ndarray."""
-    if not cfg["show_sch"] or np.all(np.isnan(filtered)):
+    if not cfg["show_sch"] or np.all(np.isnan(filtered)) or len(t) < 2:
         return None
     _v = np.gradient(filtered, t)
     _a = np.gradient(_v, t)
@@ -307,6 +332,8 @@ def _add_main_price_traces(fig, t, noisy, ohlc, filtered, filtered2, cfg) -> Non
 
 def _add_residual_traces(fig, t, filtered, noisy, filtered2, cfg, rr, vr) -> np.ndarray:
     """Add residual, velocity, and acceleration traces to subplots. Returns acceleration array."""
+    if len(t) < 2:
+        return np.array([])
     if not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=filtered - noisy, mode="lines", name="残差",
             line=dict(color="#5f6c80", width=1.0, dash="dot")), row=rr, col=1)
@@ -469,6 +496,11 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=bar_index)
     if err is not None:
         st.error(err)
+        return
+
+    # ★ 防御性检查：即使没报错，数据也可能不足
+    if t is None or len(t) < 2:
+        st.caption(f"⚠️ {tf} 数据点不足 ({len(t) if t is not None else 0})，无法渲染")
         return
 
     # ── Step 2: Date markers ──
