@@ -1176,12 +1176,14 @@ def _render_backtest_nav(total_bars, min_n_pts):
         if st.button(label, key="_bt_toggle_play", use_container_width=True, help=help_text):
             if is_playing:
                 AppState.set("_is_playing", False)
+                AppState.set("_play_just_started", False)
                 st.rerun()
             else:
                 # 如果已到末尾，从头开始播放
                 if bar_index >= total_bars:
                     st.session_state._bar_index = min_n_pts
                 AppState.set("_is_playing", True)
+                AppState.set("_play_just_started", True)
                 _update_cutoff_and_rerun()
 
     with col_nav[3]:
@@ -1208,18 +1210,36 @@ def _render_backtest_nav(total_bars, min_n_pts):
 
 
 def _run_backtest_play():
-    """回测自动播放循环。"""
+    """回测自动播放 — 只更新窗口位置，不调用 rerun。
+
+    返回 True 表示需要 main() 末尾 sleep + rerun 触发下一步。
+    """
     if not AppState.get("_is_playing", False):
-        return
+        return False
+
+    # 刚启动播放时不前进，先渲染当前帧给用户看一眼
+    if AppState.get("_play_just_started", False):
+        AppState.set("_play_just_started", False)
+        return True
+
     bar_index = st.session_state.get("_bar_index", 0)
     total = AppState.get("_min_tf_bar_count", 0)
     if bar_index >= total:
         AppState.set("_is_playing", False)
-        return
-    speed = AppState.get("_play_speed", 1.0)
-    time.sleep(1.0 / speed)
+        return False
+
+    # 前进一个 bar
     st.session_state._bar_index = bar_index + 1
-    _update_cutoff_and_rerun()
+
+    # 同步更新 cutoff_date（与 _on_slider_change 逻辑一致）
+    ticker = AppState.get("_fetched_ticker", "")
+    min_tf = AppState.get("_min_tf", "")
+    if min_tf and ticker:
+        cutoff_date = _get_bar_date_from_db(ticker, min_tf, bar_index)  # (bar_index+1)-1 == bar_index
+        if cutoff_date:
+            AppState.set("_bt_cutoff_date", cutoff_date)
+
+    return True
 
 
 def _render_backtest_mode(market, ticker_code, configs) -> None:
@@ -1481,8 +1501,8 @@ def _run_auto_refresh(market, ticker_code, auto_refresh, interval) -> None:
 
 # =====================================================================
 def main() -> None:
-    # ── 回测自动播放（必须在 widget 渲染之前，Streamlit 禁止 widget 实例化后修改其 key）──
-    _run_backtest_play()
+    # ── 回测自动播放：更新窗口位置（必须在 widget 渲染之前修改 key）──
+    need_rerun = _run_backtest_play()
     logger.info("App started")
     _get_db_connection()
     init_config_tables()
@@ -1589,6 +1609,12 @@ def main() -> None:
 
     # ── Auto-refresh ──
     _run_auto_refresh(market, ticker_code, auto_refresh, interval)
+
+    # ── 回测自动播放：图表渲染完成后 sleep + rerun 触发下一步 ──
+    if need_rerun:
+        speed = AppState.get("_play_speed", 1.0)
+        time.sleep(1.0 / speed)
+        st.rerun()
 
 
 if __name__ == "__main__":
