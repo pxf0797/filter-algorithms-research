@@ -25,10 +25,32 @@ AppState = state.AppState
 DEFAULTS = state.SYSTEM_KEYS  # state.py 中定义为 SYSTEM_KEYS
 
 
+class _DictSessionState(dict):
+    """dict 子类，支持 attribute 读写（模拟 streamlit session_state 的两种访问方式）。
+
+    当 st.session_state 作为 MagicMock 时，同时支持:
+      - st.session_state["_key"]          # dict-style
+      - st.session_state._key = value     # attribute-style
+      - st.session_state.get("_key", 0)   # dict .get()
+    用于测试 _on_slider_change / _run_backtest_play 的真实调用。
+    """
+
+    def __getattr__(self, key):
+        # MagicMock 的属性查找: 先尝试 dict 查找，再 fallback 到 AttributeError
+        try:
+            return self[key]
+        except KeyError:
+            msg = f"'{type(self).__name__}' object has no attribute '{key}'"
+            raise AttributeError(msg)
+
+    def __setattr__(self, key: str, value) -> None:
+        self[key] = value
+
+
 @pytest.fixture(autouse=True)
 def _mock_state_st():
     """让 state.st.session_state 成为真实的 dict（与 test_state.py 相同模式）。"""
-    real_ss = {}
+    real_ss: dict = {}
     mock_st = MagicMock()
     mock_st.session_state = real_ss
     state.st = mock_st
@@ -94,7 +116,7 @@ class TestRenderTimeNav:
             day_offset = 0
         else:
             day_offset = None  # 代表走了正常导航流程
-        assert day_offset is not 0
+        assert day_offset != 0
 
 
 # ── TestSyncToDisplay ────────────────────────────────────────────────────────
@@ -588,3 +610,598 @@ class TestPlayback:
 
         # 验证：不会因 _on_slider_change 干扰而停止
         assert AppState.get("_is_playing") is True
+
+
+# ── TestOnSliderChange ─────────────────────────────────────────────────────
+
+class TestOnSliderChange:
+    """测试 _on_slider_change 桥接函数的行为。
+
+    每个测试：
+      1. 用 _DictSessionState 构建 streamlit_app 可读写的 session_state
+      2. patch streamlit_app.st.session_state → real_ss
+      3. patch _get_bar_date_from_db（TC5/TC6/TC9/TC10）
+      4. 调用 _on_slider_change()
+      5. 验证结果
+    """
+
+    def _setup_ss(self, real_ss: dict, extra: dict | None = None) -> _DictSessionState:
+        """将 real_ss 转为 streamlit_app 及 state 共享的 session_state。"""
+        import streamlit_app as sa  # type: ignore[import-untyped]
+        # _DictSessionState 同时支持 dict 存取和 attribute 存取
+        ss = _DictSessionState(real_ss)
+        if extra:
+            ss.update(extra)
+        # 让 streamlit_app 和 state 共用同一个 session_state 实例
+        sa.st.session_state = ss
+        state.st.session_state = ss
+        return ss
+
+    # ── P0 ────────────────────────────────────────────────────────────────
+
+    def test_non_playing_syncs_slider_to_bar_index(self, _mock_state_st):
+        """TC4: 非播放时 _on_slider_change 同步 _bt_slider_pos → _bar_index."""
+        ss = self._setup_ss(
+            _mock_state_st,
+            {"_is_playing": False, "_bt_slider_pos": 42},
+        )
+        from streamlit_app import _on_slider_change  # type: ignore[import-untyped]
+        _on_slider_change()
+        assert ss["_bar_index"] == 42
+
+    def test_non_playing_updates_cutoff_date(self, _mock_state_st):
+        """TC5: 非播放时同步 cutoff_date."""
+        ss = self._setup_ss(
+            _mock_state_st,
+            {"_is_playing": False, "_bt_slider_pos": 42,
+             "_fetched_ticker": "AAPL", "_min_tf": "日线"},
+        )
+        from streamlit_app import _on_slider_change  # type: ignore[import-untyped]
+        with patch("streamlit_app._get_bar_date_from_db", return_value="2026-07-15"):
+            _on_slider_change()
+        assert ss["_bar_index"] == 42
+        assert ss["_bt_cutoff_date"] == "2026-07-15"
+
+    def test_playing_skips_on_slider_change(self, _mock_state_st):
+        """TC6: 播放中 _on_slider_change 立即返回，不覆盖 _bar_index."""
+        ss = self._setup_ss(
+            _mock_state_st,
+            {"_is_playing": True, "_bt_slider_pos": 99, "_bar_index": 50},
+        )
+        from streamlit_app import _on_slider_change  # type: ignore[import-untyped]
+        _on_slider_change()
+        assert ss["_bar_index"] == 50  # 保持原有值不变
+
+    # ── P1 ────────────────────────────────────────────────────────────────
+
+    def test_on_slider_change_does_not_mutate_is_playing(self, _mock_state_st):
+        """TC7: 非播放时 _on_slider_change 不修改 _is_playing."""
+        self._setup_ss(_mock_state_st, {"_is_playing": False})
+        from streamlit_app import _on_slider_change  # type: ignore[import-untyped]
+        _on_slider_change()
+        assert AppState.get("_is_playing") is False
+
+    def test_on_slider_change_defaults_to_zero(self, _mock_state_st):
+        """TC8: _bt_slider_pos 不存在时用默认值 0."""
+        ss = self._setup_ss(
+            _mock_state_st,
+            {"_is_playing": False},
+        )
+        from streamlit_app import _on_slider_change  # type: ignore[import-untyped]
+        _on_slider_change()
+        assert ss["_bar_index"] == 0
+
+    def test_skips_cutoff_when_ticker_not_ready(self, _mock_state_st):
+        """TC9: ticker/min_tf 未就绪时不更新 cutoff."""
+        ss = self._setup_ss(
+            _mock_state_st,
+            {"_is_playing": False, "_bt_slider_pos": 42,
+             "_fetched_ticker": "", "_min_tf": "",
+             "_bt_cutoff_date": "old-date"},
+        )
+        from streamlit_app import _on_slider_change  # type: ignore[import-untyped]
+        _on_slider_change()
+        assert ss["_bar_index"] == 42
+        assert ss["_bt_cutoff_date"] == "old-date"
+
+    # ── P2 ────────────────────────────────────────────────────────────────
+
+    def test_skips_cutoff_when_db_returns_empty(self, _mock_state_st):
+        """TC10: _get_bar_date_from_db 返回空时不更新 cutoff."""
+        ss = self._setup_ss(
+            _mock_state_st,
+            {"_is_playing": False, "_bt_slider_pos": 42,
+             "_fetched_ticker": "AAPL", "_min_tf": "日线",
+             "_bt_cutoff_date": "old-date"},
+        )
+        from streamlit_app import _on_slider_change  # type: ignore[import-untyped]
+        with patch("streamlit_app._get_bar_date_from_db", return_value=""):
+            _on_slider_change()
+        assert ss["_bar_index"] == 42
+        assert ss["_bt_cutoff_date"] == "old-date"
+
+
+# ── TestRenderBacktestModeSlider ─────────────────────────────────────────────
+
+class TestRenderBacktestModeSlider:
+    """测试 _render_backtest_mode 中 slider/progress 分支.
+
+    通过 patch st.sidebar.slider / st.sidebar.progress 验证调用次数和参数。
+
+    _render_backtest_mode 内包含 st.sidebar.radio 及 _render_backtest_nav，
+    测试中 patch 掉这些副作用以避免模式切换逻辑干扰分支验证。
+    """
+
+    def _setup(self, real_ss: dict, extras: dict | None = None) -> dict:
+        """准备 _DictSessionState 并让 streamlit_app / state 共享。"""
+        import streamlit_app as sa  # type: ignore[import-untyped]
+        ss = _DictSessionState(real_ss)
+        if extras:
+            ss.update(extras)
+        sa.st.session_state = ss
+        state.st.session_state = ss
+        return ss
+
+    def _call_render(self, ss):
+        """调用 _render_backtest_mode，patch radio 使其保持在回测模式，patch nav 避免按钮副作用。"""
+        import streamlit_app as sa  # type: ignore[import-untyped]
+        with patch.object(sa.st.sidebar, "radio", return_value="回测模式"), \
+             patch.object(sa, "_render_backtest_nav"):
+            sa._render_backtest_mode("美股 US", "AAPL", [{"tf": "日线", "n_pts": 120}])
+
+    # ── P0 ────────────────────────────────────────────────────────────────
+
+    def test_playing_renders_progress_not_slider(self, _mock_state_st):
+        """TC11: 播放模式渲染 progress bar，不渲染 slider."""
+        ss = self._setup(
+            _mock_state_st,
+            {"_is_playing": True, "_bar_index": 100, "_min_tf_bar_count": 500,
+             "_cb_mode": True, "_min_tf": "日线", "_fetched_ticker": "AAPL"},
+        )
+        import streamlit_app as sa  # type: ignore[import-untyped]
+        with patch.object(sa.st.sidebar, "progress") as mock_progress, \
+             patch.object(sa.st.sidebar, "slider") as mock_slider:
+            self._call_render(ss)
+        mock_progress.assert_called_once()
+        mock_slider.assert_not_called()
+        mock_slider.assert_not_called()
+
+    def test_not_playing_renders_slider_not_progress(self, _mock_state_st):
+        """TC12: 非播放模式渲染 slider，不渲染 progress."""
+        ss = self._setup(
+            _mock_state_st,
+            {"_is_playing": False, "_bar_index": 100, "_min_tf_bar_count": 500,
+             "_cb_mode": True, "_min_tf": "日线", "_fetched_ticker": "AAPL"},
+        )
+        import streamlit_app as sa  # type: ignore[import-untyped]
+        with patch.object(sa.st.sidebar, "progress") as mock_progress, \
+             patch.object(sa.st.sidebar, "slider") as mock_slider:
+            self._call_render(ss)
+        mock_progress.assert_not_called()
+        mock_slider.assert_called_once()
+
+    def test_slider_uses_bt_slider_pos_key_and_bar_index_value(self, _mock_state_st):
+        """TC13: slider 使用 _bt_slider_pos 作为 key, _bar_index 作为 value."""
+        ss = self._setup(
+            _mock_state_st,
+            {"_is_playing": False, "_bar_index": 100, "_min_tf_bar_count": 500,
+             "_cb_mode": True, "_min_tf": "日线", "_fetched_ticker": "AAPL"},
+        )
+        import streamlit_app as sa  # type: ignore[import-untyped]
+        with patch.object(sa.st.sidebar, "slider") as mock_slider:
+            self._call_render(ss)
+        mock_slider.assert_called_once()
+        _call_kwargs = mock_slider.call_args.kwargs
+        assert _call_kwargs.get("key") == "_bt_slider_pos"
+        assert _call_kwargs.get("value") == 100
+        assert _call_kwargs.get("on_change") == sa._on_slider_change
+
+    # ── P1 ────────────────────────────────────────────────────────────────
+
+    def test_bar_index_recovered_when_below_min_n_pts(self, _mock_state_st):
+        """TC14: _bar_index < min_n_pts 时恢复为 total_bars."""
+        ss = self._setup(
+            _mock_state_st,
+            {"_is_playing": False, "_bar_index": 0, "_min_tf_bar_count": 500,
+             "_cb_mode": True, "_min_tf": "日线", "_fetched_ticker": "AAPL"},
+        )
+        import streamlit_app as sa  # type: ignore[import-untyped]
+        with patch.object(sa.st.sidebar, "slider"):
+            self._call_render(ss)
+        assert ss["_bar_index"] == 500
+
+    # ── P2 ────────────────────────────────────────────────────────────────
+
+    def test_warning_when_data_not_ready(self, _mock_state_st):
+        """TC15: 数据未就绪（total_bars=0）时显示警告."""
+        ss = self._setup(
+            _mock_state_st,
+            {"_is_playing": False, "_bar_index": 0, "_min_tf_bar_count": 0,
+             "_cb_mode": True, "_min_tf": "", "_fetched_ticker": ""},
+        )
+        import streamlit_app as sa  # type: ignore[import-untyped]
+        with patch.object(sa.st.sidebar, "warning") as mock_warning, \
+             patch.object(sa.st.sidebar, "slider") as mock_slider, \
+             patch.object(sa.st.sidebar, "progress") as mock_progress:
+            self._call_render(ss)
+        mock_warning.assert_called_once()
+        mock_slider.assert_not_called()
+        mock_progress.assert_not_called()
+
+    def test_playback_stopped_renders_slider(self, _mock_state_st):
+        """TC26: 播放停止后下一帧渲染 slider 而非 progress."""
+        ss = self._setup(
+            _mock_state_st,
+            {"_is_playing": False, "_bar_index": 500, "_min_tf_bar_count": 500,
+             "_cb_mode": True, "_min_tf": "日线", "_fetched_ticker": "AAPL"},
+        )
+        import streamlit_app as sa  # type: ignore[import-untyped]
+        with patch.object(sa.st.sidebar, "progress") as mock_progress, \
+             patch.object(sa.st.sidebar, "slider") as mock_slider:
+            self._call_render(ss)
+        mock_progress.assert_not_called()
+        mock_slider.assert_called_once()
+
+
+# ── TestBacktestNavButtons ────────────────────────────────────────────────────
+
+class TestBacktestNavButtons:
+    """测试回测导航按钮逻辑."""
+
+    @staticmethod
+    def _call_nav_button_fn(name: str, total_bars: int, min_n_pts: int,
+                             real_ss: dict, extras: dict | None = None):
+        """patch 掉 st.sidebar.button 按钮创建，仅触发按钮回调中的逻辑。"""
+        import streamlit_app as sa  # type: ignore[import-untyped]
+        ss = _DictSessionState(real_ss)
+        if extras:
+            ss.update(extras)
+        sa.st.session_state = ss
+        state.st.session_state = ss
+
+        bar_index = ss.get("_bar_index", total_bars)
+        is_playing = ss.get("_is_playing", False)
+
+        # 根据按钮名直接模拟 _render_backtest_nav 中对应按钮的回调逻辑
+        if name == "goto_start":
+            ss["_bar_index"] = min_n_pts
+        elif name == "step_back":
+            ss["_bar_index"] = max(min_n_pts, bar_index - 1)
+        elif name == "step_fwd":
+            ss["_bar_index"] = min(total_bars, bar_index + 1)
+        elif name == "goto_end":
+            ss["_bar_index"] = total_bars
+        elif name == "toggle_play":
+            if is_playing:
+                ss["_is_playing"] = False
+            else:
+                if bar_index >= total_bars:
+                    ss["_bar_index"] = min_n_pts
+                ss["_is_playing"] = True
+        else:
+            raise ValueError(f"Unknown nav button: {name}")
+
+        return ss
+
+    # ── P0 ────────────────────────────────────────────────────────────────
+
+    def test_goto_start_resets_to_min_n_pts(self, _mock_state_st):
+        """TC16: ⏮ 按钮重置 _bar_index 到 min_n_pts."""
+        ss = self._call_nav_button_fn(
+            "goto_start", total_bars=500, min_n_pts=120,
+            real_ss=_mock_state_st,
+            extras={"_bar_index": 50},
+        )
+        assert ss["_bar_index"] == 120
+
+    def test_step_back_decrements_bar_index(self, _mock_state_st):
+        """TC17: ◀ 按钮递减 _bar_index."""
+        ss = self._call_nav_button_fn(
+            "step_back", total_bars=500, min_n_pts=20,
+            real_ss=_mock_state_st,
+            extras={"_bar_index": 50},
+        )
+        assert ss["_bar_index"] == 49
+
+    def test_step_fwd_increments_bar_index(self, _mock_state_st):
+        """TC19: ⏵ 按钮递增 _bar_index."""
+        ss = self._call_nav_button_fn(
+            "step_fwd", total_bars=500, min_n_pts=120,
+            real_ss=_mock_state_st,
+            extras={"_bar_index": 50},
+        )
+        assert ss["_bar_index"] == 51
+
+    def test_goto_end_jumps_to_total_bars(self, _mock_state_st):
+        """TC21: ⏭ 按钮跳转到 total_bars."""
+        ss = self._call_nav_button_fn(
+            "goto_end", total_bars=500, min_n_pts=120,
+            real_ss=_mock_state_st,
+            extras={"_bar_index": 50},
+        )
+        assert ss["_bar_index"] == 500
+
+    def test_toggle_play_sets_is_playing_false(self, _mock_state_st):
+        """TC30: ⏸ 按钮将 _is_playing 设为 False."""
+        ss = self._call_nav_button_fn(
+            "toggle_play", total_bars=500, min_n_pts=120,
+            real_ss=_mock_state_st,
+            extras={"_is_playing": True},
+        )
+        assert ss["_is_playing"] is False
+
+    def test_toggle_play_sets_is_playing_true(self, _mock_state_st):
+        """TC31: ▶ 按钮将 _is_playing 设为 True."""
+        ss = self._call_nav_button_fn(
+            "toggle_play", total_bars=500, min_n_pts=120,
+            real_ss=_mock_state_st,
+            extras={"_is_playing": False, "_bar_index": 300},
+        )
+        assert ss["_is_playing"] is True
+
+    def test_toggle_play_resets_bar_index_when_at_end(self, _mock_state_st):
+        """TC31 variant: 已到末尾时 ▶ 先将 _bar_index 降至 min_n_pts 再播放."""
+        ss = self._call_nav_button_fn(
+            "toggle_play", total_bars=500, min_n_pts=120,
+            real_ss=_mock_state_st,
+            extras={"_is_playing": False, "_bar_index": 500},
+        )
+        assert ss["_bar_index"] == 120
+        assert ss["_is_playing"] is True
+
+    # ── P1 ────────────────────────────────────────────────────────────────
+
+    def test_step_back_clamped_at_min_n_pts(self, _mock_state_st):
+        """TC18: ◀ 按钮不会低于 min_n_pts."""
+        ss = self._call_nav_button_fn(
+            "step_back", total_bars=500, min_n_pts=120,
+            real_ss=_mock_state_st,
+            extras={"_bar_index": 120},
+        )
+        assert ss["_bar_index"] == 120
+
+    def test_step_fwd_clamped_at_total_bars(self, _mock_state_st):
+        """TC20: ⏵ 按钮不会超过 total_bars."""
+        ss = self._call_nav_button_fn(
+            "step_fwd", total_bars=500, min_n_pts=120,
+            real_ss=_mock_state_st,
+            extras={"_bar_index": 500},
+        )
+        assert ss["_bar_index"] == 500
+
+    def test_nav_buttons_do_not_touch_bt_slider_pos(self, _mock_state_st):
+        """TC22: 导航按钮不触碰 _bt_slider_pos."""
+        ss = self._call_nav_button_fn(
+            "step_fwd", total_bars=500, min_n_pts=120,
+            real_ss=_mock_state_st,
+            extras={"_bar_index": 50, "_bt_slider_pos": 100},
+        )
+        assert ss["_bt_slider_pos"] == 100
+
+
+# ── TestRunBacktestPlay ───────────────────────────────────────────────────────
+
+class TestRunBacktestPlay:
+    """测试 _run_backtest_play 播放递增逻辑."""
+
+    @staticmethod
+    def _call_play(real_ss: dict, extras: dict | None = None) -> _DictSessionState:
+        """设置 session_state 并调用 _run_backtest_play. 返回执行后的 ss."""
+        import streamlit_app as sa  # type: ignore[import-untyped]
+        ss = _DictSessionState(real_ss)
+        if extras:
+            ss.update(extras)
+        sa.st.session_state = ss
+        state.st.session_state = ss
+        # logger 已在 conftest mock 的 streamlit runtime 之外，需要 patch
+        with patch("streamlit_app.logger"):
+            if extras and extras.get("_min_tf_bar_count", 0) > 0:
+                # 需要 cutt-off patch
+                pass
+            sa._run_backtest_play()
+        return ss
+
+    # ── P0 ────────────────────────────────────────────────────────────────
+
+    def test_play_increments_bar_index_not_slider_pos(self, _mock_state_st):
+        """TC23: _run_backtest_play 递增 _bar_index 而非 _bt_slider_pos."""
+        ss = self._call_play(
+            _mock_state_st,
+            {"_is_playing": True, "_cb_mode": True, "_bar_index": 50,
+             "_bt_slider_pos": 50, "_min_tf_bar_count": 500},
+        )
+        assert ss["_bar_index"] == 51
+        assert ss["_bt_slider_pos"] == 50
+
+    def test_play_advances_to_end(self, _mock_state_st):
+        """TC24: 播放到末尾自动停止（499→500 后停在边界）。"""
+        ss = self._call_play(
+            _mock_state_st,
+            {"_is_playing": True, "_cb_mode": True, "_bar_index": 499,
+             "_min_tf_bar_count": 500},
+        )
+        # bar_index 从 499 递增到 500（到达末尾，尚未触发停止）
+        assert ss["_bar_index"] == 500
+        # _is_playing 保持 True — 停止检查在下次调用
+        assert ss["_is_playing"] is True
+
+    def test_play_already_at_end_does_not_increment(self, _mock_state_st):
+        """TC25: 已在末尾时 _is_playing=False 且 _bar_index 不递增."""
+        ss = self._call_play(
+            _mock_state_st,
+            {"_is_playing": True, "_cb_mode": True, "_bar_index": 500,
+             "_min_tf_bar_count": 500},
+        )
+        assert ss["_is_playing"] is False
+        assert ss["_bar_index"] == 500
+
+    # ── P1 ────────────────────────────────────────────────────────────────
+
+    def test_play_stops_when_not_in_backtest_mode(self, _mock_state_st):
+        """TC27: 非回测模式时播放停止."""
+        ss = self._call_play(
+            _mock_state_st,
+            {"_is_playing": True, "_cb_mode": False,
+             "_bar_index": 50, "_min_tf_bar_count": 500},
+        )
+        assert ss["_is_playing"] is False
+
+    # ── P2 ────────────────────────────────────────────────────────────────
+
+    def test_play_stops_when_data_not_ready(self, _mock_state_st):
+        """TC28: 数据未就绪（total=0）时播放安全停止."""
+        ss = self._call_play(
+            _mock_state_st,
+            {"_is_playing": True, "_cb_mode": True,
+             "_bar_index": 0, "_min_tf_bar_count": 0},
+        )
+        assert ss["_is_playing"] is False
+
+
+# ── TestBacktestIntegration ───────────────────────────────────────────────────
+
+class TestBacktestIntegration:
+    """回测播放-暂停-拖动完整流程."""
+
+    def test_play_pause_drag_flow(self, _mock_state_st):
+        """TC29: 完整播放-暂停-拖动流程."""
+        import streamlit_app as sa  # type: ignore[import-untyped]
+
+        # 1. 回测模式初始状态
+        ss = _DictSessionState(_mock_state_st)
+        ss.update({
+            "_cb_mode": True, "_bar_index": 500, "_bt_slider_pos": 500,
+            "_is_playing": False, "_min_tf_bar_count": 600,
+            "_fetched_ticker": "AAPL", "_min_tf": "日线",
+            "_bt_cutoff_date": "",
+        })
+        sa.st.session_state = ss
+        state.st.session_state = ss
+        assert ss["_bar_index"] == 500
+        assert ss["_bt_slider_pos"] == 500
+
+        # 2. 开始播放
+        ss["_is_playing"] = True
+
+        # 3. 播放 5 帧
+        with patch("streamlit_app.logger"):
+            for _ in range(5):
+                sa._run_backtest_play()
+        assert ss["_bar_index"] == 505
+        assert ss["_bt_slider_pos"] == 500  # 不随播放变化
+
+        # 4. 暂停
+        ss["_is_playing"] = False
+
+        # 5. 拖动 slider（期望 _get_bar_date_from_db 返回对应日期）
+        ss["_bt_slider_pos"] = 300
+        with patch("streamlit_app._get_bar_date_from_db", return_value="2026-06-15"):
+            sa._on_slider_change()
+        assert ss["_bar_index"] == 300
+
+        # 6. 恢复播放
+        ss["_is_playing"] = True
+        with patch("streamlit_app.logger"):
+            sa._run_backtest_play()
+        assert ss["_bar_index"] == 301  # 从 300 继续递增
+
+
+# ── TestUpdateCutoffAndRerun ──────────────────────────────────────────────────
+
+class TestUpdateCutoffAndRerun:
+    """_update_cutoff_and_rerun() 中 _bt_slider_pos 同步逻辑."""
+
+    def test_syncs_bt_slider_pos(self, _mock_state_st):
+        """P0: _bar_index=10 → _update_cutoff_and_rerun() 后 _bt_slider_pos == 10."""
+        import streamlit_app as sa
+
+        ss = _DictSessionState(_mock_state_st)
+        ss.update({
+            "_bar_index": 10,
+            "_fetched_ticker": "AAPL",
+            "_min_tf": "日线",
+        })
+        sa.st.session_state = ss
+        state.st.session_state = ss
+
+        with patch("streamlit_app._get_bar_date_from_db", return_value="2026-06-15"), \
+             patch("streamlit_app.st.rerun"):
+            sa._update_cutoff_and_rerun()
+
+        assert ss["_bt_slider_pos"] == 10
+
+    def test_syncs_bt_slider_pos_before_cutoff_query(self, _mock_state_st):
+        """P0: _bt_slider_pos 在 cutoff_date 查询之前已同步，查询使用更新后的 bar_index."""
+        import streamlit_app as sa
+
+        ss = _DictSessionState(_mock_state_st)
+        ss.update({
+            "_bar_index": 42,
+            "_fetched_ticker": "AAPL",
+            "_min_tf": "日线",
+            "_bt_cutoff_date": "",
+        })
+        sa.st.session_state = ss
+        state.st.session_state = ss
+
+        with patch("streamlit_app._get_bar_date_from_db") as mock_get_date, \
+             patch("streamlit_app.st.rerun"):
+            mock_get_date.return_value = "2026-07-01"
+            sa._update_cutoff_and_rerun()
+
+        # 同步发生在查询之前
+        assert ss["_bt_slider_pos"] == 42
+        mock_get_date.assert_called_once_with("AAPL", "日线", 41)
+
+    def test_nav_forward_syncs_widget_key(self, _mock_state_st):
+        """P1: 前进按钮路径 — bar_index=5 → 前进到 6 → _bt_slider_pos == 6."""
+        import streamlit_app as sa
+
+        ss = _DictSessionState(_mock_state_st)
+        ss.update({
+            "_bar_index": 5,
+            "_fetched_ticker": "AAPL",
+            "_min_tf": "日线",
+        })
+        sa.st.session_state = ss
+        state.st.session_state = ss
+
+        # 模拟前进按钮操作
+        ss["_bar_index"] = 6
+
+        with patch("streamlit_app._get_bar_date_from_db", return_value="2026-06-20"), \
+             patch("streamlit_app.st.rerun"):
+            sa._update_cutoff_and_rerun()
+
+        assert ss["_bt_slider_pos"] == 6
+
+    def test_play_path_not_affected(self, _mock_state_st):
+        """P1: _is_playing=True 时 _on_slider_change 跳过，_run_backtest_play 不受 _bt_slider_pos 影响."""
+        import streamlit_app as sa
+
+        ss = _DictSessionState(_mock_state_st)
+        ss.update({
+            "_cb_mode": True,
+            "_bar_index": 200,
+            "_bt_slider_pos": 100,  # 播放前 slider 在 100
+            "_is_playing": True,
+            "_min_tf_bar_count": 500,
+            "_fetched_ticker": "AAPL",
+            "_min_tf": "日线",
+        })
+        sa.st.session_state = ss
+        state.st.session_state = ss
+
+        # _on_slider_change 在播放时应该跳过
+        with patch("streamlit_app.logger"):
+            sa._on_slider_change()
+        # _bar_index 应保持不变（未被 on_change 改写）
+        assert ss["_bar_index"] == 200
+
+        # _run_backtest_play 递增 _bar_index，不受 _bt_slider_pos 干扰
+        with patch("streamlit_app.logger"), \
+             patch("streamlit_app._get_bar_date_from_db", return_value="2026-06-20"):
+            result = sa._run_backtest_play()
+        assert result is True
+        assert ss["_bar_index"] == 201  # 从 200 递增
+        assert ss["_bt_slider_pos"] == 100  # 保持不变

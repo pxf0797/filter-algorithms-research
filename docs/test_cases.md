@@ -1,6 +1,6 @@
 # 多周期股票滤波分析工具 — 测试用例文档
 
-> 自动生成于 2026-06-28 (更新于 2026-07-04) | 测试总数: 625（pytest 收集，不含 test_streamlit_app.py 的 25 个 mock 测试） | Python 3.12 + pytest
+> 自动生成于 2026-06-28 (更新于 2026-07-05) | 测试总数: 662（pytest 收集，不含 test_streamlit_app.py 的 25 个 mock 测试） | Python 3.12 + pytest
 
 ## 文档说明
 
@@ -43,9 +43,9 @@
 
 | 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
 |--------|---------|---------|---------|---------|
-| TC-CONFIG-015 | 保存并加载 ticker 配置 | temp_config_db | save_ticker_config → load_ticker_config | 加载的数据与保存的一致 |
-| TC-CONFIG-016 | 保存 ticker 配置并关联预设 | temp_config_db，已有预设 | save_ticker_config 指定 preset_id | 配置正确关联到预设 |
-| TC-CONFIG-017 | 加载不存在的 ticker 配置 | temp_config_db | load_ticker_config(不存在的ticker) | 返回空/默认配置 |
+| TC-CONFIG-058 | 保存并加载 ticker 配置 | temp_config_db | save_ticker_config → load_ticker_config | 加载的数据与保存的一致 |
+| TC-CONFIG-059 | 保存 ticker 配置并关联预设 | temp_config_db，已有预设 | save_ticker_config 指定 preset_id | 配置正确关联到预设 |
+| TC-CONFIG-060 | 加载不存在的 ticker 配置 | temp_config_db | load_ticker_config(不存在的ticker) | 返回空/默认配置 |
 
 #### 历史记录 (`TestHistory`)
 
@@ -1479,7 +1479,7 @@
 
 ## 8. 回测模式测试
 
-### 8.1 回测功能 (`test_backtest.py`) — 22 用例
+### 8.1 回测功能 (`test_backtest.py`) — 53 用例
 
 #### 模式切换 (`TestBacktestModeSwitch`)
 
@@ -1543,6 +1543,82 @@
 
 ---
 
+### 8.2 回测播放状态分离 (`test_backtest.py` / `test_state.py`) — 31 用例
+
+#### 状态分离测试 (`TestBacktestSliderKeys` — `test_state.py`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-BT-026 | 验证 `_bt_slider_pos` 在 `SYSTEM_KEYS` 中声明且默认值为 0 | `real_session_state` fixture | 读取 `state.SYSTEM_KEYS["_bt_slider_pos"]` | 键存在且值为 0 |
+| TC-BT-027 | 验证 `AppState.init_defaults()` 初始化 `_bt_slider_pos` 为 0 | `real_session_state` fixture + SYSTEM_KEYS 已清空 backtest 相关键 | 调用 `AppState.init_defaults()` | `st.session_state._bt_slider_pos == 0` |
+| TC-BT-028 | 验证 `_bt_slider_pos` 和 `_bar_index` 独立存储互不影响 | `real_session_state` fixture | `AppState.set("_bt_slider_pos", 50); AppState.set("_bar_index", 100)` | `AppState.get("_bt_slider_pos") == 50` 且 `AppState.get("_bar_index") == 100` |
+
+#### 桥接函数测试 (`TestOnSliderChange` — `test_backtest.py`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-BT-029 | `_on_slider_change` 非播放时同步 `_bt_slider_pos` 到 `_bar_index` | 设置 `_is_playing=False`, `_bt_slider_pos=42` | 调用 `_on_slider_change()` | `st.session_state._bar_index == 42` |
+| TC-BT-030 | `_on_slider_change` 非播放时更新 `_bt_cutoff_date` | 设置 `_is_playing=False`, `_bt_slider_pos=42`, `_fetched_ticker="AAPL"`, `_min_tf="日线"`；patch `_get_bar_date_from_db` 返回 `"2026-07-15"` | 调用 `_on_slider_change()` | `_get_bar_date_from_db("AAPL", "日线", 41)` 被调用；`AppState.get("_bt_cutoff_date") == "2026-07-15"` |
+| TC-BT-031 | `_on_slider_change` 播放中立即返回，不覆盖 `_bar_index` | 设置 `_is_playing=True`, `_bt_slider_pos=99`, `_bar_index=50` | 调用 `_on_slider_change()` | `st.session_state._bar_index` 保持 50 不变 |
+| TC-BT-032 | `_on_slider_change` 不修改 `_is_playing`（无副作用） | 设置 `_is_playing=False` | 调用 `_on_slider_change()` | `AppState.get("_is_playing")` 保持 False |
+| TC-BT-033 | `_on_slider_change` 在 `_bt_slider_pos` 不存在时使用默认值 0 | `state.st` mock（`_bt_slider_pos` 未设置）；`_is_playing=False` | 调用 `_on_slider_change()` | `st.session_state._bar_index == 0`，不抛异常 |
+| TC-BT-034 | `_on_slider_change` 在 ticker/min_tf 未就绪时不更新 cutoff | 设置 `_is_playing=False`, `_bt_slider_pos=42`, `_fetched_ticker=""`, `_min_tf=""` | 调用 `_on_slider_change()` | `st.session_state._bar_index == 42`；`_bt_cutoff_date` 不更新 |
+| TC-BT-035 | `_on_slider_change` 在 `_get_bar_date_from_db` 返回空时不更新 cutoff | patch `_get_bar_date_from_db` 返回 `""`；设置 `_fetched_ticker="AAPL"`, `_min_tf="日线"` | 调用 `_on_slider_change()` | `_bar_index` 正确更新；`_bt_cutoff_date` 保持原值不变 |
+
+#### 渲染分支测试 (`TestRenderBacktestModeSlider` — `test_backtest.py`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-BT-036 | 播放模式使用 progress bar 而非 slider | `AppState.get("_is_playing") == True`, `_min_tf_bar_count > 0` | 渲染 `_render_backtest_mode()` | 执行 `st.sidebar.progress()` 分支；不执行 `st.sidebar.slider()` 分支 |
+| TC-BT-037 | 非播放模式使用 slider 而非 progress bar | `AppState.get("_is_playing") == False`, `_min_tf_bar_count > 0` | 渲染 `_render_backtest_mode()` | `st.sidebar.slider()` 被调用且 `key="_bt_slider_pos"`；`st.sidebar.progress()` 不被调用 |
+| TC-BT-038 | Slider 使用 `_bt_slider_pos` 作为 key，`_bar_index` 作为 value | 非播放模式，`_bar_index=100`, `total_bars=500`, `min_n_pts=120` | patch `st.sidebar.slider`，捕获调用参数 | `key="_bt_slider_pos"`, `value=100`, `on_change=_on_slider_change` |
+| TC-BT-039 | 非播放模式 `_bar_index < min_n_pts` 时恢复为 `total_bars` | `_is_playing=False`, `_bar_index=0`, `_min_tf_bar_count=500`, `min_n_pts=120` | 渲染回测模式 | `st.session_state._bar_index` 被修正为 500 |
+| TC-BT-040 | 数据未就绪时显示警告而非 slider | `_min_tf_bar_count=0` 或 `_min_tf=""` | 渲染回测模式 | 渲染 `st.sidebar.warning("回测数据未就绪...")`；不渲染 slider 或 progress |
+
+#### 导航按钮回归测试 (`TestBacktestNavButtons` — `test_backtest.py`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-BT-041 | ⏮ 按钮重置 `_bar_index` 到 `min_n_pts` | `_bar_index=50`, `min_n_pts=20` | 执行 ⏮ 按钮逻辑 | `st.session_state._bar_index == 20` |
+| TC-BT-042 | ◀ 按钮递减 `_bar_index` | `_bar_index=50`, `min_n_pts=20` | 执行 ◀ 按钮逻辑 | `st.session_state._bar_index == 49` |
+| TC-BT-043 | ◀ 按钮不会低于 `min_n_pts`（clamp） | `_bar_index=20`, `min_n_pts=20` | 执行 ◀ 按钮逻辑 | `st.session_state._bar_index == 20` |
+| TC-BT-044 | ⏵ 按钮递增 `_bar_index` | `_bar_index=50`, `total_bars=500` | 执行 ⏵ 按钮逻辑 | `st.session_state._bar_index == 51` |
+| TC-BT-045 | ⏵ 按钮不会超过 `total_bars`（clamp） | `_bar_index=500`, `total_bars=500` | 执行 ⏵ 按钮逻辑 | `st.session_state._bar_index == 500` |
+| TC-BT-046 | ⏭ 按钮跳转到 `total_bars` | `_bar_index=50`, `total_bars=500` | 执行 ⏭ 按钮逻辑 | `st.session_state._bar_index == 500` |
+| TC-BT-047 | 导航按钮不修改 `_bt_slider_pos` | 操作前 `_bt_slider_pos=100` | 执行任意导航按钮逻辑 | `_bt_slider_pos` 保持 100 不变 |
+
+#### 播放流程测试 (`TestRunBacktestPlay` — `test_backtest.py`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-BT-048 | `_run_backtest_play` 递增 `_bar_index` 而非 `_bt_slider_pos` | `_is_playing=True`, `_cb_mode=True`, `_bar_index=50`, `_bt_slider_pos=50`, `_min_tf_bar_count=500` | 调用 `_run_backtest_play()` | `_bar_index == 51`；`_bt_slider_pos == 50`（不变）；返回值 True |
+| TC-BT-049 | 播放到末尾自动停止 | `_is_playing=True`, `_bar_index=499`, `total=500` | 调用 `_run_backtest_play()` | `AppState.get("_is_playing") == False`；返回值 False |
+| TC-BT-050 | 播放停止后 `_is_playing` 设为 False | `_is_playing=True`, `_bar_index=500`, `total=500`（已到末尾） | 调用 `_run_backtest_play()` | `AppState.get("_is_playing") == False`；`_bar_index` 不递增 |
+| TC-BT-051 | 播放停止后渲染切回 slider 分支 | `_is_playing` 从 True 切换到 False，`_bar_index=500`, `total_bars=500` | 渲染 `_render_backtest_mode()` | 走 slider 渲染分支；`st.sidebar.progress()` 不被调用 |
+| TC-BT-052 | 非回测模式时停止播放 | `_is_playing=True`, `_cb_mode=False` | 调用 `_run_backtest_play()` | `AppState.get("_is_playing")` 被设为 False；返回值 False |
+| TC-BT-053 | 数据未就绪时播放安全停止 | `_is_playing=True`, `_min_tf_bar_count=0` | 调用 `_run_backtest_play()` | `AppState.get("_is_playing")` 被设为 False；返回值 False |
+
+#### 集成场景测试 (`TestBacktestIntegration` — `test_backtest.py`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-BT-054 | 完整播放-暂停-拖动-恢复播放流程 | `_cb_mode=True`, `_bar_index=500`, `_bt_slider_pos=500`; patch `_get_bar_date_from_db` | (1) 开始播放: `_is_playing=True` (2) 播放 x5: `_run_backtest_play()` (3) 暂停: `_is_playing=False` (4) 拖动 slider: `_bt_slider_pos=300`, `_on_slider_change()` (5) 恢复播放 | 步骤 2 后 `_bar_index=505`, `_bt_slider_pos` 不变；步骤 4 后 `_bar_index=300`；步骤 5 后 `_bar_index` 从 300 继续递增 |
+| TC-BT-055 | ⏸ 按钮将 `_is_playing` 设为 False | `_is_playing=True` | 触发 ⏸ 按钮逻辑 | `AppState.get("_is_playing") == False` |
+| TC-BT-056 | ▶ 按钮将 `_is_playing` 设为 True | `_is_playing=False`；若 `_bar_index >= total_bars` 则先重置 | 触发 ▶ 按钮逻辑 | `AppState.get("_is_playing") == True` 或 `_bar_index` 被降至 `min_n_pts` 后 `_is_playing=True` |
+
+#### 导航按钮 Widget Key 同步 (`test_backtest.py`) — 6 用例
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-BT-057 | _update_cutoff_and_rerun 同步 _bt_slider_pos | 回测模式，_bar_index=10 | 调用 _update_cutoff_and_rerun() | _bt_slider_pos 更新为 10 |
+| TC-BT-058 | ⏵前进按钮后 slider widget key 同步 | 回测模式，_bar_index=5 | 点击前进按钮 | _bt_slider_pos = 6 |
+| TC-BT-059 | ◀后退按钮后 slider widget key 同步 | 回测模式，_bar_index=5 | 点击后退按钮 | _bt_slider_pos = 4 |
+| TC-BT-060 | ⏮跳到开头后 widget key 同步 | 回测模式 | 点击跳到开头 | _bt_slider_pos = min_n_pts |
+| TC-BT-061 | ⏭跳到末尾后 widget key 同步 | 回测模式 | 点击跳到末尾 | _bt_slider_pos = total_bars |
+| TC-BT-062 | 播放路径 _bt_slider_pos 同步不影响播放 | 播放中 | _bt_slider_pos 被导航修改 | 播放不受影响，_on_slider_change 跳过 |
+
+---
+
 ## 附录
 
 ### A. 测试运行命令
@@ -1580,7 +1656,7 @@ pytest tests/ --cov=. --cov-report=html
 |------|------|---------|--------|
 | 数据持久层 | test_config_db.py | 16 | 58 |
 | | test_db.py | 14 | 57 |
-| | test_state.py | 11 | 59 |
+| | test_state.py | 12 | 62 |
 | 算法核心 | test_filters.py | 6 | 22 |
 | | test_signals.py | 2 | 16 |
 | | test_strategy.py | 5 | 18 |
@@ -1598,5 +1674,5 @@ pytest tests/ --cov=. --cov-report=html
 | 边界与参数 | test_boundary.py | 11 | 30 |
 | | test_param_export_import.py | 5 | 13 |
 | 数据加载 | test_data_loader.py | 5 | 30 |
-| **回测模式** | **test_backtest.py** | **6** | **22** |
-| **合计** | **21 文件** | **145** | **625** |
+| **回测模式** | **test_backtest.py** | **6** | **56** |
+| **合计** | **21 文件** | **146** | **662** |

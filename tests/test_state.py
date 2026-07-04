@@ -476,3 +476,34 @@ class TestShortcutFunctions:
         cfg = state.get_view_cfg(0)
         assert isinstance(cfg, dict)
         assert "tf" in cfg
+
+
+# ====================================================================
+# Backtest Slider Key 分离
+# ====================================================================
+
+class TestBacktestSliderKeys:
+    """验证 _bt_slider_pos 作为独立 Slider Widget Key 存在且与 _bar_index 分离。"""
+
+    def test_bt_slider_pos_in_system_keys_default_zero(self):
+        """TC1: _bt_slider_pos 在 SYSTEM_KEYS 中声明且默认值为 0."""
+        assert "_bt_slider_pos" in SYSTEM_KEYS
+        assert SYSTEM_KEYS["_bt_slider_pos"] == 0
+
+    def test_init_defaults_sets_bt_slider_pos(self, real_session_state):
+        """TC2: AppState.init_defaults() 初始化 _bt_slider_pos 为 0."""
+        # 清空 SYSTEM_KEYS 中所有回测相关键
+        for k in list(real_session_state):
+            del real_session_state[k]
+        AppState.init_defaults()
+        assert real_session_state.get("_bt_slider_pos") == 0
+
+    def test_bt_slider_pos_independent_from_bar_index(self, real_session_state):
+        """TC3: _bt_slider_pos 和 _bar_index 独立存储，互不影响."""
+        AppState.set("_bt_slider_pos", 50)
+        AppState.set("_bar_index", 100)
+        assert AppState.get("_bt_slider_pos") == 50
+        assert AppState.get("_bar_index") == 100
+        # 修改一个不影响另一个
+        AppState.set("_bt_slider_pos", 99)
+        assert AppState.get("_bar_index") == 100
