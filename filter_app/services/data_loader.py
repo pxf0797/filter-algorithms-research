@@ -136,9 +136,34 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
     return np.arange(n, dtype=float), close, result_ohlc, full, None, dates
 
 
-def _sync_to_display(code: str, tf: str, day_offset: int, n_pts: int) -> Tuple[bool, int]:
-    """从 SQLite 按天偏移查询，写入 display parquet。"""
-    df = query_kline(code, tf, n_pts, day_offset=day_offset)
+def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int = 120,
+                     cutoff_date: Optional[str] = None) -> Tuple[bool, int]:
+    """同步数据到 display parquet。
+
+    cutoff_date=None: 浏览模式，取最新 n_pts 条（支持 day_offset 日期偏移）
+    cutoff_date=YYYY-MM-DD: 回测模式，取截止到 cutoff_date 的最后 n_pts 条（日期对齐）
+    """
+    if cutoff_date is not None:
+        # 回测模式：查询截止到 cutoff_date 的最后 n_pts 条，按日期对齐
+        from db import get_conn
+        with get_conn() as conn:
+            rows = conn.execute(
+                """SELECT ts, open, high, low, close, volume
+                   FROM kline WHERE ticker=? AND timeframe=? AND ts <= ?
+                   ORDER BY ts DESC LIMIT ?""",
+                (ticker_code, tf, cutoff_date, n_pts),
+            ).fetchall()
+        if rows:
+            rows.reverse()  # DESC → ASC
+            df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+            display_dir = Path(__file__).parent.parent.parent / "data" / "display"
+            display_dir.mkdir(parents=True, exist_ok=True)
+            df.to_parquet(display_dir / f"{tf}.parquet", index=False)
+            return True, len(df)
+        return False, 0
+
+    # 浏览模式：原有逻辑（n_pts 窗口）
+    df = query_kline(ticker_code, tf, n_pts, day_offset=day_offset)
     if len(df) < 5:
         return False, len(df)
     df["Date"] = pd.to_datetime(df["Date"])

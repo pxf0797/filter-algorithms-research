@@ -39,6 +39,13 @@ SYSTEM_KEYS: Dict[str, Any] = {
     "_preset_action_id": None,
     "new_preset_name": "",
     "overwrite_preset": False,
+    # 回测模式状态键
+    "_cb_mode": False,
+    "_bar_index": 0,
+    "_bt_cutoff_date": "",        # 回测截止日期（ISO格式字符串），用于各周期日期对齐截断
+    "_bt_last_ticker": "",        # 上次回测时的 ticker，用于检测切换
+    "_min_tf": "",
+    "_min_tf_bar_count": 0,
 }
 
 # 全局参数 — 已在 main() 中由 widget 初始化，这里只做参考

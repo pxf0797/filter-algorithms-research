@@ -83,10 +83,26 @@ def upsert_kline(ticker: str, tf: str, df: pd.DataFrame):
             logger.debug("Upserted {} recent rows for {}/{}", len(recent), ticker, tf)
 
 
-def query_kline(ticker: str, tf: str, n_pts: int, day_offset: int = 0) -> pd.DataFrame:
-    """查询K线。day_offset>0=前移N天，0=最新。"""
-    logger.debug("Querying kline: ticker={}, tf={}, n_pts={}, day_offset={}", ticker, tf, n_pts, day_offset)
+def query_kline(ticker, tf, n_pts=120, day_offset=0, offset=None):
+    """查询K线。
+    offset=None: 取最新 n_pts 条（浏览模式，支持 day_offset 日期偏移）
+    offset=N:    从第 N 条开始取 n_pts 条（回测模式，窗口滑动，按时间升序返回）
+    """
+    logger.debug("Querying kline: ticker={}, tf={}, n_pts={}, day_offset={}, offset={}",
+                 ticker, tf, n_pts, day_offset, offset)
     with get_conn() as conn:
+        if offset is not None:
+            rows = conn.execute(
+                """SELECT ts, open, high, low, close, volume
+                   FROM kline WHERE ticker=? AND timeframe=?
+                   ORDER BY ts ASC LIMIT ? OFFSET ?""",
+                (ticker, tf, n_pts, int(offset)),
+            ).fetchall()
+            if not rows:
+                return pd.DataFrame()
+            df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+            return df
+
         row = conn.execute(
             "SELECT MAX(ts) FROM kline WHERE ticker=? AND timeframe=?",
             (ticker, tf),

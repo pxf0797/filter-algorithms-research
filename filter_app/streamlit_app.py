@@ -45,6 +45,7 @@ from components.sidebar import (
     _render_params, ALL_TFS, DEFAULT_TFS, TF_HIERARCHY,
 )
 from state import AppState
+from backtest_logger import log_mode_switch, log_bar_navigation, log_data_load, log_error
 
 # ---------------------------------------------------------------------------
 # Page config (must be the first Streamlit command)
@@ -111,20 +112,56 @@ def _date_markers(dates, tf) -> tuple[list, list]:
     return positions, labels
 
 
-def _load_chart_data(market, ticker_code, tf, day_offset, n_pts) -> tuple:
-    """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err)."""
-    _sync_to_display(ticker_code, tf, day_offset, n_pts)
+def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=None, cutoff_date=None) -> tuple:
+    """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err).
+
+    浏览: window_start=None, cutoff_date=None
+    回测: window_start=slider值, cutoff_date=截止日期
+    """
+    if window_start is not None:
+        # 回测模式：按 cutoff_date 日期对齐
+        ok, count = _sync_to_display(ticker_code, tf, n_pts=n_pts, cutoff_date=cutoff_date)
+        if not ok:
+            # parquet 写入失败，直接走 API 回退
+            t, noisy, ohlc, ticker_full, dates, err = _cached_fetch_stock(market, ticker_code, tf, n_pts)
+            # API 回退路径：截断到 n_pts
+            if err is None and window_start is not None and dates is not None and len(dates) > n_pts:
+                t = t[-n_pts:]
+                noisy = noisy[-n_pts:]
+                if hasattr(ohlc, 'iloc'):
+                    ohlc = ohlc.iloc[-n_pts:]
+                dates = dates[-n_pts:]
+            return t, noisy, ohlc, ticker_full, dates, err
+    else:
+        # 浏览模式：取最新 n_pts 条
+        ok, count = _sync_to_display(ticker_code, tf, day_offset=day_offset, n_pts=n_pts)
+        if not ok:
+            # parquet 写入失败，直接走 API 回退
+            return _cached_fetch_stock(market, ticker_code, tf, n_pts)
     display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
     err = None
     if display_path.exists():
         try:
             df = pd.read_parquet(display_path)
-            if "Date" in df.columns and "Close" in df.columns and len(df) >= 5:
+            if "Date" in df.columns and "Close" in df.columns and len(df) >= 2:
                 df["Date"] = pd.to_datetime(df["Date"])
                 df = df.set_index("Date").sort_index()
+
+                # ★ 不再需要截断！parquet 已经是 n_pts 条
+                if len(df) < 2:
+                    err = f"{tf} 数据点不足 ({len(df)})"
+                    return None, None, None, None, None, err
+
                 t = np.arange(len(df), dtype=float)
                 noisy = df["Close"].values.ravel()
                 ohlc = df[["Open", "High", "Low", "Close"]] if all(c in df.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=df.index)
+
+                if window_start is not None:
+                    try:
+                        log_data_load(ticker_code, tf, len(df), AppState.get("_bt_cutoff_date", ""), elapsed_ms=0)
+                    except Exception as e:
+                        logger.debug(f"回测日志写入失败: {e}")
+
                 return t, noisy, ohlc, ticker_code, df.index, None
             else:
                 err = "数据不足"
@@ -168,7 +205,7 @@ def _compute_filters(noisy, t, cfg) -> tuple[np.ndarray, np.ndarray | None]:
 def _compute_schmitt_trigger(filtered, t, cfg) -> dict | None:
     """Compute Schmitt trigger signal. Returns schmitt dict or None.
     Note: Not cached via @st.cache_data because params include unhashable np.ndarray."""
-    if not cfg["show_sch"] or np.all(np.isnan(filtered)):
+    if not cfg["show_sch"] or np.all(np.isnan(filtered)) or len(t) < 2:
         return None
     _v = np.gradient(filtered, t)
     _a = np.gradient(_v, t)
@@ -291,6 +328,8 @@ def _add_main_price_traces(fig, t, noisy, ohlc, filtered, filtered2, cfg) -> Non
 
 def _add_residual_traces(fig, t, filtered, noisy, filtered2, cfg, rr, vr) -> np.ndarray:
     """Add residual, velocity, and acceleration traces to subplots. Returns acceleration array."""
+    if len(t) < 2:
+        return np.array([])
     if not np.all(np.isnan(filtered)):
         fig.add_trace(go.Scatter(x=t, y=filtered - noisy, mode="lines", name="残差",
             line=dict(color="#5f6c80", width=1.0, dash="dot")), row=rr, col=1)
@@ -385,20 +424,80 @@ def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row) -> None
     fig.update_yaxes(title_text="PnL(%)", row=pnl_row, col=1, ticksuffix="%")
 
 
+def _get_min_tf_and_count(configs, ticker_code) -> tuple:
+    """从4个视图的tf配置中确定最小周期（最精细）和总bar数。
+    遍历configs中各视图的tf字段，取ALL_TFS中索引最小的（最精细的）为_min_tf。
+    从 DB 查询该 tf 的全量 bar 数（不使用 parquet，parquet 只有窗口数据）。
+    返回 (_min_tf, bar_count)。"""
+    if not configs:
+        return "", 0
+
+    # 取索引最小的 tf（最精细周期）
+    min_idx = len(ALL_TFS)
+    min_tf = ""
+    for cfg in configs:
+        tf = cfg.get("tf", "")
+        try:
+            idx = ALL_TFS.index(tf)
+            if idx < min_idx:
+                min_idx = idx
+                min_tf = tf
+        except ValueError:
+            continue
+
+    if not min_tf:
+        return "", 0
+
+    # 从 DB 查询全量 bar 数（parquet 只含当前窗口数据，不能用作 slider 上限）
+    try:
+        from db import get_conn
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM kline WHERE ticker=? AND timeframe=?",
+                (ticker_code, min_tf),
+            ).fetchone()
+            bar_count = row[0] if row else 0
+    except Exception:
+        bar_count = 0
+
+    return min_tf, bar_count
+
+
+def _save_backtest_config(ticker_code, min_tf, bar_count, window_size):
+    """保存回测配置到 JSON 文件。"""
+    import json
+    from datetime import datetime
+    config_path = Path(__file__).parent.parent / "data" / "backtest_config.json"
+    config = {
+        "ticker": ticker_code,
+        "min_tf": min_tf,
+        "bar_count": bar_count,
+        "window_size": window_size,
+        "cached_at": datetime.now().isoformat(),
+    }
+    with open(config_path, "w") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+
+
+
 # =====================================================================
 # Chart rendering (main figure builder)
 # =====================================================================
 
 @st.fragment
-def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None) -> None:
-    """Fragment wrapper for _render_chart — enables per-view independent re-rendering."""
-    _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl)
+def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, window_start=None, cutoff_date=None) -> None:
+    """Fragment wrapper for _render_chart — enables per-view independent re-rendering.
+    window_start: 回测模式下窗口起始位置，用于数据加载和日志记录。
+    cutoff_date: 回测模式下的截止日期，用于日期对齐。"""
+    _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl, window_start=window_start, cutoff_date=cutoff_date)
 
 
-def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None) -> None:
+def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, window_start=None, cutoff_date=None) -> None:
     """Fetch data + render multi-subplot figure from config.
     优先从本地 Parquet 读取；day_offset=向历史前移N天（各周期独立对齐）。
-    higher_pnl: 高周期PnL数据（来自 _align_pnl_to_current_tf 的输出），非空时新增row 7子图。"""
+    higher_pnl: 高周期PnL数据（来自 _align_pnl_to_current_tf 的输出），非空时新增row 7子图。
+    window_start: 回测模式下窗口起始位置，用于数据加载和日志。
+    cutoff_date: 回测模式下的截止日期，用于各周期日期对齐。"""
     tf = cfg["tf"]
     n_pts = cfg["n_pts"]
     logger.debug(f"Rendering chart: {ticker_code}/{tf} view={key} n_pts={n_pts}")
@@ -410,9 +509,17 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         _raw_higher = st.session_state.get(f"_pnl_{_higher_tf}")
 
     # ── Step 1: Load chart data ──
-    t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts)
+    t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=window_start, cutoff_date=cutoff_date)
     if err is not None:
+        if "数据点不足" in str(err):
+            st.caption(f"⏳ {tf} 在回测日期前无足够数据")
+            return
         st.error(err)
+        return
+
+    # ★ 防御性检查：即使没报错，数据也可能不足
+    if t is None or len(t) < 2:
+        st.caption(f"⚠️ {tf} 数据点不足 ({len(t) if t is not None else 0})，无法渲染")
         return
 
     # ── Step 2: Date markers ──
@@ -951,6 +1058,8 @@ def _render_param_panels(filter_id, dual, filter_id2) -> list:
 
 def _render_time_nav(configs, ticker_code) -> int:
     """Render time window navigation. Returns day_offset."""
+    if AppState.get("_cb_mode", False):
+        return 0  # 回测模式下不显示时间窗口导航
     st.sidebar.markdown("---")
     st.sidebar.caption("⏪ 时间窗口（按天移动）")
     if not AppState.has("_day_offset"):
@@ -992,6 +1101,116 @@ def _render_time_nav(configs, ticker_code) -> int:
     if data_start and data_end:
         st.sidebar.caption(f"数据范围: {data_start} ~ {data_end}")
     return AppState.get("_day_offset", 0)
+
+
+def _get_bar_date_from_db(ticker_code, tf, bar_index):
+    """从 DB 查询指定 bar_index 位置的日期。返回字符串或空字符串。"""
+    from db import get_conn
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT ts FROM kline WHERE ticker=? AND timeframe=? ORDER BY ts ASC LIMIT 1 OFFSET ?",
+            (ticker_code, tf, bar_index),
+        ).fetchone()
+    return row[0] if row else ""
+
+
+def _render_backtest_mode(market, ticker_code, configs) -> None:
+    """侧边栏回测模式切换 + bar 位置滑块。"""
+    st.sidebar.markdown("---")
+    st.sidebar.caption("🔬 回测模式")
+
+    mode_options = ["浏览模式", "回测模式"]
+    mode_index = 1 if AppState.get("_cb_mode", False) else 0
+    selected = st.sidebar.radio("模式", mode_options, horizontal=True,
+                                 index=mode_index, key="_bt_mode_radio")
+
+    new_cb_mode = (selected == "回测模式")
+    old_cb_mode = AppState.get("_cb_mode", False)
+
+    if new_cb_mode != old_cb_mode:
+        if new_cb_mode:
+            # 切换到回测模式：计算最小周期信息
+            min_tf, bar_count = _get_min_tf_and_count(configs, ticker_code)
+            AppState.set("_min_tf", min_tf)
+            AppState.set("_min_tf_bar_count", bar_count)
+            AppState.set("_bar_index", 0)
+            # 取 min_tf 视图中最小的 n_pts 作为 slider 范围下限
+            min_n_pts = min((cfg["n_pts"] for cfg in configs if cfg["tf"] == min_tf), default=120)
+            _save_backtest_config(ticker_code, min_tf, bar_count, min_n_pts)
+            # 初始化 cutoff_date：从 DB 查询 bar_index=0 位置的日期
+            if bar_count > 0 and min_tf:
+                cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, 0)
+                if cutoff_date:
+                    AppState.set("_bt_cutoff_date", cutoff_date)
+            if bar_count > 0:
+                st.toast(f"回测模式已启用  最小周期: {min_tf} ({bar_count} bars)")
+            else:
+                st.toast("回测模式已启用  数据未就绪")
+            try:
+                log_mode_switch(ticker_code, "enter", min_tf, bar_count)
+            except Exception as e:
+                logger.debug(f"回测日志写入失败: {e}")
+        else:
+            # 切换回浏览模式：清除回测状态
+            # 捕获退出前的回测参数（必须在清除前读取）
+            _exit_min_tf = AppState.get("_min_tf", "")
+            _exit_bar_count = AppState.get("_min_tf_bar_count", 0)
+            AppState.set("_bar_index", 0)
+            AppState.set("_bt_cutoff_date", "")
+            AppState.set("_min_tf", "")
+            AppState.set("_min_tf_bar_count", 0)
+            try:
+                log_mode_switch(ticker_code, "exit", _exit_min_tf, _exit_bar_count)
+            except Exception as e:
+                logger.debug(f"回测日志写入失败: {e}")
+
+        AppState.set("_cb_mode", new_cb_mode)
+        st.rerun()
+
+    # 回测模式下显示窗口位置信息
+    if AppState.get("_cb_mode", False):
+        window_start = AppState.get("_bar_index", 0)
+        total_bars = AppState.get("_min_tf_bar_count", 0)
+        min_tf = AppState.get("_min_tf", "")
+        # 取 min_tf 视图中最小的 n_pts 作为 slider 范围下限
+        min_n_pts = min((cfg["n_pts"] for cfg in configs if cfg["tf"] == min_tf), default=120)
+
+        if total_bars > 0:
+            # 显示当前窗口时间范围
+            try:
+                display_path = Path(__file__).parent.parent / "data" / "display" / f"{min_tf}.parquet"
+                if display_path.exists():
+                    df = pd.read_parquet(display_path)
+                    if len(df) > 0:
+                        start_val = df["Date"].iloc[0] if "Date" in df.columns else ""
+                        end_val = df["Date"].iloc[-1] if "Date" in df.columns else ""
+                        if start_val and end_val:
+                            start_str = pd.Timestamp(start_val).strftime("%Y-%m-%d %H:%M")
+                            end_str = pd.Timestamp(end_val).strftime("%Y-%m-%d %H:%M")
+                            st.sidebar.caption(f"📍 窗口 {window_start + 1}-{min(window_start + min_n_pts, total_bars)}/{total_bars} | {start_str} ~ {end_str}")
+            except Exception:
+                pass
+
+            # 窗口位置 slider（范围：0 ~ total_bars - min_n_pts）
+            max_start = max(0, total_bars - min_n_pts)
+            new_window_start = st.sidebar.slider(
+                f"窗口位置 (min_n_pts={min_n_pts}条)", 0, max_start, window_start,
+                key="_bt_bar_slider",
+            )
+            if new_window_start != window_start:
+                AppState.set("_bar_index", new_window_start)
+                # 计算 cutoff_date（窗口最后一根 bar 的日期）
+                if min_tf:
+                    cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, new_window_start + min_n_pts - 1)
+                    if cutoff_date:
+                        AppState.set("_bt_cutoff_date", cutoff_date)
+                    try:
+                        log_bar_navigation(ticker_code, min_tf, new_window_start, total_bars, cutoff_date or "")
+                    except Exception as e:
+                        logger.debug(f"回测日志写入失败: {e}")
+                st.rerun()
+        else:
+            st.sidebar.warning("回测数据未就绪，请先在浏览模式加载数据")
 
 
 def _render_db_backup() -> None:
@@ -1205,13 +1424,39 @@ def main() -> None:
     # ── Pass 1: 2x2 parameter panels ──
     configs = _render_param_panels(filter_id, dual, filter_id2)
 
+    # ticker 切换后，若处于回测模式则刷新回测状态（需在 _render_backtest_mode 前）
+    _prev_bt_ticker = AppState.get("_bt_last_ticker", "")
+    if AppState.get("_cb_mode", False) and ticker_code and ticker_code != _prev_bt_ticker:
+        min_tf, bar_count = _get_min_tf_and_count(configs, ticker_code)
+        if min_tf and bar_count > 0:
+            AppState.set("_min_tf", min_tf)
+            AppState.set("_min_tf_bar_count", bar_count)
+            AppState.set("_bar_index", 0)
+            min_n_pts = min((cfg["n_pts"] for cfg in configs if cfg["tf"] == min_tf), default=120)
+            _save_backtest_config(ticker_code, min_tf, bar_count, min_n_pts)
+            cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, 0)
+            if cutoff_date:
+                AppState.set("_bt_cutoff_date", cutoff_date)
+        AppState.set("_bt_last_ticker", ticker_code)
+
     # ── Time window navigation ──
     day_offset = _render_time_nav(configs, ticker_code)
+
+    # ── 回测模式切换 ──
+    _render_backtest_mode(market, ticker_code, configs)
 
     # ── DB backup/restore ──
     _render_db_backup()
 
     # ── Pass 2: 2x2 chart views ──
+    cb_mode = AppState.get("_cb_mode", False)
+    if cb_mode:
+        window_start = AppState.get("_bar_index", 0)
+        cutoff_date = AppState.get("_bt_cutoff_date", "")
+    else:
+        window_start = None
+        cutoff_date = None
+
     grid_cols = []
     for row_idx in range(2):
         c1, c2 = st.columns(2)
@@ -1223,7 +1468,7 @@ def main() -> None:
         col_idx = orig_i % 2
         with grid_cols[row_idx][col_idx]:
             _render_chart_fragment(market, ticker_code, cfg, f"v{orig_i}", compact=True,
-                                   day_offset=day_offset)
+                                   day_offset=day_offset, window_start=window_start, cutoff_date=cutoff_date)
 
     # ── Export config ──
     _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code)
