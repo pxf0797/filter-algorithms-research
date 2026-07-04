@@ -240,6 +240,53 @@ return t, noisy, ohlc, ticker_full, dates, err
 
 **结论**: 图表渲染管线完全不感知模式差异。模式差异完全隔离在数据加载层 `_load_chart_data` → `_sync_to_display`。
 
+### 2.5 修复方案 (待实施)
+
+#### 修复 2-1: 日期对齐 — 各 TF 窗口末尾对齐到同一 cutoff_date [Minor]
+
+**现状**: 回测模式使用 `window_start` 做行号偏移 (`LIMIT n_pts OFFSET N`)。各 TF 的窗口位置由同一个行号 N 决定，但不同周期的 bar 数量不同，同一行号 N 对应完全不同的日期。
+
+例如 min_tf="15分钟" 且 window_start=500:
+- 15分钟: bar 500 ~ bar 619 (约 30 小时数据)
+- 月线: bar 500 已超出范围 (月线总共可能只有 100 条)
+
+**方案**: 改为日期对齐 — 各 TF 窗口的**最后一根 bar** 对齐到同一个 cutoff_date:
+1. 从 min_tf 计算 cutoff_date = min_tf 第 (window_start + n_pts - 1) 条 bar 的日期
+2. 各 TF 查询: `SELECT ... WHERE ts <= cutoff_date ORDER BY ts DESC LIMIT n_pts`
+3. 结果: 各 TF 都显示截止到同一日期的最后 n_pts 条 bar
+
+```python
+# _sync_to_display 回测分支改为:
+def _sync_to_display(ticker_code, tf, n_pts=120, cutoff_date=None):
+    if cutoff_date is not None:
+        # 回测模式: 查询截止到 cutoff_date 的最后 n_pts 条
+        rows = conn.execute(
+            """SELECT ts, open, high, low, close, volume
+               FROM kline WHERE ticker=? AND timeframe=? AND ts <= ?
+               ORDER BY ts DESC LIMIT ?""",
+            (ticker_code, tf, cutoff_date, n_pts),
+        ).fetchall()
+        # 反转排序 (DESC → ASC)
+        rows.reverse()
+```
+
+**效果**:
+- 修改前: 各 TF 用同一行号偏移，时间完全不对齐
+- 修改后: 所有 TF 的最后一根 bar 都是同一日期，实现真正的"回测到某一时刻"
+
+---
+
+#### 修复 2-2: 合并 bar_index 和 window_start [Info]
+
+**现状**: `_load_chart_data` 同时接收 `bar_index` 和 `window_start` 两个参数，但值始终相同。`bar_index` 仅用于日志和预测对过滤，`window_start` 用于数据查询。
+
+**方案**: 删除 `bar_index` 参数，`window_start` 统一承担所有职责:
+- 数据查询: `_sync_to_display(cutoff_date=...)`
+- 日志记录: `log_data_load(...)` 用 `window_start`
+- 预测对过滤: `pair_end > window_start + n_pts - 1` 改为按日期判断
+
+**影响**: 函数签名减少一个冗余参数，调用链更简洁。
+
 ---
 
 ## 三、数据显示设置 (Display Settings / Controls)
@@ -447,6 +494,8 @@ if ticker_code and ticker_code != AppState.get("_fetched_ticker"):
 | 8 | **Minor** | **退出回测时 parquet 瞬时不一致** — 退出回测回到浏览模式时，parquet 中仍是回测窗口的数据，下次 `_load_chart_data` 调用 `_sync_to_display` 才覆盖 | data_loader.py:139, streamlit_app.py:1150-1165 | **待修复** |
 | 9 | **Minor** | **参数语义不统一** — 浏览用 `day_offset` (天数偏移), 回测用 `window_start` (行号偏移), 两个参数并存但互斥 | streamlit_app.py:115-126 | **方案已确定，待实施** — 修复 1-2: `_load_chart_data` 只保留 `window_start` |
 | 10 | **Minor** | **API 回退路径不截断** — parquet 不存在时回退到 yfinance API，两个模式都没有在此路径上应用窗口截断 | streamlit_app.py:158-163 | **方案已确定，待实施** — 修复 1-3: API 回退分支增加窗口截断 |
+| 11 | **Minor** | **4 视图时间不对齐** — 回测模式下各 TF 用同一行号偏移 `window_start`，不同周期的 bar 数量不同，同一行号对应完全不同的日期 | streamlit_app.py:121-126, data_loader.py:143-148 | **方案已确定，待实施** — 修复 2-1: 改为 cutoff_date 日期对齐 |
+| 12 | **Info** | **bar_index/window_start 冗余** — `_load_chart_data` 同时接收两个参数但值始终相同，`bar_index` 仅用于日志和预测对过滤 | streamlit_app.py:115-126 | **方案已确定，待实施** — 修复 2-2: 合并冗余参数 |
 
 ### 6.4 代码位置索引
 
