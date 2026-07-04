@@ -1135,6 +1135,8 @@ def _update_cutoff_and_rerun():
     ticker = AppState.get("_fetched_ticker", "")
     min_tf = AppState.get("_min_tf", "")
     bar_index = AppState.get("_bar_index", 0)
+    # ★ 同步 Streamlit widget state，防止 slider 用旧值覆盖导航按钮的修改
+    st.session_state._bt_bar_slider = bar_index
     if min_tf and ticker:
         cutoff_date = _get_bar_date_from_db(ticker, min_tf, bar_index - 1)
         if cutoff_date:
