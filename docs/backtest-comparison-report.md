@@ -132,6 +132,70 @@ ORDER BY ts ASC LIMIT ? OFFSET ?
 | 排序 | 时间升序 (query_kline 内部做了 `iloc[::-1]`) | 时间升序 (SQL ORDER BY ts ASC) |
 | 4 视图是否共享 | **各 TF 独立文件** (各自取最新 N 条) | **各 TF 独立文件** (各自按 offset 取 N 条) |
 
+### 1.5 修复方案 (待实施)
+
+#### 修复 1-1: 统一 SQL 查询路径 [Minor]
+
+**现状**: 浏览模式走 `query_kline()` (db.py:97-116)，回测模式走 `_sync_to_display` 内联 SQL (data_loader.py:143-148)，两套不同的 SQL 代码路径。
+
+**方案**: 在 `query_kline` 中增加 `offset` 参数:
+```python
+def query_kline(ticker, tf, n_pts=120, day_offset=0, offset=None):
+    """
+    offset=None: 取最新 n_pts 条 (浏览模式, 支持 day_offset 日期偏移)
+    offset=N:    从第 N 条开始取 n_pts 条 (回测模式, 窗口滑动)
+    """
+    with get_conn() as conn:
+        if offset is not None:
+            rows = conn.execute(
+                """SELECT ts, open, high, low, close, volume
+                   FROM kline WHERE ticker=? AND timeframe=?
+                   ORDER BY ts ASC LIMIT ? OFFSET ?""",
+                (ticker, tf, n_pts, offset),
+            ).fetchall()
+        else:
+            # 原有 day_offset 逻辑
+            ...
+```
+
+**影响**: `_sync_to_display` 回测分支删除内联SQL, 改为调用 `query_kline(offset=window_start)`。两处 SQL 合并为一处。
+
+---
+
+#### 修复 1-2: 统一参数语义 [Minor]
+
+**现状**: 浏览用 `day_offset` (天数偏移), 回测用 `window_start` (行号偏移), 两个参数在 `_sync_to_display` 和 `_load_chart_data` 中并存但互斥。
+
+**方案**: `_load_chart_data` 只保留一个定位参数 `window_start`:
+- 浏览模式: `window_start=None`, 内部计算为"最新N条"
+- 回测模式: `window_start=N`, 内部转为 DB OFFSET
+
+`day_offset` 回归为浏览模式的独立功能（时间窗口导航），不传递到 `_sync_to_display`。
+
+**影响**: 函数签名更简洁, 参数语义清晰。
+
+---
+
+#### 修复 1-3: 回退路径补全截断 [Minor]
+
+**现状**: 当 parquet 不存在时，回退到 `_cached_fetch_stock` (yfinance API), 但回测模式没有在此路径上应用 `window_start` 截断，浏览模式同理没有应用 `day_offset`。
+
+**方案**: 在 `_load_chart_data` 的 API 回退分支 (line 163) 增加窗口截断:
+```python
+# API 回退路径也应用截断
+t, noisy, ohlc, ticker_full, dates, err = _cached_fetch_stock(...)
+if err is None and window_start is not None and dates is not None:
+    # 回测模式: 截取窗口
+    start = min(window_start, len(dates))
+    end = min(start + n_pts, len(dates))
+    t = t[start:end]
+    noisy = noisy[start:end]
+    ...
+return t, noisy, ohlc, ticker_full, dates, err
+```
+
+**影响**: API 回退路径也正确截断, 浏览和回测行为一致。
+
 ---
 
 ## 二、数据显示 (Data Display)
@@ -376,11 +440,13 @@ if ticker_code and ticker_code != AppState.get("_fetched_ticker"):
 | 1 | ~~Major~~ | ~~force_full 每次渲染重写 parquet~~ | data_loader.py | **Phase1 已修复** |
 | 2 | **Major** | **ticker 切换时回测状态不重置** — 在回测模式下切换到不同 ticker，`_cb_mode=True`、`_bar_index`、`_min_tf_bar_count` 等状态键不变，slider 可能越界或数据异常 | streamlit_app.py:719-731, 1110-1214 | **待修复** |
 | 3 | **Major** | **回测下 day_offset/n_pts 控件可见但失效** — `_render_time_nav` 的 "前移/后移/最新" 按钮和步长选择器在回测模式下仍然显示但不生效 | streamlit_app.py:1054-1096 | **待修复** |
-| 4 | ~~Major~~ | ~~数据管道不统一（两套 SQL）~~ — 浏览和回测走不同的 SQL 路径 | data_loader.py, db.py | **已改善** — 统一写 n_pts，但 SQL 路径仍有差异（设计意图） |
+| 4 | **Minor** | **数据管道不统一（两套 SQL）** — 浏览和回测走不同的 SQL 路径 | data_loader.py, db.py | **方案已确定，待实施** — 修复 1-1: `query_kline` 增加 offset 参数，统一 SQL 查询路径 |
 | 5 | **Minor** | **高周期 bar_index 小时无数据报错** — 当 min_tf 周期的 bar_count 很小时，slider 范围计算可能出错 | streamlit_app.py:1197-1200 | **待修复** |
 | 6 | **Minor** | **退出回测时 `_day_offset` 不被重置** — 退出回测模式时 `_day_offset` 保留切出前的值，不会重置为 0 | streamlit_app.py:1150-1165 | **待修复** |
 | 7 | **Minor** | **`_sync_to_display` 返回值被忽略** — 调用处未检查返回的 `(success, row_count)`，写入失败无法感知 | data_loader.py:139, streamlit_app.py:122-126 | **待修复** |
 | 8 | **Minor** | **退出回测时 parquet 瞬时不一致** — 退出回测回到浏览模式时，parquet 中仍是回测窗口的数据，下次 `_load_chart_data` 调用 `_sync_to_display` 才覆盖 | data_loader.py:139, streamlit_app.py:1150-1165 | **待修复** |
+| 9 | **Minor** | **参数语义不统一** — 浏览用 `day_offset` (天数偏移), 回测用 `window_start` (行号偏移), 两个参数并存但互斥 | streamlit_app.py:115-126 | **方案已确定，待实施** — 修复 1-2: `_load_chart_data` 只保留 `window_start` |
+| 10 | **Minor** | **API 回退路径不截断** — parquet 不存在时回退到 yfinance API，两个模式都没有在此路径上应用窗口截断 | streamlit_app.py:158-163 | **方案已确定，待实施** — 修复 1-3: API 回退分支增加窗口截断 |
 
 ### 6.4 代码位置索引
 
