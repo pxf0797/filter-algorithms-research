@@ -335,6 +335,47 @@ def _sync_to_display(ticker_code, tf, n_pts=120, cutoff_date=None):
 - **加载时机**: 通过 `_load_backtest_config()` (streamlit_app.py:468) 定义，但目前 **未被主动调用**
 - **作用**: 记录上次回测的状态，可用于恢复
 
+### 3.4 修复方案 (待实施)
+
+#### 修复 3-1: 回测模式下隐藏时间窗口导航 [Minor]
+
+**现状**: `_render_time_nav` (时间窗口导航: 前移/后移/最新按钮 + 步长选择) 在回测模式下仍然可见，但 `_load_chart_data` 回测分支已不再使用 `day_offset`，用户操作无效果。
+
+**方案**: 在 `_render_time_nav` 中判断 `_cb_mode`，回测模式下隐藏整个区域:
+```python
+def _render_time_nav(configs, ticker_code) -> int:
+    if AppState.get("_cb_mode", False):
+        # 回测模式下隐藏时间窗口导航，用 bar slider 替代
+        return 0
+    # ... 原有浏览模式逻辑
+```
+
+**影响**: 消除"死控件"，用户体验清晰。
+
+---
+
+#### 修复 3-2: 回测模式下各视图独立 n_pts [Minor]
+
+**现状**: 当前 `window_size` 取自 min_tf 对应视图的 `n_pts`，所有视图统一使用同一个窗口大小。但各视图参须面板中已有独立的 `n_pts` 配置 slider，回测时却被忽略。
+
+**方案**: 回测模式下 `window_size` 不再从 min_tf 统一取值，而是各视图使用自己的 `cfg["n_pts"]`:
+- View 0 (日线, n_pts=120): 从 DB 取 120 条日线，截止到 cutoff_date
+- View 1 (周线, n_pts=60): 从 DB 取 60 条周线，截止到 cutoff_date
+- View 2 (15分钟, n_pts=50): 从 DB 取 50 条 15 分钟，截止到 cutoff_date（min_tf）
+- slider 范围仍由 min_tf 决定: 0 ~ (min_tf_total_bars - min_tf_n_pts)
+
+配合修复 2-1（日期对齐），各视图各自查询截止到同一 cutoff_date 的最后 n_pts 条数据，各视图的 n_pts 和显示数量由各自的参数面板独立控制。
+
+---
+
+#### 修复 3-3: day_offset 保留旧值 [保持现状]
+
+**现状**: 从回测切回浏览时 `_day_offset` 不清零，保留用户之前的时间窗口位置。
+
+**决定**: 这是设计意图 — 用户回到浏览模式后应恢复到之前的时间窗口位置，而非强制跳到最新。不修改。
+
+---
+
 ---
 
 ## 四、状态管理 (State Management)
@@ -486,7 +527,7 @@ if ticker_code and ticker_code != AppState.get("_fetched_ticker"):
 |---|--------|------|------|---------|
 | 1 | ~~Major~~ | ~~force_full 每次渲染重写 parquet~~ | data_loader.py | **Phase1 已修复** |
 | 2 | **Major** | **ticker 切换时回测状态不重置** — 在回测模式下切换到不同 ticker，`_cb_mode=True`、`_bar_index`、`_min_tf_bar_count` 等状态键不变，slider 可能越界或数据异常 | streamlit_app.py:719-731, 1110-1214 | **待修复** |
-| 3 | **Major** | **回测下 day_offset/n_pts 控件可见但失效** — `_render_time_nav` 的 "前移/后移/最新" 按钮和步长选择器在回测模式下仍然显示但不生效 | streamlit_app.py:1054-1096 | **待修复** |
+| 3 | **Major** | **回测下 day_offset/n_pts 控件可见但失效** — `_render_time_nav` 的 "前移/后移/最新" 按钮和步长选择器在回测模式下仍然显示但不生效 | streamlit_app.py:1054-1096 | **方案已确定，待实施** — 修复 3-1: 回测下隐藏 |
 | 4 | **Minor** | **数据管道不统一（两套 SQL）** — 浏览和回测走不同的 SQL 路径 | data_loader.py, db.py | **方案已确定，待实施** — 修复 1-1: `query_kline` 增加 offset 参数，统一 SQL 查询路径 |
 | 5 | **Minor** | **高周期 bar_index 小时无数据报错** — 当 min_tf 周期的 bar_count 很小时，slider 范围计算可能出错 | streamlit_app.py:1197-1200 | **待修复** |
 | 6 | **Minor** | **退出回测时 `_day_offset` 不被重置** — 退出回测模式时 `_day_offset` 保留切出前的值，不会重置为 0 | streamlit_app.py:1150-1165 | **待修复** |
@@ -496,6 +537,8 @@ if ticker_code and ticker_code != AppState.get("_fetched_ticker"):
 | 10 | **Minor** | **API 回退路径不截断** — parquet 不存在时回退到 yfinance API，两个模式都没有在此路径上应用窗口截断 | streamlit_app.py:158-163 | **方案已确定，待实施** — 修复 1-3: API 回退分支增加窗口截断 |
 | 11 | **Minor** | **4 视图时间不对齐** — 回测模式下各 TF 用同一行号偏移 `window_start`，不同周期的 bar 数量不同，同一行号对应完全不同的日期 | streamlit_app.py:121-126, data_loader.py:143-148 | **方案已确定，待实施** — 修复 2-1: 改为 cutoff_date 日期对齐 |
 | 12 | **Info** | **bar_index/window_start 冗余** — `_load_chart_data` 同时接收两个参数但值始终相同，`bar_index` 仅用于日志和预测对过滤 | streamlit_app.py:115-126 | **方案已确定，待实施** — 修复 2-2: 合并冗余参数 |
+| 13 | **Minor** | **回测下各视图 n_pts 被统一覆盖** — `window_size` 取自 min_tf 视图的 n_pts，其他视图独立的 n_pts 配置被忽略 | streamlit_app.py:1124-1149 | **方案已确定，待实施** — 修复 3-2: 各视图独立 n_pts |
+| 14 | **Minor** | **day_offset 保留旧值** — 从回测切回浏览时 `_day_offset` 不清零，保留用户之前的时间窗口位置 | streamlit_app.py:1150-1165 | **保持现状** — 设计意图：用户回到浏览模式后恢复到之前的时间窗口位置 |
 
 ### 6.4 代码位置索引
 
