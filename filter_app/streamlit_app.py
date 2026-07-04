@@ -1181,13 +1181,14 @@ def _render_backtest_nav(total_bars, min_n_pts):
                 # 如果已到末尾，从头开始播放
                 if bar_index >= total_bars:
                     st.session_state._bar_index = min_n_pts
-                    # 更新 cutoff_date 到新位置
-                    ticker = AppState.get("_fetched_ticker", "")
-                    min_tf = AppState.get("_min_tf", "")
-                    if min_tf and ticker:
-                        d = _get_bar_date_from_db(ticker, min_tf, min_n_pts - 1)
-                        if d:
-                            AppState.set("_bt_cutoff_date", d)
+                # ★ 在任何位置开始播放时，都预更新 cutoff_date
+                ticker_v = AppState.get("_fetched_ticker", "")
+                min_tf_v = AppState.get("_min_tf", "")
+                if min_tf_v and ticker_v:
+                    cur = st.session_state.get("_bar_index", total_bars)
+                    d = _get_bar_date_from_db(ticker_v, min_tf_v, cur - 1)
+                    if d:
+                        AppState.set("_bt_cutoff_date", d)
                 AppState.set("_is_playing", True)
                 st.rerun()
 
