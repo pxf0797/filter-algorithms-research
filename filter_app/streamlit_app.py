@@ -1176,15 +1176,20 @@ def _render_backtest_nav(total_bars, min_n_pts):
         if st.button(label, key="_bt_toggle_play", use_container_width=True, help=help_text):
             if is_playing:
                 AppState.set("_is_playing", False)
-                AppState.set("_play_just_started", False)
                 st.rerun()
             else:
                 # 如果已到末尾，从头开始播放
                 if bar_index >= total_bars:
                     st.session_state._bar_index = min_n_pts
+                    # 更新 cutoff_date 到新位置
+                    ticker = AppState.get("_fetched_ticker", "")
+                    min_tf = AppState.get("_min_tf", "")
+                    if min_tf and ticker:
+                        d = _get_bar_date_from_db(ticker, min_tf, min_n_pts - 1)
+                        if d:
+                            AppState.set("_bt_cutoff_date", d)
                 AppState.set("_is_playing", True)
-                AppState.set("_play_just_started", True)
-                _update_cutoff_and_rerun()
+                st.rerun()
 
     with col_nav[3]:
         if st.button("⏵", key="_bt_step_fwd", use_container_width=True,
@@ -1213,14 +1218,10 @@ def _run_backtest_play():
     """回测自动播放 — 只更新窗口位置，不调用 rerun。
 
     返回 True 表示需要 main() 末尾 sleep + rerun 触发下一步。
+    播放按钮只需设置 _is_playing=True 再 st.rerun()，本函数自动处理前进。
     """
     if not AppState.get("_is_playing", False):
         return False
-
-    # 刚启动播放时不前进，先渲染当前帧给用户看一眼
-    if AppState.get("_play_just_started", False):
-        AppState.set("_play_just_started", False)
-        return True
 
     bar_index = st.session_state.get("_bar_index", 0)
     total = AppState.get("_min_tf_bar_count", 0)
@@ -1228,14 +1229,14 @@ def _run_backtest_play():
         AppState.set("_is_playing", False)
         return False
 
-    # 前进一个 bar
+    # 前进一个 bar（在 slider widget 渲染之前，Streamlit 允许修改 widget key）
     st.session_state._bar_index = bar_index + 1
 
-    # 同步更新 cutoff_date（与 _on_slider_change 逻辑一致）
+    # 同步更新 cutoff_date
     ticker = AppState.get("_fetched_ticker", "")
     min_tf = AppState.get("_min_tf", "")
     if min_tf and ticker:
-        cutoff_date = _get_bar_date_from_db(ticker, min_tf, bar_index)  # (bar_index+1)-1 == bar_index
+        cutoff_date = _get_bar_date_from_db(ticker, min_tf, bar_index)
         if cutoff_date:
             AppState.set("_bt_cutoff_date", cutoff_date)
 
