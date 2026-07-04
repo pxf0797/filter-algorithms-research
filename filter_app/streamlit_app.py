@@ -1134,9 +1134,7 @@ def _update_cutoff_and_rerun():
     """slider/导航变化时更新 cutoff_date 并 rerun"""
     ticker = AppState.get("_fetched_ticker", "")
     min_tf = AppState.get("_min_tf", "")
-    bar_index = AppState.get("_bar_index", 0)
-    # ★ 同步 Streamlit widget state，防止 slider 用旧值覆盖导航按钮的修改
-    st.session_state._bt_bar_slider = bar_index
+    bar_index = st.session_state.get("_bar_index", 0)
     if min_tf and ticker:
         cutoff_date = _get_bar_date_from_db(ticker, min_tf, bar_index - 1)
         if cutoff_date:
@@ -1146,7 +1144,7 @@ def _update_cutoff_and_rerun():
 
 def _render_backtest_nav(total_bars, min_n_pts):
     """渲染回测导航按钮：⏮ ◀ ▶/⏸ ▶▶ ⏭ + 速度"""
-    bar_index = AppState.get("_bar_index", total_bars)
+    bar_index = st.session_state.get("_bar_index", total_bars)
     is_playing = AppState.get("_is_playing", False)
 
     col_nav = st.sidebar.columns([1, 1, 1, 1, 1, 2])
@@ -1154,13 +1152,13 @@ def _render_backtest_nav(total_bars, min_n_pts):
     with col_nav[0]:
         if st.button("⏮", key="_bt_goto_start", use_container_width=True,
                      help=f"跳到开头 (bar {min_n_pts})"):
-            AppState.set("_bar_index", min_n_pts)
+            st.session_state._bar_index = min_n_pts
             _update_cutoff_and_rerun()
 
     with col_nav[1]:
         if st.button("◀", key="_bt_step_back", use_container_width=True,
                      disabled=bar_index <= min_n_pts, help="后退一个 bar"):
-            AppState.set("_bar_index", max(min_n_pts, bar_index - 1))
+            st.session_state._bar_index = max(min_n_pts, bar_index - 1)
             _update_cutoff_and_rerun()
 
     with col_nav[2]:
@@ -1173,13 +1171,13 @@ def _render_backtest_nav(total_bars, min_n_pts):
     with col_nav[3]:
         if st.button("▶▶", key="_bt_step_fwd", use_container_width=True,
                      disabled=bar_index >= total_bars, help="前进一个 bar"):
-            AppState.set("_bar_index", min(total_bars, bar_index + 1))
+            st.session_state._bar_index = min(total_bars, bar_index + 1)
             _update_cutoff_and_rerun()
 
     with col_nav[4]:
         if st.button("⏭", key="_bt_goto_end", use_container_width=True,
                      help=f"跳到末尾 (bar {total_bars})"):
-            AppState.set("_bar_index", total_bars)
+            st.session_state._bar_index = total_bars
             _update_cutoff_and_rerun()
 
     with col_nav[5]:
@@ -1197,14 +1195,14 @@ def _run_backtest_play():
     """回测自动播放循环。"""
     if not AppState.get("_is_playing", False):
         return
-    bar_index = AppState.get("_bar_index", 0)
+    bar_index = st.session_state.get("_bar_index", 0)
     total = AppState.get("_min_tf_bar_count", 0)
     if bar_index >= total:
         AppState.set("_is_playing", False)
         return
     speed = AppState.get("_play_speed", 1.0)
     time.sleep(1.0 / speed)
-    AppState.set("_bar_index", bar_index + 1)
+    st.session_state._bar_index = bar_index + 1
     _update_cutoff_and_rerun()
 
 
@@ -1235,6 +1233,7 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
             AppState.set("_min_tf_bar_count", bar_count)
             # bar_index = 窗口结束位置，默认在末尾
             AppState.set("_bar_index", bar_count)
+            st.session_state._bar_index = bar_count
             # 取 min_tf 视图中最小的 n_pts 作为 slider 范围下限
             min_n_pts = min((cfg["n_pts"] for cfg in configs if cfg["tf"] == min_tf), default=120)
             if not cached:
@@ -1259,6 +1258,7 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
             _exit_min_tf = AppState.get("_min_tf", "")
             _exit_bar_count = AppState.get("_min_tf_bar_count", 0)
             AppState.set("_bar_index", 0)
+            st.session_state._bar_index = 0
             AppState.set("_bt_cutoff_date", "")
             AppState.set("_min_tf", "")
             AppState.set("_min_tf_bar_count", 0)
@@ -1272,7 +1272,7 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
 
     # 回测模式下显示窗口位置信息
     if AppState.get("_cb_mode", False):
-        bar_index = AppState.get("_bar_index", 0)
+        bar_index = st.session_state.get("_bar_index", 0)
         total_bars = AppState.get("_min_tf_bar_count", 0)
         min_tf = AppState.get("_min_tf", "")
         # 取 min_tf 视图中最小的 n_pts 作为 slider 范围下限
@@ -1287,22 +1287,17 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
             st.sidebar.caption(f"📊 显示 bar {win_start_display} ~ {bar_index} / {total_bars}")
 
             # 窗口位置 slider（范围：min_n_pts ~ total_bars，bar_index 为窗口结束位置）
-            new_bar_index = st.sidebar.slider(
-                "窗口结束位置", min_n_pts, total_bars, bar_index,
-                key="_bt_bar_slider",
+            st.sidebar.slider(
+                "窗口结束位置", min_n_pts, total_bars,
+                key="_bar_index",
             )
-            if new_bar_index != bar_index:
-                AppState.set("_bar_index", new_bar_index)
-                # 计算 cutoff_date（bar_index 位置的日期）
-                if min_tf:
-                    cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, new_bar_index - 1)
-                    if cutoff_date:
-                        AppState.set("_bt_cutoff_date", cutoff_date)
-                    try:
-                        log_bar_navigation(ticker_code, min_tf, new_bar_index, total_bars, cutoff_date or "")
-                    except Exception as e:
-                        logger.debug(f"回测日志写入失败: {e}")
-                st.rerun()
+            # slider 直接绑定 _bar_index，拖动时 Streamlit 自动更新
+            # st.session_state._bar_index 并 rerun，无需手动检测变更。
+            # 同步 cutoff_date（每次渲染时根据当前 bar_index 计算）。
+            if min_tf:
+                cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, bar_index - 1)
+                if cutoff_date:
+                    AppState.set("_bt_cutoff_date", cutoff_date)
         else:
             st.sidebar.warning("回测数据未就绪，请先在浏览模式加载数据")
 
@@ -1532,6 +1527,7 @@ def main() -> None:
             AppState.set("_min_tf", min_tf)
             AppState.set("_min_tf_bar_count", bar_count)
             AppState.set("_bar_index", bar_count)
+            st.session_state._bar_index = bar_count
             min_n_pts = min((cfg["n_pts"] for cfg in configs if cfg["tf"] == min_tf), default=120)
             if not cached:
                 _save_backtest_config(ticker_code, min_tf, bar_count, min_n_pts)
@@ -1554,7 +1550,7 @@ def main() -> None:
     # ── Pass 2: 2x2 chart views ──
     cb_mode = AppState.get("_cb_mode", False)
     if cb_mode:
-        window_start = AppState.get("_bar_index", 0)
+        window_start = st.session_state.get("_bar_index", 0)
         cutoff_date = AppState.get("_bt_cutoff_date", "")
     else:
         window_start = None
