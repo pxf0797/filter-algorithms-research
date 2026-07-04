@@ -46,6 +46,10 @@ SYSTEM_KEYS: Dict[str, Any] = {
     "_bt_last_ticker": "",        # 上次回测时的 ticker，用于检测切换
     "_min_tf": "",
     "_min_tf_bar_count": 0,
+    # 回测播放控制
+    "_is_playing": False,
+    "_play_speed": 1.0,
+    "_play_speed_label": "1x",
 }
 
 # 全局参数 — 已在 main() 中由 widget 初始化，这里只做参考

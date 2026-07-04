@@ -116,7 +116,7 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=No
     """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err).
 
     浏览: window_start=None, cutoff_date=None
-    回测: window_start=slider值, cutoff_date=截止日期
+    回测: window_start=bar_index(窗口结束位置), cutoff_date=截止日期
     """
     if window_start is not None:
         # 回测模式：按 cutoff_date 日期对齐
@@ -1114,6 +1114,82 @@ def _get_bar_date_from_db(ticker_code, tf, bar_index):
     return row[0] if row else ""
 
 
+def _update_cutoff_and_rerun():
+    """slider/导航变化时更新 cutoff_date 并 rerun"""
+    ticker = AppState.get("_fetched_ticker", "")
+    min_tf = AppState.get("_min_tf", "")
+    bar_index = AppState.get("_bar_index", 0)
+    if min_tf and ticker:
+        cutoff_date = _get_bar_date_from_db(ticker, min_tf, bar_index - 1)
+        if cutoff_date:
+            AppState.set("_bt_cutoff_date", cutoff_date)
+    st.rerun()
+
+
+def _render_backtest_nav(total_bars, min_n_pts):
+    """渲染回测导航按钮：⏮ ◀ ▶/⏸ ▶▶ ⏭ + 速度"""
+    bar_index = AppState.get("_bar_index", total_bars)
+    is_playing = AppState.get("_is_playing", False)
+
+    col_nav = st.sidebar.columns([1, 1, 1, 1, 1, 2])
+
+    with col_nav[0]:
+        if st.button("⏮", key="_bt_goto_start", use_container_width=True,
+                     help=f"跳到开头 (bar {min_n_pts})"):
+            AppState.set("_bar_index", min_n_pts)
+            _update_cutoff_and_rerun()
+
+    with col_nav[1]:
+        if st.button("◀", key="_bt_step_back", use_container_width=True,
+                     disabled=bar_index <= min_n_pts, help="后退一个 bar"):
+            AppState.set("_bar_index", max(min_n_pts, bar_index - 1))
+            _update_cutoff_and_rerun()
+
+    with col_nav[2]:
+        label = "⏸" if is_playing else "▶"
+        help_text = "暂停" if is_playing else "播放"
+        if st.button(label, key="_bt_toggle_play", use_container_width=True, help=help_text):
+            AppState.set("_is_playing", not is_playing)
+            st.rerun()
+
+    with col_nav[3]:
+        if st.button("▶▶", key="_bt_step_fwd", use_container_width=True,
+                     disabled=bar_index >= total_bars, help="前进一个 bar"):
+            AppState.set("_bar_index", min(total_bars, bar_index + 1))
+            _update_cutoff_and_rerun()
+
+    with col_nav[4]:
+        if st.button("⏭", key="_bt_goto_end", use_container_width=True,
+                     help=f"跳到末尾 (bar {total_bars})"):
+            AppState.set("_bar_index", total_bars)
+            _update_cutoff_and_rerun()
+
+    with col_nav[5]:
+        speeds = ["0.25x", "0.5x", "1x", "2x", "5x", "10x"]
+        speed_map = {"0.25x": 0.25, "0.5x": 0.5, "1x": 1.0, "2x": 2.0, "5x": 5.0, "10x": 10.0}
+        current = AppState.get("_play_speed_label", "1x")
+        idx = speeds.index(current) if current in speeds else 2
+        new_speed = st.selectbox("速度", speeds, index=idx, key="_bt_speed", label_visibility="collapsed")
+        if new_speed != current:
+            AppState.set("_play_speed_label", new_speed)
+            AppState.set("_play_speed", speed_map[new_speed])
+
+
+def _run_backtest_play():
+    """回测自动播放循环。"""
+    if not AppState.get("_is_playing", False):
+        return
+    bar_index = AppState.get("_bar_index", 0)
+    total = AppState.get("_min_tf_bar_count", 0)
+    if bar_index >= total:
+        AppState.set("_is_playing", False)
+        return
+    speed = AppState.get("_play_speed", 1.0)
+    time.sleep(1.0 / speed)
+    AppState.set("_bar_index", bar_index + 1)
+    _update_cutoff_and_rerun()
+
+
 def _render_backtest_mode(market, ticker_code, configs) -> None:
     """侧边栏回测模式切换 + bar 位置滑块。"""
     st.sidebar.markdown("---")
@@ -1133,13 +1209,14 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
             min_tf, bar_count = _get_min_tf_and_count(configs, ticker_code)
             AppState.set("_min_tf", min_tf)
             AppState.set("_min_tf_bar_count", bar_count)
-            AppState.set("_bar_index", 0)
+            # bar_index = 窗口结束位置，默认在末尾
+            AppState.set("_bar_index", bar_count)
             # 取 min_tf 视图中最小的 n_pts 作为 slider 范围下限
             min_n_pts = min((cfg["n_pts"] for cfg in configs if cfg["tf"] == min_tf), default=120)
             _save_backtest_config(ticker_code, min_tf, bar_count, min_n_pts)
-            # 初始化 cutoff_date：从 DB 查询 bar_index=0 位置的日期
+            # 初始化 cutoff_date：从 DB 查询 bar_index 位置（最后一条 bar）的日期
             if bar_count > 0 and min_tf:
-                cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, 0)
+                cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, bar_count - 1)
                 if cutoff_date:
                     AppState.set("_bt_cutoff_date", cutoff_date)
             if bar_count > 0:
@@ -1169,43 +1246,34 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
 
     # 回测模式下显示窗口位置信息
     if AppState.get("_cb_mode", False):
-        window_start = AppState.get("_bar_index", 0)
+        bar_index = AppState.get("_bar_index", 0)
         total_bars = AppState.get("_min_tf_bar_count", 0)
         min_tf = AppState.get("_min_tf", "")
         # 取 min_tf 视图中最小的 n_pts 作为 slider 范围下限
         min_n_pts = min((cfg["n_pts"] for cfg in configs if cfg["tf"] == min_tf), default=120)
 
         if total_bars > 0:
-            # 显示当前窗口时间范围
-            try:
-                display_path = Path(__file__).parent.parent / "data" / "display" / f"{min_tf}.parquet"
-                if display_path.exists():
-                    df = pd.read_parquet(display_path)
-                    if len(df) > 0:
-                        start_val = df["Date"].iloc[0] if "Date" in df.columns else ""
-                        end_val = df["Date"].iloc[-1] if "Date" in df.columns else ""
-                        if start_val and end_val:
-                            start_str = pd.Timestamp(start_val).strftime("%Y-%m-%d %H:%M")
-                            end_str = pd.Timestamp(end_val).strftime("%Y-%m-%d %H:%M")
-                            st.sidebar.caption(f"📍 窗口 {window_start + 1}-{min(window_start + min_n_pts, total_bars)}/{total_bars} | {start_str} ~ {end_str}")
-            except Exception:
-                pass
+            # ── 导航按钮 ──
+            _render_backtest_nav(total_bars, min_n_pts)
 
-            # 窗口位置 slider（范围：0 ~ total_bars - min_n_pts）
-            max_start = max(0, total_bars - min_n_pts)
-            new_window_start = st.sidebar.slider(
-                f"窗口位置 (min_n_pts={min_n_pts}条)", 0, max_start, window_start,
+            # 显示当前窗口信息
+            win_start_display = max(1, bar_index - min_n_pts + 1)
+            st.sidebar.caption(f"📊 显示 bar {win_start_display} ~ {bar_index} / {total_bars}")
+
+            # 窗口位置 slider（范围：min_n_pts ~ total_bars，bar_index 为窗口结束位置）
+            new_bar_index = st.sidebar.slider(
+                "窗口结束位置", min_n_pts, total_bars, bar_index,
                 key="_bt_bar_slider",
             )
-            if new_window_start != window_start:
-                AppState.set("_bar_index", new_window_start)
-                # 计算 cutoff_date（窗口最后一根 bar 的日期）
+            if new_bar_index != bar_index:
+                AppState.set("_bar_index", new_bar_index)
+                # 计算 cutoff_date（bar_index 位置的日期）
                 if min_tf:
-                    cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, new_window_start + min_n_pts - 1)
+                    cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, new_bar_index - 1)
                     if cutoff_date:
                         AppState.set("_bt_cutoff_date", cutoff_date)
                     try:
-                        log_bar_navigation(ticker_code, min_tf, new_window_start, total_bars, cutoff_date or "")
+                        log_bar_navigation(ticker_code, min_tf, new_bar_index, total_bars, cutoff_date or "")
                     except Exception as e:
                         logger.debug(f"回测日志写入失败: {e}")
                 st.rerun()
@@ -1431,10 +1499,10 @@ def main() -> None:
         if min_tf and bar_count > 0:
             AppState.set("_min_tf", min_tf)
             AppState.set("_min_tf_bar_count", bar_count)
-            AppState.set("_bar_index", 0)
+            AppState.set("_bar_index", bar_count)
             min_n_pts = min((cfg["n_pts"] for cfg in configs if cfg["tf"] == min_tf), default=120)
             _save_backtest_config(ticker_code, min_tf, bar_count, min_n_pts)
-            cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, 0)
+            cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, bar_count - 1)
             if cutoff_date:
                 AppState.set("_bt_cutoff_date", cutoff_date)
         AppState.set("_bt_last_ticker", ticker_code)
@@ -1469,6 +1537,9 @@ def main() -> None:
         with grid_cols[row_idx][col_idx]:
             _render_chart_fragment(market, ticker_code, cfg, f"v{orig_i}", compact=True,
                                    day_offset=day_offset, window_start=window_start, cutoff_date=cutoff_date)
+
+    # ── 回测自动播放 ──
+    _run_backtest_play()
 
     # ── Export config ──
     _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code)
