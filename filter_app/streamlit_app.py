@@ -1322,6 +1322,9 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
             st.sidebar.caption(f"📊 显示 bar {win_start_display} ~ {bar_index} / {total_bars}")
 
             # 窗口位置 slider（范围：min_n_pts ~ total_bars，bar_index 为窗口结束位置）
+            # 确保 _bar_index 在 slider 有效范围内（防止退出回测后残留 0 值）
+            if st.session_state.get("_bar_index", 0) < min_n_pts:
+                st.session_state._bar_index = total_bars
             st.sidebar.slider(
                 "窗口结束位置", min_n_pts, total_bars,
                 key="_bar_index",
