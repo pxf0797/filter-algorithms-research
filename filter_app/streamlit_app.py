@@ -1174,8 +1174,15 @@ def _render_backtest_nav(total_bars, min_n_pts):
         label = "⏸" if is_playing else "▶"
         help_text = "暂停" if is_playing else "播放"
         if st.button(label, key="_bt_toggle_play", use_container_width=True, help=help_text):
-            AppState.set("_is_playing", not is_playing)
-            st.rerun()
+            if is_playing:
+                AppState.set("_is_playing", False)
+                st.rerun()
+            else:
+                # 如果已到末尾，从头开始播放
+                if bar_index >= total_bars:
+                    st.session_state._bar_index = min_n_pts
+                AppState.set("_is_playing", True)
+                _update_cutoff_and_rerun()
 
     with col_nav[3]:
         if st.button("▶▶", key="_bt_step_fwd", use_container_width=True,
