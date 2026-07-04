@@ -119,21 +119,19 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=No
     回测: window_start=bar_index(窗口结束位置), cutoff_date=截止日期
     """
     if window_start is not None:
-        # 回测模式: 仅在首次进入时同步数据, slider 移动时跳过重写
-        if not AppState.get("_bt_data_synced", False):
-            ok, count = _sync_to_display(ticker_code, tf, n_pts=n_pts, cutoff_date=AppState.get("_bt_cutoff_date", ""))
-            AppState.set("_bt_data_synced", True)
-            if not ok:
-                # parquet 写入失败，直接走 API 回退
-                t, noisy, ohlc, ticker_full, dates, err = _cached_fetch_stock(market, ticker_code, tf, n_pts)
-                # API 回退路径：截断到 n_pts
-                if err is None and dates is not None and len(dates) > n_pts:
-                    t = t[-n_pts:]
-                    noisy = noisy[-n_pts:]
-                    if hasattr(ohlc, 'iloc'):
-                        ohlc = ohlc.iloc[-n_pts:]
-                    dates = dates[-n_pts:]
-                return t, noisy, ohlc, ticker_full, dates, err
+        # 回测模式：按 cutoff_date 日期对齐
+        ok, count = _sync_to_display(ticker_code, tf, n_pts=n_pts, cutoff_date=cutoff_date)
+        if not ok:
+            # parquet 写入失败，直接走 API 回退
+            t, noisy, ohlc, ticker_full, dates, err = _cached_fetch_stock(market, ticker_code, tf, n_pts)
+            # API 回退路径：截断到 n_pts
+            if err is None and dates is not None and len(dates) > n_pts:
+                t = t[-n_pts:]
+                noisy = noisy[-n_pts:]
+                if hasattr(ohlc, 'iloc'):
+                    ohlc = ohlc.iloc[-n_pts:]
+                dates = dates[-n_pts:]
+            return t, noisy, ohlc, ticker_full, dates, err
     else:
         # 浏览模式：取最新 n_pts 条
         ok, count = _sync_to_display(ticker_code, tf, day_offset=day_offset, n_pts=n_pts)
@@ -160,7 +158,7 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=No
 
                 if window_start is not None:
                     try:
-                        log_data_load(ticker_code, tf, len(df), AppState.get("_bt_cutoff_date", ""), elapsed_ms=0)
+                        log_data_load(ticker_code, tf, len(df), cutoff_date or "", elapsed_ms=0)
                     except Exception as e:
                         logger.debug(f"回测日志写入失败: {e}")
 
@@ -1142,6 +1140,17 @@ def _update_cutoff_and_rerun():
     st.rerun()
 
 
+def _on_slider_change():
+    """slider 拖动时更新 cutoff_date（Streamlit on_change 回调，自动 rerun）。"""
+    ticker = AppState.get("_fetched_ticker", "")
+    min_tf = AppState.get("_min_tf", "")
+    bar_index = st.session_state.get("_bar_index", 0)
+    if min_tf and ticker:
+        cutoff_date = _get_bar_date_from_db(ticker, min_tf, bar_index - 1)
+        if cutoff_date:
+            AppState.set("_bt_cutoff_date", cutoff_date)
+
+
 def _render_backtest_nav(total_bars, min_n_pts):
     """渲染回测导航按钮：⏮ ◀ ▶/⏸ ▶▶ ⏭ + 速度"""
     bar_index = st.session_state.get("_bar_index", total_bars)
@@ -1253,7 +1262,6 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
                 logger.debug(f"回测日志写入失败: {e}")
         else:
             # 切换回浏览模式：清除回测状态
-            AppState.set("_bt_data_synced", False)
             # 捕获退出前的回测参数（必须在清除前读取）
             _exit_min_tf = AppState.get("_min_tf", "")
             _exit_bar_count = AppState.get("_min_tf_bar_count", 0)
@@ -1290,14 +1298,8 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
             st.sidebar.slider(
                 "窗口结束位置", min_n_pts, total_bars,
                 key="_bar_index",
+                on_change=_on_slider_change,
             )
-            # slider 直接绑定 _bar_index，拖动时 Streamlit 自动更新
-            # st.session_state._bar_index 并 rerun，无需手动检测变更。
-            # 同步 cutoff_date（每次渲染时根据当前 bar_index 计算）。
-            if min_tf:
-                cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, bar_index - 1)
-                if cutoff_date:
-                    AppState.set("_bt_cutoff_date", cutoff_date)
         else:
             st.sidebar.warning("回测数据未就绪，请先在浏览模式加载数据")
 
@@ -1534,8 +1536,6 @@ def main() -> None:
             cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, bar_count - 1)
             if cutoff_date:
                 AppState.set("_bt_cutoff_date", cutoff_date)
-        # ticker 切换后需重新同步 parquet 数据
-        AppState.set("_bt_data_synced", False)
         AppState.set("_bt_last_ticker", ticker_code)
 
     # ── Time window navigation ──
