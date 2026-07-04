@@ -43,6 +43,7 @@ SYSTEM_KEYS: Dict[str, Any] = {
     "_cb_mode": False,
     "_bar_index": 0,
     "_bt_cutoff_date": "",        # 回测截止日期（ISO格式字符串），用于各周期日期对齐截断
+    "_bt_last_ticker": "",        # 上次回测时的 ticker，用于检测切换
     "_min_tf": "",
     "_min_tf_bar_count": 0,
 }

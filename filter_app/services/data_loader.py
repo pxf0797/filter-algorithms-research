@@ -137,23 +137,24 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
 
 
 def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int = 120,
-                     window_start: Optional[int] = None) -> Tuple[bool, int]:
+                     cutoff_date: Optional[str] = None) -> Tuple[bool, int]:
     """同步数据到 display parquet。
 
-    window_start=None: 浏览模式，取最新 n_pts 条
-    window_start=N:    回测模式，从 DB 第 N 条开始取 n_pts 条（窗口滑动）
+    cutoff_date=None: 浏览模式，取最新 n_pts 条（支持 day_offset 日期偏移）
+    cutoff_date=YYYY-MM-DD: 回测模式，取截止到 cutoff_date 的最后 n_pts 条（日期对齐）
     """
-    if window_start is not None:
-        # 回测模式：从 DB 第 window_start 条开始，取 n_pts 条
+    if cutoff_date is not None:
+        # 回测模式：查询截止到 cutoff_date 的最后 n_pts 条，按日期对齐
         from db import get_conn
         with get_conn() as conn:
             rows = conn.execute(
                 """SELECT ts, open, high, low, close, volume
-                   FROM kline WHERE ticker=? AND timeframe=?
-                   ORDER BY ts ASC LIMIT ? OFFSET ?""",
-                (ticker_code, tf, n_pts, int(window_start)),
+                   FROM kline WHERE ticker=? AND timeframe=? AND ts <= ?
+                   ORDER BY ts DESC LIMIT ?""",
+                (ticker_code, tf, cutoff_date, n_pts),
             ).fetchall()
         if rows:
+            rows.reverse()  # DESC → ASC
             df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
             display_dir = Path(__file__).parent.parent.parent / "data" / "display"
             display_dir.mkdir(parents=True, exist_ok=True)
