@@ -45,6 +45,7 @@ from components.sidebar import (
     _render_params, ALL_TFS, DEFAULT_TFS, TF_HIERARCHY,
 )
 from state import AppState
+from backtest_logger import log_mode_switch, log_bar_navigation, log_data_load, log_error
 
 # ---------------------------------------------------------------------------
 # Page config (must be the first Streamlit command)
@@ -113,7 +114,11 @@ def _date_markers(dates, tf) -> tuple[list, list]:
 
 def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None) -> tuple:
     """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err)."""
-    _sync_to_display(ticker_code, tf, day_offset, n_pts)
+    # 回测模式：用 force_full=True 确保 parquet 有全量数据
+    if bar_index is not None:
+        _sync_to_display(ticker_code, tf, day_offset, n_pts, force_full=True)
+    else:
+        _sync_to_display(ticker_code, tf, day_offset, n_pts)
     display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
     err = None
     if display_path.exists():
@@ -122,32 +127,32 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None)
             if "Date" in df.columns and "Close" in df.columns and len(df) >= 2:
                 df["Date"] = pd.to_datetime(df["Date"])
                 df = df.set_index("Date").sort_index()
-                # 回测模式：按 cutoff_date 对各周期统一截断（日期对齐）
+                # ★ 统一的截断点：回测按日期，浏览按行数
                 if bar_index is not None:
+                    # 回测模式：按 cutoff_date 对齐
                     cutoff_str = AppState.get("_bt_cutoff_date", "")
                     if cutoff_str:
                         try:
                             cutoff_date = pd.Timestamp(cutoff_str).tz_localize(None)
-                            # 统一时区：剥离 tz 避免比较异常
                             df_idx = df.index.tz_localize(None) if hasattr(df.index, 'tz') and df.index.tz is not None else df.index
                             df = df[df_idx <= cutoff_date]
                         except Exception:
-                            if bar_index < len(df):
-                                df = df.iloc[:bar_index + 1]
-                    elif bar_index < len(df):
-                        logger.warning(f"回测 {tf}: cutoff_date 未就绪，回退到数值截断")
-                        df = df.iloc[:bar_index + 1]
-                    # ★ 空数据守卫：截断后可能为空（高周期数据起始晚于 cutoff_date）
-                    if len(df) < 2:
-                        err = f"{tf} 回测数据不足：截止日期前无足够K线"
-                        return None, None, None, None, None, err
-                # ★ 截断后检查最小长度
+                            pass  # 截断失败时返回全量
+                else:
+                    # 浏览模式：取最后 n_pts 条
+                    df = df.tail(n_pts)
                 if len(df) < 2:
                     err = f"{tf} 数据点不足 ({len(df)})，最少需要 2 个点"
                     return None, None, None, None, None, err
                 t = np.arange(len(df), dtype=float)
                 noisy = df["Close"].values.ravel()
                 ohlc = df[["Open", "High", "Low", "Close"]] if all(c in df.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=df.index)
+                # 回测模式：记录数据加载事件
+                if bar_index is not None:
+                    try:
+                        log_data_load(ticker_code, tf, len(df), AppState.get("_bt_cutoff_date", ""), elapsed_ms=0)
+                    except Exception:
+                        pass
                 return t, noisy, ohlc, ticker_code, df.index, None
             else:
                 err = "数据不足"
@@ -155,25 +160,7 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None)
             err = str(e)
     if err is not None:
         return None, None, None, None, None, err
-    # API 回退路径也应用截断
-    t, noisy, ohlc, ticker_full, dates, err = _cached_fetch_stock(market, ticker_code, tf, n_pts)
-    if err is None and bar_index is not None and dates is not None and len(dates) > 0:
-        cutoff_str = AppState.get("_bt_cutoff_date", "")
-        if cutoff_str:
-            try:
-                cutoff_date = pd.Timestamp(cutoff_str).tz_localize(None)
-                mask = dates <= cutoff_date
-                if mask.sum() >= 2:
-                    t = t[mask]
-                    noisy = noisy[mask]
-                    if hasattr(ohlc, 'iloc'):
-                        ohlc = ohlc.iloc[mask]
-                    dates = dates[mask]
-                else:
-                    return None, None, None, None, None, f"{tf} 回测数据不足"
-            except Exception:
-                pass  # 截断失败时返回全量数据（比崩溃好）
-    return t, noisy, ohlc, ticker_full, dates, err
+    return _cached_fetch_stock(market, ticker_code, tf, n_pts)
 
 
 def _compute_filters(noisy, t, cfg) -> tuple[np.ndarray, np.ndarray | None]:
@@ -1083,6 +1070,17 @@ def _render_time_nav(configs, ticker_code) -> int:
     return AppState.get("_day_offset", 0)
 
 
+def _get_bar_date_from_db(ticker_code, tf, bar_index):
+    """从 DB 查询指定 bar_index 位置的日期。返回字符串或空字符串。"""
+    from db import get_conn
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT ts FROM kline WHERE ticker=? AND timeframe=? ORDER BY ts ASC LIMIT 1 OFFSET ?",
+            (ticker_code, tf, bar_index),
+        ).fetchone()
+    return row[0] if row else ""
+
+
 def _render_backtest_mode(market, ticker_code, configs) -> None:
     """侧边栏回测模式切换 + bar 位置滑块。"""
     st.sidebar.markdown("---")
@@ -1103,26 +1101,32 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
             AppState.set("_min_tf", min_tf)
             AppState.set("_min_tf_bar_count", bar_count)
             AppState.set("_bar_index", 0)
-            # 初始化 cutoff_date：从 min_tf parquet 中获取 bar_index=0 位置的日期
+            # 初始化 cutoff_date：从 DB 查询 bar_index=0 位置的日期
             if bar_count > 0 and min_tf:
-                try:
-                    display_path = Path(__file__).parent.parent / "data" / "display" / f"{min_tf}.parquet"
-                    if display_path.exists():
-                        df = pd.read_parquet(display_path)
-                        if "Date" in df.columns and len(df) > 0:
-                            AppState.set("_bt_cutoff_date", str(pd.Timestamp(df["Date"].iloc[0])))
-                except Exception:
-                    pass
+                cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, 0)
+                if cutoff_date:
+                    AppState.set("_bt_cutoff_date", cutoff_date)
             if bar_count > 0:
                 st.toast(f"回测模式已启用  最小周期: {min_tf} ({bar_count} bars)")
             else:
                 st.toast("回测模式已启用  数据未就绪")
+            try:
+                log_mode_switch(ticker_code, "enter", min_tf, bar_count)
+            except Exception:
+                pass
         else:
             # 切换回浏览模式：清除回测状态
+            # 捕获退出前的回测参数（必须在清除前读取）
+            _exit_min_tf = AppState.get("_min_tf", "")
+            _exit_bar_count = AppState.get("_min_tf_bar_count", 0)
             AppState.set("_bar_index", 0)
             AppState.set("_bt_cutoff_date", "")
             AppState.set("_min_tf", "")
             AppState.set("_min_tf_bar_count", 0)
+            try:
+                log_mode_switch(ticker_code, "exit", _exit_min_tf, _exit_bar_count)
+            except Exception:
+                pass
 
         AppState.set("_cb_mode", new_cb_mode)
         st.rerun()
@@ -1154,15 +1158,13 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
             )
             if new_bar_index != bar_index:
                 AppState.set("_bar_index", new_bar_index)
-                # 计算 cutoff_date：从 min_tf parquet 中获取 bar_index 位置的日期
+                # 计算 cutoff_date：从 DB 查询 bar_index 位置的日期
                 if min_tf:
+                    cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, new_bar_index)
+                    if cutoff_date:
+                        AppState.set("_bt_cutoff_date", cutoff_date)
                     try:
-                        display_path = Path(__file__).parent.parent / "data" / "display" / f"{min_tf}.parquet"
-                        if display_path.exists():
-                            df = pd.read_parquet(display_path)
-                            if new_bar_index < len(df) and "Date" in df.columns:
-                                cutoff_date = str(pd.Timestamp(df["Date"].iloc[new_bar_index]))
-                                AppState.set("_bt_cutoff_date", cutoff_date)
+                        log_bar_navigation(ticker_code, min_tf, new_bar_index, total_bars, cutoff_date or "")
                     except Exception:
                         pass
                 st.rerun()

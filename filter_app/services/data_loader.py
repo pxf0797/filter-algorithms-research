@@ -136,8 +136,26 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
     return np.arange(n, dtype=float), close, result_ohlc, full, None, dates
 
 
-def _sync_to_display(code: str, tf: str, day_offset: int, n_pts: int) -> Tuple[bool, int]:
-    """从 SQLite 按天偏移查询，写入 display parquet。"""
+def _sync_to_display(code: str, tf: str, day_offset: int, n_pts: int, force_full: bool = False) -> Tuple[bool, int]:
+    """同步数据到 display parquet。force_full=True 时写入全量数据（回测用）。"""
+    if force_full:
+        from db import get_conn
+        with get_conn() as conn:
+            rows = conn.execute(
+                """SELECT ts, open, high, low, close, volume
+                   FROM kline WHERE ticker=? AND timeframe=?
+                   ORDER BY ts ASC""",
+                (code, tf),
+            ).fetchall()
+        if rows:
+            df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+            display_dir = Path(__file__).parent.parent.parent / "data" / "display"
+            display_dir.mkdir(parents=True, exist_ok=True)
+            df.to_parquet(display_dir / f"{tf}.parquet", index=False)
+            return True, len(df)
+        return False, 0
+
+    # 浏览模式：原有逻辑（n_pts 窗口）
     df = query_kline(code, tf, n_pts, day_offset=day_offset)
     if len(df) < 5:
         return False, len(df)
