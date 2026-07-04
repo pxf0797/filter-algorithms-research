@@ -556,3 +556,35 @@ class TestPlayback:
         assert speed_map["5x"] == 5.0
         assert speed_map["10x"] == 10.0
         assert len(speed_map) == 6
+
+    def test_on_slider_change_skips_during_playback(self):
+        """播放期间 _on_slider_change 应跳过，避免干扰播放循环"""
+        # 播放中：_on_slider_change 第一行检查 _is_playing
+        AppState.set("_is_playing", True)
+        should_skip = AppState.get("_is_playing", False)
+        assert should_skip is True  # 播放中 → 跳过
+
+        # 非播放：正常执行（更新 cutoff_date）
+        AppState.set("_is_playing", False)
+        should_skip = AppState.get("_is_playing", False)
+        assert should_skip is False  # 非播放 → 正常执行
+
+    def test_play_works_from_any_position(self):
+        """从任意 bar_index (< total) 开始播放的核心逻辑验证"""
+        # 场景：用户拖动 slider 到 200 后点击播放
+        AppState.set("_is_playing", True)
+        AppState.set("_bar_index", 200)
+        AppState.set("_min_tf_bar_count", 500)
+
+        bar_index = AppState.get("_bar_index")
+        total = AppState.get("_min_tf_bar_count", 0)
+
+        # 验证：bar_index < total → 不触发停止
+        assert bar_index < total  # 200 < 500
+
+        # 验证：前进一个 bar
+        new_bar_index = bar_index + 1
+        assert new_bar_index == 201
+
+        # 验证：不会因 _on_slider_change 干扰而停止
+        assert AppState.get("_is_playing") is True

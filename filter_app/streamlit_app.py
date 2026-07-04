@@ -1141,7 +1141,9 @@ def _update_cutoff_and_rerun():
 
 
 def _on_slider_change():
-    """slider 拖动时更新 cutoff_date（Streamlit on_change 回调，自动 rerun）。"""
+    """slider 拖动时更新 cutoff_date。播放期间跳过 — _run_backtest_play 自行维护。"""
+    if AppState.get("_is_playing", False):
+        return  # 播放中，避免 on_change 自动 rerun 干扰播放循环
     ticker = AppState.get("_fetched_ticker", "")
     min_tf = AppState.get("_min_tf", "")
     bar_index = st.session_state.get("_bar_index", 0)
