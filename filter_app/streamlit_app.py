@@ -112,13 +112,18 @@ def _date_markers(dates, tf) -> tuple[list, list]:
     return positions, labels
 
 
-def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None) -> tuple:
-    """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err)."""
-    # 回测模式：用 force_full=True 确保 parquet 有全量数据
-    if bar_index is not None:
-        _sync_to_display(ticker_code, tf, day_offset, n_pts, force_full=True)
+def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None, window_start=None) -> tuple:
+    """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err).
+
+    浏览: bar_index=None, window_start=None
+    回测: bar_index=N, window_start=slider值
+    """
+    if window_start is not None:
+        # 回测模式：从 DB 指定位置读 n_pts 条
+        _sync_to_display(ticker_code, tf, n_pts=n_pts, window_start=window_start)
     else:
-        _sync_to_display(ticker_code, tf, day_offset, n_pts)
+        # 浏览模式：取最新 n_pts 条
+        _sync_to_display(ticker_code, tf, day_offset=day_offset, n_pts=n_pts)
     display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
     err = None
     if display_path.exists():
@@ -127,32 +132,22 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=None)
             if "Date" in df.columns and "Close" in df.columns and len(df) >= 2:
                 df["Date"] = pd.to_datetime(df["Date"])
                 df = df.set_index("Date").sort_index()
-                # ★ 统一的截断点：回测按日期，浏览按行数
-                if bar_index is not None:
-                    # 回测模式：按 cutoff_date 对齐
-                    cutoff_str = AppState.get("_bt_cutoff_date", "")
-                    if cutoff_str:
-                        try:
-                            cutoff_date = pd.Timestamp(cutoff_str).tz_localize(None)
-                            df_idx = df.index.tz_localize(None) if hasattr(df.index, 'tz') and df.index.tz is not None else df.index
-                            df = df[df_idx <= cutoff_date]
-                        except Exception:
-                            pass  # 截断失败时返回全量
-                else:
-                    # 浏览模式：取最后 n_pts 条
-                    df = df.tail(n_pts)
+
+                # ★ 不再需要截断！parquet 已经是 n_pts 条
                 if len(df) < 2:
-                    err = f"{tf} 数据点不足 ({len(df)})，最少需要 2 个点"
+                    err = f"{tf} 数据点不足 ({len(df)})"
                     return None, None, None, None, None, err
+
                 t = np.arange(len(df), dtype=float)
                 noisy = df["Close"].values.ravel()
                 ohlc = df[["Open", "High", "Low", "Close"]] if all(c in df.columns for c in ["Open", "High", "Low"]) else pd.DataFrame({"Open": noisy, "High": noisy, "Low": noisy, "Close": noisy}, index=df.index)
-                # 回测模式：记录数据加载事件
+
                 if bar_index is not None:
                     try:
                         log_data_load(ticker_code, tf, len(df), AppState.get("_bt_cutoff_date", ""), elapsed_ms=0)
                     except Exception:
                         pass
+
                 return t, noisy, ohlc, ticker_code, df.index, None
             else:
                 err = "数据不足"
@@ -454,22 +449,53 @@ def _get_min_tf_and_count(configs, ticker_code) -> tuple:
     return min_tf, bar_count
 
 
+def _save_backtest_config(ticker_code, min_tf, bar_count, window_size):
+    """保存回测配置到 JSON 文件。"""
+    import json
+    from datetime import datetime
+    config_path = Path(__file__).parent.parent / "data" / "backtest_config.json"
+    config = {
+        "ticker": ticker_code,
+        "min_tf": min_tf,
+        "bar_count": bar_count,
+        "window_size": window_size,
+        "cached_at": datetime.now().isoformat(),
+    }
+    with open(config_path, "w") as f:
+        json.dump(config, f, ensure_ascii=False, indent=2)
+
+
+def _load_backtest_config():
+    """加载回测配置。返回 dict 或 None。"""
+    import json
+    config_path = Path(__file__).parent.parent / "data" / "backtest_config.json"
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return None
+
+
 # =====================================================================
 # Chart rendering (main figure builder)
 # =====================================================================
 
 @st.fragment
-def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, bar_index=None) -> None:
+def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, bar_index=None, window_start=None) -> None:
     """Fragment wrapper for _render_chart — enables per-view independent re-rendering.
-    bar_index: 回测模式下传递的 bar 位置，用于数据截断。"""
-    _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl, bar_index=bar_index)
+    bar_index: 回测模式下传递的 bar 位置，用于日志记录。
+    window_start: 回测模式下窗口起始位置，用于数据加载。"""
+    _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl, bar_index=bar_index, window_start=window_start)
 
 
-def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, bar_index=None) -> None:
+def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, bar_index=None, window_start=None) -> None:
     """Fetch data + render multi-subplot figure from config.
     优先从本地 Parquet 读取；day_offset=向历史前移N天（各周期独立对齐）。
     higher_pnl: 高周期PnL数据（来自 _align_pnl_to_current_tf 的输出），非空时新增row 7子图。
-    bar_index: 回测模式下传递的 bar 位置，用于数据截断。"""
+    bar_index: 回测模式下传递的 bar 位置，用于日志记录。
+    window_start: 回测模式下窗口起始位置，用于数据加载。"""
     tf = cfg["tf"]
     n_pts = cfg["n_pts"]
     logger.debug(f"Rendering chart: {ticker_code}/{tf} view={key} n_pts={n_pts}")
@@ -481,7 +507,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         _raw_higher = st.session_state.get(f"_pnl_{_higher_tf}")
 
     # ── Step 1: Load chart data ──
-    t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=bar_index)
+    t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts, bar_index=bar_index, window_start=window_start)
     if err is not None:
         st.error(err)
         return
@@ -1101,6 +1127,13 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
             AppState.set("_min_tf", min_tf)
             AppState.set("_min_tf_bar_count", bar_count)
             AppState.set("_bar_index", 0)
+            # 计算 min_tf 对应的窗口大小并保存回测配置
+            window_size = 120  # 默认
+            for cfg in configs:
+                if cfg["tf"] == min_tf:
+                    window_size = cfg["n_pts"]
+                    break
+            _save_backtest_config(ticker_code, min_tf, bar_count, window_size)
             # 初始化 cutoff_date：从 DB 查询 bar_index=0 位置的日期
             if bar_count > 0 and min_tf:
                 cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, 0)
@@ -1131,40 +1164,49 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
         AppState.set("_cb_mode", new_cb_mode)
         st.rerun()
 
-    # 回测模式下显示 bar 位置信息
+    # 回测模式下显示窗口位置信息
     if AppState.get("_cb_mode", False):
-        bar_index = AppState.get("_bar_index", 0)
+        window_start = AppState.get("_bar_index", 0)
         total_bars = AppState.get("_min_tf_bar_count", 0)
         min_tf = AppState.get("_min_tf", "")
+        # 计算 min_tf 对应的窗口大小
+        window_size = 120  # 默认
+        for cfg in configs:
+            if cfg["tf"] == min_tf:
+                window_size = cfg["n_pts"]
+                break
 
         if total_bars > 0:
-            # 显示当前 bar 时间
+            # 显示当前窗口时间范围
             try:
                 display_path = Path(__file__).parent.parent / "data" / "display" / f"{min_tf}.parquet"
                 if display_path.exists():
                     df = pd.read_parquet(display_path)
-                    if bar_index < len(df):
-                        date_val = df["Date"].iloc[bar_index] if "Date" in df.columns else ""
-                        if date_val:
-                            date_str = pd.Timestamp(date_val).strftime("%Y-%m-%d %H:%M")
-                            st.sidebar.caption(f"📍 bar {bar_index + 1}/{total_bars} | {date_str}")
+                    if len(df) > 0:
+                        start_val = df["Date"].iloc[0] if "Date" in df.columns else ""
+                        end_val = df["Date"].iloc[-1] if "Date" in df.columns else ""
+                        if start_val and end_val:
+                            start_str = pd.Timestamp(start_val).strftime("%Y-%m-%d %H:%M")
+                            end_str = pd.Timestamp(end_val).strftime("%Y-%m-%d %H:%M")
+                            st.sidebar.caption(f"📍 窗口 {window_start + 1}-{min(window_start + window_size, total_bars)}/{total_bars} | {start_str} ~ {end_str}")
             except Exception:
                 pass
 
-            # bar 位置 slider
-            new_bar_index = st.sidebar.slider(
-                "Bar 位置", 0, total_bars - 1, bar_index,
-                key="_bt_bar_slider", label_visibility="visible",
+            # 窗口位置 slider（范围：0 ~ total_bars - window_size）
+            max_start = max(0, total_bars - window_size)
+            new_window_start = st.sidebar.slider(
+                f"窗口位置 (窗口={window_size}条)", 0, max_start, window_start,
+                key="_bt_bar_slider",
             )
-            if new_bar_index != bar_index:
-                AppState.set("_bar_index", new_bar_index)
-                # 计算 cutoff_date：从 DB 查询 bar_index 位置的日期
+            if new_window_start != window_start:
+                AppState.set("_bar_index", new_window_start)
+                # 计算 cutoff_date（窗口最后一根 bar 的日期）
                 if min_tf:
-                    cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, new_bar_index)
+                    cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, new_window_start + window_size - 1)
                     if cutoff_date:
                         AppState.set("_bt_cutoff_date", cutoff_date)
                     try:
-                        log_bar_navigation(ticker_code, min_tf, new_bar_index, total_bars, cutoff_date or "")
+                        log_bar_navigation(ticker_code, min_tf, new_window_start, total_bars, cutoff_date or "")
                     except Exception:
                         pass
                 st.rerun()
@@ -1394,7 +1436,12 @@ def main() -> None:
 
     # ── Pass 2: 2x2 chart views ──
     cb_mode = AppState.get("_cb_mode", False)
-    bar_index = AppState.get("_bar_index", 0) if cb_mode else None
+    if cb_mode:
+        bar_index = AppState.get("_bar_index", 0)
+        window_start = AppState.get("_bar_index", 0)
+    else:
+        bar_index = None
+        window_start = None
 
     grid_cols = []
     for row_idx in range(2):
@@ -1407,7 +1454,7 @@ def main() -> None:
         col_idx = orig_i % 2
         with grid_cols[row_idx][col_idx]:
             _render_chart_fragment(market, ticker_code, cfg, f"v{orig_i}", compact=True,
-                                   day_offset=day_offset, bar_index=bar_index)
+                                   day_offset=day_offset, bar_index=bar_index, window_start=window_start)
 
     # ── Export config ──
     _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code)

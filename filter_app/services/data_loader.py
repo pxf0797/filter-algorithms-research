@@ -136,16 +136,22 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
     return np.arange(n, dtype=float), close, result_ohlc, full, None, dates
 
 
-def _sync_to_display(code: str, tf: str, day_offset: int, n_pts: int, force_full: bool = False) -> Tuple[bool, int]:
-    """同步数据到 display parquet。force_full=True 时写入全量数据（回测用）。"""
-    if force_full:
+def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int = 120,
+                     window_start: Optional[int] = None) -> Tuple[bool, int]:
+    """同步数据到 display parquet。
+
+    window_start=None: 浏览模式，取最新 n_pts 条
+    window_start=N:    回测模式，从 DB 第 N 条开始取 n_pts 条（窗口滑动）
+    """
+    if window_start is not None:
+        # 回测模式：从 DB 第 window_start 条开始，取 n_pts 条
         from db import get_conn
         with get_conn() as conn:
             rows = conn.execute(
                 """SELECT ts, open, high, low, close, volume
                    FROM kline WHERE ticker=? AND timeframe=?
-                   ORDER BY ts ASC""",
-                (code, tf),
+                   ORDER BY ts ASC LIMIT ? OFFSET ?""",
+                (ticker_code, tf, n_pts, int(window_start)),
             ).fetchall()
         if rows:
             df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
@@ -156,7 +162,7 @@ def _sync_to_display(code: str, tf: str, day_offset: int, n_pts: int, force_full
         return False, 0
 
     # 浏览模式：原有逻辑（n_pts 窗口）
-    df = query_kline(code, tf, n_pts, day_offset=day_offset)
+    df = query_kline(ticker_code, tf, n_pts, day_offset=day_offset)
     if len(df) < 5:
         return False, len(df)
     df["Date"] = pd.to_datetime(df["Date"])
