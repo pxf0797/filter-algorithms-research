@@ -1,6 +1,6 @@
 # 多周期股票滤波分析工具 — 测试用例文档
 
-> 自动生成于 2026-06-28 | 测试总数: 603（pytest 收集，不含 test_streamlit_app.py 的 25 个 mock 测试） | Python 3.12 + pytest
+> 自动生成于 2026-06-28 (更新于 2026-07-04) | 测试总数: 625（pytest 收集，不含 test_streamlit_app.py 的 25 个 mock 测试） | Python 3.12 + pytest
 
 ## 文档说明
 
@@ -1477,6 +1477,72 @@
 
 ---
 
+## 8. 回测模式测试
+
+### 8.1 回测功能 (`test_backtest.py`) — 22 用例
+
+#### 模式切换 (`TestBacktestModeSwitch`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-BT-001 | 进入回测模式后 _cb_mode=True | mock session_state | AppState.set("_cb_mode", True) | get("_cb_mode") 返回 True |
+| TC-BT-002 | 退出回测时 _cb_mode=False + _bar_index=0 + _bt_cutoff_date="" | mock session_state，进入回测后 | 依次设置 _cb_mode=False, _bar_index=0, _bt_cutoff_date="" | 三个键值全部还原 |
+| TC-BT-003 | 初始 _cb_mode 默认为 False | mock session_state | init_defaults | _cb_mode 为 False |
+| TC-BT-004 | 初始 _bar_index 默认为 0 | mock session_state | init_defaults | _bar_index 为 0 |
+| TC-BT-005 | 初始 _bt_cutoff_date 默认为空字符串 | mock session_state | init_defaults | _bt_cutoff_date 为 "" |
+
+#### 时间导航隐藏 (`TestRenderTimeNav`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-BT-006 | _cb_mode=True 时 _render_time_nav 返回 0 | mock session_state，_cb_mode=True | 模拟 _render_time_nav 分支逻辑 | day_offset 为 0 |
+| TC-BT-007 | _cb_mode=False 时不返回 0 | mock session_state，_cb_mode=False | 模拟分支逻辑 | day_offset 不是 0（走正常导航流程） |
+
+#### 回测数据加载 (`TestBacktestDataLoading`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-BT-008 | cutoff_date 模式查询使用 <= cutoff_date | mock DB 有数据 | _sync_to_display(ticker, tf, cutoff_date=...) | ok=True, 查询 SQL 包含 cutoff_date |
+| TC-BT-009 | cutoff_date 查询无结果返回 (False, 0) | mock DB 空集合 | _sync_to_display(ticker, tf, cutoff_date=很老日期) | ok=False, count=0 |
+| TC-BT-010 | 不传 cutoff_date 走浏览模式 query_kline 路径 | mock query_kline | _sync_to_display(ticker, tf, cutoff_date=None) | query_kline 被调用 |
+| TC-BT-011 | _sync_to_display 返回 False 触发 API 回退 | mock DB 空 | _sync_to_display 返回 (False,0) | 返回值指示需 API 回退 |
+| TC-BT-012 | cutoff_date 查询截断为恰好 n_pts 条 | mock DB 有 3 条 | _sync_to_display(n_pts=3, cutoff_date=...) | count == n_pts |
+
+#### 边界条件 (`TestBacktestEdgeCases`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-BT-013 | 高周期无数据返回 (False, 0) | mock DB 空 | _sync_to_display(月线, cutoff_date=极早) | ok=False, count=0 |
+| TC-BT-014 | ticker 切换时回测状态重置 | mock session_state | 模拟 ticker 从 AAPL 切换到 MSFT | _bar_index 归零, _bt_cutoff_date 清空 |
+| TC-BT-015 | 日志失败时 logger.debug 记录异常 | mock log_data_load 抛异常 | 模拟捕获 + logger.debug | debug 被调用，外层不崩溃 |
+| TC-BT-016 | 进入回测时保存 backtest_config.json | tmp_path | 写入配置 JSON 文件 | 文件内容匹配预期 |
+| TC-BT-017 | bar_index 在 slider 范围内滑动 | mock session_state | 设置 bar_index 为 0、200、max | 值正确且在有效范围内 |
+
+#### Bar 日期查询 (`TestGetBarDateFromDb`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-BT-018 | 查到日期返回字符串 | mock DB 有数据 | _get_bar_date_from_db("AAPL", "1d", 100) | 返回 "2026-06-15" |
+| TC-BT-019 | 无数据返回空字符串 | mock DB 无数据 | _get_bar_date_from_db("AAPL", "1d", 99999) | 返回 "" |
+
+#### 回测日志 (`TestBacktestLogger`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-BT-020 | log_mode_switch 写入 JSONL | tmp_path | log_mode_switch("AAPL", "enter", ...) | JSONL 记录 event="mode_switch" |
+| TC-BT-021 | log_bar_navigation 写入 JSONL | tmp_path | log_bar_navigation(..., bar_index=50, ...) | JSONL 记录含 bar_index=50 |
+| TC-BT-022 | log_data_load + log_error 写入正确字段 | tmp_path | log_data_load / log_error | 各字段值正确 |
+| TC-BT-023 | 日志目录自动创建 | tmp_path/nested | _ensure_dir | 目录被创建 |
+
+#### AppState 回测键 (`TestAppStateKeys`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-BT-024 | DEFAULTS 包含 _cb_mode, _bar_index, _bt_cutoff_date, _bt_last_ticker | 无 | 检查 DEFAULTS 字典 | 四个键都存在 |
+| TC-BT-025 | 各键默认值类型正确 | 无 | 检查类型 | _cb_mode=bool, _bar_index=int, date=str |
+
+---
+
 ## 附录
 
 ### A. 测试运行命令
@@ -1532,4 +1598,5 @@ pytest tests/ --cov=. --cov-report=html
 | 边界与参数 | test_boundary.py | 11 | 30 |
 | | test_param_export_import.py | 5 | 13 |
 | 数据加载 | test_data_loader.py | 5 | 30 |
-| **合计** | **20 文件** | **139** | **603** |
+| **回测模式** | **test_backtest.py** | **6** | **22** |
+| **合计** | **21 文件** | **145** | **625** |
