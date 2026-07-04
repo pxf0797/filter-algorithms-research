@@ -119,19 +119,21 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=No
     回测: window_start=bar_index(窗口结束位置), cutoff_date=截止日期
     """
     if window_start is not None:
-        # 回测模式：按 cutoff_date 日期对齐
-        ok, count = _sync_to_display(ticker_code, tf, n_pts=n_pts, cutoff_date=cutoff_date)
-        if not ok:
-            # parquet 写入失败，直接走 API 回退
-            t, noisy, ohlc, ticker_full, dates, err = _cached_fetch_stock(market, ticker_code, tf, n_pts)
-            # API 回退路径：截断到 n_pts
-            if err is None and window_start is not None and dates is not None and len(dates) > n_pts:
-                t = t[-n_pts:]
-                noisy = noisy[-n_pts:]
-                if hasattr(ohlc, 'iloc'):
-                    ohlc = ohlc.iloc[-n_pts:]
-                dates = dates[-n_pts:]
-            return t, noisy, ohlc, ticker_full, dates, err
+        # 回测模式: 仅在首次进入时同步数据, slider 移动时跳过重写
+        if not AppState.get("_bt_data_synced", False):
+            ok, count = _sync_to_display(ticker_code, tf, n_pts=n_pts, cutoff_date=AppState.get("_bt_cutoff_date", ""))
+            AppState.set("_bt_data_synced", True)
+            if not ok:
+                # parquet 写入失败，直接走 API 回退
+                t, noisy, ohlc, ticker_full, dates, err = _cached_fetch_stock(market, ticker_code, tf, n_pts)
+                # API 回退路径：截断到 n_pts
+                if err is None and dates is not None and len(dates) > n_pts:
+                    t = t[-n_pts:]
+                    noisy = noisy[-n_pts:]
+                    if hasattr(ohlc, 'iloc'):
+                        ohlc = ohlc.iloc[-n_pts:]
+                    dates = dates[-n_pts:]
+                return t, noisy, ohlc, ticker_full, dates, err
     else:
         # 浏览模式：取最新 n_pts 条
         ok, count = _sync_to_display(ticker_code, tf, day_offset=day_offset, n_pts=n_pts)
@@ -478,6 +480,20 @@ def _save_backtest_config(ticker_code, min_tf, bar_count, window_size):
     with open(config_path, "w") as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
 
+
+def _load_backtest_config(ticker_code):
+    """加载回测配置缓存。ticker匹配时返回配置，否则返回None。"""
+    import json
+    config_path = Path(__file__).parent.parent / "data" / "backtest_config.json"
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                config = json.load(f)
+            if config.get("ticker") == ticker_code:
+                return config
+        except Exception:
+            pass
+    return None
 
 
 # =====================================================================
@@ -1205,15 +1221,22 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
 
     if new_cb_mode != old_cb_mode:
         if new_cb_mode:
-            # 切换到回测模式：计算最小周期信息
-            min_tf, bar_count = _get_min_tf_and_count(configs, ticker_code)
+            # 切换到回测模式：先尝试从缓存加载配置
+            cached = _load_backtest_config(ticker_code)
+            if cached:
+                min_tf = cached["min_tf"]
+                bar_count = cached["bar_count"]
+            else:
+                # 缓存未命中，从 DB 查询
+                min_tf, bar_count = _get_min_tf_and_count(configs, ticker_code)
             AppState.set("_min_tf", min_tf)
             AppState.set("_min_tf_bar_count", bar_count)
             # bar_index = 窗口结束位置，默认在末尾
             AppState.set("_bar_index", bar_count)
             # 取 min_tf 视图中最小的 n_pts 作为 slider 范围下限
             min_n_pts = min((cfg["n_pts"] for cfg in configs if cfg["tf"] == min_tf), default=120)
-            _save_backtest_config(ticker_code, min_tf, bar_count, min_n_pts)
+            if not cached:
+                _save_backtest_config(ticker_code, min_tf, bar_count, min_n_pts)
             # 初始化 cutoff_date：从 DB 查询 bar_index 位置（最后一条 bar）的日期
             if bar_count > 0 and min_tf:
                 cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, bar_count - 1)
@@ -1229,6 +1252,7 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
                 logger.debug(f"回测日志写入失败: {e}")
         else:
             # 切换回浏览模式：清除回测状态
+            AppState.set("_bt_data_synced", False)
             # 捕获退出前的回测参数（必须在清除前读取）
             _exit_min_tf = AppState.get("_min_tf", "")
             _exit_bar_count = AppState.get("_min_tf_bar_count", 0)
@@ -1495,16 +1519,25 @@ def main() -> None:
     # ticker 切换后，若处于回测模式则刷新回测状态（需在 _render_backtest_mode 前）
     _prev_bt_ticker = AppState.get("_bt_last_ticker", "")
     if AppState.get("_cb_mode", False) and ticker_code and ticker_code != _prev_bt_ticker:
-        min_tf, bar_count = _get_min_tf_and_count(configs, ticker_code)
+        # 先尝试从缓存加载配置
+        cached = _load_backtest_config(ticker_code)
+        if cached:
+            min_tf = cached["min_tf"]
+            bar_count = cached["bar_count"]
+        else:
+            min_tf, bar_count = _get_min_tf_and_count(configs, ticker_code)
         if min_tf and bar_count > 0:
             AppState.set("_min_tf", min_tf)
             AppState.set("_min_tf_bar_count", bar_count)
             AppState.set("_bar_index", bar_count)
             min_n_pts = min((cfg["n_pts"] for cfg in configs if cfg["tf"] == min_tf), default=120)
-            _save_backtest_config(ticker_code, min_tf, bar_count, min_n_pts)
+            if not cached:
+                _save_backtest_config(ticker_code, min_tf, bar_count, min_n_pts)
             cutoff_date = _get_bar_date_from_db(ticker_code, min_tf, bar_count - 1)
             if cutoff_date:
                 AppState.set("_bt_cutoff_date", cutoff_date)
+        # ticker 切换后需重新同步 parquet 数据
+        AppState.set("_bt_data_synced", False)
         AppState.set("_bt_last_ticker", ticker_code)
 
     # ── Time window navigation ──
