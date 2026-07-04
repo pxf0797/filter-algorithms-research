@@ -1141,14 +1141,17 @@ def _update_cutoff_and_rerun():
 
 
 def _on_slider_change():
-    """slider 拖动时更新 cutoff_date。播放期间跳过 — _run_backtest_play 自行维护。"""
+    """slider 拖动时同步 _bt_slider_pos → _bar_index 并更新 cutoff_date。
+    播放期间跳过 — _run_backtest_play 自行维护。"""
     if AppState.get("_is_playing", False):
         return  # 播放中，避免 on_change 自动 rerun 干扰播放循环
+    # 从 Slider Widget Key 读取当前值，同步到程序状态
+    slider_val = st.session_state.get("_bt_slider_pos", 0)
+    st.session_state._bar_index = slider_val
     ticker = AppState.get("_fetched_ticker", "")
     min_tf = AppState.get("_min_tf", "")
-    bar_index = st.session_state.get("_bar_index", 0)
     if min_tf and ticker:
-        cutoff_date = _get_bar_date_from_db(ticker, min_tf, bar_index - 1)
+        cutoff_date = _get_bar_date_from_db(ticker, min_tf, slider_val - 1)
         if cutoff_date:
             AppState.set("_bt_cutoff_date", cutoff_date)
 
@@ -1338,15 +1341,22 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
             win_start_display = max(1, bar_index - min_n_pts + 1)
             st.sidebar.caption(f"📊 显示 bar {win_start_display} ~ {bar_index} / {total_bars}")
 
-            # 窗口位置 slider（范围：min_n_pts ~ total_bars，bar_index 为窗口结束位置）
-            # 确保 _bar_index 在 slider 有效范围内（防止退出回测后残留 0 值）
-            if st.session_state.get("_bar_index", 0) < min_n_pts:
-                st.session_state._bar_index = total_bars
-            st.sidebar.slider(
-                "窗口结束位置", min_n_pts, total_bars,
-                key="_bar_index",
-                on_change=_on_slider_change,
-            )
+            # 窗口位置进度 indicator
+            # 播放期间用进度条替代 Slider（避免 Widget Key 与 _run_backtest_play 的递增冲突）
+            if AppState.get("_is_playing", False):
+                progress = (bar_index - min_n_pts) / max(1, total_bars - min_n_pts)
+                st.sidebar.progress(progress, text=f"播放中... {bar_index}/{total_bars}")
+            else:
+                # 非播放时：Slider 用独立 key，on_change 同步到 _bar_index
+                # 确保 _bar_index 在 slider 有效范围内（防止退出回测后残留 0 值）
+                if st.session_state.get("_bar_index", 0) < min_n_pts:
+                    st.session_state._bar_index = total_bars
+                st.sidebar.slider(
+                    "窗口结束位置", min_n_pts, total_bars,
+                    value=bar_index,
+                    key="_bt_slider_pos",
+                    on_change=_on_slider_change,
+                )
         else:
             st.sidebar.warning("回测数据未就绪，请先在浏览模式加载数据")
 

@@ -44,6 +44,7 @@ SYSTEM_KEYS: Dict[str, Any] = {
     "_bar_index": 0,
     "_bt_cutoff_date": "",        # 回测截止日期（ISO格式字符串），用于各周期日期对齐截断
     "_bt_last_ticker": "",        # 上次回测时的 ticker，用于检测切换
+    "_bt_slider_pos": 0,          # Slider Widget Key（与 _bar_index 分离，避免播放冲突）
     "_min_tf": "",
     "_min_tf_bar_count": 0,
     # 回测播放控制
