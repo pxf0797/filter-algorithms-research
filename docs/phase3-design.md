@@ -8,26 +8,39 @@ Phase3 聚焦于回测体验的完善：自动播放、策略回测、性能优�
 
 ## 二、改进项详述
 
-### P3-1: 自动播放功能 [Major]
+### P3-1: 回测导航控件 [Major]
 
-**当前状态**: _is_playing 状态键已预留，但无播放逻辑。
+**当前状态**: 只有 slider + 模式 radio，缺少导航按钮。`_is_playing` 状态键已预留。
 
-**方案**:
-- 在回测控制栏添加 播放/暂停 按钮
-- 6档速度: 0.25x/0.5x/1x/2x/5x/10x
-- 实现: `_run_backtest_play()` 函数，用 `time.sleep(interval)` + `st.rerun()`
-- 到达末尾自动停止
-- 播放时 slider 跟随移动
+**方案**: 在回测控制栏添加完整的导航按钮组：
 
-**函数签名**:
+```
+┌─────────────────────────────────────────────────────┐
+│ ⏮  ◀  ▶ / ⏸  ▶▶  ⏭    速度: [1x ▼]              │
+│ [━━━━━━━━━━━●━━━━━━━━━━]  bar 500/2500             │
+└─────────────────────────────────────────────────────┘
+```
+
+**按钮功能**:
+| 按钮 | 功能 | 键盘 | 边界行为 |
+|------|------|------|---------|
+| ⏮ | 跳到开头 | Home | bar_index = N (窗口最小值) |
+| ◀ | 后退一步 | Left | min(N, bar_index - 1) |
+| ▶/⏸ | 播放/暂停 | Space | 切换 _is_playing |
+| ▶▶ | 前进一步 | Right | max(total, bar_index + 1) |
+| ⏭ | 跳到末尾 | End | bar_index = total |
+
+**速度选择**: 6档 — 0.25x / 0.5x / 1x / 2x / 5x / 10x
+
+**播放实现**:
 ```python
 def _run_backtest_play():
-    """回测自动播放循环。"""
+    """回测自动播放循环。到达末尾自动停止。"""
     if not AppState.get("_is_playing", False):
         return
     bar_index = AppState.get("_bar_index", 0)
     total = AppState.get("_min_tf_bar_count", 0)
-    if bar_index >= total - 1:
+    if bar_index >= total:
         AppState.set("_is_playing", False)
         return
     speed = AppState.get("_play_speed", 1.0)
@@ -36,7 +49,35 @@ def _run_backtest_play():
     st.rerun()
 ```
 
-**涉及文件**: streamlit_app.py (+30行), state.py (+1 key)
+**涉及文件**: streamlit_app.py (~45行新控件), state.py (~2 keys: _is_playing, _play_speed)
+
+---
+
+### P3-1b: Slider 范围修正 — 窗口结束位置 [Major]
+
+**当前状态 (Phase2)**: slider 表示窗口起始位置 `window_start`，范围 `0 ~ total - N`。用户拖动到位置 X 时，显示 [X, X+N) 的数据。
+
+**问题**: 
+- slider 最小值 0，但 bar 0 时显示 N 条数据，其中有 N 条是 bar 0 及之后
+- 用户不理解"窗口起始位置"的语义
+- 与直觉相反：用户想看"到第 500 条 bar 为止的 N 条数据"，而非"从第 380 条开始的 N 条"
+
+**方案**: slider 改为窗口**结束位置**，范围 `N ~ total`：
+```
+修改前: window_start ∈ [0, total-N]
+       显示 bars[window_start : window_start+N]
+
+修改后: bar_index ∈ [N, total]
+       显示 bars[bar_index-N : bar_index]
+```
+
+**具体改动**:
+1. `_render_backtest_mode` 中 slider: `min_value=N, max_value=total`
+2. `_bar_index` 语义变更: 从"窗口起始"改为"窗口结束"
+3. `cutoff_date` 计算简化: 直接从 `bar_index` 位置取日期（不需要 `+ N - 1`）
+4. `_sync_to_display`: `cutoff_date` 仍然是窗口最后一条的日期，查询 `WHERE ts <= cutoff_date ORDER BY ts DESC LIMIT N`
+
+**效果**: 用户拖动 slider 到 500，图表显示"截止到第 500 条 bar 的最后 N 条数据"。
 
 ---
 
@@ -98,10 +139,10 @@ def _run_backtest_play():
 
 | 文件 | P3-1 | P3-2 | P3-3 | P3-4 | P3-5 | 合计 |
 |------|------|------|------|------|------|------|
-| streamlit_app.py | +30 | +80 | +15 | +10 | +20 | +155 |
+| streamlit_app.py | +50 | +80 | +15 | +10 | +20 | +175 |
 | services/filter_engine.py | — | +40 | — | — | — | +40 |
-| state.py | +1 | — | — | — | — | +1 |
-| **合计** | **+31** | **+120** | **+15** | **+10** | **+20** | **~+200** |
+| state.py | +2 | — | — | — | — | +2 |
+| **合计** | **+52** | **+120** | **+15** | **+10** | **+20** | **~+217** |
 
 ## 四、测试计划
 
@@ -125,7 +166,8 @@ def _run_backtest_play():
 
 ## 六、实施顺序
 
-1. P3-3 (缓存优化) — 基础设施
-2. P3-4 (ticker切换) + P3-5 (配置预热) — 状态完善
-3. P3-1 (自动播放) — 用户交互
-4. P3-2 (策略回测) — 功能增强
+1. P3-1b (slider 范围修正) — 语义修正，影响后续所有功能
+2. P3-1 (导航控件) — 用户交互
+3. P3-3 (缓存优化) — 基础设施
+4. P3-4 (ticker切换) + P3-5 (配置预热) — 状态完善
+5. P3-2 (策略回测) — 功能增强
