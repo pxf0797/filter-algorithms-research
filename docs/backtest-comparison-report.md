@@ -541,6 +541,71 @@ if AppState.get("_cb_mode", False):
 
 ---
 
+### 5.3 修复方案 (待实施)
+
+#### 修复 5-1: tz_localize 时区防御改为 try/except [Minor]
+
+**现状**: 使用 `hasattr(df.index, 'tz') and df.index.tz is not None` 检查时区，条件判断不够健壮。
+
+**方案**: 改为 try/except TypeError 包裹:
+```python
+try:
+    df_idx = df.index.tz_localize(None)
+except TypeError:
+    df_idx = df.index
+```
+
+**影响**: 更健壮的时区处理，覆盖所有边缘情况。
+
+---
+
+#### 修复 5-2: 检查 _sync_to_display 返回值 [Minor]
+
+**现状**: `_load_chart_data` 调用 `_sync_to_display(...)` 但不检查返回值。若 DB 为空返回 (False, 0)，parquet 未写入，代码继续尝试读 parquet 然后才回退 yfinance——多了一次无效 IO。
+
+**方案**: 检查返回值，失败时直接走 yfinance 回退:
+```python
+ok, _ = _sync_to_display(...)
+if not ok:
+    # parquet 写入失败，直接走 API 回退
+    return _cached_fetch_stock(market, ticker_code, tf, n_pts)
+```
+
+**影响**: 减少无效 parquet 读操作，回退路径更直接。
+
+---
+
+#### 修复 5-3: 高周期 TF 数据不足时优雅降级 [Minor]
+
+**现状**: 当 min_tf 很精细(如15分钟)且 bar_index 较小时，高周期 TF (季线/月线) 可能只有 0-1 条 bar，直接 `st.error("数据点不足")` 阻塞整个视图。
+
+**方案**: 对 len(df) < 2 的高周期视图显示友好提示而非报错:
+```python
+if len(df) < 2:
+    st.caption(f"⏳ {tf} 在回测日期前无足够数据")
+    return  # 不渲染，但也不报错阻塞
+```
+
+**影响**: 用户知道该视图无数据但不被错误打断，其余视图正常显示。
+
+---
+
+#### 修复 5-4: 日志失败不静默 [Info]
+
+**现状**: 所有 `log_*` 调用包裹 `try/except: pass`，日志写入失败完全静默。
+
+**方案**: 在 except 中至少用 `logger.debug` 记录:
+```python
+try:
+    log_mode_switch(...)
+except Exception as e:
+    logger.debug(f"回测日志写入失败: {e}")
+```
+
+**影响**: 开发者可通过 loguru 日志发现日志系统问题，不影响用户。
+
+---
+
 ## 六、差异总结
 
 ### 6.1 Phase1 重构后已统一的点
@@ -575,9 +640,9 @@ if AppState.get("_cb_mode", False):
 | 2 | **Major** | **ticker 切换时回测状态不重置** — 在回测模式下切换到不同 ticker，`_cb_mode=True`、`_bar_index`、`_min_tf_bar_count` 等状态键不变，slider 可能越界或数据异常 | streamlit_app.py:719-731, 1110-1214 | **方案已确定，待实施** — 修复 4-1: 自动刷新回测状态 |
 | 3 | **Major** | **回测下 day_offset/n_pts 控件可见但失效** — `_render_time_nav` 的 "前移/后移/最新" 按钮和步长选择器在回测模式下仍然显示但不生效 | streamlit_app.py:1054-1096 | **方案已确定，待实施** — 修复 3-1: 回测下隐藏 |
 | 4 | **Minor** | **数据管道不统一（两套 SQL）** — 浏览和回测走不同的 SQL 路径 | data_loader.py, db.py | **方案已确定，待实施** — 修复 1-1: `query_kline` 增加 offset 参数，统一 SQL 查询路径 |
-| 5 | **Minor** | **高周期 bar_index 小时无数据报错** — 当 min_tf 周期的 bar_count 很小时，slider 范围计算可能出错 | streamlit_app.py:1197-1200 | **待修复** |
+| 5 | **Minor** | **高周期 bar_index 小时无数据报错** — 当 min_tf 周期的 bar_count 很小时，slider 范围计算可能出错 | streamlit_app.py:1197-1200 | **方案已确定 — 修复 5-3: 优雅降级** |
 | 6 | **Minor** | **退出回测时 `_day_offset` 不被重置** — 退出回测模式时 `_day_offset` 保留切出前的值，不会重置为 0 | streamlit_app.py:1150-1165 | **待修复** |
-| 7 | **Minor** | **`_sync_to_display` 返回值被忽略** — 调用处未检查返回的 `(success, row_count)`，写入失败无法感知 | data_loader.py:139, streamlit_app.py:122-126 | **待修复** |
+| 7 | **Minor** | **`_sync_to_display` 返回值被忽略** — 调用处未检查返回的 `(success, row_count)`，写入失败无法感知 | data_loader.py:139, streamlit_app.py:122-126 | **方案已确定 — 修复 5-2: 检查返回值** |
 | 8 | **Minor** | **退出回测时 parquet 瞬时不一致** — 退出回测回到浏览模式时，parquet 中仍是回测窗口的数据，下次 `_load_chart_data` 调用 `_sync_to_display` 才覆盖 | data_loader.py:139, streamlit_app.py:1150-1165 | **待修复** |
 | 9 | **Minor** | **参数语义不统一** — 浏览用 `day_offset` (天数偏移), 回测用 `window_start` (行号偏移), 两个参数并存但互斥 | streamlit_app.py:115-126 | **方案已确定，待实施** — 修复 1-2: `_load_chart_data` 只保留 `window_start` |
 | 10 | **Minor** | **API 回退路径不截断** — parquet 不存在时回退到 yfinance API，两个模式都没有在此路径上应用窗口截断 | streamlit_app.py:158-163 | **方案已确定，待实施** — 修复 1-3: API 回退分支增加窗口截断 |
@@ -587,6 +652,8 @@ if AppState.get("_cb_mode", False):
 | 14 | **Minor** | **day_offset 保留旧值** — 从回测切回浏览时 `_day_offset` 不清零，保留用户之前的时间窗口位置 | streamlit_app.py:1150-1165 | **保持现状** — 设计意图：用户回到浏览模式后恢复到之前的时间窗口位置 |
 | 15 | **Info** | **`_is_playing` 状态键** — state.py 中定义了 `_is_playing` 但当前无播放功能 | state.py:49 | **保留** — 为后续 Phase 自动播放功能预留 |
 | 16 | **Info** | **`_load_backtest_config` 未被调用** — 函数已定义但从未被调用，只有 `_save_backtest_config` 在进入回测时被调用 | streamlit_app.py:468-478 | **已决定删除** — 修复 4-3: 删除未使用函数 |
+| 17 | **Minor** | **tz_localize 时区防御不完整** — `hasattr(df.index, 'tz') and df.index.tz is not None` 条件判断不够健壮，边缘情况可能漏过 | services/ | **方案已确定 — 修复 5-1: try/except TypeError** |
+| 18 | **Info** | **日志写入失败静默** — 所有 `log_*` 调用包裹 `try/except: pass`，日志写入失败完全静默，问题不可见 | streamlit_app.py, services/backtest_logger.py | **方案已确定 — 修复 5-4: logger.debug** |
 
 ### 6.4 代码位置索引
 
@@ -612,7 +679,31 @@ if AppState.get("_cb_mode", False):
 
 ---
 
-## 七、分析过程记录
+## 七、修复方案汇总
+
+| 编号 | 章节 | 问题 | 严重度 | 方案 | 状态 |
+|------|------|------|--------|------|------|
+| 1-1 | 一 | 两套SQL不统一 | Minor | query_kline 增加 offset 参数 | 已确定 |
+| 1-2 | 一 | day_offset vs window_start 混杂 | Minor | 统一为 window_start | 已确定 |
+| 1-3 | 一 | API回退路径不截断 | Minor | 回退路径补全窗口截断 | 已确定 |
+| 2-1 | 二 | 4视图行号不对齐 | Minor | 改为 cutoff_date 日期对齐 | 已确定 |
+| 2-2 | 二 | bar_index/window_start 冗余 | Info | 合并为一个参数 | 已确定 |
+| 3-1 | 三 | day_offset控件回测下失效 | Minor | 回测下隐藏时间导航 | 已确定 |
+| 3-2 | 三 | n_pts被统一覆盖 | Minor | 各视图独立使用自己的 n_pts | 已确定 |
+| 3-3 | 三 | day_offset不清零 | Info | 保持现状 | 已确定 |
+| 4-1 | 四 | ticker切换状态不重置 | Major | 自动刷新回测状态 | 已确定 |
+| 4-2 | 四 | _is_playing 未使用 | Info | 保留用于后续播放 | 已确定 |
+| 4-3 | 四 | _load_backtest_config 未调用 | Info | 删除未使用函数 | 已确定 |
+| 5-1 | 五 | tz防御不完整 | Minor | try/except TypeError | 已确定 |
+| 5-2 | 五 | _sync_to_display返回值忽略 | Minor | 检查返回值 | 已确定 |
+| 5-3 | 五 | 高周期无数据报错 | Minor | 优雅降级 | 已确定 |
+| 5-4 | 五 | 日志静默失败 | Info | logger.debug | 已确定 |
+
+**统计**: 15个修复方案中, Major 1个, Minor 10个, Info 4个
+
+---
+
+## 八、分析过程记录
 
 本报告经过以下分析阶段逐步构建：
 
