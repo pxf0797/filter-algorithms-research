@@ -1152,7 +1152,7 @@ def _on_slider_change():
 
 
 def _render_backtest_nav(total_bars, min_n_pts):
-    """渲染回测导航按钮：⏮ ◀ ▶/⏸ ▸ ⏭ + 速度"""
+    """渲染回测导航按钮：⏮ ◀ ▶/⏸ ⏵ ⏭ + 速度"""
     bar_index = st.session_state.get("_bar_index", total_bars)
     is_playing = AppState.get("_is_playing", False)
 
@@ -1187,7 +1187,7 @@ def _render_backtest_nav(total_bars, min_n_pts):
                 _update_cutoff_and_rerun()
 
     with col_nav[3]:
-        if st.button("▸", key="_bt_step_fwd", use_container_width=True,
+        if st.button("⏵", key="_bt_step_fwd", use_container_width=True,
                      disabled=bar_index >= total_bars, help="前进一个 bar"):
             st.session_state._bar_index = min(total_bars, bar_index + 1)
             _update_cutoff_and_rerun()
