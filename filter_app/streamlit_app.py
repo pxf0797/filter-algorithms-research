@@ -1223,9 +1223,22 @@ def _run_backtest_play():
     if not AppState.get("_is_playing", False):
         return False
 
+    # 安全守卫：不在回测模式或 ticker 未就绪时停止播放
+    if not AppState.get("_cb_mode", False):
+        AppState.set("_is_playing", False)
+        return False
+
     bar_index = st.session_state.get("_bar_index", 0)
     total = AppState.get("_min_tf_bar_count", 0)
+
+    # 安全守卫：bar 总数异常时停止播放
+    if total <= 0:
+        logger.debug(f"回测播放停止: total={total}, 数据未就绪")
+        AppState.set("_is_playing", False)
+        return False
+
     if bar_index >= total:
+        logger.debug(f"回测播放停止: bar_index={bar_index} >= total={total}")
         AppState.set("_is_playing", False)
         return False
 
