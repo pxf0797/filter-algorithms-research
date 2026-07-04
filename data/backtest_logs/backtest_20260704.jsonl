@@ -1,0 +1,198 @@
+{"ts": "2026-07-04T10:12:53.911719", "event": "mode_switch", "ticker": "3690", "direction": "enter", "min_tf": "15分钟", "bar_count": 1414}
+{"ts": "2026-07-04T10:12:53.982377", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 393, "cutoff_date": "2026-03-27T09:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T10:13:33.217677", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 1848, "cutoff_date": "2026-03-27T09:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T11:59:57.323882", "event": "mode_switch", "ticker": "3690", "direction": "enter", "min_tf": "15分钟", "bar_count": 1414}
+{"ts": "2026-07-04T11:59:57.390699", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-03-27T09:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T11:59:58.189957", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-03-27T09:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T11:59:59.388836", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-03-27T09:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:00:08.384638", "event": "bar_navigation", "ticker": "3690", "min_tf": "15分钟", "bar_index": 323, "total": 1414, "cutoff_date": "2026-04-23T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:00:08.445744", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-04-23T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:00:09.265547", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-04-23T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:00:10.512216", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-04-23T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:00:11.280852", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-04-23T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:00:16.611784", "event": "bar_navigation", "ticker": "3690", "min_tf": "15分钟", "bar_index": 1164, "total": 1414, "cutoff_date": "2026-06-17T11:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:00:16.673477", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-17T11:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:00:17.605642", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-17T11:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:00:18.675779", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-17T11:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:00:19.452654", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-17T11:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:00:28.498673", "event": "bar_navigation", "ticker": "3690", "min_tf": "15分钟", "bar_index": 537, "total": 1414, "cutoff_date": "2026-05-08T09:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:00:28.560710", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-08T09:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:00:29.468881", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-08T09:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:00:30.708077", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-05-08T09:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:00:31.457897", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-05-08T09:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:03:04.371422", "event": "bar_navigation", "ticker": "3690", "min_tf": "15分钟", "bar_index": 1364, "total": 1414, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:03:04.451954", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:03:05.224725", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:03:06.042617", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T12:03:06.657540", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:09.467011", "event": "mode_switch", "ticker": "3690", "direction": "enter", "min_tf": "15分钟", "bar_count": 1414}
+{"ts": "2026-07-04T20:11:09.532275", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:10.274954", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:11.078649", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:11.692804", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:22.610400", "event": "bar_navigation", "ticker": "3690", "min_tf": "15分钟", "bar_index": 877, "total": 1414, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:22.671291", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:23.422094", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:24.232273", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:24.819621", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:28.876445", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:29.616267", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:30.429064", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:31.021925", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:32.245379", "event": "bar_navigation", "ticker": "3690", "min_tf": "15分钟", "bar_index": 877, "total": 1414, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:32.305494", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:33.047031", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:33.859443", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:34.457129", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:35.715333", "event": "bar_navigation", "ticker": "3690", "min_tf": "15分钟", "bar_index": 877, "total": 1414, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:35.774297", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:36.524370", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:37.328958", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:37.925758", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:39.151302", "event": "bar_navigation", "ticker": "3690", "min_tf": "15分钟", "bar_index": 877, "total": 1414, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:39.207014", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:39.951872", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:40.759090", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:41.359780", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:42.582608", "event": "bar_navigation", "ticker": "3690", "min_tf": "15分钟", "bar_index": 877, "total": 1414, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:42.643338", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:43.389148", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:44.202227", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:44.802466", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:46.033498", "event": "bar_navigation", "ticker": "3690", "min_tf": "15分钟", "bar_index": 877, "total": 1414, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:46.090631", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:46.835931", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:47.652902", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:48.272701", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:49.512402", "event": "bar_navigation", "ticker": "3690", "min_tf": "15分钟", "bar_index": 877, "total": 1414, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:49.567009", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:50.334767", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:51.274452", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:52.035263", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-27T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:52.956640", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-27T14:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:53.716131", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-27T14:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:54.523348", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-05-27T14:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:55.160582", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-05-27T14:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:57.664285", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-27T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:58.421371", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-27T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:59.240039", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-05-27T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:11:59.848632", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-05-27T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:02.569143", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-27T14:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:03.318473", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-27T14:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:04.128766", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-05-27T14:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:04.731766", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-05-27T14:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:06.136600", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:06.892009", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:07.701235", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:08.308063", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:11.043044", "event": "bar_navigation", "ticker": "3690", "min_tf": "15分钟", "bar_index": 1188, "total": 1414, "cutoff_date": "2026-06-16T10:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:11.105418", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-16T10:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:11.866353", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-16T10:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:12.689491", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-16T10:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:13.305364", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-16T10:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:16.805217", "event": "bar_navigation", "ticker": "3690", "min_tf": "15分钟", "bar_index": 1414, "total": 1414, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:16.865599", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:17.617961", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:18.435200", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:19.055325", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:25.967448", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:26.710701", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:27.517429", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:28.112564", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:37.113765", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:37.853759", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:38.650521", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:39.250227", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:49.933640", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:50.680609", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:51.491229", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:12:52.108050", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:17:15.711990", "event": "mode_switch", "ticker": "3690", "direction": "enter", "min_tf": "15分钟", "bar_count": 1414}
+{"ts": "2026-07-04T20:17:15.773804", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:17:16.543803", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:17:17.401226", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:17:18.026894", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:17:24.293496", "event": "bar_navigation", "ticker": "3690", "min_tf": "15分钟", "bar_index": 652, "total": 1414, "cutoff_date": "2026-05-12T15:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:17:24.352958", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-12T15:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:17:25.128737", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-12T15:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:17:25.992128", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-05-12T15:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:17:26.604353", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-05-12T15:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:17:49.192919", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-12T15:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:17:49.964829", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-12T15:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:17:50.835285", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-05-12T15:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:17:51.459726", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-05-12T15:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:27:26.398878", "event": "mode_switch", "ticker": "3690", "direction": "enter", "min_tf": "15分钟", "bar_count": 1414}
+{"ts": "2026-07-04T20:27:26.469243", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:27:27.241818", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:27:28.100331", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:27:28.729094", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:27:35.580487", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-02T11:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:27:36.350836", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-02T11:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:27:37.207908", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-02T11:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:27:37.814722", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-02T11:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:34:32.081634", "event": "mode_switch", "ticker": "3690", "direction": "enter", "min_tf": "15分钟", "bar_count": 1414}
+{"ts": "2026-07-04T20:34:32.148308", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:34:32.917679", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:34:33.783055", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:34:34.404352", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:34:37.366132", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-29T09:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:34:38.200994", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-29T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:34:38.980353", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-29T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:34:39.833135", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-05-29T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:34:40.438203", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-05-29T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:34:47.304761", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-05-08T15:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:34:48.075736", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-05-08T15:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:34:48.936594", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-05-08T15:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:34:49.547705", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-05-08T15:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:44:37.047701", "event": "mode_switch", "ticker": "3690", "direction": "enter", "min_tf": "15分钟", "bar_count": 1414}
+{"ts": "2026-07-04T20:44:37.114038", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:44:37.894130", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:44:38.733966", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:44:39.363838", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-30T16:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:44:43.286276", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-10T11:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:44:44.234103", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-10T11:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:44:45.291887", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-10T11:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:44:46.039734", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-10T11:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:44:50.180065", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-10T11:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:44:51.125887", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-10T11:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:44:52.186571", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-10T11:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:44:52.932307", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-10T11:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:00.803648", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-10T11:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:01.750940", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-10T11:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:02.809034", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-10T11:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:03.707995", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-10T13:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:04.669299", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-10T13:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:05.720829", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-10T13:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:06.350634", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-10T13:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:09.961249", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-10T13:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:10.901585", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-10T13:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:11.966198", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-10T13:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:12.598465", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-10T13:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:16.391993", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-10T13:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:17.341516", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-10T13:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:18.410067", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-10T13:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:19.048243", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-10T13:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:40.261902", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-10T13:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:41.213770", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-10T13:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:42.271785", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-10T13:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:42.908437", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-10T13:45:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:56.244741", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-10T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:57.190130", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-10T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:58.246359", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-10T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:45:58.884147", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-10T14:00:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:04.125582", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-10T14:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:05.077354", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-10T14:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:06.163364", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-10T14:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:06.801110", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-10T14:15:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:19.724454", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-10T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:20.684518", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-10T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:21.737051", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-10T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:22.374979", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-10T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:24.547632", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-10T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:25.488082", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-10T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:26.551627", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-10T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:27.191928", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-10T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:34.541714", "event": "data_load", "ticker": "3690", "tf": "周线", "bar_count": 60, "cutoff_date": "2026-06-10T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:35.491796", "event": "data_load", "ticker": "3690", "tf": "日线", "bar_count": 60, "cutoff_date": "2026-06-10T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:36.552472", "event": "data_load", "ticker": "3690", "tf": "60分钟", "bar_count": 60, "cutoff_date": "2026-06-10T14:30:00+08:00", "elapsed_ms": 0}
+{"ts": "2026-07-04T20:46:37.195765", "event": "data_load", "ticker": "3690", "tf": "15分钟", "bar_count": 50, "cutoff_date": "2026-06-10T14:30:00+08:00", "elapsed_ms": 0}

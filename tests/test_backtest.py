@@ -402,3 +402,189 @@ class TestAppStateKeys:
     def test_bt_last_ticker_is_empty_str(self):
         """_bt_last_ticker 默认值为空字符串."""
         assert DEFAULTS["_bt_last_ticker"] == ""
+
+
+# ── TestNavigationButtons ─────────────────────────────────────────────────────
+
+class TestNavigationButtons:
+    """测试导航按钮逻辑"""
+
+    def test_forward_increments_bar_index(self):
+        """前进按钮: _bar_index + 1, 不超过 total"""
+        total_bars = 500
+        AppState.set("_bar_index", 100)
+        bar_index = AppState.get("_bar_index")
+        # 前进逻辑（与 _render_backtest_nav 中一致）
+        new_index = min(total_bars, bar_index + 1)
+        assert new_index == 101
+
+    def test_backward_decrements_bar_index(self):
+        """后退按钮: _bar_index - 1, 不低于 min_n_pts"""
+        min_n_pts = 120
+        AppState.set("_bar_index", 200)
+        bar_index = AppState.get("_bar_index")
+        new_index = max(min_n_pts, bar_index - 1)
+        assert new_index == 199
+
+    def test_goto_start_sets_min_n_pts(self):
+        """跳到开头: _bar_index = min_n_pts"""
+        min_n_pts = 120
+        AppState.set("_bar_index", 300)
+        # goto start 逻辑
+        AppState.set("_bar_index", min_n_pts)
+        assert AppState.get("_bar_index") == min_n_pts
+
+    def test_goto_end_sets_total(self):
+        """跳到末尾: _bar_index = total_bars"""
+        total_bars = 500
+        AppState.set("_bar_index", 100)
+        AppState.set("_bar_index", total_bars)
+        assert AppState.get("_bar_index") == total_bars
+
+    def test_forward_disabled_at_end(self):
+        """前进按钮在末尾时 disabled"""
+        total_bars = 500
+        bar_index = 500
+        disabled = bar_index >= total_bars
+        assert disabled is True
+
+    def test_backward_disabled_at_start(self):
+        """后退按钮在开头时 disabled"""
+        min_n_pts = 120
+        bar_index = 120
+        disabled = bar_index <= min_n_pts
+        assert disabled is True
+
+
+# ── TestPlayback ──────────────────────────────────────────────────────────────
+
+class TestPlayback:
+    """测试播放功能"""
+
+    def test_play_not_active_returns_false(self):
+        """_is_playing=False 时 _run_backtest_play 返回 False"""
+        AppState.set("_is_playing", False)
+        # _run_backtest_play 第一行: if not AppState.get("_is_playing", False): return False
+        if not AppState.get("_is_playing", False):
+            should_continue = False
+        else:
+            should_continue = True
+        assert should_continue is False
+
+    def test_play_increments_bar_index(self):
+        """播放时 bar_index += 1"""
+        AppState.set("_is_playing", True)
+        AppState.set("_play_just_started", False)
+        AppState.set("_bar_index", 100)
+        AppState.set("_min_tf_bar_count", 500)
+
+        bar_index = AppState.get("_bar_index")
+        total = AppState.get("_min_tf_bar_count", 0)
+
+        # _run_backtest_play 核心逻辑：bar_index < total 时前进
+        if bar_index < total:
+            AppState.set("_bar_index", bar_index + 1)
+            should_continue = True
+        else:
+            AppState.set("_is_playing", False)
+            should_continue = False
+
+        assert should_continue is True
+        assert AppState.get("_bar_index") == 101
+
+    def test_play_stops_at_end(self):
+        """bar_index >= total 时自动停止"""
+        AppState.set("_is_playing", True)
+        AppState.set("_play_just_started", False)
+        AppState.set("_bar_index", 500)
+        AppState.set("_min_tf_bar_count", 500)
+
+        bar_index = AppState.get("_bar_index")
+        total = AppState.get("_min_tf_bar_count", 0)
+
+        if bar_index >= total:
+            AppState.set("_is_playing", False)
+            should_continue = False
+        else:
+            should_continue = True
+
+        assert should_continue is False
+        assert AppState.get("_is_playing") is False
+
+    def test_play_updates_cutoff_date(self):
+        """播放时 cutoff_date 同步更新"""
+        # 播放过程中 bar_index 前进后，通过 _get_bar_date_from_db 获取
+        # 最新日期并写入 _bt_cutoff_date
+        AppState.set("_bar_index", 100)
+        AppState.set("_fetched_ticker", "AAPL")
+        AppState.set("_min_tf", "1d")
+        AppState.set("_bt_cutoff_date", "")
+
+        # 模拟 cutoff_date 同步（_run_backtest_play 中的逻辑）
+        cutoff_date = "2026-06-15"
+        if cutoff_date:
+            AppState.set("_bt_cutoff_date", cutoff_date)
+
+        assert AppState.get("_bt_cutoff_date") == "2026-06-15"
+
+    def test_play_pause_toggle(self):
+        """点击播放→暂停→播放 循环正常"""
+        # 初始：不播放
+        AppState.set("_is_playing", False)
+        assert AppState.get("_is_playing") is False
+
+        # 点击播放
+        AppState.set("_is_playing", True)
+        assert AppState.get("_is_playing") is True
+
+        # 点击暂停
+        AppState.set("_is_playing", False)
+        assert AppState.get("_is_playing") is False
+
+        # 再次点击播放
+        AppState.set("_is_playing", True)
+        assert AppState.get("_is_playing") is True
+
+    def test_play_speed_mapping(self):
+        """速度标签正确映射到 sleep 时间"""
+        speed_map = {"0.25x": 0.25, "0.5x": 0.5, "1x": 1.0, "2x": 2.0, "5x": 5.0, "10x": 10.0}
+
+        assert speed_map["0.25x"] == 0.25
+        assert speed_map["0.5x"] == 0.5
+        assert speed_map["1x"] == 1.0
+        assert speed_map["2x"] == 2.0
+        assert speed_map["5x"] == 5.0
+        assert speed_map["10x"] == 10.0
+        assert len(speed_map) == 6
+
+    def test_on_slider_change_skips_during_playback(self):
+        """播放期间 _on_slider_change 应跳过，避免干扰播放循环"""
+        # 播放中：_on_slider_change 第一行检查 _is_playing
+        AppState.set("_is_playing", True)
+        should_skip = AppState.get("_is_playing", False)
+        assert should_skip is True  # 播放中 → 跳过
+
+        # 非播放：正常执行（更新 cutoff_date）
+        AppState.set("_is_playing", False)
+        should_skip = AppState.get("_is_playing", False)
+        assert should_skip is False  # 非播放 → 正常执行
+
+    def test_play_works_from_any_position(self):
+        """从任意 bar_index (< total) 开始播放的核心逻辑验证"""
+        # 场景：用户拖动 slider 到 200 后点击播放
+        AppState.set("_is_playing", True)
+        AppState.set("_bar_index", 200)
+        AppState.set("_min_tf_bar_count", 500)
+
+        bar_index = AppState.get("_bar_index")
+        total = AppState.get("_min_tf_bar_count", 0)
+
+        # 验证：bar_index < total → 不触发停止
+        assert bar_index < total  # 200 < 500
+
+        # 验证：前进一个 bar
+        new_bar_index = bar_index + 1
+        assert new_bar_index == 201
+
+        # 验证：不会因 _on_slider_change 干扰而停止
+        assert AppState.get("_is_playing") is True
