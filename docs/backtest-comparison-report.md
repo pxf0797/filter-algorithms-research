@@ -462,6 +462,52 @@ if ticker_code and ticker_code != AppState.get("_fetched_ticker"):
 
 这是问题 #2 (Major)。
 
+### 4.4 修复方案 (待实施)
+
+#### 修复 4-1: ticker 切换时刷新回测状态 [Major]
+
+**现状**: 用户在回测模式下切换 ticker 时，`_bar_index`、`_bt_cutoff_date`、`_min_tf`、`_min_tf_bar_count` 保留旧值，slider range 基于旧 ticker 可能导致越界。
+
+**方案**: 不强制退出回测模式，而是像浏览模式一样自动刷新回测状态:
+1. 在 `_handle_initial_fetch` 中检测 ticker 变化
+2. 如果当前处于回测模式，重新计算新 ticker 的 `_min_tf`、`_min_tf_bar_count`、`_bt_cutoff_date`
+3. 将 `_bar_index` 重置为 0
+4. 保存新的 `backtest_config.json`
+5. 记录日志
+
+```python
+# _handle_initial_fetch 中增加:
+if AppState.get("_cb_mode", False):
+    # ticker 变化，刷新回测状态
+    min_tf, bar_count = _get_min_tf_and_count(configs, new_ticker)
+    AppState.set("_min_tf", min_tf)
+    AppState.set("_min_tf_bar_count", bar_count)
+    AppState.set("_bar_index", 0)
+    cutoff_date = _get_bar_date_from_db(new_ticker, min_tf, 0 + window_size - 1) if bar_count > 0 else ""
+    AppState.set("_bt_cutoff_date", cutoff_date)
+    _save_backtest_config(new_ticker, min_tf, bar_count, window_size)
+```
+
+**效果**: 用户在回测模式下切换 ticker，自动看到新 ticker 的回测数据，无需手动切回浏览再切回来。
+
+---
+
+#### 修复 4-2: `_is_playing` 状态键 [保留]
+
+**现状**: state.py 中定义了 `_is_playing` 但当前无播放功能。
+
+**决定**: 保留此键，为后续 Phase 自动播放功能预留。不做修改。
+
+---
+
+#### 修复 4-3: 删除未使用的 `_load_backtest_config` [Info]
+
+**现状**: `_load_backtest_config()` (streamlit_app.py:~468) 函数已定义但从未被调用。只有 `_save_backtest_config()` 在进入回测时被调用。
+
+**方案**: 删除 `_load_backtest_config` 函数及其定义。保留 `_save_backtest_config`（进入回测时写入配置）。
+
+**影响**: 删除约 10 行未使用代码，`backtest_config.json` 仅作为调试/外部查看用。
+
 ---
 
 ## 五、边界条件 & 异常处理
@@ -526,7 +572,7 @@ if ticker_code and ticker_code != AppState.get("_fetched_ticker"):
 | # | 严重度 | 问题 | 位置 | 修复状态 |
 |---|--------|------|------|---------|
 | 1 | ~~Major~~ | ~~force_full 每次渲染重写 parquet~~ | data_loader.py | **Phase1 已修复** |
-| 2 | **Major** | **ticker 切换时回测状态不重置** — 在回测模式下切换到不同 ticker，`_cb_mode=True`、`_bar_index`、`_min_tf_bar_count` 等状态键不变，slider 可能越界或数据异常 | streamlit_app.py:719-731, 1110-1214 | **待修复** |
+| 2 | **Major** | **ticker 切换时回测状态不重置** — 在回测模式下切换到不同 ticker，`_cb_mode=True`、`_bar_index`、`_min_tf_bar_count` 等状态键不变，slider 可能越界或数据异常 | streamlit_app.py:719-731, 1110-1214 | **方案已确定，待实施** — 修复 4-1: 自动刷新回测状态 |
 | 3 | **Major** | **回测下 day_offset/n_pts 控件可见但失效** — `_render_time_nav` 的 "前移/后移/最新" 按钮和步长选择器在回测模式下仍然显示但不生效 | streamlit_app.py:1054-1096 | **方案已确定，待实施** — 修复 3-1: 回测下隐藏 |
 | 4 | **Minor** | **数据管道不统一（两套 SQL）** — 浏览和回测走不同的 SQL 路径 | data_loader.py, db.py | **方案已确定，待实施** — 修复 1-1: `query_kline` 增加 offset 参数，统一 SQL 查询路径 |
 | 5 | **Minor** | **高周期 bar_index 小时无数据报错** — 当 min_tf 周期的 bar_count 很小时，slider 范围计算可能出错 | streamlit_app.py:1197-1200 | **待修复** |
@@ -539,6 +585,8 @@ if ticker_code and ticker_code != AppState.get("_fetched_ticker"):
 | 12 | **Info** | **bar_index/window_start 冗余** — `_load_chart_data` 同时接收两个参数但值始终相同，`bar_index` 仅用于日志和预测对过滤 | streamlit_app.py:115-126 | **方案已确定，待实施** — 修复 2-2: 合并冗余参数 |
 | 13 | **Minor** | **回测下各视图 n_pts 被统一覆盖** — `window_size` 取自 min_tf 视图的 n_pts，其他视图独立的 n_pts 配置被忽略 | streamlit_app.py:1124-1149 | **方案已确定，待实施** — 修复 3-2: 各视图独立 n_pts |
 | 14 | **Minor** | **day_offset 保留旧值** — 从回测切回浏览时 `_day_offset` 不清零，保留用户之前的时间窗口位置 | streamlit_app.py:1150-1165 | **保持现状** — 设计意图：用户回到浏览模式后恢复到之前的时间窗口位置 |
+| 15 | **Info** | **`_is_playing` 状态键** — state.py 中定义了 `_is_playing` 但当前无播放功能 | state.py:49 | **保留** — 为后续 Phase 自动播放功能预留 |
+| 16 | **Info** | **`_load_backtest_config` 未被调用** — 函数已定义但从未被调用，只有 `_save_backtest_config` 在进入回测时被调用 | streamlit_app.py:468-478 | **已决定删除** — 修复 4-3: 删除未使用函数 |
 
 ### 6.4 代码位置索引
 
