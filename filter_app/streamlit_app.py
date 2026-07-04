@@ -1481,6 +1481,8 @@ def _run_auto_refresh(market, ticker_code, auto_refresh, interval) -> None:
 
 # =====================================================================
 def main() -> None:
+    # ── 回测自动播放（必须在 widget 渲染之前，Streamlit 禁止 widget 实例化后修改其 key）──
+    _run_backtest_play()
     logger.info("App started")
     _get_db_connection()
     init_config_tables()
@@ -1575,9 +1577,6 @@ def main() -> None:
         with grid_cols[row_idx][col_idx]:
             _render_chart_fragment(market, ticker_code, cfg, f"v{orig_i}", compact=True,
                                    day_offset=day_offset, window_start=window_start, cutoff_date=cutoff_date)
-
-    # ── 回测自动播放 ──
-    _run_backtest_play()
 
     # ── Export config ──
     _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code)
