@@ -239,47 +239,7 @@ def _get_period_start(last_completed_ts, tf):
     else:
         start = ts + pd.Timedelta(days=1)
 
-    if tf in ("5分钟", "15分钟", "60分钟"):
-        return start.strftime("%Y-%m-%dT%H:%M:%S")
-    else:
-        return start.strftime("%Y-%m-%d")
-
-
-def _get_this_period_start(ts, tf):
-    """返回 ts 所属周期的起点（与 _get_period_start 不同，后者返回下个周期的起点）。
-
-    用于 REPLACE 场景：当 DB 中最后一条 bar 的 ts 处于进行中的周期时，
-    需要从 min_tf 重新合成该周期的 bar。
-
-    返回:
-        str — 分钟级 TF 返回 "YYYY-MM-DDTHH:MM:SS"，其他 TF 返回 "YYYY-MM-DD"
-    """
-    ts = pd.Timestamp(ts)
-
-    if tf == "5分钟":
-        current_minutes = ts.hour * 60 + ts.minute
-        boundary = (current_minutes // 5) * 5
-        result = ts.replace(hour=boundary // 60, minute=boundary % 60, second=0, microsecond=0)
-        return result.strftime("%Y-%m-%dT%H:%M:%S")
-    elif tf == "15分钟":
-        current_minutes = ts.hour * 60 + ts.minute
-        boundary = (current_minutes // 15) * 15
-        result = ts.replace(hour=boundary // 60, minute=boundary % 60, second=0, microsecond=0)
-        return result.strftime("%Y-%m-%dT%H:%M:%S")
-    elif tf == "60分钟":
-        result = ts.replace(minute=0, second=0, microsecond=0)
-        return result.strftime("%Y-%m-%dT%H:%M:%S")
-    elif tf == "日线":
-        return ts.normalize().strftime("%Y-%m-%d")
-    elif tf == "周线":
-        return (ts - pd.Timedelta(days=ts.weekday())).normalize().strftime("%Y-%m-%d")
-    elif tf == "月线":
-        return ts.replace(day=1).normalize().strftime("%Y-%m-%d")
-    elif tf == "季线":
-        q_start_month = ((ts.month - 1) // 3) * 3 + 1
-        return pd.Timestamp(year=ts.year, month=q_start_month, day=1).strftime("%Y-%m-%d")
-    else:
-        return ts.strftime("%Y-%m-%d")
+    return start.strftime("%Y-%m-%d")
 
 
 def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int = 120,
@@ -307,37 +267,28 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int 
 
         # ── 合成高周期不完整 bar ──
         synthesized_bar = None
-        replace_last = False
         if min_tf and cutoff_date and ALL_TFS.index(tf) > ALL_TFS.index(min_tf):
-            last_bar_ts = pd.Timestamp(rows[0][0])
-            cutoff_dt = pd.Timestamp(cutoff_date)
-            next_period_start = pd.Timestamp(_get_period_start(last_bar_ts, tf))
-
+            last_completed_ts = rows[0][0]  # DESC 查询的第一条（最新时间）的 ts
             try:
-                if cutoff_dt < next_period_start:
-                    # SCENARIO B (REPLACE): DB最后一条bar处于进行中的周期
-                    # → 用 min_tf 数据重新合成该周期的 bar，替换 rows[0]
-                    period_start = _get_this_period_start(last_bar_ts, tf)
-                    period_end = last_bar_ts  # bar 的 ts 就是周期结束时间
-                    replace_last = True
-                else:
-                    # SCENARIO A (APPEND): DB最后一条bar已完成
-                    # → 检查是否有不完整的下一个 bar
-                    period_end = _get_period_end(last_bar_ts, tf)
-                    if cutoff_dt >= period_end:
-                        period_start = None  # 不触发合成
-                    else:
-                        period_start = _get_period_start(last_bar_ts, tf)
+                next_end = _get_period_end(last_completed_ts, tf)
+                cutoff_dt = pd.Timestamp(cutoff_date)
+                if cutoff_dt < next_end:
+                    period_start = _get_period_start(last_completed_ts, tf)
 
-                if period_start is not None:
-                    period_start_str = period_start  # 现在两个 _get_*_period_start 都返回正确格式的字符串
+                    # ── 保护判断: period_start > cutoff_date 时 fallback ──
+                    # 这发生在日线及以上 TF: last_completed_ts 就是当天日期,
+                    # _get_period_start 返回次日, 但 cutoff 在同一天内
+                    # 此时应使用 last_completed_ts 所在日期作为 period_start
+                    if period_start > cutoff_date:
+                        period_start = pd.Timestamp(last_completed_ts).strftime("%Y-%m-%d")
+
                     with get_conn() as inner_conn:
                         min_rows = inner_conn.execute(
                             """SELECT open, high, low, close, volume
                                FROM kline
                                WHERE ticker=? AND timeframe=? AND ts >= ? AND ts <= ?
                                ORDER BY ts ASC""",
-                            (ticker_code, min_tf, period_start_str, cutoff_date),
+                            (ticker_code, min_tf, period_start, cutoff_date),
                         ).fetchall()
                     if min_rows:
                         opens = [r[0] for r in min_rows]
@@ -345,9 +296,8 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int 
                         lows  = [r[2] for r in min_rows]
                         closes = [r[3] for r in min_rows]
                         volumes = [r[4] for r in min_rows]
-                        # 统一使用 ISO 格式的 Date，避免 parquet 读取崩溃
                         synthesized_bar = {
-                            "Date": period_end.strftime("%Y-%m-%dT%H:%M:%S") if hasattr(period_end, 'strftime') else str(period_end),
+                            "Date": next_end.strftime("%Y-%m-%dT%H:%M:%S") if hasattr(next_end, 'strftime') else str(next_end),
                             "Open": float(opens[0]),
                             "High": float(max(highs)),
                             "Low": float(min(lows)),
@@ -356,37 +306,28 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int 
                         }
                         logger.debug(f"Synthesized {tf} bar for {ticker_code} at {cutoff_date}: "
                                      f"O={opens[0]:.2f} H={max(highs):.2f} L={min(lows):.2f} "
-                                     f"C={closes[-1]:.2f} V={sum(volumes):.0f} "
-                                     f"mode={'REPLACE' if replace_last else 'APPEND'}")
+                                     f"C={closes[-1]:.2f} V={sum(volumes):.0f}")
             except Exception as e:
                 logger.debug(f"Synthesis failed for {ticker_code}/{tf}: {e}")
                 synthesized_bar = None
-                replace_last = False
 
-        # 构建 DataFrame，处理合成 bar 追加与截断
+        # 构建 DataFrame，合成 bar 追加到末尾
         if synthesized_bar is not None:
-            # rows 是 DESC 结果，需反转
             data = []
             for r in reversed(rows):
                 data.append({
                     "Date": r[0], "Open": r[1], "High": r[2],
                     "Low": r[3], "Close": r[4], "Volume": r[5],
                 })
-            if replace_last:
-                # 替换最后一条（最新的原始 bar）为合成版本
-                data[-1] = synthesized_bar
-            else:
-                # 追加到末尾
-                data.append(synthesized_bar)
-            # 裁剪到 n_pts 条（去掉最早的）
+            data.append(synthesized_bar)
             if len(data) > n_pts:
                 data = data[-n_pts:]
             df = pd.DataFrame(data)
         else:
-            rows = list(reversed(rows))
-            if len(rows) > n_pts:
-                rows = rows[-n_pts:]
-            df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+            rows_list = list(reversed(rows))
+            if len(rows_list) > n_pts:
+                rows_list = rows_list[-n_pts:]
+            df = pd.DataFrame(rows_list, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
 
         display_dir = Path(__file__).parent.parent.parent / "data" / "display"
         display_dir.mkdir(parents=True, exist_ok=True)
