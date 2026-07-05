@@ -305,13 +305,23 @@ def _find_immediate_finer_tf(tf: str, tfs: list) -> _Optional[str]:
     return None
 
 def _needs_synthesis(tf: str, db_rows: list, cutoff_date: str) -> bool:
-    """Check if cutoff_date has entered the next period, requiring bar synthesis."""
+    """Check if cutoff_date is after the last complete bar, requiring bar synthesis.
+
+    The original logic checked ``cutoff >= period_start`` (start of the *next* period),
+    which works for minute-level TFs (periods are minutes apart) but fails for daily+
+    TFs.  Example: last daily bar at 2026-07-02 00:00, cutoff at 2026-07-02 15:45.
+    The next daily period starts at 2026-07-03 00:00, so 15:45 >= next‑midnight is
+    False → synthesis never triggers, even though we have hours of intraday data
+    after the last complete daily bar.
+
+    Fixed to ``cutoff > last_ts``: if there is *any* data beyond the timestamp of
+    the last complete bar we should synthesize a partial bar, regardless of whether
+    a full period boundary has been crossed."""
     if not db_rows:
         return False
     last_ts = _ensure_tz_naive(pd.Timestamp(db_rows[-1]["Date"]))
-    period_start = _get_period_start_ts(last_ts, tf)
     cutoff_dt = _ensure_tz_naive(pd.Timestamp(cutoff_date))
-    return cutoff_dt >= period_start
+    return cutoff_dt > last_ts
 
 def _aggregate_bars(finer_bars: list, synth_date: str) -> dict:
     """Aggregate finer-TF bars into one coarser-TF bar. O=first, H=max, L=min, C=last, V=sum."""
