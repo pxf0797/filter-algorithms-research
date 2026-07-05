@@ -20,3 +20,4 @@ data/*.db
 htmlcov/
 .pytest_cache/
 config/
+data/backtest_logs/
