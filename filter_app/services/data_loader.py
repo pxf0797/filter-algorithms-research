@@ -173,8 +173,7 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
     if n == 0:
         return None, None, None, full, "写入成功但查询失败", None
     close = result_df["Close"].values.ravel()
-    dates = pd.to_datetime(result_df["Date"], format='mixed')
-    dates = dates.dt.tz_localize(None) if dates.dt.tz is not None else dates
+    dates = pd.to_datetime(result_df["Date"])
     result_ohlc = result_df if "Open" in result_df.columns else pd.DataFrame({"Open":close,"High":close,"Low":close,"Close":close}, index=dates)
     return np.arange(n, dtype=float), close, result_ohlc, full, None, dates
 
@@ -199,6 +198,15 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0,
             ).fetchall()
         if not rows:
             return False, 0
+
+        # ── 提取时区后缀(确保合成bar的Date格式与DB一致) ──
+        tz_suffix = ""
+        if rows:
+            first_ts = rows[0][0]
+            if "+" in str(first_ts):
+                tz_suffix = str(first_ts)[str(first_ts).index("+"):]
+            elif str(first_ts).endswith("Z"):
+                tz_suffix = "Z"
 
         # ── 分钟级TF逐级合成不完整bar ──
         synthesized_bar = None
@@ -229,7 +237,7 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0,
                         closes = [r[3] for r in min_rows]
                         volumes = [r[4] for r in min_rows]
                         synthesized_bar = {
-                            "Date": next_end.strftime("%Y-%m-%dT%H:%M:%S"),
+                            "Date": next_end.strftime("%Y-%m-%dT%H:%M:%S") + tz_suffix,
                             "Open": float(opens[0]),
                             "High": float(max(highs)),
                             "Low": float(min(lows)),
@@ -270,8 +278,7 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0,
     df = query_kline(ticker_code, tf, n_pts, day_offset=day_offset)
     if len(df) < 5:
         return False, len(df)
-    dates = pd.to_datetime(df["Date"], format='mixed')
-    df["Date"] = dates.dt.tz_localize(None) if dates.dt.tz is not None else dates
+    df["Date"] = pd.to_datetime(df["Date"])
     display_dir = Path(__file__).parent.parent.parent / "data" / "display"
     display_dir.mkdir(parents=True, exist_ok=True)
     df.to_parquet(display_dir / f"{tf}.parquet", index=False)
