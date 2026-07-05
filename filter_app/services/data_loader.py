@@ -393,7 +393,7 @@ def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
             if actual_start <= synth_ts <= cutoff_dt:
                 if all_finer_bars:
                     last_db_ts = _ensure_tz_naive(pd.Timestamp(all_finer_bars[-1]["Date"]))
-                    if synth_ts > last_db_ts:
+                    if synth_ts >= last_db_ts:
                         all_finer_bars[-1] = finer_synth_bar   # replace same-period DB bar
                     else:
                         existing_ts = {_ensure_tz_naive(pd.Timestamp(b["Date"])) for b in all_finer_bars}
