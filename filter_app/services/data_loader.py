@@ -382,16 +382,26 @@ def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
 
     finer_db_bars = _query_tf_for_period(ticker_code, finer_tf, period_start_str, period_end_str)
 
-    # Merge finer_tf's synthesized bar if within range
+    # Merge finer_tf's synthesized bar if within range.
+    # When the synth bar falls after the last finer-DB bar it represents a more
+    # up-to-date (partial) view of the same period — **replace** the DB bar so
+    # we don't aggregate competing OHLC values for the same period.
     all_finer_bars = list(finer_db_bars)
     if finer_synth_bar is not None:
         try:
             synth_ts = _ensure_tz_naive(pd.Timestamp(finer_synth_bar["Date"]))
             if actual_start <= synth_ts <= cutoff_dt:
-                existing_ts = {_ensure_tz_naive(pd.Timestamp(b["Date"])) for b in all_finer_bars}
-                if synth_ts not in existing_ts:
+                if all_finer_bars:
+                    last_db_ts = _ensure_tz_naive(pd.Timestamp(all_finer_bars[-1]["Date"]))
+                    if synth_ts > last_db_ts:
+                        all_finer_bars[-1] = finer_synth_bar   # replace same-period DB bar
+                    else:
+                        existing_ts = {_ensure_tz_naive(pd.Timestamp(b["Date"])) for b in all_finer_bars}
+                        if synth_ts not in existing_ts:
+                            all_finer_bars.append(finer_synth_bar)
+                            all_finer_bars.sort(key=lambda b: _ensure_tz_naive(pd.Timestamp(b["Date"])))
+                else:
                     all_finer_bars.append(finer_synth_bar)
-                    all_finer_bars.sort(key=lambda b: _ensure_tz_naive(pd.Timestamp(b["Date"])))
         except Exception:
             pass
 
