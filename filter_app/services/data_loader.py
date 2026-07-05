@@ -338,8 +338,14 @@ def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
         except Exception:
             pass
 
-    period_start_str = actual_start.isoformat()
-    period_end_str = cutoff_dt.isoformat()
+    # ★ BUGFIX: Append timezone suffix from cutoff_date to query bounds.
+    # Without this, string comparison in SQL WHERE ts <= period_end excludes
+    # DB bars whose ts has a timezone suffix (e.g. "T14:45:00+08:00" > "T14:45:00"),
+    # causing the last bar at the cutoff boundary to be dropped from synthesis.
+    # This cascades: 60min synth Close=wrong → daily Close=wrong → weekly Close=wrong.
+    tz_suffix = _get_tz_suffix(cutoff_date)
+    period_start_str = actual_start.isoformat() + tz_suffix
+    period_end_str = cutoff_dt.isoformat() + tz_suffix
 
     finer_db_bars = _query_tf_for_period(ticker_code, finer_tf, period_start_str, period_end_str)
 
