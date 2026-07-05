@@ -13,6 +13,48 @@ from loguru import logger
 from typing import Any, Dict, Optional, Tuple
 from db import upsert_kline, query_kline
 
+# 周期层级定义（与 components/sidebar.py 保持一致）
+ALL_TFS = ["1分钟", "5分钟", "15分钟", "60分钟", "日线", "周线", "月线", "季线"]
+
+
+def _get_period_end(ts, tf):
+    """计算给定 ts 之后的下一个周期结束时间戳（仅分钟级TF）。"""
+    ts = pd.Timestamp(ts)
+    if tf == "1分钟":
+        return ts + pd.Timedelta(minutes=1)
+    elif tf == "5分钟":
+        current_minutes = ts.hour * 60 + ts.minute
+        next_boundary = ((current_minutes // 5) + 1) * 5
+        next_hour = next_boundary // 60
+        next_minute = next_boundary % 60
+        if next_hour >= 24:
+            return (ts + pd.Timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        return ts.replace(hour=next_hour, minute=next_minute, second=0, microsecond=0)
+    elif tf == "15分钟":
+        current_minutes = ts.hour * 60 + ts.minute
+        next_boundary = ((current_minutes // 15) + 1) * 15
+        next_hour = next_boundary // 60
+        next_minute = next_boundary % 60
+        if next_hour >= 24:
+            return (ts + pd.Timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        return ts.replace(hour=next_hour, minute=next_minute, second=0, microsecond=0)
+    elif tf == "60分钟":
+        return (ts + pd.Timedelta(hours=1)).replace(minute=0, second=0, microsecond=0)
+    else:
+        return ts  # 非分钟TF返回原值
+
+
+def _get_period_start(ts, tf):
+    """返回不完整bar的数据查询起点（ISO日期字符串）。
+    用于 finer_tf 查询: ts >= period_start AND ts <= cutoff_date
+    """
+    ts = pd.Timestamp(ts)
+    if tf in ("1分钟", "5分钟", "15分钟", "60分钟"):
+        start = ts + pd.Timedelta(minutes=1)
+    else:
+        start = ts + pd.Timedelta(days=1)
+    return start.strftime("%Y-%m-%d")
+
 
 def _fetch_all_timeframes(market: str, code: str) -> Dict[str, Tuple[bool, Any]]:
     """获取某股票全部8个周期的数据，并行写入DB。返回成功/失败统计。"""
@@ -136,8 +178,9 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
     return np.arange(n, dtype=float), close, result_ohlc, full, None, dates
 
 
-def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int = 120,
-                     cutoff_date: Optional[str] = None) -> Tuple[bool, int]:
+def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0,
+                     n_pts: int = 120, cutoff_date: Optional[str] = None,
+                     min_tf: Optional[str] = None) -> Tuple[bool, int]:
     """同步数据到 display parquet。
 
     cutoff_date=None: 浏览模式，取最新 n_pts 条（支持 day_offset 日期偏移）
@@ -153,14 +196,74 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int 
                    ORDER BY ts DESC LIMIT ?""",
                 (ticker_code, tf, cutoff_date, n_pts),
             ).fetchall()
-        if rows:
-            rows.reverse()  # DESC → ASC
-            df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
-            display_dir = Path(__file__).parent.parent.parent / "data" / "display"
-            display_dir.mkdir(parents=True, exist_ok=True)
-            df.to_parquet(display_dir / f"{tf}.parquet", index=False)
-            return True, len(df)
-        return False, 0
+        if not rows:
+            return False, 0
+
+        # ── 分钟级TF逐级合成不完整bar ──
+        synthesized_bar = None
+        if (min_tf and cutoff_date
+            and tf in ("5分钟", "15分钟", "60分钟")
+            and ALL_TFS.index(tf) > ALL_TFS.index(min_tf)):
+            try:
+                last_completed_ts = rows[0][0]  # 最新已完成bar的ts
+                next_end = _get_period_end(last_completed_ts, tf)
+                cutoff_dt = pd.Timestamp(cutoff_date)
+                if cutoff_dt < next_end:
+                    # 用紧邻更细一级TF的数据合成
+                    finer_idx = ALL_TFS.index(tf) - 1
+                    finer_tf = ALL_TFS[finer_idx]
+                    period_start = _get_period_start(last_completed_ts, tf)
+                    with get_conn() as inner_conn:
+                        min_rows = inner_conn.execute(
+                            """SELECT open, high, low, close, volume
+                               FROM kline
+                               WHERE ticker=? AND timeframe=? AND ts >= ? AND ts <= ?
+                               ORDER BY ts ASC""",
+                            (ticker_code, finer_tf, period_start, cutoff_date),
+                        ).fetchall()
+                    if min_rows:
+                        opens = [r[0] for r in min_rows]
+                        highs = [r[1] for r in min_rows]
+                        lows  = [r[2] for r in min_rows]
+                        closes = [r[3] for r in min_rows]
+                        volumes = [r[4] for r in min_rows]
+                        synthesized_bar = {
+                            "Date": next_end.strftime("%Y-%m-%dT%H:%M:%S"),
+                            "Open": float(opens[0]),
+                            "High": float(max(highs)),
+                            "Low": float(min(lows)),
+                            "Close": float(closes[-1]),
+                            "Volume": float(sum(volumes)),
+                        }
+                        logger.debug(f"Synthesized {tf} bar from {finer_tf}: "
+                                     f"O={opens[0]:.2f} H={max(highs):.2f} "
+                                     f"L={min(lows):.2f} C={closes[-1]:.2f}")
+            except Exception as e:
+                logger.debug(f"Synthesis failed for {ticker_code}/{tf}: {e}")
+                synthesized_bar = None
+
+        # 构建 DataFrame
+        if synthesized_bar is not None:
+            data = []
+            for r in reversed(rows):
+                data.append({
+                    "Date": r[0], "Open": r[1], "High": r[2],
+                    "Low": r[3], "Close": r[4], "Volume": r[5],
+                })
+            data.append(synthesized_bar)
+            if len(data) > n_pts:
+                data = data[-n_pts:]
+            df = pd.DataFrame(data)
+        else:
+            rows_list = list(reversed(rows))
+            if len(rows_list) > n_pts:
+                rows_list = rows_list[-n_pts:]
+            df = pd.DataFrame(rows_list, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+
+        display_dir = Path(__file__).parent.parent.parent / "data" / "display"
+        display_dir.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(display_dir / f"{tf}.parquet", index=False)
+        return True, len(df)
 
     # 浏览模式：原有逻辑（n_pts 窗口）
     df = query_kline(ticker_code, tf, n_pts, day_offset=day_offset)

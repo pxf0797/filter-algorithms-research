@@ -120,7 +120,9 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=No
     """
     if window_start is not None:
         # 回测模式：按 cutoff_date 日期对齐
-        ok, count = _sync_to_display(ticker_code, tf, n_pts=n_pts, cutoff_date=cutoff_date)
+        _bt_min_tf = AppState.get("_min_tf", "")
+        ok, count = _sync_to_display(ticker_code, tf, n_pts=n_pts,
+                                      cutoff_date=cutoff_date, min_tf=_bt_min_tf)
         if not ok:
             # parquet 写入失败，直接走 API 回退
             t, noisy, ohlc, ticker_full, dates, err = _cached_fetch_stock(market, ticker_code, tf, n_pts)
