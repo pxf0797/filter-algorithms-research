@@ -239,7 +239,10 @@ def _get_period_start(last_completed_ts, tf):
     else:
         start = ts + pd.Timedelta(days=1)
 
-    return start.strftime("%Y-%m-%d")
+    if tf in ("5分钟", "15分钟", "60分钟"):
+        return start.strftime("%Y-%m-%dT%H:%M:%S")
+    else:
+        return start.strftime("%Y-%m-%d")
 
 
 def _get_this_period_start(ts, tf):
@@ -247,30 +250,36 @@ def _get_this_period_start(ts, tf):
 
     用于 REPLACE 场景：当 DB 中最后一条 bar 的 ts 处于进行中的周期时，
     需要从 min_tf 重新合成该周期的 bar。
+
+    返回:
+        str — 分钟级 TF 返回 "YYYY-MM-DDTHH:MM:SS"，其他 TF 返回 "YYYY-MM-DD"
     """
     ts = pd.Timestamp(ts)
 
     if tf == "5分钟":
         current_minutes = ts.hour * 60 + ts.minute
         boundary = (current_minutes // 5) * 5
-        return ts.replace(hour=boundary // 60, minute=boundary % 60, second=0, microsecond=0)
+        result = ts.replace(hour=boundary // 60, minute=boundary % 60, second=0, microsecond=0)
+        return result.strftime("%Y-%m-%dT%H:%M:%S")
     elif tf == "15分钟":
         current_minutes = ts.hour * 60 + ts.minute
         boundary = (current_minutes // 15) * 15
-        return ts.replace(hour=boundary // 60, minute=boundary % 60, second=0, microsecond=0)
+        result = ts.replace(hour=boundary // 60, minute=boundary % 60, second=0, microsecond=0)
+        return result.strftime("%Y-%m-%dT%H:%M:%S")
     elif tf == "60分钟":
-        return ts.replace(minute=0, second=0, microsecond=0)
+        result = ts.replace(minute=0, second=0, microsecond=0)
+        return result.strftime("%Y-%m-%dT%H:%M:%S")
     elif tf == "日线":
-        return ts.normalize()
+        return ts.normalize().strftime("%Y-%m-%d")
     elif tf == "周线":
-        return (ts - pd.Timedelta(days=ts.weekday())).normalize()
+        return (ts - pd.Timedelta(days=ts.weekday())).normalize().strftime("%Y-%m-%d")
     elif tf == "月线":
-        return ts.replace(day=1).normalize()
+        return ts.replace(day=1).normalize().strftime("%Y-%m-%d")
     elif tf == "季线":
         q_start_month = ((ts.month - 1) // 3) * 3 + 1
-        return pd.Timestamp(year=ts.year, month=q_start_month, day=1)
+        return pd.Timestamp(year=ts.year, month=q_start_month, day=1).strftime("%Y-%m-%d")
     else:
-        return ts
+        return ts.strftime("%Y-%m-%d")
 
 
 def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int = 120,
@@ -321,7 +330,7 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int 
                         period_start = _get_period_start(last_bar_ts, tf)
 
                 if period_start is not None:
-                    period_start_str = period_start.strftime("%Y-%m-%d %H:%M:%S") if hasattr(period_start, 'strftime') else str(period_start)
+                    period_start_str = period_start  # 现在两个 _get_*_period_start 都返回正确格式的字符串
                     with get_conn() as inner_conn:
                         min_rows = inner_conn.execute(
                             """SELECT open, high, low, close, volume
