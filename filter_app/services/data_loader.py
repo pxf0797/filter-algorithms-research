@@ -405,13 +405,38 @@ def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
         except Exception:
             pass
 
-    # ★ Cross-night filter: for minute TFs, exclude bars from days other than
-    # cutoff.  Without this the query window [last_ts, cutoff] can span
-    # overnight / weekend gaps and pull in bars from already-completed periods.
+    # ★ Cross-period filter: the query window [last_ts, cutoff] can span
+    # overnight / weekend / month-end gaps and pull in bars from already-
+    # completed periods.  For each target TF we compute the start of the
+    # *current* (incomplete) period that contains cutoff and drop any
+    # finer-TF bar whose date falls before it.
     if target_tf in ("1分钟", "5分钟", "15分钟", "60分钟"):
-        cutoff_date_str = cutoff_dt.strftime("%Y-%m-%d")
+        # minute TFs  →  keep only bars on the same calendar day as cutoff
+        period_start_str = cutoff_dt.strftime("%Y-%m-%d")  # "2026-07-02"
         all_finer_bars = [b for b in all_finer_bars
-                          if b["Date"][:10] == cutoff_date_str]
+                          if b["Date"][:10] == period_start_str]
+    elif target_tf == "日线":
+        # daily bar  →  same day
+        period_start_str = cutoff_dt.strftime("%Y-%m-%d")
+        all_finer_bars = [b for b in all_finer_bars
+                          if b["Date"][:10] == period_start_str]
+    elif target_tf == "周线":
+        # current week starts on the most recent Monday
+        week_start = cutoff_dt - pd.Timedelta(days=cutoff_dt.weekday())
+        period_start_str = week_start.strftime("%Y-%m-%d")
+        all_finer_bars = [b for b in all_finer_bars
+                          if b["Date"][:10] >= period_start_str]
+    elif target_tf == "月线":
+        period_start_str = cutoff_dt.strftime("%Y-%m") + "-01"
+        all_finer_bars = [b for b in all_finer_bars
+                          if b["Date"][:10] >= period_start_str]
+    elif target_tf == "季线":
+        q = (cutoff_dt.month - 1) // 3
+        q_start = cutoff_dt.replace(month=q * 3 + 1, day=1)
+        period_start_str = q_start.strftime("%Y-%m-%d")
+        all_finer_bars = [b for b in all_finer_bars
+                          if b["Date"][:10] >= period_start_str]
+    # (1分钟 falls through to the minute-TF branch above)
 
     if len(all_finer_bars) == 0:
         return None
