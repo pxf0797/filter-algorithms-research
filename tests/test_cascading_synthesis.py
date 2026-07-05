@@ -168,21 +168,118 @@ class TestGetPeriodStartTs:
 # ---------------------------------------------------------------------------
 
 class TestNeedsSynthesis:
-    def test_cutoff_after_period_start__returns_true(self):
+    def test_cutoff_after_last_ts__returns_true(self):
+        """60min: last=14:00, cutoff=14:45 → 14:45 > 14:00 → True"""
         from services.data_loader import _needs_synthesis
         db_rows = [{"Date": "2026-07-03T14:00:00+08:00"}]
-        cutoff = "2026-07-03T14:47:00+08:00"
-        assert _needs_synthesis("60分钟", db_rows, cutoff) is True
+        assert _needs_synthesis("60分钟", db_rows, "2026-07-03T14:45:00+08:00") == True
 
-    def test_cutoff_before_period_start__returns_false(self):
+    def test_cutoff_equal_last_ts__returns_false(self):
+        """cutoff == last_ts → no new data → False"""
         from services.data_loader import _needs_synthesis
         db_rows = [{"Date": "2026-07-03T14:00:00+08:00"}]
-        cutoff = "2026-07-03T13:45:00+08:00"
-        assert _needs_synthesis("60分钟", db_rows, cutoff) is False
+        assert _needs_synthesis("60分钟", db_rows, "2026-07-03T14:00:00+08:00") == False
 
     def test_empty_rows__returns_false(self):
         from services.data_loader import _needs_synthesis
-        assert _needs_synthesis("60分钟", [], "2026-07-03T14:47:00+08:00") is False
+        assert _needs_synthesis("60分钟", [], "2026-07-03T14:45:00+08:00") == False
+
+    def test_daily_same_day__cutoff_after_midnight__returns_true(self):
+        """★ 关键回归: 日线 last=7/2 00:00, cutoff=7/2 15:45 → 15:45 > 00:00 → True"""
+        from services.data_loader import _needs_synthesis
+        db_rows = [{"Date": "2026-07-02T00:00:00"}]
+        assert _needs_synthesis("日线", db_rows, "2026-07-02T15:45:00-04:00") == True
+
+    def test_weekly__returns_true(self):
+        """周线 last=6/29(Mon), cutoff=7/2(Thu) → True"""
+        from services.data_loader import _needs_synthesis
+        db_rows = [{"Date": "2026-06-29T00:00:00"}]
+        assert _needs_synthesis("周线", db_rows, "2026-07-02T15:45:00-04:00") == True
+
+
+# ---------------------------------------------------------------------------
+# Test _get_query_start_for_synthesis
+# ---------------------------------------------------------------------------
+
+class TestGetQueryStartForSynthesis:
+    def test_60min_returns_last_ts(self):
+        from services.data_loader import _get_query_start_for_synthesis
+        import pandas as pd
+        last_ts = pd.Timestamp("2026-07-03T14:00:00")
+        result = _get_query_start_for_synthesis(last_ts, "60分钟")
+        assert result == last_ts
+
+    def test_daily_returns_last_ts(self):
+        """★ 关键回归: 日线返回last_ts而非次日"""
+        from services.data_loader import _get_query_start_for_synthesis
+        import pandas as pd
+        last_ts = pd.Timestamp("2026-07-02T00:00:00")
+        result = _get_query_start_for_synthesis(last_ts, "日线")
+        assert result == last_ts  # 不是次日!
+
+    def test_weekly_returns_last_ts(self):
+        from services.data_loader import _get_query_start_for_synthesis
+        import pandas as pd
+        last_ts = pd.Timestamp("2026-06-29T00:00:00")
+        result = _get_query_start_for_synthesis(last_ts, "周线")
+        assert result == last_ts
+
+
+# ---------------------------------------------------------------------------
+# Test _offset_to_tz
+# ---------------------------------------------------------------------------
+
+class TestOffsetToTz:
+    def test_positive_offset(self):
+        from services.data_loader import _offset_to_tz
+        from datetime import timezone, timedelta
+        tz = _offset_to_tz("+08:00")
+        assert tz.utcoffset(None) == timedelta(hours=8)
+
+    def test_negative_offset(self):
+        from services.data_loader import _offset_to_tz
+        from datetime import timezone, timedelta
+        tz = _offset_to_tz("-04:00")
+        assert tz.utcoffset(None) == timedelta(hours=-4)
+
+    def test_utc_z(self):
+        from services.data_loader import _offset_to_tz
+        from datetime import timezone, timedelta
+        tz = _offset_to_tz("Z")
+        assert tz.utcoffset(None) == timedelta(0)
+
+    def test_empty_string(self):
+        from services.data_loader import _offset_to_tz
+        from datetime import timezone, timedelta
+        tz = _offset_to_tz("")
+        assert tz.utcoffset(None) == timedelta(0)
+
+
+# ---------------------------------------------------------------------------
+# Test _needs_synthesis regression (关键回归)
+# ---------------------------------------------------------------------------
+
+class TestNeedsSynthesisRegression:
+    """回归测试: 确保所有TF的合成判定在典型场景下正确"""
+
+    @pytest.mark.parametrize("tf,last_date,cutoff,expected", [
+        # 分钟级: cutoff在同一周期内
+        ("15分钟", "2026-07-03T14:30:00+08:00", "2026-07-03T14:45:00+08:00", True),
+        ("60分钟", "2026-07-03T14:00:00+08:00", "2026-07-03T14:45:00+08:00", True),
+        # 日线: cutoff在同一天 ← 之前为False的bug
+        ("日线", "2026-07-02T00:00:00", "2026-07-02T15:45:00-04:00", True),
+        # 周线
+        ("周线", "2026-06-29T00:00:00", "2026-07-02T15:45:00-04:00", True),
+        # 月线
+        ("月线", "2026-07-01T00:00:00", "2026-07-02T15:45:00-04:00", True),
+        # cutoff == last → 不需要合成
+        ("60分钟", "2026-07-03T14:00:00+08:00", "2026-07-03T14:00:00+08:00", False),
+        ("日线", "2026-07-02T00:00:00", "2026-07-02T00:00:00", False),
+    ])
+    def test_needs_synthesis(self, tf, last_date, cutoff, expected):
+        from services.data_loader import _needs_synthesis
+        db_rows = [{"Date": last_date}]
+        assert _needs_synthesis(tf, db_rows, cutoff) == expected
 
 
 # ---------------------------------------------------------------------------

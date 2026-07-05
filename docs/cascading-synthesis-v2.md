@@ -1461,3 +1461,16 @@ def test_cascade_60min_to_daily_uses_synth_bar():
 | 4 | Streamlit 集成 | ✅ 已实现 | streamlit_app.py: import + _load_chart_data + main() |
 | 5 | 单元测试 | ✅ 已实现 | tests/test_cascading_synthesis.py |
 | - | 冒烟验证 | ✅ 通过 | 33项核心逻辑测试全部通过 |
+
+### 10.2 已修复 Bug (实施后)
+
+| Bug | 提交 | 根因 | 修复 |
+|-----|------|------|------|
+| ALL_TFS 导入错误 | 086effc | import 路径循环依赖 | 改回本地常量 |
+| _write_parquet 路径 | e040310 | parent少一层 | 统一 parent.parent.parent |
+| P1 ×5 | e92a147 | n_pts/返回值/链断裂/回退/参数 | 见 all-issues-tracker.md |
+| 时区边界 bar 遗漏 | d6f5839 | SQL字符串比较 tz后缀 | period_end 加 tz_suffix |
+| 日线级反向边界 | 2a2599b | finer_tf格式不匹配 | 从 finer_tf 提取时区 |
+| 跨时区假转换 | a87cea5 | 剥离-拼接 替代真转换 | tz_convert() |
+| _needs_synthesis 日线失效 | 3bf8a47 | cutoff >= 下一周期 | cutoff > last_ts |
+| _get_query_start_for_synthesis 窗口颠倒 | fec408a | last_ts+1天 超出cutoff | 返回 last_ts |

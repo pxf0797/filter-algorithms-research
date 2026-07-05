@@ -10,9 +10,9 @@
 | 优先级 | 总数 | 设计已解决 | 待修复 | 已修复 |
 |--------|------|-----------|--------|--------|
 | P0 | 3 | 3 | 0 | 0 |
-| P1 | 7 | 6 | 5 | 0 |
+| P1 | 7 | 2 | 0 | 5 |
 | P2 | 10 | 4 | 6 | 0 |
-| **合计** | **20** | **13** | **11** | **0** |
+| **合计** | **20** | **9** | **6** | **5** |
 
 > 注: "设计已解决"指 v1 审查中发现的问题在 v2 设计方案中已彻底解决，无需额外代码修改。"待修复"指当前实现中仍存在的问题。"已修复"指已在代码中修复并验证。
 
@@ -34,10 +34,11 @@
 
 ---
 
-## 3. P1 — 待修复问题 (实现后发现)
+## 3. P1 — 修复问题 (已全部修复)
 
 ### P1-1: n_pts 强制统一为 120，各视图配置被忽略
 
+- **状态**: ✅ 已修复 | **提交**: e92a147
 - **发现来源**: backtest-logic-change-analysis.md §差异#2
 - **简述**: `_sync_all_cascading()` 对所有 TF 使用固定 `n_pts=120`（data_loader.py L374），不读取各视图的 `cfg["n_pts"]`。日线视图配置 `n_pts=60` 但实际显示 120 条 bar。
 - **根因分析**: v2 设计将数据写入从各视图内部（`_load_chart_data`）提升到全局入口（`_sync_all_cascading`），但未传递 per-view 的 n_pts 参数。`_load_chart_data` 中 L141 注释 "不再需要截断！parquet 已经是 n_pts 条" 已不准确——parquet 有 120 条，但视图可能只需要 60 条。
@@ -57,6 +58,7 @@
 
 ### P1-2: `_sync_all_cascading` 返回值被丢弃，失败无感知
 
+- **状态**: ✅ 已修复 | **提交**: e92a147
 - **发现来源**: backtest-logic-change-analysis.md §差异#4
 - **简述**: `main()` L1617 调用 `_sync_all_cascading(...)` 但丢弃其返回的 `dict[str, bool]`。如果所有 TF 都写入失败（如 DB 连接异常），所有 4 个视图静默回退到 `_cached_fetch_stock()`，显示最新数据而非回测历史数据，且无任何错误提示。
 - **根因分析**: v1 设计中每个视图独立处理 `_sync_to_display` 的失败（`ok==False` 时独立回退），v2 集中处理后缺少全局失败检测。
@@ -75,6 +77,7 @@
 
 ### P1-3: 合成链断裂 — 中间 TF 无数据时粗粒度 TF 无法合成
 
+- **状态**: ✅ 已修复 | **提交**: e92a147
 - **发现来源**: backtest-logic-change-analysis.md §差异#6
 - **简述**: 当某个中间 TF 的 DB 无数据时，`_sync_all_cascading` 执行 `continue`（跳过该 TF），`synth_cache` 中无该 TF 条目。后续更粗 TF 调用 `_find_immediate_finer_tf()` 找到该 TF 但 `finer_tf in synth_cache` 为 False → 不合成，所有更粗 TF 的合成 bar 缺失。
 - **根因分析**: v2 设计引入了 TF 间数据依赖（级联合成），但 `_sync_all_cascading` 中 `if not db_rows: continue` 直接跳过，未尝试降级到下一个可用的更细 TF。
@@ -96,6 +99,7 @@
 
 ### P1-4: 回退路径返回最新数据，破坏回测时间一致性
 
+- **状态**: ✅ 已修复 | **提交**: e92a147
 - **发现来源**: backtest-logic-change-analysis.md §差异#3(c)
 - **简述**: 回测模式下 parquet 缺失时，`_load_chart_data()` 回退到 `_cached_fetch_stock()`，该函数调用 `query_kline(code, tf, n_pts, day_offset=0)` 返回最新 n_pts 条数据，不考虑 cutoff_date。图表显示最新数据而非回测历史数据。
 - **根因分析**: 这是 v1 就存在的问题（`_cached_fetch_stock` 不具备 cutoff_date 过滤能力），但 v2 中 parquet 缺失的概率发生了变化——v1 是个别 TF 问题，v2 可能是级联合成链路中任何一环断裂。
@@ -120,6 +124,7 @@
 
 ### P1-5: yfinance 周/月/季线 timestamp 约定未验证
 
+- **状态**: ✅ 已修复 | **提交**: e92a147
 - **发现来源**: design-review-v2.md §5 N1
 - **简述**: v2 的 `_get_period_start_ts()` 对周线/月线/季线使用 `last_ts + 1天`，假设 DB 中这些 TF 的 ts 是周期结束日（周五/月末/季末）。若 yfinance 实际返回周期开始日（周一/月初/季初），则 `ts + 1天` 计算出错误的 period_start，导致周/月/季线合成判断全部错误。
 - **根因分析**: v2 设计方案确立后未执行 Phase 0（yfinance timestamp 验证），直接进入实施。该假设从未被显式验证。
@@ -136,6 +141,20 @@
   2. 如果验证通过（ts=周期结束日），无需修改。
   3. 如果 ts=周期开始日，需要重新计算 `_get_period_start_ts()` 的周/月/季线分支。
 - **涉及文件/行号**: `data_loader.py` `_get_period_start_ts()` 周线/月线/季线分支
+
+### 实施后追加修复 (未在原始P1清单中)
+
+以下 bug 在实施后发现并修复，记录于此以保证追踪完整性：
+
+| Bug | 提交 | 根因 | 修复 |
+|-----|------|------|------|
+| ALL_TFS 导入错误 | 086effc | import 路径循环依赖 | 改回本地常量 |
+| _write_parquet 路径 | e040310 | parent少一层 | 统一 parent.parent.parent |
+| 时区边界 bar 遗漏 | d6f5839 | SQL字符串比较缺少tz后缀 | period_end 加 tz_suffix |
+| 日线级反向边界 | 2a2599b | finer_tf 时区格式不匹配 | 从 finer_tf 提取时区 |
+| 跨时区假转换 | a87cea5 | 剥离-拼接 替代真转换 | 真 tz_convert() |
+| _needs_synthesis 日线失效 | 3bf8a47 | cutoff >= 下一周期判定错误 | cutoff > last_ts |
+| _get_query_start_for_synthesis 窗口颠倒 | fec408a | last_ts+1天 超出 cutoff | 返回 last_ts |
 
 ---
 
