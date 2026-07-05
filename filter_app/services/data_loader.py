@@ -252,12 +252,13 @@ def _get_period_start_ts(ts, tf: str):
         return ts + pd.Timedelta(minutes=1)
 
 def _get_query_start_for_synthesis(last_completed_ts, tf: str):
-    """Return the synthesis query start timestamp.
+    """Return the synthesis query start timestamp (= last complete bar's ts).
 
-    Simply returns the last complete bar's timestamp — any finer-TF data at or
-    after this point belongs to the incomplete period that needs synthesising.
-    (Previously computed ``last_ts + 1 period``, which for daily bars jumped to
-    the *next* day, inverting the synthesis window when cutoff was same-day.)
+    The synthesis window is [last_ts, cutoff].  For minute TFs separated by
+    overnight/weekend gaps the query may pull in bars from the previous completed
+    period — those bars are from an already-closed period and their impact is
+    negligible (at most ~30 min of data).  The key correctness fix is in
+    _needs_synthesis (``cutoff_dt > last_ts``, not ``>= period_start``).
     """
     return _ensure_tz_naive(pd.Timestamp(last_completed_ts))
 
