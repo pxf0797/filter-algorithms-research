@@ -173,7 +173,7 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
     if n == 0:
         return None, None, None, full, "写入成功但查询失败", None
     close = result_df["Close"].values.ravel()
-    dates = pd.to_datetime(result_df["Date"])
+    dates = pd.to_datetime(result_df["Date"], format='mixed')
     result_ohlc = result_df if "Open" in result_df.columns else pd.DataFrame({"Open":close,"High":close,"Low":close,"Close":close}, index=dates)
     return np.arange(n, dtype=float), close, result_ohlc, full, None, dates
 
@@ -269,7 +269,7 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0,
     df = query_kline(ticker_code, tf, n_pts, day_offset=day_offset)
     if len(df) < 5:
         return False, len(df)
-    df["Date"] = pd.to_datetime(df["Date"])
+    df["Date"] = pd.to_datetime(df["Date"], format='mixed')
     display_dir = Path(__file__).parent.parent.parent / "data" / "display"
     display_dir.mkdir(parents=True, exist_ok=True)
     df.to_parquet(display_dir / f"{tf}.parquet", index=False)
