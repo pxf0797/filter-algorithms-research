@@ -402,10 +402,20 @@ def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
     return _aggregate_bars(all_finer_bars, synth_date)
 
 def _build_output_df(db_rows: list, synthesized_bar: _Optional[dict], n_pts: int) -> pd.DataFrame:
-    """Merge DB rows + optional synthesized bar, truncate to n_pts, return DataFrame."""
+    """Merge DB rows + optional synthesized bar, return DataFrame with exactly n_pts rows.
+
+    When a synthesized bar is present it **replaces** the last DB row (they
+    represent the same period — the DB row is a retrospectively-complete bar
+    downloaded after market close, the synth row is the partial view up to
+    ``cutoff_date``).  Appending both would keep future knowledge in the
+    backtest window.
+    """
     data = list(db_rows)
     if synthesized_bar is not None:
-        data.append(synthesized_bar)
+        if data:
+            data[-1] = synthesized_bar   # replace, not append
+        else:
+            data.append(synthesized_bar)
     if len(data) > n_pts:
         data = data[-n_pts:]
     return pd.DataFrame(data, columns=["Date", "Open", "High", "Low", "Close", "Volume"])

@@ -356,14 +356,22 @@ class TestBuildOutputDf:
         assert "Date" in df.columns
 
     def test_with_synth_bar(self):
+        """合成bar替换最后一条DB bar, 而非追加"""
         from services.data_loader import _build_output_df
         db_rows = [
             {"Date": "2026-07-01T00:00:00", "Open": 100.0, "High": 101.0, "Low": 99.0, "Close": 100.5, "Volume": 1000},
+            {"Date": "2026-07-02T00:00:00", "Open": 100.5, "High": 102.0, "Low": 100.0, "Close": 101.5, "Volume": 2000},
         ]
-        synth = {"Date": "2026-07-03T14:47:00", "Open": 101.0, "High": 103.0, "Low": 100.5, "Close": 102.0, "Volume": 3000}
+        synth = {"Date": "2026-07-02T15:45:00", "Open": 101.0, "High": 103.0, "Low": 100.5, "Close": 102.0, "Volume": 3000}
         df = _build_output_df(db_rows, synth, 120)
+        # 2 DB bars + 1 synth → replace last DB bar → still 2 bars
         assert len(df) == 2
+        # 合成bar的Close
         assert df["Close"].iloc[-1] == 102.0
+        # 第一条DB bar保持不变
+        assert df["Close"].iloc[0] == 100.5
+        # 第二条DB bar(7/2)已被合成bar替换 — Date变了
+        assert df["Date"].iloc[-1] == "2026-07-02T15:45:00"
 
     def test_truncation(self):
         from services.data_loader import _build_output_df
