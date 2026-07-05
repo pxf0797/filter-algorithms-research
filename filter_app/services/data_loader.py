@@ -242,6 +242,37 @@ def _get_period_start(last_completed_ts, tf):
     return start.strftime("%Y-%m-%d")
 
 
+def _get_this_period_start(ts, tf):
+    """返回 ts 所属周期的起点（与 _get_period_start 不同，后者返回下个周期的起点）。
+
+    用于 REPLACE 场景：当 DB 中最后一条 bar 的 ts 处于进行中的周期时，
+    需要从 min_tf 重新合成该周期的 bar。
+    """
+    ts = pd.Timestamp(ts)
+
+    if tf == "5分钟":
+        current_minutes = ts.hour * 60 + ts.minute
+        boundary = (current_minutes // 5) * 5
+        return ts.replace(hour=boundary // 60, minute=boundary % 60, second=0, microsecond=0)
+    elif tf == "15分钟":
+        current_minutes = ts.hour * 60 + ts.minute
+        boundary = (current_minutes // 15) * 15
+        return ts.replace(hour=boundary // 60, minute=boundary % 60, second=0, microsecond=0)
+    elif tf == "60分钟":
+        return ts.replace(minute=0, second=0, microsecond=0)
+    elif tf == "日线":
+        return ts.normalize()
+    elif tf == "周线":
+        return (ts - pd.Timedelta(days=ts.weekday())).normalize()
+    elif tf == "月线":
+        return ts.replace(day=1).normalize()
+    elif tf == "季线":
+        q_start_month = ((ts.month - 1) // 3) * 3 + 1
+        return pd.Timestamp(year=ts.year, month=q_start_month, day=1)
+    else:
+        return ts
+
+
 def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int = 120,
                      cutoff_date: Optional[str] = None,
                      min_tf: Optional[str] = None) -> Tuple[bool, int]:
@@ -267,29 +298,47 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int 
 
         # ── 合成高周期不完整 bar ──
         synthesized_bar = None
+        replace_last = False
         if min_tf and cutoff_date and ALL_TFS.index(tf) > ALL_TFS.index(min_tf):
-            last_completed_ts = rows[0][0]  # DESC 查询的第一条（最新时间，距 cutoff_date 最近）的 ts
+            last_bar_ts = pd.Timestamp(rows[0][0])
+            cutoff_dt = pd.Timestamp(cutoff_date)
+            next_period_start = pd.Timestamp(_get_period_start(last_bar_ts, tf))
+
             try:
-                next_end = _get_period_end(last_completed_ts, tf)
-                cutoff_dt = pd.Timestamp(cutoff_date)
-                if cutoff_dt < next_end:
-                    period_start = _get_period_start(last_completed_ts, tf)
+                if cutoff_dt < next_period_start:
+                    # SCENARIO B (REPLACE): DB最后一条bar处于进行中的周期
+                    # → 用 min_tf 数据重新合成该周期的 bar，替换 rows[0]
+                    period_start = _get_this_period_start(last_bar_ts, tf)
+                    period_end = last_bar_ts  # bar 的 ts 就是周期结束时间
+                    replace_last = True
+                else:
+                    # SCENARIO A (APPEND): DB最后一条bar已完成
+                    # → 检查是否有不完整的下一个 bar
+                    period_end = _get_period_end(last_bar_ts, tf)
+                    if cutoff_dt >= period_end:
+                        period_start = None  # 不触发合成
+                    else:
+                        period_start = _get_period_start(last_bar_ts, tf)
+
+                if period_start is not None:
+                    period_start_str = period_start.strftime("%Y-%m-%d %H:%M:%S") if hasattr(period_start, 'strftime') else str(period_start)
                     with get_conn() as inner_conn:
                         min_rows = inner_conn.execute(
                             """SELECT open, high, low, close, volume
                                FROM kline
                                WHERE ticker=? AND timeframe=? AND ts >= ? AND ts <= ?
                                ORDER BY ts ASC""",
-                            (ticker_code, min_tf, period_start, cutoff_date),
+                            (ticker_code, min_tf, period_start_str, cutoff_date),
                         ).fetchall()
                     if min_rows:
                         opens = [r[0] for r in min_rows]
                         highs = [r[1] for r in min_rows]
-                        lows = [r[2] for r in min_rows]
+                        lows  = [r[2] for r in min_rows]
                         closes = [r[3] for r in min_rows]
                         volumes = [r[4] for r in min_rows]
+                        # 统一使用 ISO 格式的 Date，避免 parquet 读取崩溃
                         synthesized_bar = {
-                            "Date": next_end.strftime("%Y-%m-%d %H:%M:%S") if any(c in str(next_end) for c in " :") else next_end.strftime("%Y-%m-%d"),
+                            "Date": period_end.strftime("%Y-%m-%dT%H:%M:%S") if hasattr(period_end, 'strftime') else str(period_end),
                             "Open": float(opens[0]),
                             "High": float(max(highs)),
                             "Low": float(min(lows)),
@@ -298,10 +347,12 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int 
                         }
                         logger.debug(f"Synthesized {tf} bar for {ticker_code} at {cutoff_date}: "
                                      f"O={opens[0]:.2f} H={max(highs):.2f} L={min(lows):.2f} "
-                                     f"C={closes[-1]:.2f} V={sum(volumes):.0f}")
+                                     f"C={closes[-1]:.2f} V={sum(volumes):.0f} "
+                                     f"mode={'REPLACE' if replace_last else 'APPEND'}")
             except Exception as e:
                 logger.debug(f"Synthesis failed for {ticker_code}/{tf}: {e}")
                 synthesized_bar = None
+                replace_last = False
 
         # 构建 DataFrame，处理合成 bar 追加与截断
         if synthesized_bar is not None:
@@ -312,7 +363,12 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int 
                     "Date": r[0], "Open": r[1], "High": r[2],
                     "Low": r[3], "Close": r[4], "Volume": r[5],
                 })
-            data.append(synthesized_bar)
+            if replace_last:
+                # 替换最后一条（最新的原始 bar）为合成版本
+                data[-1] = synthesized_bar
+            else:
+                # 追加到末尾
+                data.append(synthesized_bar)
             # 裁剪到 n_pts 条（去掉最早的）
             if len(data) > n_pts:
                 data = data[-n_pts:]

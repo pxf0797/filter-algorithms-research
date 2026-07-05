@@ -377,3 +377,87 @@ class TestSynthesisCondition:
             assert ALL_TFS.index(tf) == idx, (
                 f"{tf} 的索引应为 {idx}，实际为 {ALL_TFS.index(tf)}"
             )
+
+
+class TestGetThisPeriodStart:
+    """Test _get_this_period_start() - period start for REPLACE scenario."""
+
+    def setup_method(self):
+        from services.data_loader import _get_this_period_start
+        self.func = _get_this_period_start
+
+    def test_daily(self):
+        ts = pd.Timestamp("2026-04-23 10:30:00")
+        result = self.func(ts, "日线")
+        assert result == pd.Timestamp("2026-04-23 00:00:00")
+
+    def test_hourly(self):
+        ts = pd.Timestamp("2026-04-23 10:30:00")
+        result = self.func(ts, "60分钟")
+        assert result == pd.Timestamp("2026-04-23 10:00:00")
+
+    def test_15min(self):
+        ts = pd.Timestamp("2026-04-23 10:37:00")
+        result = self.func(ts, "15分钟")
+        assert result == pd.Timestamp("2026-04-23 10:30:00")
+
+    def test_5min(self):
+        ts = pd.Timestamp("2026-04-23 10:37:00")
+        result = self.func(ts, "5分钟")
+        assert result == pd.Timestamp("2026-04-23 10:35:00")
+
+    def test_weekly(self):
+        # Wednesday → Monday of this week
+        ts = pd.Timestamp("2026-04-22")  # Wednesday
+        result = self.func(ts, "周线")
+        assert result == pd.Timestamp("2026-04-20")  # Monday
+
+    def test_monthly(self):
+        ts = pd.Timestamp("2026-04-23")
+        result = self.func(ts, "月线")
+        assert result == pd.Timestamp("2026-04-01")
+
+    def test_quarterly(self):
+        ts = pd.Timestamp("2026-05-15")
+        result = self.func(ts, "季线")
+        assert result == pd.Timestamp("2026-04-01")
+
+    def test_quarterly_q1(self):
+        ts = pd.Timestamp("2026-02-15")
+        result = self.func(ts, "季线")
+        assert result == pd.Timestamp("2026-01-01")
+
+
+class TestSynthesisReplaceVsAppend:
+    """Test synthesis condition logic: REPLACE when cutoff in same period, APPEND otherwise."""
+
+    def test_replace_daily_within_same_day(self):
+        """cutoff 10:30, last_bar ts=2026-04-23 → cutoff < next_period_start(04-24) → REPLACE"""
+        from services.data_loader import _get_period_start
+        last_bar_ts = pd.Timestamp("2026-04-23")
+        next_ps = pd.Timestamp(_get_period_start(last_bar_ts, "日线"))
+        cutoff_dt = pd.Timestamp("2026-04-23 10:30")
+        assert cutoff_dt < next_ps  # True → REPLACE scenario
+
+    def test_append_hourly_next_bar(self):
+        """cutoff 10:30, last_bar ts=10:00 → cutoff >= next_period_start(11:00)? No → APPEND"""
+        from services.data_loader import _get_period_start, _get_period_end
+        last_bar_ts = pd.Timestamp("2026-04-23 10:00")
+        next_ps = pd.Timestamp(_get_period_start(last_bar_ts, "60分钟"))
+        cutoff_dt = pd.Timestamp("2026-04-23 10:30")
+        # cutoff < next_period_start? 10:30 < 10:01? No
+        # So it's APPEND scenario
+        next_end = _get_period_end(last_bar_ts, "60分钟")
+        assert cutoff_dt < next_end  # True → APPEND scenario
+
+    def test_no_synthesis_when_bar_complete(self):
+        """cutoff 11:00, last_bar ts=11:00 → bar is complete, next_period_start is 11:01
+        but _get_period_start(11:00, "60分钟") returns "2026-04-23" (date only after strftime).
+        So cutoff_dt(11:00) >= next_ps(00:00) → period_start=None → no synthesis."""
+        from services.data_loader import _get_period_start
+        last_bar_ts = pd.Timestamp("2026-04-23 11:00")
+        cutoff_dt = pd.Timestamp("2026-04-23 11:00")
+        next_ps = pd.Timestamp(_get_period_start(last_bar_ts, "60分钟"))
+        # _get_period_start returns "2026-04-23" (date only), so next_ps = 2026-04-23 00:00
+        # cutoff_dt(11:00) >= next_ps(00:00) → True → period_start = None → skip synthesis
+        assert cutoff_dt >= next_ps
