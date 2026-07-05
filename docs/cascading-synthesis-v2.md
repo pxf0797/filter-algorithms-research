@@ -1446,3 +1446,18 @@ def test_cascade_60min_to_daily_uses_synth_bar():
 
 > **文档版本**: v2.0 | **下次评审**: Phase 3 实施前
 > **变更行数**: ~600行新增/修改 (data_loader.py), ~5行修改 (streamlit_app.py)
+
+---
+
+## 10. 实施状态
+
+| Phase | 内容 | 状态 | 文件 |
+|-------|------|------|------|
+| 1 | 时间格式工具 | ✅ 已实现 | data_loader.py:_ensure_tz_naive/_get_tz_suffix/_format_synth_date |
+| 1 | 周期边界计算 | ✅ 已实现 | data_loader.py:_get_period_start_ts/_get_query_start_for_synthesis |
+| 2 | 数据查询函数 | ✅ 已实现 | data_loader.py:_query_tf_from_db/_query_tf_for_period/_find_immediate_finer_tf |
+| 2 | 合成核心 | ✅ 已实现 | data_loader.py:_needs_synthesis/_aggregate_bars/_synthesize_incomplete_bar |
+| 3 | 级联主入口 | ✅ 已实现 | data_loader.py:_sync_all_cascading/_build_output_df/_write_parquet |
+| 4 | Streamlit 集成 | ✅ 已实现 | streamlit_app.py: import + _load_chart_data + main() |
+| 5 | 单元测试 | ✅ 已实现 | tests/test_cascading_synthesis.py |
+| - | 冒烟验证 | ✅ 通过 | 33项核心逻辑测试全部通过 |

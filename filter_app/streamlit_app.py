@@ -36,6 +36,7 @@ from services.filter_engine import (
 )
 from services.data_loader import (
     _fetch_all_timeframes, _fetch_stock, _sync_to_display,
+    _sync_all_cascading,
 )
 from components.charts import (
     _render_plotly, _add_prediction_traces,
@@ -119,19 +120,9 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=No
     回测: window_start=bar_index(窗口结束位置), cutoff_date=截止日期
     """
     if window_start is not None:
-        # 回测模式：按 cutoff_date 日期对齐
-        ok, count = _sync_to_display(ticker_code, tf, n_pts=n_pts, cutoff_date=cutoff_date)
-        if not ok:
-            # parquet 写入失败，直接走 API 回退
-            t, noisy, ohlc, ticker_full, dates, err = _cached_fetch_stock(market, ticker_code, tf, n_pts)
-            # API 回退路径：截断到 n_pts
-            if err is None and dates is not None and len(dates) > n_pts:
-                t = t[-n_pts:]
-                noisy = noisy[-n_pts:]
-                if hasattr(ohlc, 'iloc'):
-                    ohlc = ohlc.iloc[-n_pts:]
-                dates = dates[-n_pts:]
-            return t, noisy, ohlc, ticker_full, dates, err
+        # 回测模式: parquet 已由 _sync_all_cascading() 前置写入
+        # 直接走下方 parquet 读取路径; parquet 不存在时走 API 回退
+        pass
     else:
         # 浏览模式：取最新 n_pts 条
         ok, count = _sync_to_display(ticker_code, tf, day_offset=day_offset, n_pts=n_pts)
@@ -1616,6 +1607,14 @@ def main() -> None:
     else:
         window_start = None
         cutoff_date = None
+
+    # ── 回测模式: 前置级联合成（一次性写入所有TF的parquet）──
+    if cb_mode and ticker_code and cutoff_date:
+        tfs_in_use = sorted(set(cfg["tf"] for cfg in configs),
+                            key=lambda x: ALL_TFS.index(x))
+        min_tf_val = AppState.get("_min_tf", "")
+        if tfs_in_use and min_tf_val:
+            _sync_all_cascading(ticker_code, tfs_in_use, cutoff_date, min_tf_val)
 
     grid_cols = []
     for row_idx in range(2):
