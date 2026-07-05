@@ -1474,3 +1474,15 @@ def test_cascade_60min_to_daily_uses_synth_bar():
 | 跨时区假转换 | a87cea5 | 剥离-拼接 替代真转换 | tz_convert() |
 | _needs_synthesis 日线失效 | 3bf8a47 | cutoff >= 下一周期 | cutoff > last_ts |
 | _get_query_start_for_synthesis 窗口颠倒 | fec408a | last_ts+1天 超出cutoff | 返回 last_ts |
+
+### 10.3 tag后修复 (v1.0-cascading-synthesis 之后)
+
+标签 `v1.0-cascading-synthesis` 之后的 5 个修复提交，解决合成过程中 `replace` 语义、跨周期过滤、边界条件等问题：
+
+| 提交 | 修复 |
+|------|------|
+| 9e3283d | _build_output_df: 合成bar替换DB最后bar, 而非追加。含测试更新 |
+| 509a0da | _synthesize_incomplete_bar: finer_synth_bar 替换同周期DB bar, 而非追加 |
+| 6087986 | 跨夜查询污染: 同日过滤排除跨夜bar。边界合成: _needs_synthesis 改为 `cutoff >= last_ts` |
+| 2b4e2b7 | 跨周期过滤推广到全部TF: 原仅日线合成过滤, 现周线/月线/季线均执行当前周期过滤 |
+| 678c92b | finer_synth_bar 替换条件: `>` 改为 `>=`, 确保相同时间戳的合成bar也能替换 |

@@ -155,6 +155,11 @@
 | 跨时区假转换 | a87cea5 | 剥离-拼接 替代真转换 | 真 tz_convert() |
 | _needs_synthesis 日线失效 | 3bf8a47 | cutoff >= 下一周期判定错误 | cutoff > last_ts |
 | _get_query_start_for_synthesis 窗口颠倒 | fec408a | last_ts+1天 超出 cutoff | 返回 last_ts |
+| _build_output_df 追加导致重复bar | 9e3283d | 合成bar追加而非替换DB最后bar, 导致同一周期出现两条记录 | 改为替换(replace), 含测试更新 |
+| _synthesize_incomplete_bar finer_synth_bar 追加 | 509a0da | finer_synth_bar 追加而非替换同周期DB bar | 替换同周期DB bar, 避免重复聚合 |
+| 跨夜查询污染 + 边界合成缺失 | 6087986 | query窗口跨越非交易日拉入污染数据; _needs_synthesis 使用 `>= period_start` 导致日线永不合成 | 同日过滤 + _needs_synthesis 改为 `cutoff >= last_ts` |
+| 跨周期过滤仅覆盖日线 | 2b4e2b7 | 跨周期过滤只在日线合成分支生效 | 推广到全部TF (分钟/日/周/月/季) |
+| finer_synth_bar 替换条件过严 | 678c92b | `synth_ts > last_db_ts` 严格大于, 边界相等时无法替换 | 改为 `>=`, 覆盖边界场景 |
 
 ---
 
