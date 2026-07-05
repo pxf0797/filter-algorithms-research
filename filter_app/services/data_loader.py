@@ -374,7 +374,7 @@ def _build_output_df(db_rows: list, synthesized_bar: _Optional[dict], n_pts: int
 def _write_parquet(tf: str, df: pd.DataFrame) -> bool:
     """Write DataFrame to data/display/{tf}.parquet. Returns True on success."""
     try:
-        display_dir = Path(__file__).parent.parent / "data" / "display"
+        display_dir = Path(__file__).parent.parent.parent / "data" / "display"
         display_dir.mkdir(parents=True, exist_ok=True)
         df.to_parquet(display_dir / f"{tf}.parquet", index=False)
         return True
