@@ -2,6 +2,7 @@
 
 > 修订记录：v1.0 — 初始方案
 > v1.1 — 全面审计，统一为动态 ALL_TFS.index 逻辑
+> v1.2 — 实现完成，修复季线/分钟线边界计算 3 个 bug
 
 ---
 
@@ -724,15 +725,16 @@ master
         └── 按以下顺序提交
 ```
 
-### 7.2 开发顺序
+### 7.2 开发完成状态
 
-| 步骤 | 内容 | 预计工作量 | 风险 |
-|------|------|-----------|------|
-| 1 | `data_loader.py`：添加 `_get_period_end()`, `_get_period_start()`, `_synthesize_higher_tf_bar()` | 中（约 60 行） | 低——纯计算函数，无外部依赖 |
-| 2 | `data_loader.py`：修改 `_sync_to_display()` 签名 + 合成分支 | 中（约 40 行改动） | 中——需确保浏览模式不变 |
-| 3 | `streamlit_app.py`：`_load_chart_data()` 传入 `min_tf` | 小（约 3 行） | 低——单点修改 |
-| 4 | 单元测试 | 中（约 100 行） | 低——纯函数测试 |
-| 5 | 手动回测验证 | 小 | 无代码风险 |
+| 步骤 | 内容 | 状态 |
+|------|------|------|
+| 1 | `data_loader.py`：添加 `_get_period_end()`, `_get_period_start()` | 已完成 |
+| 2 | `data_loader.py`：修改 `_sync_to_display()` 签名 + 合成分支 | 已完成 |
+| 3 | `streamlit_app.py`：`_load_chart_data()` 传入 `min_tf` | 已完成 |
+| 4 | 单元测试（46 个，覆盖全部周期边界计算） | 已完成 |
+| 5 | Bug 修复：季线 `_get_period_end` 月末计算、分钟线跨小时、季线 `_get_period_start` | 已完成 |
+| 6 | 手动回测验证 | 待完成 |
 
 ### 7.3 风险点
 
