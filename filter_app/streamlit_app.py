@@ -146,8 +146,7 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=No
         try:
             df = pd.read_parquet(display_path)
             if "Date" in df.columns and "Close" in df.columns and len(df) >= 2:
-                dates = pd.to_datetime(df["Date"], format='mixed')
-                df["Date"] = dates.dt.tz_localize(None) if dates.dt.tz is not None else dates
+                df["Date"] = pd.to_datetime(df["Date"])
                 df = df.set_index("Date").sort_index()
 
                 # ★ 不再需要截断！parquet 已经是 n_pts 条
