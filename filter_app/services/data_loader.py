@@ -12,6 +12,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 from typing import Any, Dict, Optional, Tuple
 from db import upsert_kline, query_kline
+# 周期层级定义（与 components/sidebar.py 保持一致）
+ALL_TFS = ["1分钟", "5分钟", "15分钟", "60分钟", "日线", "周线", "月线", "季线"]
 
 
 def _fetch_all_timeframes(market: str, code: str) -> Dict[str, Tuple[bool, Any]]:
@@ -189,3 +191,357 @@ def _stock_name_lookup(market: str, code: str) -> str:
     except Exception as e:
         logger.debug(f"Stock name lookup failed for {full}: {e}")
         return ""
+
+
+# ═══════════════════════════════════════════════════════════════
+# Cascading Bar Synthesis (v2) — 回测级联合成
+# ═══════════════════════════════════════════════════════════════
+
+import re as _re
+from typing import Optional as _Optional
+from datetime import timezone as _dt_timezone, timedelta as _dt_timedelta
+
+def _offset_to_tz(offset_str: str):
+    """Convert a UTC offset string like '-04:00' or '+08:00' to a datetime.timezone."""
+    if not offset_str or offset_str == 'Z':
+        return _dt_timezone.utc
+    sign = 1 if offset_str[0] == '+' else -1
+    h, m = map(int, offset_str[1:].split(':'))
+    return _dt_timezone(_dt_timedelta(hours=sign * h, minutes=sign * m))
+
+def _ensure_tz_naive(ts):
+    """Strip timezone from pd.Timestamp, keeping wall-clock time unchanged."""
+    if hasattr(ts, 'tz') and ts.tz is not None:
+        return ts.tz_localize(None)
+    return ts
+
+def _get_tz_suffix(ts_str: str) -> str:
+    """Extract timezone suffix from ISO timestamp string. Returns '+08:00', 'Z', or ''."""
+    if not ts_str:
+        return ""
+    if '+' in ts_str:
+        return ts_str[ts_str.index('+'):]
+    if ts_str.endswith('Z'):
+        return 'Z'
+    m = _re.search(r'-\d{2}:\d{2}$', ts_str)
+    return m.group(0) if m else ''
+
+def _format_synth_date(cutoff_date: str, tf: str, db_rows: list) -> str:
+    """Format synthesized bar's Date to match this TF's DB native format.
+    Minute TFs keep timezone suffix; daily+ TFs drop timezone."""
+    dt = pd.Timestamp(cutoff_date)
+    if dt.tz is not None:
+        dt = dt.tz_localize(None)
+    base = dt.isoformat()
+    if db_rows:
+        tz = _get_tz_suffix(db_rows[0].get("Date", ""))
+        if tz:
+            return base + tz
+    return base
+
+def _get_period_start_ts(ts, tf: str):
+    """Compute the start of the NEXT period after the last completed bar.
+    ts MUST be tz-naive pd.Timestamp.
+    Minute TFs: +1 minute. Daily/Weekly/Monthly/Quarterly: +1 day."""
+    ts = _ensure_tz_naive(pd.Timestamp(ts))
+    if tf in ("5分钟", "15分钟", "60分钟"):
+        return ts + pd.Timedelta(minutes=1)
+    elif tf in ("日线", "周线", "月线", "季线"):
+        return (ts + pd.Timedelta(days=1)).normalize()
+    else:
+        return ts + pd.Timedelta(minutes=1)
+
+def _get_query_start_for_synthesis(last_completed_ts, tf: str):
+    """Return the synthesis query start timestamp (= last complete bar's ts).
+
+    The synthesis window is [last_ts, cutoff].  For minute TFs separated by
+    overnight/weekend gaps the query may pull in bars from the previous completed
+    period — those bars are from an already-closed period and their impact is
+    negligible (at most ~30 min of data).  The key correctness fix is in
+    _needs_synthesis (``cutoff_dt > last_ts``, not ``>= period_start``).
+    """
+    return _ensure_tz_naive(pd.Timestamp(last_completed_ts))
+
+def _query_tf_from_db(ticker_code: str, tf: str, cutoff_date: str, n_pts: int) -> list:
+    """Query last n_pts completed bars for tf <= cutoff_date. Returns list[dict] in ASCENDING time order."""
+    from db import get_conn
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT ts, open, high, low, close, volume
+               FROM kline WHERE ticker=? AND timeframe=? AND ts <= ?
+               ORDER BY ts DESC LIMIT ?""",
+            (ticker_code, tf, cutoff_date, n_pts),
+        ).fetchall()
+    if not rows:
+        return []
+    return [
+        {"Date": r[0], "Open": r[1], "High": r[2], "Low": r[3], "Close": r[4], "Volume": r[5]}
+        for r in reversed(rows)
+    ]
+
+def _query_tf_for_period(ticker_code: str, tf: str, period_start: str, period_end: str) -> list:
+    """Query ALL bars for tf in [period_start, period_end] (for synthesis, no n_pts limit).
+    Returns list[dict] in ASCENDING time order."""
+    from db import get_conn
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT ts, open, high, low, close, volume
+               FROM kline WHERE ticker=? AND timeframe=?
+               AND ts >= ? AND ts <= ?
+               ORDER BY ts ASC""",
+            (ticker_code, tf, period_start, period_end),
+        ).fetchall()
+    return [
+        {"Date": r[0], "Open": r[1], "High": r[2], "Low": r[3], "Close": r[4], "Volume": r[5]}
+        for r in rows
+    ]
+
+def _find_immediate_finer_tf(tf: str, tfs: list) -> _Optional[str]:
+    """Find the immediately finer TF from the available tfs list."""
+    current_idx = ALL_TFS.index(tf)
+    for candidate_tf in reversed(tfs):
+        if ALL_TFS.index(candidate_tf) < current_idx:
+            return candidate_tf
+    return None
+
+def _needs_synthesis(tf: str, db_rows: list, cutoff_date: str) -> bool:
+    """Check if cutoff_date is after the last complete bar, requiring bar synthesis.
+
+    The original logic checked ``cutoff >= period_start`` (start of the *next* period),
+    which works for minute-level TFs (periods are minutes apart) but fails for daily+
+    TFs.  Example: last daily bar at 2026-07-02 00:00, cutoff at 2026-07-02 15:45.
+    The next daily period starts at 2026-07-03 00:00, so 15:45 >= next‑midnight is
+    False → synthesis never triggers, even though we have hours of intraday data
+    after the last complete daily bar.
+
+    Fixed to ``cutoff > last_ts``: if there is *any* data beyond the timestamp of
+    the last complete bar we should synthesize a partial bar, regardless of whether
+    a full period boundary has been crossed."""
+    if not db_rows:
+        return False
+    last_ts = _ensure_tz_naive(pd.Timestamp(db_rows[-1]["Date"]))
+    cutoff_dt = _ensure_tz_naive(pd.Timestamp(cutoff_date))
+    return cutoff_dt >= last_ts
+
+def _aggregate_bars(finer_bars: list, synth_date: str) -> dict:
+    """Aggregate finer-TF bars into one coarser-TF bar. O=first, H=max, L=min, C=last, V=sum."""
+    df = pd.DataFrame(finer_bars)
+    return {
+        "Date": synth_date,
+        "Open": float(df["Open"].iloc[0]),
+        "High": float(df["High"].max()),
+        "Low": float(df["Low"].min()),
+        "Close": float(df["Close"].iloc[-1]),
+        "Volume": float(df["Volume"].sum()),
+    }
+
+def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
+                                ticker_code: str, finer_tf: str,
+                                finer_synth_bar: _Optional[dict]) -> _Optional[dict]:
+    """Synthesize one incomplete bar for target_tf from finer_tf data.
+    Queries DB for finer_tf bars in the synthesis period, then aggregates."""
+    if not db_rows:
+        return None
+
+    last_ts = _ensure_tz_naive(pd.Timestamp(db_rows[-1]["Date"]))
+    query_start = _get_query_start_for_synthesis(last_ts, target_tf)
+    cutoff_dt = _ensure_tz_naive(pd.Timestamp(cutoff_date))
+
+    # Daily synthesis from 60min: start from market open 09:30
+    actual_start = query_start
+    if target_tf == "日线" and finer_tf == "60分钟":
+        try:
+            market_open = query_start.replace(hour=9, minute=30, second=0, microsecond=0)
+            if query_start < market_open < cutoff_dt:
+                actual_start = market_open
+        except Exception:
+            pass
+
+    # ★ BUGFIX v3: Proper timezone conversion for cross-timezone synthesis.
+    # v1/v2 blindly stripped & re-appended tz offset strings, which breaks when
+    # min_tf and finer_tf are in different timezones (e.g. A-stock +08:00 vs
+    # US stock -04:00). "14:45+08:00" stripped to "14:45" then suffixed with
+    # "-04:00" yields "14:45-04:00", a completely different absolute time.
+    # Fix: use pd.Timestamp.tz_convert() to do a real timezone conversion,
+    # then format the result in finer_tf's timezone for the SQL query.
+    finer_sample = _query_tf_from_db(ticker_code, finer_tf, cutoff_date, 1)
+    finer_tz = _get_tz_suffix(finer_sample[0]["Date"]) if finer_sample else ""
+
+    if finer_tz:
+        # finer_tf has timezone → convert cutoff & actual_start to that tz
+        tz_obj = _offset_to_tz(finer_tz)
+        cutoff_ts = pd.Timestamp(cutoff_date)                      # tz-aware
+        cutoff_in_finer = cutoff_ts.tz_convert(tz_obj)             # real conversion
+        actual_in_finer = actual_start.tz_localize(tz_obj)         # naive → tz-aware
+        period_start_str = actual_in_finer.isoformat()
+        period_end_str = cutoff_in_finer.isoformat()
+    else:
+        # finer_tf has no timezone (daily+) → use tz-naive strings as-is
+        period_start_str = actual_start.isoformat()
+        period_end_str = cutoff_dt.isoformat()
+
+    finer_db_bars = _query_tf_for_period(ticker_code, finer_tf, period_start_str, period_end_str)
+
+    # Merge finer_tf's synthesized bar if within range.
+    # When the synth bar falls after the last finer-DB bar it represents a more
+    # up-to-date (partial) view of the same period — **replace** the DB bar so
+    # we don't aggregate competing OHLC values for the same period.
+    all_finer_bars = list(finer_db_bars)
+    if finer_synth_bar is not None:
+        try:
+            synth_ts = _ensure_tz_naive(pd.Timestamp(finer_synth_bar["Date"]))
+            if actual_start <= synth_ts <= cutoff_dt:
+                if all_finer_bars:
+                    last_db_ts = _ensure_tz_naive(pd.Timestamp(all_finer_bars[-1]["Date"]))
+                    if synth_ts >= last_db_ts:
+                        all_finer_bars[-1] = finer_synth_bar   # replace same-period DB bar
+                    else:
+                        existing_ts = {_ensure_tz_naive(pd.Timestamp(b["Date"])) for b in all_finer_bars}
+                        if synth_ts not in existing_ts:
+                            all_finer_bars.append(finer_synth_bar)
+                            all_finer_bars.sort(key=lambda b: _ensure_tz_naive(pd.Timestamp(b["Date"])))
+                else:
+                    all_finer_bars.append(finer_synth_bar)
+        except Exception:
+            pass
+
+    # ★ Cross-period filter: the query window [last_ts, cutoff] can span
+    # overnight / weekend / month-end gaps and pull in bars from already-
+    # completed periods.  For each target TF we compute the start of the
+    # *current* (incomplete) period that contains cutoff and drop any
+    # finer-TF bar whose date falls before it.
+    if target_tf in ("1分钟", "5分钟", "15分钟", "60分钟"):
+        # minute TFs: double filter —
+        # 1) same calendar day as cutoff (defeats cross-night pollution)
+        # 2) >= end of last completed period (defeats same-day intra-period
+        #    pollution, e.g. 60 min bar at 15:45 must not include 15:00-15:15
+        #    bars that belong to the already-complete 14:30-15:30 period)
+        cutoff_date_str = cutoff_dt.strftime("%Y-%m-%d")
+        period_minutes = {"5分钟": 5, "15分钟": 15, "60分钟": 60}.get(target_tf, 1)
+        period_end_of_last = last_ts + pd.Timedelta(minutes=period_minutes)
+        all_finer_bars = [b for b in all_finer_bars
+                          if b["Date"][:10] == cutoff_date_str
+                          and _ensure_tz_naive(pd.Timestamp(b["Date"])) >= period_end_of_last]
+    elif target_tf == "日线":
+        # daily bar  →  same day
+        period_start_str = cutoff_dt.strftime("%Y-%m-%d")
+        all_finer_bars = [b for b in all_finer_bars
+                          if b["Date"][:10] == period_start_str]
+    elif target_tf == "周线":
+        # current week starts on the most recent Monday
+        week_start = cutoff_dt - pd.Timedelta(days=cutoff_dt.weekday())
+        period_start_str = week_start.strftime("%Y-%m-%d")
+        all_finer_bars = [b for b in all_finer_bars
+                          if b["Date"][:10] >= period_start_str]
+    elif target_tf == "月线":
+        period_start_str = cutoff_dt.strftime("%Y-%m") + "-01"
+        all_finer_bars = [b for b in all_finer_bars
+                          if b["Date"][:10] >= period_start_str]
+    elif target_tf == "季线":
+        q = (cutoff_dt.month - 1) // 3
+        q_start = cutoff_dt.replace(month=q * 3 + 1, day=1)
+        period_start_str = q_start.strftime("%Y-%m-%d")
+        all_finer_bars = [b for b in all_finer_bars
+                          if b["Date"][:10] >= period_start_str]
+    # (1分钟 falls through to the minute-TF branch above)
+
+    if len(all_finer_bars) == 0:
+        return None
+
+    synth_date = _format_synth_date(cutoff_date, target_tf, db_rows)
+    return _aggregate_bars(all_finer_bars, synth_date)
+
+def _build_output_df(db_rows: list, synthesized_bar: _Optional[dict], n_pts: int) -> pd.DataFrame:
+    """Merge DB rows + optional synthesized bar, return DataFrame with exactly n_pts rows.
+
+    When a synthesized bar is present it **replaces** the last DB row (they
+    represent the same period — the DB row is a retrospectively-complete bar
+    downloaded after market close, the synth row is the partial view up to
+    ``cutoff_date``).  Appending both would keep future knowledge in the
+    backtest window.
+    """
+    data = list(db_rows)
+    if synthesized_bar is not None:
+        if data:
+            data[-1] = synthesized_bar   # replace, not append
+        else:
+            data.append(synthesized_bar)
+    if len(data) > n_pts:
+        data = data[-n_pts:]
+    return pd.DataFrame(data, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
+
+def _write_parquet(tf: str, df: pd.DataFrame) -> bool:
+    """Write DataFrame to data/display/{tf}.parquet. Returns True on success."""
+    try:
+        display_dir = Path(__file__).parent.parent.parent / "data" / "display"
+        display_dir.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(display_dir / f"{tf}.parquet", index=False)
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to write parquet for {tf}: {e}")
+        return False
+
+def _sync_all_cascading(ticker_code: str, tfs: list, cutoff_date: str,
+                         min_tf: str, n_pts: int = 120) -> dict:
+    """Cascading synthesis main entry: process TFs finest→coarsest, synthesize incomplete bars.
+
+    Args:
+        n_pts: int or dict[str,int]. If int, applied to all TFs. If dict, per-TF n_pts.
+
+    Returns {tf: bool} — True if parquet written successfully."""
+    results: dict = {}
+    synth_cache: dict = {}
+
+    for tf in tfs:
+        # Resolve per-TF n_pts
+        tf_n_pts = n_pts[tf] if isinstance(n_pts, dict) else n_pts
+
+        db_rows = _query_tf_from_db(ticker_code, tf, cutoff_date, tf_n_pts)
+        if not db_rows:
+            logger.debug(f"[cascading] {tf}: no DB data, skip")
+            results[tf] = False
+            # ★ P1-3 fix: still cache empty entry so coarser TFs can find a finer TF
+            synth_cache[tf] = {"synth_bar": None, "db_sample_ts": ""}
+            continue
+
+        needs_synth = (
+            tf != min_tf
+            and _needs_synthesis(tf, db_rows, cutoff_date)
+        )
+
+        synthesized_bar = None
+        if needs_synth:
+            finer_tf = _find_immediate_finer_tf(tf, tfs)
+            if finer_tf and finer_tf in synth_cache:
+                synthesized_bar = _synthesize_incomplete_bar(
+                    target_tf=tf,
+                    db_rows=db_rows,
+                    cutoff_date=cutoff_date,
+                    ticker_code=ticker_code,
+                    finer_tf=finer_tf,
+                    finer_synth_bar=synth_cache[finer_tf].get("synth_bar"),
+                )
+                if synthesized_bar:
+                    logger.debug(
+                        f"[cascading] {tf}: synth bar Date={synthesized_bar['Date']}, "
+                        f"O={synthesized_bar['Open']:.2f} C={synthesized_bar['Close']:.2f}"
+                    )
+            else:
+                logger.debug(f"[cascading] {tf}: no finer_tf ({finer_tf}) in cache, skip synth")
+
+        combined = _build_output_df(db_rows, synthesized_bar, tf_n_pts)
+        ok = _write_parquet(tf, combined)
+        results[tf] = ok
+
+        synth_cache[tf] = {
+            "synth_bar": synthesized_bar,
+            "db_sample_ts": db_rows[0]["Date"] if db_rows else "",
+        }
+
+    # ★ P1-2: log summary so caller can check
+    success_count = sum(1 for v in results.values() if v)
+    if success_count < len(tfs):
+        logger.warning(f"[cascading] partial success: {success_count}/{len(tfs)} TFs written")
+    else:
+        logger.debug(f"[cascading] done: all {success_count} TFs written")
+    return results

@@ -36,6 +36,7 @@ from services.filter_engine import (
 )
 from services.data_loader import (
     _fetch_all_timeframes, _fetch_stock, _sync_to_display,
+    _sync_all_cascading,
 )
 from components.charts import (
     _render_plotly, _add_prediction_traces,
@@ -119,25 +120,18 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=No
     回测: window_start=bar_index(窗口结束位置), cutoff_date=截止日期
     """
     if window_start is not None:
-        # 回测模式：按 cutoff_date 日期对齐
-        ok, count = _sync_to_display(ticker_code, tf, n_pts=n_pts, cutoff_date=cutoff_date)
-        if not ok:
-            # parquet 写入失败，直接走 API 回退
-            t, noisy, ohlc, ticker_full, dates, err = _cached_fetch_stock(market, ticker_code, tf, n_pts)
-            # API 回退路径：截断到 n_pts
-            if err is None and dates is not None and len(dates) > n_pts:
-                t = t[-n_pts:]
-                noisy = noisy[-n_pts:]
-                if hasattr(ohlc, 'iloc'):
-                    ohlc = ohlc.iloc[-n_pts:]
-                dates = dates[-n_pts:]
-            return t, noisy, ohlc, ticker_full, dates, err
+        # 回测模式: parquet 已由 _sync_all_cascading() 前置写入
+        # 直接走下方 parquet 读取路径
+        # ★ P1-4: parquet不存在时返回错误,不回退到yfinance(会返回最新数据破坏时间一致性)
+        pass
+        _is_backtest = True
     else:
         # 浏览模式：取最新 n_pts 条
         ok, count = _sync_to_display(ticker_code, tf, day_offset=day_offset, n_pts=n_pts)
         if not ok:
             # parquet 写入失败，直接走 API 回退
             return _cached_fetch_stock(market, ticker_code, tf, n_pts)
+        _is_backtest = False
     display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
     err = None
     if display_path.exists():
@@ -169,6 +163,9 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=No
             err = str(e)
     if err is not None:
         return None, None, None, None, None, err
+    # ★ P1-4: 回测模式下不回退到yfinance(返回最新数据破坏时间一致性)
+    if _is_backtest:
+        return None, None, None, None, None, f"{tf} 数据未就绪，请先加载数据"
     return _cached_fetch_stock(market, ticker_code, tf, n_pts)
 
 
@@ -1616,6 +1613,23 @@ def main() -> None:
     else:
         window_start = None
         cutoff_date = None
+
+    # ── 回测模式: 前置级联合成（一次性写入所有TF的parquet）──
+    if cb_mode and ticker_code and cutoff_date:
+        tfs_in_use = sorted(set(cfg["tf"] for cfg in configs),
+                            key=lambda x: ALL_TFS.index(x))
+        min_tf_val = AppState.get("_min_tf", "")
+        if tfs_in_use and min_tf_val:
+            # ★ P1-1: build per-TF n_pts dict from view configs
+            tf_n_pts = {cfg["tf"]: cfg["n_pts"] for cfg in configs}
+            # ★ P1-2: check return value, warn on partial failure
+            bt_results = _sync_all_cascading(ticker_code, tfs_in_use, cutoff_date,
+                                              min_tf_val, n_pts=tf_n_pts)
+            failed_tfs = [tf for tf, ok in bt_results.items() if not ok]
+            if failed_tfs:
+                logger.warning(f"Backtest cascading failed for: {failed_tfs}")
+            if len(failed_tfs) == len(tfs_in_use):
+                st.sidebar.warning("回测数据加载失败，请检查数据库")
 
     grid_cols = []
     for row_idx in range(2):
