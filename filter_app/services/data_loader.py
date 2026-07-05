@@ -199,6 +199,15 @@ def _stock_name_lookup(market: str, code: str) -> str:
 
 import re as _re
 from typing import Optional as _Optional
+from datetime import timezone as _dt_timezone, timedelta as _dt_timedelta
+
+def _offset_to_tz(offset_str: str):
+    """Convert a UTC offset string like '-04:00' or '+08:00' to a datetime.timezone."""
+    if not offset_str or offset_str == 'Z':
+        return _dt_timezone.utc
+    sign = 1 if offset_str[0] == '+' else -1
+    h, m = map(int, offset_str[1:].split(':'))
+    return _dt_timezone(_dt_timedelta(hours=sign * h, minutes=sign * m))
 
 def _ensure_tz_naive(ts):
     """Strip timezone from pd.Timestamp, keeping wall-clock time unchanged."""
@@ -338,18 +347,28 @@ def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
         except Exception:
             pass
 
-    # ★ BUGFIX: Match query-bound timezone format to the finer_tf's DB format.
-    # Minute-level TFs have tz suffix (e.g. "+08:00") in DB; daily+ TFs do not.
-    # Using cutoff_date's tz on a daily finer_tf creates a prefix-comparison bug:
-    #   "2026-06-30T00:00:00" >= "2026-06-30T00:00:00+08:00" → False
-    #   (shorter string sorts before longer prefix)
-    # Likewise, missing tz on a minute-level finer_tf drops the boundary bar:
-    #   "2026-07-03T14:45:00+08:00" <= "2026-07-03T14:45:00" → False
+    # ★ BUGFIX v3: Proper timezone conversion for cross-timezone synthesis.
+    # v1/v2 blindly stripped & re-appended tz offset strings, which breaks when
+    # min_tf and finer_tf are in different timezones (e.g. A-stock +08:00 vs
+    # US stock -04:00). "14:45+08:00" stripped to "14:45" then suffixed with
+    # "-04:00" yields "14:45-04:00", a completely different absolute time.
+    # Fix: use pd.Timestamp.tz_convert() to do a real timezone conversion,
+    # then format the result in finer_tf's timezone for the SQL query.
     finer_sample = _query_tf_from_db(ticker_code, finer_tf, cutoff_date, 1)
     finer_tz = _get_tz_suffix(finer_sample[0]["Date"]) if finer_sample else ""
-    tz_suffix = finer_tz if finer_tz else _get_tz_suffix(cutoff_date)
-    period_start_str = actual_start.isoformat() + tz_suffix
-    period_end_str = cutoff_dt.isoformat() + tz_suffix
+
+    if finer_tz:
+        # finer_tf has timezone → convert cutoff & actual_start to that tz
+        tz_obj = _offset_to_tz(finer_tz)
+        cutoff_ts = pd.Timestamp(cutoff_date)                      # tz-aware
+        cutoff_in_finer = cutoff_ts.tz_convert(tz_obj)             # real conversion
+        actual_in_finer = actual_start.tz_localize(tz_obj)         # naive → tz-aware
+        period_start_str = actual_in_finer.isoformat()
+        period_end_str = cutoff_in_finer.isoformat()
+    else:
+        # finer_tf has no timezone (daily+) → use tz-naive strings as-is
+        period_start_str = actual_start.isoformat()
+        period_end_str = cutoff_dt.isoformat()
 
     finer_db_bars = _query_tf_for_period(ticker_code, finer_tf, period_start_str, period_end_str)
 
