@@ -252,15 +252,14 @@ def _get_period_start_ts(ts, tf: str):
         return ts + pd.Timedelta(minutes=1)
 
 def _get_query_start_for_synthesis(last_completed_ts, tf: str):
-    """Compute the query start timestamp for synthesis (same logic as _get_period_start_ts).
-    ts MUST be tz-naive."""
-    last_completed_ts = _ensure_tz_naive(pd.Timestamp(last_completed_ts))
-    if tf in ("5分钟", "15分钟", "60分钟"):
-        return last_completed_ts + pd.Timedelta(minutes=1)
-    elif tf in ("日线", "周线", "月线", "季线"):
-        return (last_completed_ts + pd.Timedelta(days=1)).normalize()
-    else:
-        return last_completed_ts + pd.Timedelta(minutes=1)
+    """Return the synthesis query start timestamp.
+
+    Simply returns the last complete bar's timestamp — any finer-TF data at or
+    after this point belongs to the incomplete period that needs synthesising.
+    (Previously computed ``last_ts + 1 period``, which for daily bars jumped to
+    the *next* day, inverting the synthesis window when cutoff was same-day.)
+    """
+    return _ensure_tz_naive(pd.Timestamp(last_completed_ts))
 
 def _query_tf_from_db(ticker_code: str, tf: str, cutoff_date: str, n_pts: int) -> list:
     """Query last n_pts completed bars for tf <= cutoff_date. Returns list[dict] in ASCENDING time order."""
