@@ -268,7 +268,7 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int 
         # ── 合成高周期不完整 bar ──
         synthesized_bar = None
         if min_tf and cutoff_date and ALL_TFS.index(tf) > ALL_TFS.index(min_tf):
-            last_completed_ts = rows[-1][0]  # DESC 查询的最后一条（最早时间）的 ts
+            last_completed_ts = rows[0][0]  # DESC 查询的第一条（最新时间，距 cutoff_date 最近）的 ts
             try:
                 next_end = _get_period_end(last_completed_ts, tf)
                 cutoff_dt = pd.Timestamp(cutoff_date)
