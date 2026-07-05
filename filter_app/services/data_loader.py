@@ -385,15 +385,24 @@ def _write_parquet(tf: str, df: pd.DataFrame) -> bool:
 def _sync_all_cascading(ticker_code: str, tfs: list, cutoff_date: str,
                          min_tf: str, n_pts: int = 120) -> dict:
     """Cascading synthesis main entry: process TFs finest→coarsest, synthesize incomplete bars.
+
+    Args:
+        n_pts: int or dict[str,int]. If int, applied to all TFs. If dict, per-TF n_pts.
+
     Returns {tf: bool} — True if parquet written successfully."""
     results: dict = {}
     synth_cache: dict = {}
 
     for tf in tfs:
-        db_rows = _query_tf_from_db(ticker_code, tf, cutoff_date, n_pts)
+        # Resolve per-TF n_pts
+        tf_n_pts = n_pts[tf] if isinstance(n_pts, dict) else n_pts
+
+        db_rows = _query_tf_from_db(ticker_code, tf, cutoff_date, tf_n_pts)
         if not db_rows:
             logger.debug(f"[cascading] {tf}: no DB data, skip")
             results[tf] = False
+            # ★ P1-3 fix: still cache empty entry so coarser TFs can find a finer TF
+            synth_cache[tf] = {"synth_bar": None, "db_sample_ts": ""}
             continue
 
         needs_synth = (
@@ -421,7 +430,7 @@ def _sync_all_cascading(ticker_code: str, tfs: list, cutoff_date: str,
             else:
                 logger.debug(f"[cascading] {tf}: no finer_tf ({finer_tf}) in cache, skip synth")
 
-        combined = _build_output_df(db_rows, synthesized_bar, n_pts)
+        combined = _build_output_df(db_rows, synthesized_bar, tf_n_pts)
         ok = _write_parquet(tf, combined)
         results[tf] = ok
 
@@ -430,5 +439,10 @@ def _sync_all_cascading(ticker_code: str, tfs: list, cutoff_date: str,
             "db_sample_ts": db_rows[0]["Date"] if db_rows else "",
         }
 
-    logger.debug(f"[cascading] done: {results}")
+    # ★ P1-2: log summary so caller can check
+    success_count = sum(1 for v in results.values() if v)
+    if success_count < len(tfs):
+        logger.warning(f"[cascading] partial success: {success_count}/{len(tfs)} TFs written")
+    else:
+        logger.debug(f"[cascading] done: all {success_count} TFs written")
     return results
