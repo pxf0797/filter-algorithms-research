@@ -411,10 +411,17 @@ def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
     # *current* (incomplete) period that contains cutoff and drop any
     # finer-TF bar whose date falls before it.
     if target_tf in ("1分钟", "5分钟", "15分钟", "60分钟"):
-        # minute TFs  →  keep only bars on the same calendar day as cutoff
-        period_start_str = cutoff_dt.strftime("%Y-%m-%d")  # "2026-07-02"
+        # minute TFs: double filter —
+        # 1) same calendar day as cutoff (defeats cross-night pollution)
+        # 2) >= end of last completed period (defeats same-day intra-period
+        #    pollution, e.g. 60 min bar at 15:45 must not include 15:00-15:15
+        #    bars that belong to the already-complete 14:30-15:30 period)
+        cutoff_date_str = cutoff_dt.strftime("%Y-%m-%d")
+        period_minutes = {"5分钟": 5, "15分钟": 15, "60分钟": 60}.get(target_tf, 1)
+        period_end_of_last = last_ts + pd.Timedelta(minutes=period_minutes)
         all_finer_bars = [b for b in all_finer_bars
-                          if b["Date"][:10] == period_start_str]
+                          if b["Date"][:10] == cutoff_date_str
+                          and _ensure_tz_naive(pd.Timestamp(b["Date"])) >= period_end_of_last]
     elif target_tf == "日线":
         # daily bar  →  same day
         period_start_str = cutoff_dt.strftime("%Y-%m-%d")

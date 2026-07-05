@@ -408,15 +408,17 @@ class TestCrossPeriodFilter:
     """
 
     def test_minute_tf_same_day_filter(self):
-        """60分钟合成: 排除不同日的15分钟bar — 提交 6087986"""
+        """60分钟合成: 排除不同日 + 排除上周期内的bar — 提交 6087986 + 周期边界"""
         from services.data_loader import _synthesize_incomplete_bar
         from unittest.mock import patch
 
-        db_rows = [{"Date": "2026-07-03T14:00:00+08:00", "Open": 100, "High": 101, "Low": 99, "Close": 100, "Volume": 1000}]
+        # last complete 60min = 13:00, period_end = 14:00
+        db_rows = [{"Date": "2026-07-03T13:00:00+08:00", "Open": 99, "High": 100, "Low": 98, "Close": 99.5, "Volume": 800}]
         cutoff_date = "2026-07-03T14:47:00+08:00"
 
         mock_finer_bars = [
-            {"Date": "2026-07-02T14:45:00+08:00", "Open": 90, "High": 91, "Low": 89, "Close": 90.5, "Volume": 500},   # 7/2 — 应被过滤
+            {"Date": "2026-07-02T14:45:00+08:00", "Open": 90, "High": 91, "Low": 89, "Close": 90.5, "Volume": 500},   # 7/2 — 过滤(日期)
+            {"Date": "2026-07-03T13:45:00+08:00", "Open": 98, "High": 99, "Low": 97, "Close": 98.5, "Volume": 600},   # 7/3 — 过滤(ts<14:00)
             {"Date": "2026-07-03T14:15:00+08:00", "Open": 100, "High": 102, "Low": 99, "Close": 101, "Volume": 1000},  # 7/3 — 保留
             {"Date": "2026-07-03T14:30:00+08:00", "Open": 101, "High": 103, "Low": 100, "Close": 102, "Volume": 1500}, # 7/3 — 保留
         ]
@@ -426,9 +428,9 @@ class TestCrossPeriodFilter:
             result = _synthesize_incomplete_bar("60分钟", db_rows, cutoff_date, "AAPL", "15分钟", None)
 
         assert result is not None
-        assert result["Open"] == 100.0          # 第一条保留bar的Open
-        assert result["Close"] == 102.0         # 最后一条保留bar的Close
-        assert result["Volume"] == 2500.0       # 只含7/3的bar (1000+1500)
+        assert result["Open"] == 100.0          # 第一条保留bar(14:15)的Open
+        assert result["Close"] == 102.0         # 最后一条保留bar(14:30)的Close
+        assert result["Volume"] == 2500.0       # 只含>=14:00的bar (1000+1500)
 
     def test_daily_same_day_filter(self):
         """日线合成: 只保留同日60分钟bar — 提交 2b4e2b7"""
