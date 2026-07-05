@@ -174,11 +174,11 @@ class TestNeedsSynthesis:
         db_rows = [{"Date": "2026-07-03T14:00:00+08:00"}]
         assert _needs_synthesis("60分钟", db_rows, "2026-07-03T14:45:00+08:00") == True
 
-    def test_cutoff_equal_last_ts__returns_false(self):
-        """cutoff == last_ts → no new data → False"""
+    def test_cutoff_equal_last_ts__returns_true(self):
+        """cutoff == last_ts → 边界场景, DB bar是'未来数据'需替换 → True"""
         from services.data_loader import _needs_synthesis
         db_rows = [{"Date": "2026-07-03T14:00:00+08:00"}]
-        assert _needs_synthesis("60分钟", db_rows, "2026-07-03T14:00:00+08:00") == False
+        assert _needs_synthesis("60分钟", db_rows, "2026-07-03T14:00:00+08:00") == True
 
     def test_empty_rows__returns_false(self):
         from services.data_loader import _needs_synthesis
@@ -272,9 +272,9 @@ class TestNeedsSynthesisRegression:
         ("周线", "2026-06-29T00:00:00", "2026-07-02T15:45:00-04:00", True),
         # 月线
         ("月线", "2026-07-01T00:00:00", "2026-07-02T15:45:00-04:00", True),
-        # cutoff == last → 不需要合成
-        ("60分钟", "2026-07-03T14:00:00+08:00", "2026-07-03T14:00:00+08:00", False),
-        ("日线", "2026-07-02T00:00:00", "2026-07-02T00:00:00", False),
+        # cutoff == last → 边界场景需合成(DB bar是收盘后完整版)
+        ("60分钟", "2026-07-03T14:00:00+08:00", "2026-07-03T14:00:00+08:00", True),
+        ("日线", "2026-07-02T00:00:00", "2026-07-02T00:00:00", True),
     ])
     def test_needs_synthesis(self, tf, last_date, cutoff, expected):
         from services.data_loader import _needs_synthesis

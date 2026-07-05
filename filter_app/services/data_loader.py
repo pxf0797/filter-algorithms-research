@@ -321,7 +321,7 @@ def _needs_synthesis(tf: str, db_rows: list, cutoff_date: str) -> bool:
         return False
     last_ts = _ensure_tz_naive(pd.Timestamp(db_rows[-1]["Date"]))
     cutoff_dt = _ensure_tz_naive(pd.Timestamp(cutoff_date))
-    return cutoff_dt > last_ts
+    return cutoff_dt >= last_ts
 
 def _aggregate_bars(finer_bars: list, synth_date: str) -> dict:
     """Aggregate finer-TF bars into one coarser-TF bar. O=first, H=max, L=min, C=last, V=sum."""
@@ -404,6 +404,14 @@ def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
                     all_finer_bars.append(finer_synth_bar)
         except Exception:
             pass
+
+    # ★ Cross-night filter: for minute TFs, exclude bars from days other than
+    # cutoff.  Without this the query window [last_ts, cutoff] can span
+    # overnight / weekend gaps and pull in bars from already-completed periods.
+    if target_tf in ("1分钟", "5分钟", "15分钟", "60分钟"):
+        cutoff_date_str = cutoff_dt.strftime("%Y-%m-%d")
+        all_finer_bars = [b for b in all_finer_bars
+                          if b["Date"][:10] == cutoff_date_str]
 
     if len(all_finer_bars) == 0:
         return None
