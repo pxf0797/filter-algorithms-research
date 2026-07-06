@@ -24,7 +24,22 @@ from typing import Any, Dict, List, Optional, Tuple
 # ---------------------------------------------------------------------------
 
 def apply_sma(signal: np.ndarray, t: np.ndarray, window: int) -> np.ndarray:
-    """简单移动平均 (Simple Moving Average)."""
+    """简单移动平均 (Simple Moving Average).
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        输入信号序列。
+    t : np.ndarray
+        时间索引（仅用于统一接口签名，未使用）。
+    window : int
+        移动平均窗口大小（若为偶数则自动 +1）。
+
+    Returns
+    -------
+    np.ndarray
+        平滑后的信号序列，长度与输入相同。
+    """
     if window % 2 == 0:
         window += 1
     kernel = np.ones(window) / window
@@ -32,12 +47,44 @@ def apply_sma(signal: np.ndarray, t: np.ndarray, window: int) -> np.ndarray:
 
 
 def apply_ema(signal: np.ndarray, t: np.ndarray, span: int) -> np.ndarray:
-    """指数移动平均 (Exponential Moving Average) via pandas ewm."""
+    """指数移动平均 (Exponential Moving Average) via pandas ewm.
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        输入信号序列。
+    t : np.ndarray
+        时间索引（仅用于统一接口签名，未使用）。
+    span : int
+        EMA 跨度（衰减因子 = 2/(span+1)）。
+
+    Returns
+    -------
+    np.ndarray
+        指数加权平滑后的信号序列，长度与输入相同。
+    """
     return DataFrame({"v": signal}).ewm(span=span, adjust=False).mean().values.flatten()
 
 
 def apply_wma(signal: np.ndarray, t: np.ndarray, window: int) -> np.ndarray:
-    """加权移动平均 (Weighted Moving Average)."""
+    """加权移动平均 (Weighted Moving Average).
+
+    权重线性递增，最新数据权重最大。
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        输入信号序列。
+    t : np.ndarray
+        时间索引（仅用于统一接口签名，未使用）。
+    window : int
+        加权窗口大小（若为偶数则自动 +1）。
+
+    Returns
+    -------
+    np.ndarray
+        加权平滑后的信号序列，长度与输入相同。
+    """
     if window % 2 == 0:
         window += 1
     weights = np.arange(1, window + 1)
@@ -46,7 +93,29 @@ def apply_wma(signal: np.ndarray, t: np.ndarray, window: int) -> np.ndarray:
 
 
 def apply_alma(signal: np.ndarray, t: np.ndarray, window: int, offset: float, sigma: float) -> np.ndarray:
-    """Arnaud Legoux 移动平均 (ALMA)."""
+    """Arnaud Legoux 移动平均 (ALMA).
+
+    使用高斯加权窗口，通过 offset 控制滤波延迟，
+    sigma 控制高斯核的宽度。
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        输入信号序列。
+    t : np.ndarray
+        时间索引（仅用于统一接口签名，未使用）。
+    window : int
+        窗口大小（若为偶数则自动 +1）。
+    offset : float
+        高斯核中心偏移量，范围 [0, 1]；0.85 表示靠近右端（延迟小）。
+    sigma : float
+        高斯核标准差，越大则平滑越强。
+
+    Returns
+    -------
+    np.ndarray
+        ALMA 平滑后的信号序列，长度与输入相同。
+    """
     if window % 2 == 0:
         window += 1
     m = (window - 1) * offset               # Gaussian center (offset=0.85 → near right = past)
@@ -58,7 +127,26 @@ def apply_alma(signal: np.ndarray, t: np.ndarray, window: int, offset: float, si
 
 
 def apply_savgol(signal: np.ndarray, t: np.ndarray, window: int, order: int) -> np.ndarray:
-    """Savitzky-Golay 滤波 (多项式平滑)."""
+    """Savitzky-Golay 滤波 (多项式平滑).
+
+    对滑动窗口内的数据做局部多项式拟合，适合保留信号高频细节。
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        输入信号序列。
+    t : np.ndarray
+        时间索引（仅用于统一接口签名，未使用）。
+    window : int
+        窗口大小（若为偶数则自动 +1），必须大于 order。
+    order : int
+        多项式拟合阶数，若 ≥ window 则自动降为 window-1。
+
+    Returns
+    -------
+    np.ndarray
+        Savitzky-Golay 平滑后的信号序列，长度与输入相同。
+    """
     if window % 2 == 0:
         window += 1
     if order >= window:
@@ -67,7 +155,26 @@ def apply_savgol(signal: np.ndarray, t: np.ndarray, window: int, order: int) -> 
 
 
 def apply_kalman(signal: np.ndarray, t: np.ndarray, Q: float, R: float) -> np.ndarray:
-    """1D 恒定速度卡尔曼滤波."""
+    """1D 恒定速度卡尔曼滤波.
+
+    状态向量为 [position, velocity]，使用恒定速度模型进行预测-更新迭代。
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        输入观测信号序列（位置观测量）。
+    t : np.ndarray
+        均匀时间索引，用于计算时间步长 dt。
+    Q : float
+        过程噪声协方差，控制模型不确定性；越大则滤波对观测响应越快。
+    R : float
+        测量噪声协方差，控制观测不确定性；越大则滤波越平滑。
+
+    Returns
+    -------
+    np.ndarray
+        卡尔曼滤波后的信号序列，长度与输入相同。
+    """
     dt = t[1] - t[0]
     n = len(signal)
     x = np.array([signal[0], 0.0])     # [position, velocity]
@@ -92,7 +199,27 @@ def apply_kalman(signal: np.ndarray, t: np.ndarray, Q: float, R: float) -> np.nd
 
 
 def apply_butterworth(signal: np.ndarray, t: np.ndarray, order: int, cutoff: float) -> np.ndarray:
-    """巴特沃斯低通滤波 (零相位)."""
+    """巴特沃斯低通滤波 (零相位).
+
+    使用 sosfiltfilt 实现零相位滤波（无延迟偏移），
+    归一化奈奎斯特频率为 0.5（基于 bar 索引 dt≈1, fs=1）。
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        输入信号序列。
+    t : np.ndarray
+        时间索引（仅用于统一接口签名，未使用）。
+    order : int
+        滤波器阶数。
+    cutoff : float
+        截止频率 (Hz)，不能超过奈奎斯特频率 0.5。
+
+    Returns
+    -------
+    np.ndarray
+        巴特沃斯滤波后的信号序列，长度与输入相同。
+    """
     nyquist = 0.5  # stock: bar index dt≈1, fs=1, nyquist=0.5
     if cutoff >= nyquist:
         cutoff = nyquist * 0.99
@@ -101,19 +228,70 @@ def apply_butterworth(signal: np.ndarray, t: np.ndarray, order: int, cutoff: flo
 
 
 def apply_gaussian(signal: np.ndarray, t: np.ndarray, sigma: float) -> np.ndarray:
-    """高斯滤波 (scipy.ndimage)."""
+    """高斯滤波 (scipy.ndimage).
+
+    使用高斯核对信号做卷积平滑。
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        输入信号序列。
+    t : np.ndarray
+        时间索引（仅用于统一接口签名，未使用）。
+    sigma : float
+        高斯核标准差；越大则平滑越强。
+
+    Returns
+    -------
+    np.ndarray
+        高斯平滑后的信号序列，长度与输入相同。
+    """
     return gaussian_filter1d(signal, sigma)
 
 
 def apply_median(signal: np.ndarray, t: np.ndarray, window: int) -> np.ndarray:
-    """中值滤波."""
+    """中值滤波.
+
+    用窗口内中值替代中心点值，适合去除椒盐噪声。
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        输入信号序列。
+    t : np.ndarray
+        时间索引（仅用于统一接口签名，未使用）。
+    window : int
+        窗口大小（若为偶数则自动 +1）。
+
+    Returns
+    -------
+    np.ndarray
+        中值滤波后的信号序列，长度与输入相同。
+    """
     if window % 2 == 0:
         window += 1
     return medfilt(signal, kernel_size=window)
 
 
 def apply_lowess(signal: np.ndarray, t: np.ndarray, frac: float) -> np.ndarray:
-    """LOWESS 局部加权回归平滑."""
+    """LOWESS 局部加权回归平滑.
+
+    对每个点执行局部加权线性回归，适合非线性趋势的稳健平滑。
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        输入信号序列。
+    t : np.ndarray
+        时间索引（用于局部回归的距离计算）。
+    frac : float
+        每个局部回归使用的数据比例，范围 (0, 1]；越大则越平滑。
+
+    Returns
+    -------
+    np.ndarray
+        LOWESS 平滑后的信号序列，长度与输入相同。
+    """
     result = lowess(signal, t, frac=frac, return_sorted=False)
     # return_sorted=False returns a 1-D array of smoothed y-values
     return result
@@ -194,7 +372,31 @@ FILTERS = {
 # Metrics computation
 # ---------------------------------------------------------------------------
 def compute_metrics(clean: np.ndarray, noisy: np.ndarray, filtered: np.ndarray) -> Dict[str, Any]:
-    """计算 6 项滤波质量指标."""
+    """计算 6 项滤波质量指标。
+
+    指标包括：MSE、RMSE、MAE、信噪比提升 (SNR_imp)、
+    滞后量 (lag via cross-correlation)、粗糙度 (roughness)。
+
+    Parameters
+    ----------
+    clean : np.ndarray
+        无噪声的参考信号（真值）。
+    noisy : np.ndarray
+        含噪声的原始信号。
+    filtered : np.ndarray
+        滤波后的信号。
+
+    Returns
+    -------
+    Dict[str, Any]
+        包含以下键的字典：
+        - "mse" : float, 均方误差
+        - "rmse" : float, 均方根误差
+        - "mae" : float, 平均绝对误差
+        - "snr_imp" : float, 滤波后信噪比提升 (dB)
+        - "lag" : int, 滤波相对噪声信号的滞后量 (bar 数)
+        - "roughness" : float, 滤波信号的二阶差分平方和
+    """
     valid = ~np.isnan(filtered) & ~np.isnan(clean) & ~np.isnan(noisy)
     c, n, f = clean[valid], noisy[valid], filtered[valid]
     if len(c) < 3:
@@ -238,6 +440,26 @@ def _schmitt_trigger(v: np.ndarray, a: np.ndarray, ewma_span: int = 60,
     - a → acceleration (物理意义: 趋势加速, 类比文档 a_t)
     - ε_t = k_ε · max(σ_t(v), σ_min)  — 自适应死区基于 v 的波动率
     - Sig_t: a>ε AND v>0 → +1(多); a<-ε AND v<0 → -1(空); else 0(观望)
+
+    Parameters
+    ----------
+    v : np.ndarray
+        速度/动量信号（一阶导数）。
+    a : np.ndarray
+        加速度信号（二阶导数）。
+    ewma_span : int, optional
+        EWMA 波动率估计的跨度（默认 60）。
+    k_eps : float, optional
+        自适应死区系数（默认 0.15）。
+    sigma_min : float, optional
+        死区下限，防止死区过小（默认 0.05）。
+
+    Returns
+    -------
+    Optional[Dict[str, Any]]
+        包含 "mu_v"（EWMA均值）、"sigma_v"（EWMA标准差）、
+        "eps"（自适应阈值）、"sig"（±1/0 信号）、"dur"（持续期数）的字典。
+        数据不足时返回 None。
     """
     n = len(v)
     if n < ewma_span:
@@ -297,9 +519,22 @@ def _schmitt_trigger(v: np.ndarray, a: np.ndarray, ewma_span: int = 60,
 
 def _find_all_pairs(sig_t: np.ndarray) -> List[Tuple[int, int]]:
     """扫描 sig_t，找出窗口中所有多空切换对。
+
     规则：合并相邻同号段（+1,0,+1 → 一个连续段），异号配对。
     起始于首次入场边缘，经过中间的同向多次入场+观望，止于相反信号入口。
-    返回 [(start, end), ...] 或空列表。"""
+
+    Parameters
+    ----------
+    sig_t : np.ndarray
+        施密特触发器输出信号（+1=多, -1=空, 0=观望）。
+
+    Returns
+    -------
+    List[Tuple[int, int]]
+        多空切换对列表 [(start_idx, end_idx), ...]，
+        每个 pair 的起始和结束均为 index。
+        无有效配对时返回空列表。
+    """
     n = len(sig_t)
     if n < 3:
         return []
@@ -343,7 +578,24 @@ def _find_all_pairs(sig_t: np.ndarray) -> List[Tuple[int, int]]:
 
 def _fit_parabolic(x: np.ndarray, y: np.ndarray, start: int, end: int) -> Optional[Dict[str, Any]]:
     """对 y[start:end+1] 做二次多项式拟合。
-    返回 dict {a, b, c, y_fit} 或 None（数据不足）。"""
+
+    Parameters
+    ----------
+    x : np.ndarray
+        时间索引序列。
+    y : np.ndarray
+        原始值序列（如滤波价格）。
+    start : int
+        拟合起始索引。
+    end : int
+        拟合结束索引（含）。
+
+    Returns
+    -------
+    Optional[Dict[str, Any]]
+        包含二次系数 "a"、"b"、"c" 及拟合值 "y_fit" 的字典。
+        数据点少于 3 个时返回 None。
+    """
     x_seg = x[start:end + 1]
     y_seg = y[start:end + 1]
     if len(x_seg) < 3:
@@ -355,8 +607,28 @@ def _fit_parabolic(x: np.ndarray, y: np.ndarray, start: int, end: int) -> Option
 
 def _fit_physics_parabola(x: np.ndarray, y: np.ndarray, start: int, end: int) -> Optional[Dict[str, Any]]:
     """抛物线拟合 — 锚定对终点为顶点，y = a·(x-x₀)² + y₀。
+
     顶点 (x₀,y₀) = (x[end], y[end]) 固定，仅拟合曲率 a。
-    预测段 = 抛物线右半（与左半对称）。"""
+    预测段 = 抛物线右半（与左半对称）。
+
+    Parameters
+    ----------
+    x : np.ndarray
+        时间索引序列。
+    y : np.ndarray
+        原始值序列（如滤波价格）。
+    start : int
+        拟合起始索引。
+    end : int
+        拟合结束索引（含），同时也是抛物线顶点位置。
+
+    Returns
+    -------
+    Optional[Dict[str, Any]]
+        包含曲率 "a"、系数 "b"(恒为0)、顶点"c"(y₀)、
+        拟合值 "y_fit"、顶点索引 "x0" 的字典。
+        数据不足或分母太小无法求解时返回 None。
+    """
     x_seg = x[start:end + 1]
     y_seg = y[start:end + 1]
     if len(x_seg) < 3:
@@ -385,19 +657,32 @@ def _compute_strategy_pnl(
     - long_pnl: 做多收益曲线，非持仓期水平直线
     - short_pnl: 做空收益曲线，非持仓期水平直线
 
-    Args:
-        t: np.array, 时间索引
-        filtered: np.array, 滤波价格
-        sig_t: np.array, 施密特信号(±1/0)
-        all_pairs: list[(start,end)], 多空切换对
-        pred_pairs: list[dict], 预测曲线数据
-        stop_loss_pct: float, 止损阈值(如2.0表示2%)
-        n_extend: int, 预测延伸点数
+    Parameters
+    ----------
+    t : np.ndarray
+        时间索引。
+    filtered : np.ndarray
+        滤波价格。
+    sig_t : np.ndarray
+        施密特信号（+1=多, -1=空, 0=观望）。
+    all_pairs : List[Tuple[int, int]]
+        多空切换对列表 [(start, end), ...]。
+    pred_pairs : List[Dict[str, Any]]
+        预测曲线数据列表，每项包含 "pair_end" 和 "fit_result"。
+    stop_loss_pct : float
+        止损阈值百分比（如 2.0 表示 2%）。
+    n_extend : int, optional
+        预测延伸点数（默认 10）。
 
-    Returns:
-        long_pnl: np.array(len(t)), 做多PnL曲线(100=初始)
-        short_pnl: np.array(len(t)), 做空PnL曲线(100=初始)
-        trade_records: list[dict]
+    Returns
+    -------
+    long_pnl : np.ndarray
+        做多 PnL 曲线，长度 len(t)，初始值 100。
+    short_pnl : np.ndarray
+        做空 PnL 曲线，长度 len(t)，初始值 100。
+    trade_records : List[Dict[str, Any]]
+        交易记录列表，每项包含 id/type/entry_idx/exit_idx/
+        entry_price/exit_price/return_pct/exit_reason。
     """
     n = len(t)
 
@@ -586,20 +871,27 @@ def _align_pnl_to_current_tf(
 ) -> Dict[str, Any]:
     """将高周期PnL数据按时间戳前向填充对齐到当前周期时间轴。
 
-    Args:
-        higher_dates: pd.DatetimeIndex, 高周期的日期索引
-        higher_pnl_long: np.array, 高周期做多PnL曲线
-        higher_pnl_short: np.array, 高周期做空PnL曲线
-        higher_trades: list[dict], 高周期交易记录（含entry_idx/exit_idx/return_pct/type/exit_reason）
-        current_dates: pd.DatetimeIndex, 当前周期的日期索引
+    Parameters
+    ----------
+    higher_dates : pd.DatetimeIndex
+        高周期的日期索引。
+    higher_pnl_long : np.ndarray
+        高周期做多 PnL 曲线。
+    higher_pnl_short : np.ndarray
+        高周期做空 PnL 曲线。
+    higher_trades : List[Dict[str, Any]]
+        高周期交易记录列表，每项含 entry_idx/exit_idx/return_pct/type/exit_reason。
+    current_dates : pd.DatetimeIndex
+        当前周期的日期索引。
 
-    Returns:
-        dict: {
-            "aligned_long": np.array(len(current_dates)),
-            "aligned_short": np.array(len(current_dates)),
-            "entry_markers": [(bar_idx, trade_type, pnl_val), ...],
-            "exit_markers": [(bar_idx, trade_type, pnl_val, return_pct, exit_reason), ...],
-        }
+    Returns
+    -------
+    Dict[str, Any]
+        包含以下键的字典：
+        - "aligned_long" : np.ndarray, 对齐后的做多 PnL 曲线
+        - "aligned_short" : np.ndarray, 对齐后的做空 PnL 曲线
+        - "entry_markers" : list[(bar_idx, trade_type, pnl_val)]
+        - "exit_markers" : list[(bar_idx, trade_type, pnl_val, return_pct, exit_reason)]
     """
     n = len(current_dates)
     aligned_long = np.full(n, np.nan)
@@ -614,7 +906,18 @@ def _align_pnl_to_current_tf(
     # 统一时区：日内数据带时区(HKT)，日线/周线无时区
     # np.datetime64 无法直接比较 tz-aware 和 tz-naive，需先归一化
     def _normalize_dates(dates: pd.DatetimeIndex) -> np.ndarray:
-        """去掉时区信息，按各自字面值比较（日期级对齐）"""
+        """去掉时区信息，按各自字面值比较（日期级对齐）。
+
+        Parameters
+        ----------
+        dates : pd.DatetimeIndex
+            输入日期索引，可能带时区 (tz-aware) 或不带时区 (tz-naive)。
+
+        Returns
+        -------
+        np.ndarray
+            去掉时区后的 datetime64[ns] 数组。
+        """
         result = pd.DatetimeIndex(dates)
         if result.tz is not None:
             # tz-aware → 保持本地时间字面值，去掉时区标记
@@ -675,14 +978,21 @@ def _compute_holding_masks(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """从高周期入场/离场marker计算持仓区间掩码。
 
-    Args:
-        n_bars: 当前周期bar数
-        entry_markers: [(bar_idx, trade_type, pnl_val), ...]
-        exit_markers: [(bar_idx, trade_type, pnl_val, return_pct, exit_reason), ...]
+    Parameters
+    ----------
+    n_bars : int
+        当前周期的 bar 数量。
+    entry_markers : List[Tuple[int, str, float]]
+        入场标记列表：[(bar_idx, trade_type, pnl_val), ...]。
+    exit_markers : List[Tuple[int, str, float, float, str]]
+        离场标记列表：[(bar_idx, trade_type, pnl_val, return_pct, exit_reason), ...]。
 
-    Returns:
-        long_mask: np.array(bool), 高周期做多持仓区间
-        short_mask: np.array(bool), 高周期做空持仓区间
+    Returns
+    -------
+    long_mask : np.ndarray
+        bool 数组，标记高周期做多持仓区间。
+    short_mask : np.ndarray
+        bool 数组，标记高周期做空持仓区间。
     """
     long_mask = np.zeros(n_bars, dtype=bool)
     short_mask = np.zeros(n_bars, dtype=bool)
