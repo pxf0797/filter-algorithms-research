@@ -17,7 +17,20 @@ ALL_TFS = ["1分钟", "5分钟", "15分钟", "60分钟", "日线", "周线", "�
 
 
 def _fetch_all_timeframes(market: str, code: str) -> Dict[str, Tuple[bool, Any]]:
-    """获取某股票全部8个周期的数据，并行写入DB。返回成功/失败统计。"""
+    """获取某股票全部8个周期的数据，并行写入DB。返回成功/失败统计。
+
+    Parameters
+    ----------
+    market : str
+        市场标识，如 "A股(沪深)"、"港股 HK" 等。
+    code : str
+        股票代码。
+
+    Returns
+    -------
+    Dict[str, Tuple[bool, Any]]
+        键为周期名称，值为 (是否成功, 详情信息) 的元组。
+    """
     tf_config = {
         "1分钟": ("7d",), "5分钟": ("60d",), "15分钟": ("60d",),
         "60分钟": ("730d",), "日线": ("max",), "周线": ("max",),
@@ -46,7 +59,27 @@ def _fetch_all_timeframes(market: str, code: str) -> Dict[str, Tuple[bool, Any]]
 
 def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
                  force_period: Optional[str] = None) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[pd.DataFrame], Optional[str], Optional[str], Optional[pd.DatetimeIndex]]:
-    """从yfinance获取股票数据并写入DB。返回 (t, close, ohlc, full, err, dates)。"""
+    """从yfinance获取股票数据并写入DB。
+
+    Parameters
+    ----------
+    market : str
+        市场标识，如 "A股(沪深)"、"港股 HK" 等。
+    code : str
+        股票代码。
+    tf : str
+        周期名称，如 "日线"、"60分钟" 等。
+    n_pts : int
+        需要返回的数据点数。
+    force_period : Optional[str]
+        强制指定 yfinance 的 period 参数，覆盖自动计算。
+
+    Returns
+    -------
+    Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[pd.DataFrame], Optional[str], Optional[str], Optional[pd.DatetimeIndex]]
+        (t, close, ohlc, full, err, dates) — 时间索引数组、收盘价数组、OHLC DataFrame、
+        完整代码、错误信息（成功时为None）、日期索引。
+    """
     if not code or not code.strip():
         return None, None, None, None, "Empty ticker code", None
     if market == "A股(沪深)":
@@ -140,10 +173,28 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
 
 def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int = 120,
                      cutoff_date: Optional[str] = None) -> Tuple[bool, int]:
-    """同步数据到 display parquet。
+    """同步数据到 display parquet 文件。
 
-    cutoff_date=None: 浏览模式，取最新 n_pts 条（支持 day_offset 日期偏移）
-    cutoff_date=YYYY-MM-DD: 回测模式，取截止到 cutoff_date 的最后 n_pts 条（日期对齐）
+    浏览模式（cutoff_date=None）：取最新 n_pts 条，支持 day_offset 日期偏移。
+    回测模式（cutoff_date=YYYY-MM-DD）：取截止到 cutoff_date 的最后 n_pts 条，日期对齐。
+
+    Parameters
+    ----------
+    ticker_code : str
+        股票代码。
+    tf : str
+        周期名称。
+    day_offset : int, default 0
+        日期偏移天数，用于浏览模式。
+    n_pts : int, default 120
+        需要的数据点数。
+    cutoff_date : Optional[str], default None
+        回测截止日期，格式 "YYYY-MM-DD"。为 None 时使用浏览模式。
+
+    Returns
+    -------
+    Tuple[bool, int]
+        (是否成功, 写入的数据条数)。
     """
     if cutoff_date is not None:
         # 回测模式：查询截止到 cutoff_date 的最后 n_pts 条，按日期对齐
@@ -176,7 +227,20 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int 
 
 
 def _stock_name_lookup(market: str, code: str) -> str:
-    """查询股票名称。"""
+    """通过 yfinance 查询股票名称。
+
+    Parameters
+    ----------
+    market : str
+        市场标识，如 "A股(沪深)"、"港股 HK" 等。
+    code : str
+        股票代码。
+
+    Returns
+    -------
+    str
+        股票名称，查询失败时返回空字符串。
+    """
     if not code or not code.strip():
         return ""
     try:
@@ -202,7 +266,18 @@ from typing import Optional as _Optional
 from datetime import timezone as _dt_timezone, timedelta as _dt_timedelta
 
 def _offset_to_tz(offset_str: str):
-    """Convert a UTC offset string like '-04:00' or '+08:00' to a datetime.timezone."""
+    """将 UTC 偏移字符串转换为 datetime.timezone 对象。
+
+    Parameters
+    ----------
+    offset_str : str
+        UTC 偏移字符串，如 '-04:00'、'+08:00' 或 'Z'。
+
+    Returns
+    -------
+    datetime.timezone
+        对应的时区对象。
+    """
     if not offset_str or offset_str == 'Z':
         return _dt_timezone.utc
     sign = 1 if offset_str[0] == '+' else -1
@@ -210,13 +285,35 @@ def _offset_to_tz(offset_str: str):
     return _dt_timezone(_dt_timedelta(hours=sign * h, minutes=sign * m))
 
 def _ensure_tz_naive(ts):
-    """Strip timezone from pd.Timestamp, keeping wall-clock time unchanged."""
+    """去除 pd.Timestamp 的时区信息，保持挂钟时间不变。
+
+    Parameters
+    ----------
+    ts : pd.Timestamp
+        可能带时区的 Timestamp 对象。
+
+    Returns
+    -------
+    pd.Timestamp
+        不带时区的 Timestamp 对象（若输入无时区则原样返回）。
+    """
     if hasattr(ts, 'tz') and ts.tz is not None:
         return ts.tz_localize(None)
     return ts
 
 def _get_tz_suffix(ts_str: str) -> str:
-    """Extract timezone suffix from ISO timestamp string. Returns '+08:00', 'Z', or ''."""
+    """从 ISO 时间戳字符串中提取时区后缀。
+
+    Parameters
+    ----------
+    ts_str : str
+        ISO 格式的时间戳字符串。
+
+    Returns
+    -------
+    str
+        时区后缀，如 '+08:00'、'Z'，无时区时返回空字符串。
+    """
     if not ts_str:
         return ""
     if '+' in ts_str:
@@ -227,8 +324,24 @@ def _get_tz_suffix(ts_str: str) -> str:
     return m.group(0) if m else ''
 
 def _format_synth_date(cutoff_date: str, tf: str, db_rows: list) -> str:
-    """Format synthesized bar's Date to match this TF's DB native format.
-    Minute TFs keep timezone suffix; daily+ TFs drop timezone."""
+    """格式化合成 K 线的日期字符串，使其与对应周期的 DB 存储格式一致。
+
+    分钟级周期保留时区后缀，日线及以上周期去除时区。
+
+    Parameters
+    ----------
+    cutoff_date : str
+        回测截止日期字符串。
+    tf : str
+        周期名称。
+    db_rows : list
+        DB 查询结果行列表，用于参考日期格式。
+
+    Returns
+    -------
+    str
+        格式化后的日期字符串。
+    """
     dt = pd.Timestamp(cutoff_date)
     if dt.tz is not None:
         dt = dt.tz_localize(None)
@@ -240,9 +353,23 @@ def _format_synth_date(cutoff_date: str, tf: str, db_rows: list) -> str:
     return base
 
 def _get_period_start_ts(ts, tf: str):
-    """Compute the start of the NEXT period after the last completed bar.
-    ts MUST be tz-naive pd.Timestamp.
-    Minute TFs: +1 minute. Daily/Weekly/Monthly/Quarterly: +1 day."""
+    """计算上一个完整 K 线之后的下一个周期的起始时间。
+
+    ts 必须是不带时区的 pd.Timestamp。
+    分钟级周期：+1 分钟。日线及以上周期：+1 天。
+
+    Parameters
+    ----------
+    ts : pd.Timestamp
+        上一个完整 K 线的时间戳（必须 tz-naive）。
+    tf : str
+        周期名称。
+
+    Returns
+    -------
+    pd.Timestamp
+        下一个周期的起始时间戳。
+    """
     ts = _ensure_tz_naive(pd.Timestamp(ts))
     if tf in ("5分钟", "15分钟", "60分钟"):
         return ts + pd.Timedelta(minutes=1)
@@ -252,18 +379,45 @@ def _get_period_start_ts(ts, tf: str):
         return ts + pd.Timedelta(minutes=1)
 
 def _get_query_start_for_synthesis(last_completed_ts, tf: str):
-    """Return the synthesis query start timestamp (= last complete bar's ts).
+    """返回合成查询的起始时间戳（即最后一个完整 K 线的时间戳）。
 
-    The synthesis window is [last_ts, cutoff].  For minute TFs separated by
-    overnight/weekend gaps the query may pull in bars from the previous completed
-    period — those bars are from an already-closed period and their impact is
-    negligible (at most ~30 min of data).  The key correctness fix is in
-    _needs_synthesis (``cutoff_dt > last_ts``, not ``>= period_start``).
+    合成窗口为 [last_ts, cutoff]。对于分钟级周期，跨夜/周末间隔可能导致查询
+    拉入前一完整周期的数据，但其影响可忽略（最多约 30 分钟数据）。核心正确性
+    修正位于 _needs_synthesis（使用 `cutoff_dt > last_ts` 而非 `>= period_start`）。
+
+    Parameters
+    ----------
+    last_completed_ts : pd.Timestamp
+        最后一个完整 K 线的时间戳。
+    tf : str
+        周期名称。
+
+    Returns
+    -------
+    pd.Timestamp
+        不带时区的查询起始时间戳。
     """
     return _ensure_tz_naive(pd.Timestamp(last_completed_ts))
 
 def _query_tf_from_db(ticker_code: str, tf: str, cutoff_date: str, n_pts: int) -> list:
-    """Query last n_pts completed bars for tf <= cutoff_date. Returns list[dict] in ASCENDING time order."""
+    """查询指定周期在截止日期前的最近 n_pts 条已完成 K 线。
+
+    Parameters
+    ----------
+    ticker_code : str
+        股票代码。
+    tf : str
+        周期名称。
+    cutoff_date : str
+        截止日期字符串。
+    n_pts : int
+        需要的数据条数。
+
+    Returns
+    -------
+    list
+        dict 列表，每项包含 Date/Open/High/Low/Close/Volume 字段，按时间升序排列。
+    """
     from db import get_conn
     with get_conn() as conn:
         rows = conn.execute(
@@ -280,8 +434,24 @@ def _query_tf_from_db(ticker_code: str, tf: str, cutoff_date: str, n_pts: int) -
     ]
 
 def _query_tf_for_period(ticker_code: str, tf: str, period_start: str, period_end: str) -> list:
-    """Query ALL bars for tf in [period_start, period_end] (for synthesis, no n_pts limit).
-    Returns list[dict] in ASCENDING time order."""
+    """查询指定周期在时间区间 [period_start, period_end] 内的所有 K 线（用于合成，无 n_pts 限制）。
+
+    Parameters
+    ----------
+    ticker_code : str
+        股票代码。
+    tf : str
+        周期名称。
+    period_start : str
+        区间起始时间字符串。
+    period_end : str
+        区间结束时间字符串。
+
+    Returns
+    -------
+    list
+        dict 列表，每项包含 Date/Open/High/Low/Close/Volume 字段，按时间升序排列。
+    """
     from db import get_conn
     with get_conn() as conn:
         rows = conn.execute(
@@ -297,7 +467,20 @@ def _query_tf_for_period(ticker_code: str, tf: str, period_start: str, period_en
     ]
 
 def _find_immediate_finer_tf(tf: str, tfs: list) -> _Optional[str]:
-    """Find the immediately finer TF from the available tfs list."""
+    """从可用的周期列表中查找紧邻的更细粒度周期。
+
+    Parameters
+    ----------
+    tf : str
+        当前周期名称。
+    tfs : list
+        可用的周期名称列表。
+
+    Returns
+    -------
+    Optional[str]
+        紧邻的更细粒度周期名称，若不存在则返回 None。
+    """
     current_idx = ALL_TFS.index(tf)
     for candidate_tf in reversed(tfs):
         if ALL_TFS.index(candidate_tf) < current_idx:
@@ -305,18 +488,30 @@ def _find_immediate_finer_tf(tf: str, tfs: list) -> _Optional[str]:
     return None
 
 def _needs_synthesis(tf: str, db_rows: list, cutoff_date: str) -> bool:
-    """Check if cutoff_date is after the last complete bar, requiring bar synthesis.
+    """判断 cutoff_date 是否在最后一条完整 K 线之后，从而需要合成。
 
-    The original logic checked ``cutoff >= period_start`` (start of the *next* period),
-    which works for minute-level TFs (periods are minutes apart) but fails for daily+
-    TFs.  Example: last daily bar at 2026-07-02 00:00, cutoff at 2026-07-02 15:45.
-    The next daily period starts at 2026-07-03 00:00, so 15:45 >= next‑midnight is
-    False → synthesis never triggers, even though we have hours of intraday data
-    after the last complete daily bar.
+    原逻辑检查 ``cutoff >= period_start``（下一个周期的起点），这对分钟级周期有效
+    但对日线及以上周期失效。例如：最后日线 K 线在 2026-07-02 00:00，cutoff 在
+    2026-07-02 15:45。下一个日周期从 2026-07-03 00:00 开始，因此 15:45 >= 次日零点
+    为 False → 合成永远不会触发，即使最后日线后已有数小时的日内数据。
 
-    Fixed to ``cutoff > last_ts``: if there is *any* data beyond the timestamp of
-    the last complete bar we should synthesize a partial bar, regardless of whether
-    a full period boundary has been crossed."""
+    修正为 ``cutoff > last_ts``：只要最后完整 K 线的时间戳之后有任何数据，就应合成
+    一根部分 K 线，无论是否跨过完整的周期边界。
+
+    Parameters
+    ----------
+    tf : str
+        周期名称。
+    db_rows : list
+        DB 查询结果行列表。
+    cutoff_date : str
+        回测截止日期字符串。
+
+    Returns
+    -------
+    bool
+        是否需要合成。
+    """
     if not db_rows:
         return False
     last_ts = _ensure_tz_naive(pd.Timestamp(db_rows[-1]["Date"]))
@@ -324,7 +519,22 @@ def _needs_synthesis(tf: str, db_rows: list, cutoff_date: str) -> bool:
     return cutoff_dt >= last_ts
 
 def _aggregate_bars(finer_bars: list, synth_date: str) -> dict:
-    """Aggregate finer-TF bars into one coarser-TF bar. O=first, H=max, L=min, C=last, V=sum."""
+    """将细粒度周期的多条 K 线聚合成一条粗粒度周期的 K 线。
+
+    O=第一条的开盘价, H=最高价的最大值, L=最低价的最小值, C=最后一条的收盘价, V=成交量求和。
+
+    Parameters
+    ----------
+    finer_bars : list
+        细粒度周期的 K 线 dict 列表。
+    synth_date : str
+        合成 K 线的日期字符串。
+
+    Returns
+    -------
+    dict
+        包含 Date/Open/High/Low/Close/Volume 字段的字典。
+    """
     df = pd.DataFrame(finer_bars)
     return {
         "Date": synth_date,
@@ -338,8 +548,31 @@ def _aggregate_bars(finer_bars: list, synth_date: str) -> dict:
 def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
                                 ticker_code: str, finer_tf: str,
                                 finer_synth_bar: _Optional[dict]) -> _Optional[dict]:
-    """Synthesize one incomplete bar for target_tf from finer_tf data.
-    Queries DB for finer_tf bars in the synthesis period, then aggregates."""
+    """从更细粒度周期的数据合成目标周期的一条未完成 K 线。
+
+    从 DB 查询合成时间窗口内的细粒度 K 线，然后聚合为粗粒度 K 线。
+    处理跨时区的时区转换（v3 BUGFIX），以及跨周期边界的数据过滤。
+
+    Parameters
+    ----------
+    target_tf : str
+        目标周期名称（需合成的粗粒度周期）。
+    db_rows : list
+        目标周期的 DB 查询结果行列表。
+    cutoff_date : str
+        回测截止日期字符串。
+    ticker_code : str
+        股票代码。
+    finer_tf : str
+        更细粒度周期名称。
+    finer_synth_bar : Optional[dict]
+        细粒度周期的已合成 K 线（若有）。
+
+    Returns
+    -------
+    Optional[dict]
+        合成的 K 线字典（含 Date/Open/High/Low/Close/Volume），无可合成数据时返回 None。
+    """
     if not db_rows:
         return None
 
@@ -445,13 +678,25 @@ def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
     return _aggregate_bars(all_finer_bars, synth_date)
 
 def _build_output_df(db_rows: list, synthesized_bar: _Optional[dict], n_pts: int) -> pd.DataFrame:
-    """Merge DB rows + optional synthesized bar, return DataFrame with exactly n_pts rows.
+    """合并 DB 行与可选的合成 K 线，返回恰好 n_pts 行的 DataFrame。
 
-    When a synthesized bar is present it **replaces** the last DB row (they
-    represent the same period — the DB row is a retrospectively-complete bar
-    downloaded after market close, the synth row is the partial view up to
-    ``cutoff_date``).  Appending both would keep future knowledge in the
-    backtest window.
+    当合成 K 线存在时，它会**替换**最后一条 DB 行（二者代表同一周期——DB 行是收盘后
+    下载的复盘完整 K 线，合成行是截止到 cutoff_date 的部分视图）。同时追加两者会
+    在回测窗口中引入未来信息。
+
+    Parameters
+    ----------
+    db_rows : list
+        DB 查询结果行列表，每项为 dict 格式。
+    synthesized_bar : Optional[dict]
+        合成的 K 线字典，为 None 时不替换。
+    n_pts : int
+        返回 DataFrame 的最大行数。
+
+    Returns
+    -------
+    pd.DataFrame
+        包含 Date/Open/High/Low/Close/Volume 列的 DataFrame。
     """
     data = list(db_rows)
     if synthesized_bar is not None:
@@ -464,7 +709,20 @@ def _build_output_df(db_rows: list, synthesized_bar: _Optional[dict], n_pts: int
     return pd.DataFrame(data, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
 
 def _write_parquet(tf: str, df: pd.DataFrame) -> bool:
-    """Write DataFrame to data/display/{tf}.parquet. Returns True on success."""
+    """将 DataFrame 写入 data/display/{tf}.parquet 文件。
+
+    Parameters
+    ----------
+    tf : str
+        周期名称，用于确定文件名。
+    df : pd.DataFrame
+        要写入的 DataFrame 数据。
+
+    Returns
+    -------
+    bool
+        写入成功返回 True，失败返回 False。
+    """
     try:
         display_dir = Path(__file__).parent.parent.parent / "data" / "display"
         display_dir.mkdir(parents=True, exist_ok=True)
@@ -476,12 +734,30 @@ def _write_parquet(tf: str, df: pd.DataFrame) -> bool:
 
 def _sync_all_cascading(ticker_code: str, tfs: list, cutoff_date: str,
                          min_tf: str, n_pts: int = 120) -> dict:
-    """Cascading synthesis main entry: process TFs finest→coarsest, synthesize incomplete bars.
+    """级联合成主入口：从细到粗处理周期列表，为每个周期合成未完成 K 线。
 
-    Args:
-        n_pts: int or dict[str,int]. If int, applied to all TFs. If dict, per-TF n_pts.
+    处理流程：按周期列表从细到粗遍历，对每个周期从 DB 获取数据，判断是否需要合成，
+    如需要则利用更细粒度周期的数据进行 K 线合成，最终写入 parquet 文件。
 
-    Returns {tf: bool} — True if parquet written successfully."""
+    Parameters
+    ----------
+    ticker_code : str
+        股票代码。
+    tfs : list
+        要处理的周期名称列表（按从细到粗顺序）。
+    cutoff_date : str
+        回测截止日期字符串。
+    min_tf : str
+        最细粒度周期名称（该周期不做合成）。
+    n_pts : int or dict[str, int], default 120
+        每个周期需要的数据点数。若为 int 则统一应用于所有周期；
+        若为 dict，则键为周期名、值为对应的 n_pts。
+
+    Returns
+    -------
+    dict
+        键为周期名称，值为 bool（parquet 文件是否写入成功）。
+    """
     results: dict = {}
     synth_cache: dict = {}
 

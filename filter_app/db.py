@@ -17,6 +17,16 @@ SNAPSHOT_DIR = DB_PATH.parent / "snapshots"
 
 
 def get_conn() -> sqlite3.Connection:
+    """获取数据库连接。
+
+    以 WAL 模式打开 SQLite 连接，设置合理的同步与超时参数，
+    并使用 ``sqlite3.Row`` 作为行工厂以支持列名访问。
+
+    Returns
+    -------
+    sqlite3.Connection
+        配置好的数据库连接对象。
+    """
     logger.debug("Connecting to DB: {}", DB_PATH)
     conn = sqlite3.connect(str(DB_PATH))
     conn.execute("PRAGMA journal_mode=WAL")
@@ -27,7 +37,14 @@ def get_conn() -> sqlite3.Connection:
 
 
 def init_db():
-    """应用启动时调用一次。"""
+    """初始化数据库 schema。
+
+    创建 ``kline`` 表及其索引（如不存在）。应用启动时调用一次。
+
+    See Also
+    --------
+    get_conn : 获取数据库连接。
+    """
     logger.debug("Initializing database schema")
     with get_conn() as conn:
         conn.executescript("""
@@ -48,7 +65,22 @@ def init_db():
 
 
 def upsert_kline(ticker: str, tf: str, df: pd.DataFrame):
-    """批量 upsert。df需包含 Date,Open,High,Low,Close,Volume 列。"""
+    """批量写入或更新 K 线数据。
+
+    根据数据库中该周期的最新日期，将数据分为历史 bar 与最新 bar：
+    历史 bar 使用 ``INSERT OR IGNORE`` 避免重复，最新 bar 使用
+    ``INSERT OR REPLACE`` 允许覆盖未完成 bar。
+
+    Parameters
+    ----------
+    ticker : str
+        股票代码。
+    tf : str
+        时间周期（如 ``"日线"``, ``"60分钟"``）。
+    df : pd.DataFrame
+        包含 ``Date``, ``Open``, ``High``, ``Low``, ``Close``, ``Volume``
+        列的 Pandas DataFrame。
+    """
     logger.debug("Upserting kline: ticker={}, tf={}, rows={}", ticker, tf, len(df))
     records = []
     for idx, row in df.iterrows():
@@ -84,9 +116,32 @@ def upsert_kline(ticker: str, tf: str, df: pd.DataFrame):
 
 
 def query_kline(ticker, tf, n_pts=120, day_offset=0, offset=None):
-    """查询K线。
-    offset=None: 取最新 n_pts 条（浏览模式，支持 day_offset 日期偏移）
-    offset=N:    从第 N 条开始取 n_pts 条（回测模式，窗口滑动，按时间升序返回）
+    """查询 K 线数据。
+
+    支持两种模式：
+
+    - **浏览模式**（``offset=None``）：取最新 ``n_pts`` 条，支持 ``day_offset``
+      日期偏移，返回降序数据并最终翻转为升序。
+    - **回测模式**（``offset=N``）：从第 N 条开始取 ``n_pts`` 条，按时间升序返回。
+
+    Parameters
+    ----------
+    ticker : str
+        股票代码。
+    tf : str
+        时间周期。
+    n_pts : int, optional
+        返回的记录条数（默认 120）。
+    day_offset : int, optional
+        以最新日期为基准往前偏移的天数（仅浏览模式），默认 0。
+    offset : int or None, optional
+        回测模式下的偏移量；``None`` 表示使用浏览模式。
+
+    Returns
+    -------
+    pd.DataFrame
+        包含 ``Date``, ``Open``, ``High``, ``Low``, ``Close``, ``Volume``
+        列的 DataFrame。无数据时返回空 DataFrame。
     """
     logger.debug("Querying kline: ticker={}, tf={}, n_pts={}, day_offset={}, offset={}",
                  ticker, tf, n_pts, day_offset, offset)
@@ -134,7 +189,20 @@ def query_kline(ticker, tf, n_pts=120, day_offset=0, offset=None):
 
 
 def get_date_range(ticker: str) -> Optional[Tuple[str, str]]:
-    """返回该股票所有周期的数据起止日期。"""
+    """获取指定股票的数据起止日期范围。
+
+    查询该股票在所有时间周期上的最小和最大时间戳。
+
+    Parameters
+    ----------
+    ticker : str
+        股票代码。
+
+    Returns
+    -------
+    Optional[Tuple[str, str]]
+        形如 ``(start_date, end_date)`` 的元组，无数据时返回 ``None``。
+    """
     with get_conn() as conn:
         row = conn.execute(
             "SELECT MIN(ts), MAX(ts) FROM kline WHERE ticker=?",
@@ -146,7 +214,18 @@ def get_date_range(ticker: str) -> Optional[Tuple[str, str]]:
 
 
 def has_data(ticker: str) -> bool:
-    """检查是否有该股票任何数据。"""
+    """检查数据库中是否存在指定股票的数据。
+
+    Parameters
+    ----------
+    ticker : str
+        股票代码。
+
+    Returns
+    -------
+    bool
+        存在至少一条记录返回 ``True``，否则 ``False``。
+    """
     with get_conn() as conn:
         row = conn.execute("SELECT 1 FROM kline WHERE ticker=? LIMIT 1", (ticker,)).fetchone()
     return row is not None
@@ -157,19 +236,39 @@ def has_data(ticker: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def checkpoint_wal():
-    """Force WAL checkpoint so all data is in the main DB file."""
+    """强制执行 WAL checkpoint。
+
+    将 WAL 文件中的未提交数据全部写回主数据库文件，确保快照完整。
+
+    See Also
+    --------
+    snapshot_db : 创建数据库快照前调用。
+    """
     logger.debug("Checkpointing WAL")
     with get_conn() as conn:
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
 
 def check_data_health(ticker=None):
-    """Return structured health report for one ticker or all tickers.
+    """检查数据健康状况并返回结构化报告。
 
-    Checks: row count, date range, NULL close count, gap detection (via SQL
-    LAG window), and staleness for daily bars (>7 days without new data).
+    检查内容包括：行数、日期范围、空 close 数量、数据缺口检测
+    （通过 SQL LAG 窗口函数）、以及日线数据的新鲜度（超过 7 天未更新视为过期）。
 
-    Returns dict with keys: status, summary, details, issues.
+    Parameters
+    ----------
+    ticker : str or None, optional
+        指定股票代码；``None`` 表示检查所有股票。
+
+    Returns
+    -------
+    dict
+        包含以下键的字典：
+
+        - ``status`` : str — ``"ok"`` / ``"warn"`` / ``"error"``
+        - ``summary`` : str — 汇总描述
+        - ``details`` : list[dict] — 每只股票每个周期的检查明细
+        - ``issues`` : list[str] — 所有问题的文本描述
     """
     logger.debug("Checking data health: ticker={}", ticker or "all")
     with get_conn() as conn:
@@ -275,7 +374,13 @@ def check_data_health(ticker=None):
 
 
 def get_db_size_mb():
-    """Return DB file size in megabytes."""
+    """获取数据库文件大小（兆字节）。
+
+    Returns
+    -------
+    float
+        文件大小，以 MB 为单位。文件不存在或无法访问时返回 ``0.0``。
+    """
     try:
         return os.path.getsize(str(DB_PATH)) / (1024 * 1024)
     except OSError:
@@ -283,7 +388,21 @@ def get_db_size_mb():
 
 
 def validate_db(db_path=None):
-    """Check that a DB file has the kline table. Returns (bool, error_msg)."""
+    """验证数据库文件是否包含 ``kline`` 表。
+
+    以只读方式打开数据库，检查 ``sqlite_master`` 中是否存在 ``kline`` 表定义。
+
+    Parameters
+    ----------
+    db_path : str or None, optional
+        数据库文件路径；``None`` 时使用默认路径。
+
+    Returns
+    -------
+    Tuple[bool, str]
+        形如 ``(is_valid, error_message)`` 的二元组：
+        当表存在时返回 ``(True, "")``，否则返回 ``(False, 原因)``。
+    """
     path = db_path or str(DB_PATH)
     try:
         logger.debug("Validating DB: {}", path)
@@ -300,7 +419,16 @@ def validate_db(db_path=None):
 
 
 def snapshot_db():
-    """Create timestamped copy of market.db. Returns path."""
+    """创建带时间戳的数据库快照。
+
+    先执行 WAL checkpoint 确保数据完整，然后将 ``market.db`` 复制到
+    快照目录，文件名为 ``market_YYYYmmdd_HHMMSS.db``。
+
+    Returns
+    -------
+    str
+        快照文件的绝对路径。
+    """
     checkpoint_wal()
     SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -310,7 +438,14 @@ def snapshot_db():
 
 
 def list_snapshots():
-    """Return [(path_str, mtime, size_mb, label), ...] newest first."""
+    """列出所有快照文件，按时间倒序排列。
+
+    Returns
+    -------
+    list[Tuple[str, float, float, str]]
+        元素为 ``(path, mtime, size_mb, label)`` 的列表，按修改时间
+        从新到旧排序。无快照目录时返回空列表。
+    """
     if not SNAPSHOT_DIR.exists():
         return []
     files = sorted(
@@ -327,7 +462,15 @@ def list_snapshots():
 
 
 def restore_snapshot(snapshot_path):
-    """Restore DB from snapshot. Delete WAL/SHM afterwards."""
+    """从快照文件恢复数据库。
+
+    将快照文件复制为 ``market.db``，然后清理残留的 WAL 和 SHM 文件。
+
+    Parameters
+    ----------
+    snapshot_path : str
+        快照文件的路径。
+    """
     shutil.copy2(str(snapshot_path), str(DB_PATH))
     for suffix in ["-wal", "-shm"]:
         p = str(DB_PATH) + suffix
@@ -336,7 +479,13 @@ def restore_snapshot(snapshot_path):
 
 
 def prune_snapshots(max_keep=5):
-    """Keep only the most recent N snapshots, delete the rest."""
+    """清理旧快照，仅保留最新的 N 份。
+
+    Parameters
+    ----------
+    max_keep : int, optional
+        保留的快照数量上限，默认 5。
+    """
     snapshots = list_snapshots()
     for path_str, _, _, _ in snapshots[max_keep:]:
         try:
@@ -346,7 +495,10 @@ def prune_snapshots(max_keep=5):
 
 
 def clear_display_cache():
-    """Delete all .parquet files in data/display/."""
+    """清除显示缓存。
+
+    删除 ``data/display/`` 目录下的所有 ``.parquet`` 文件。
+    """
     display_dir = DB_PATH.parent / "display"
     if display_dir.exists():
         for f in display_dir.glob("*.parquet"):
@@ -361,17 +513,36 @@ def clear_display_cache():
 # ---------------------------------------------------------------------------
 
 def compare_with_db(ticker, tf, df_fetched):
-    """Compare a freshly-fetched DataFrame against DB for one (ticker, tf).
+    """对比新拉取的数据与数据库中已有数据。
 
-    df_fetched: yfinance DataFrame with DatetimeIndex, columns Open/High/Low/Close/Volume.
+    对重叠时间戳计算 MD5 指纹来判断一致性，并列出 Close 差值超过
+    ``1e-6`` 的明细差异。
 
-    Returns dict:
-        db_count, yf_count, overlap_count,
-        db_start, db_end, yf_start, yf_end,
-        fingerprint_match: bool,
-        diffs: [(ts, db_close, yf_close), ...]  # overlapping timestamps with diff > 1e-6
-        only_db: int, only_yf: int,
-        status: 'ok' | 'update_available' | 'conflict'
+    Parameters
+    ----------
+    ticker : str
+        股票代码。
+    tf : str
+        时间周期。
+    df_fetched : pd.DataFrame
+        新拉取的 yfinance DataFrame，需包含 ``DatetimeIndex`` 及
+        ``Open`` / ``High`` / ``Low`` / ``Close`` / ``Volume`` 列。
+
+    Returns
+    -------
+    dict
+        包含以下键的字典：
+
+        - ``status`` : str — ``"ok"`` / ``"update_available"`` / ``"conflict"``
+        - ``db_count`` : int — 数据库中记录数
+        - ``yf_count`` : int — 拉取数据记录数
+        - ``overlap_count`` : int — 重叠时间戳数
+        - ``db_start`` / ``db_end`` : str — 数据库起止日期
+        - ``yf_start`` / ``yf_end`` : str — 拉取数据起止日期
+        - ``fingerprint_match`` : bool — 重叠部分指纹是否一致
+        - ``diffs`` : list[Tuple[str, float, float]] — 差异明细
+        - ``only_db`` : int — 仅在数据库中存在的时间戳数
+        - ``only_yf`` : int — 仅在拉取数据中存在的时间戳数
     """
     import hashlib as _hashlib
 
@@ -436,11 +607,20 @@ def compare_with_db(ticker, tf, df_fetched):
 
 
 def force_update_kline(ticker, tf, df):
-    """Replace DB data for overlapping timestamps with fetched data.
+    """强制更新 K 线数据。
 
-    Strategy: DELETE rows where ts is in the fetched DataFrame, then INSERT all
-    fetched rows. This updates corrected historical bars AND adds new bars.
-    Non-overlapping historical bars (only in DB) are preserved.
+    策略：先删除拉取数据中存在的时间戳对应的 DB 记录，再通过
+    ``upsert_kline`` 重新插入。这样可以同时更新已修正的历史 bar
+    和新增 bar，同时保留数据库中独有的历史 bar。
+
+    Parameters
+    ----------
+    ticker : str
+        股票代码。
+    tf : str
+        时间周期。
+    df : pd.DataFrame
+        包含 ``DatetimeIndex`` 及标准 OHLCV 列的 DataFrame。
     """
     records = []
     for idx, row in df.iterrows():

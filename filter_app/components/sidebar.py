@@ -17,7 +17,33 @@ DEFAULT_TFS = ["日线", "60分钟", "15分钟", "5分钟"]
 def _compact_slider(label: str, pmin: float, pmax: float, pdefault: float,
                     pstep: float = 1.0, key: Optional[str] = None,
                     fmt: Optional[str] = None) -> float:
-    """标签与滑块同行（仅用于无 help 的简单滑块）。"""
+    """Render a label and slider in a single row.
+
+    The label is displayed as a caption in the left column and the slider
+    occupies the right column.
+
+    Parameters
+    ----------
+    label : str
+        Caption text for the slider.
+    pmin : float
+        Minimum slider value.
+    pmax : float
+        Maximum slider value.
+    pdefault : float
+        Default (initial) slider value.
+    pstep : float, optional
+        Step increment (default ``1.0``).
+    key : str or None, optional
+        Streamlit widget key (default ``None``).
+    fmt : str or None, optional
+        Format string for the slider value (default ``None``).
+
+    Returns
+    -------
+    float
+        The current slider value selected by the user.
+    """
     c = st.columns([0.35, 0.65])
     c[0].caption(label)
     # L22 原为 markdown(unsafe_allow_html=True)，改用 caption 实现小型标签且无安全风险
@@ -30,9 +56,35 @@ def _compact_slider(label: str, pmin: float, pmax: float, pdefault: float,
 def _render_param_slider(label: str, pmin: float, pmax: float, pstep: float,
                          pdefault: float, key_suffix: str = "",
                          container: Optional[Any] = None) -> float:
-    """Render an st.slider with appropriate numeric format.
-    If container is None, renders in sidebar (backward compat).
-    Pass container=st to render inline in the current column context.
+    """Render an ``st.slider`` with appropriate numeric format.
+
+    When ``container`` is ``None`` the slider is rendered in the sidebar.
+    When a container is provided (e.g. ``st``) it renders in the current
+    column context.  The format string is automatically determined from
+    ``pstep``: ``"%.3f"`` for steps smaller than 0.01, ``"%.2f"`` otherwise.
+
+    Parameters
+    ----------
+    label : str
+        Slider label.
+    pmin : float
+        Minimum value.
+    pmax : float
+        Maximum value.
+    pstep : float
+        Step increment.
+    pdefault : float
+        Default value.
+    key_suffix : str, optional
+        Suffix appended to the widget key (default ``""``).
+    container : object or None, optional
+        Streamlit module or column context; falls back to ``st.sidebar``
+        when ``None`` (default ``None``).
+
+    Returns
+    -------
+    float
+        The current slider value selected by the user.
     """
     ctx = container if container is not None else st.sidebar
     key = f"{label}_{key_suffix}" if key_suffix else None
@@ -54,7 +106,35 @@ TF_HIERARCHY = {
 
 def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[str],
                    tf_default: str) -> Dict[str, Any]:
-    """Ultra-compact parameter panel. Returns config dict."""
+    """Render an ultra-compact parameter panel for one view.
+
+    Builds the full configuration dict for a view, including time-frame
+    selection, Schmitt trigger parameters, prediction parameters, strategy
+    parameters, and filter parameters (with optional secondary filter).
+
+    Parameters
+    ----------
+    key : str
+        View key prefix (e.g. ``"v0"``, ``"v1"``).
+    filter_id : str
+        Primary filter identifier (looked up in ``FILTERS``).
+    dual : bool
+        Whether a secondary filter is enabled.
+    filter_id2 : str or None
+        Secondary filter identifier (ignored when ``dual`` is ``False``).
+    tf_default : str
+        Default time-frame value.
+
+    Returns
+    -------
+    dict
+        Configuration dictionary with keys including ``_fid``, ``_dual``,
+        ``_fid2``, ``tf``, ``n_pts``, ``show_sch``, ``ke``, ``sm``, ``ew``,
+        ``show_pred``, ``n_ext``, ``fit_mode``, ``show_strategy``,
+        ``stop_loss_pct``, ``show_cross_pnl``, ``show_alignment``, ``fc``,
+        ``fc2``, ``pv`` (filter params dict) and ``pv2`` (secondary filter
+        params dict).
+    """
     cfg = {"_fid": filter_id, "_dual": dual, "_fid2": filter_id2}
 
     # Row 1: [周期▼] [N▬] [施密特☑] [预测☑] [▲▼]

@@ -64,7 +64,31 @@ st.set_page_config(
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def _cached_fetch_stock(market, code, tf, n_pts, force_period=None):
-    """Cached wrapper for yfinance data fetching. Clear cache to force refresh."""
+    """Cached wrapper for yfinance data fetching.
+
+    Wraps ``services.data_loader._fetch_stock`` with ``@st.cache_data``
+    to avoid redundant API calls within the TTL window.  Clear the cache
+    (via the refresh button or programmatically) to force a fresh fetch.
+
+    Parameters
+    ----------
+    market : str
+        Market identifier, e.g. ``"美股 US"``, ``"A股(沪深)"``, ``"港股 HK"``.
+    code : str
+        Ticker symbol, e.g. ``"AAPL"``, ``"600519"``.
+    tf : str
+        Timeframe label, e.g. ``"日线"``, ``"60分钟"``.
+    n_pts : int
+        Number of data points to request.
+    force_period : str or None
+        Override the auto-computed yfinance ``period`` parameter.
+
+    Returns
+    -------
+    tuple
+        ``(t, noisy, ohlc, ticker_full, dates, err)`` as produced by
+        ``_fetch_stock``.
+    """
     return _fetch_stock(market, code, tf, n_pts, force_period=force_period)
 
 
@@ -74,7 +98,30 @@ def _cached_fetch_stock(market, code, tf, n_pts, force_period=None):
 
 
 def _date_markers(dates, tf) -> tuple[list, list]:
-    """Return (positions, labels) for vertical date markers."""
+    """Compute positions and labels for vertical date markers on the chart.
+
+    Generates marker positions (x-axis indices) and corresponding
+    date-format labels based on the active timeframe.  Different
+    timeframes trigger different spacing logic (e.g. daily boundaries
+    for minute TFs, Mondays for daily, month boundaries for weekly).
+
+    Parameters
+    ----------
+    dates : list of pandas.Timestamp or None
+        Sorted date index for the current view.  If ``None`` or empty
+        both return values are empty lists.
+    tf : str
+        Timeframe label used to decide marker granularity.  One of
+        ``"1分钟"``, ``"5分钟"``, ``"15分钟"``, ``"60分钟"``, ``"日线"``,
+        ``"周线"``, ``"月线"``, ``"季线"``.
+
+    Returns
+    -------
+    tuple of (list, list)
+        ``(positions, labels)`` where *positions* are integer x-axis
+        indices and *labels* are formatted date strings (e.g. ``"01/15"``,
+        ``"2024"``).
+    """
     if dates is None or len(dates) == 0:
         return [], []
     positions, labels = [], []
@@ -497,18 +544,77 @@ def _load_backtest_config(ticker_code):
 
 @st.fragment
 def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, window_start=None, cutoff_date=None) -> None:
-    """Fragment wrapper for _render_chart — enables per-view independent re-rendering.
-    window_start: 回测模式下窗口起始位置，用于数据加载和日志记录。
-    cutoff_date: 回测模式下的截止日期，用于日期对齐。"""
+    """Fragment wrapper around ``_render_chart`` for per-view independent re-rendering.
+
+    The ``@st.fragment`` decorator enables each of the four chart views
+    to re-render independently without triggering a full-page rerun.
+
+    Parameters
+    ----------
+    market : str
+        Market identifier.
+    ticker_code : str
+        Ticker symbol.
+    cfg : dict
+        Per-view configuration dict (timeframe, filter params, etc.).
+    key : str
+        Unique view key (e.g. ``"v0"``, ``"v1"``).
+    compact : bool, default True
+        If True, use a smaller chart height.
+    day_offset : int, default 0
+        Number of days to shift the window into the past.
+    higher_pnl : dict or None
+        Higher-timeframe PnL data from ``_align_pnl_to_current_tf``.
+    window_start : int or None
+        Backtest mode — window start bar index.
+    cutoff_date : str or None
+        Backtest mode — cutoff date string.
+
+    Returns
+    -------
+    None
+    """
     _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl, window_start=window_start, cutoff_date=cutoff_date)
 
 
 def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, window_start=None, cutoff_date=None) -> None:
-    """Fetch data + render multi-subplot figure from config.
-    优先从本地 Parquet 读取；day_offset=向历史前移N天（各周期独立对齐）。
-    higher_pnl: 高周期PnL数据（来自 _align_pnl_to_current_tf 的输出），非空时新增row 7子图。
-    window_start: 回测模式下窗口起始位置，用于数据加载和日志。
-    cutoff_date: 回测模式下的截止日期，用于各周期日期对齐。"""
+    """Fetch data and render the multi-subplot chart figure.
+
+    This is the core chart builder.  It:
+    1. Loads chart data (from Parquet cache or yfinance API).
+    2. Computes primary (and optional secondary) filter output.
+    3. Computes Schmitt trigger signal and pair segmentation.
+    4. Computes prediction curves and strategy PnL.
+    5. Builds a ``plotly`` figure with dynamic subplot layout.
+    6. Renders the figure via ``_render_plotly``.
+
+    Parameters
+    ----------
+    market : str
+        Market identifier.
+    ticker_code : str
+        Ticker symbol.
+    cfg : dict
+        Per-view configuration dict containing at least ``"tf"``,
+        ``"n_pts"``, ``"_fid"``, and display toggles.
+    key : str
+        Unique view key.
+    compact : bool, default True
+        If True, reduce chart height.
+    day_offset : int, default 0
+        Shift the time window backward by *day_offset* days.
+    higher_pnl : dict or None
+        Higher-timeframe PnL data from ``_align_pnl_to_current_tf``.
+        When non-None a cross-period PnL subplot is added.
+    window_start : int or None
+        Backtest mode — window start bar index for data loading.
+    cutoff_date : str or None
+        Backtest mode — cutoff date string for timeframe alignment.
+
+    Returns
+    -------
+    None
+    """
     tf = cfg["tf"]
     n_pts = cfg["n_pts"]
     logger.debug(f"Rendering chart: {ticker_code}/{tf} view={key} n_pts={n_pts}")
@@ -1115,7 +1221,23 @@ def _render_time_nav(configs, ticker_code) -> int:
 
 
 def _get_bar_date_from_db(ticker_code, tf, bar_index):
-    """从 DB 查询指定 bar_index 位置的日期。返回字符串或空字符串。"""
+    """Query the date string for a given bar index from the database.
+
+    Parameters
+    ----------
+    ticker_code : str
+        Ticker symbol to query.
+    tf : str
+        Timeframe label (e.g. ``"日线"``).
+    bar_index : int
+        Zero-based row offset (``OFFSET`` in the SQL query).
+
+    Returns
+    -------
+    str
+        Date string from ``kline.ts`` for the bar at the requested
+        offset, or an empty string if no row is found.
+    """
     from db import get_conn
     with get_conn() as conn:
         row = conn.execute(
@@ -1126,7 +1248,21 @@ def _get_bar_date_from_db(ticker_code, tf, bar_index):
 
 
 def _update_cutoff_and_rerun():
-    """slider/导航变化时更新 cutoff_date 并 rerun"""
+    """Update ``cutoff_date`` from the current bar index and trigger a rerun.
+
+    Called when the user clicks a backtest navigation button (⏮ ◀ ▶ ⏭).
+    Reads ``_bar_index`` from ``st.session_state``, looks up the
+    corresponding date in the DB for the minimum timeframe, writes it
+    to ``AppState._bt_cutoff_date``, and calls ``st.rerun()``.
+
+    Parameters
+    ----------
+    None — reads from ``st.session_state`` and ``AppState``.
+
+    Returns
+    -------
+    None
+    """
     ticker = AppState.get("_fetched_ticker", "")
     min_tf = AppState.get("_min_tf", "")
     bar_index = st.session_state.get("_bar_index", 0)
@@ -1140,8 +1276,23 @@ def _update_cutoff_and_rerun():
 
 
 def _on_slider_change():
-    """slider 拖动时同步 _bt_slider_pos → _bar_index 并更新 cutoff_date。
-    播放期间跳过 — _run_backtest_play 自行维护。"""
+    """Synchronise slider position to bar index and update cutoff date.
+
+    Streamlit ``on_change`` callback for the backtest slider widget.
+    Reads ``_bt_slider_pos`` from ``st.session_state``, writes it to
+    ``_bar_index``, and queries the DB for the corresponding cutoff date.
+
+    Skipped during auto-play (``_is_playing`` is ``True``) because
+    ``_run_backtest_play`` handles the progression independently.
+
+    Parameters
+    ----------
+    None — reads from ``st.session_state`` and ``AppState``.
+
+    Returns
+    -------
+    None
+    """
     if AppState.get("_is_playing", False):
         return  # 播放中，避免 on_change 自动 rerun 干扰播放循环
     # 从 Slider Widget Key 读取当前值，同步到程序状态
@@ -1262,7 +1413,34 @@ def _run_backtest_play():
 
 
 def _render_backtest_mode(market, ticker_code, configs) -> None:
-    """侧边栏回测模式切换 + bar 位置滑块。"""
+    """Render the backtest mode toggle and window-position slider in the sidebar.
+
+    Provides a radio button to switch between browse and backtest modes.
+    When switching to backtest mode it:
+    - Determines the minimum timeframe from the active configs.
+    - Queries the total bar count from the DB (or loads a cached config).
+    - Initialises ``_bar_index`` and ``_bt_cutoff_date``.
+    When switching back to browse mode it clears all backtest-related
+    state.
+
+    While in backtest mode it renders navigation buttons (via
+    ``_render_backtest_nav``) and a slider (or progress bar during
+    auto-play) for the window end position.
+
+    Parameters
+    ----------
+    market : str
+        Market identifier (``"美股 US"``, ``"A股(沪深)"``, ``"港股 HK"``).
+    ticker_code : str
+        Ticker symbol, e.g. ``"AAPL"``.
+    configs : list of dict
+        List of per-view configuration dicts, each containing at least
+        ``"tf"`` and ``"n_pts"`` keys.
+
+    Returns
+    -------
+    None
+    """
     st.sidebar.markdown("---")
     st.sidebar.caption("🔬 回测模式")
 
@@ -1530,6 +1708,32 @@ def _run_auto_refresh(market, ticker_code, auto_refresh, interval) -> None:
 
 # =====================================================================
 def main() -> None:
+    """Application entry point — orchestrates the full Streamlit page layout.
+
+    Execution order:
+    1. **Backtest auto-play** — advance the window position if playing
+       (must happen before any widget rendering).
+    2. **Initialise** — DB connection, config tables, session state,
+       one-off JSON preset import.
+    3. **Sidebar (top-down)** — config import, market/ticker, initial
+       fetch, refresh, preset selector, health check, data validation,
+       filter selectors, 2x2 parameter panels, time navigation,
+       backtest mode toggle, DB backup/restore.
+    4. **Charts (2x2 grid)** — sorted by timeframe descending; each
+       cell renders a ``_render_chart_fragment``.  In backtest mode a
+       cascading data sync (``_sync_all_cascading``) runs first.
+    5. **Footer sidebar** — export config, config history, DB import/export.
+    6. **Auto-refresh** — sleep and rerun if enabled.
+    7. **Backtest play loop** — sleep + rerun for the next frame.
+
+    Parameters
+    ----------
+    None — reads all state from ``st.session_state`` and ``AppState``.
+
+    Returns
+    -------
+    None
+    """
     # ── 回测自动播放：更新窗口位置（必须在 widget 渲染之前修改 key）──
     need_rerun = _run_backtest_play()
     logger.info("App started")

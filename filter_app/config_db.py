@@ -17,8 +17,18 @@ _CONFIG_DIR = Path(__file__).parent.parent / "config"
 
 @contextmanager
 def _get_conn() -> sqlite3.Connection:
-    """获取配置数据库连接上下文（独立于 market.db）。
-    退出时自动提交/回滚并关闭连接。"""
+    """Get a context manager for a config database connection.
+
+    Opens a connection to the standalone SQLite database at ``_CONFIG_DB_PATH``.
+    On exit the connection is committed on success or rolled back on exception,
+    then closed.
+
+    Returns
+    -------
+    sqlite3.Connection
+        Database connection with WAL journal mode, NORMAL synchronous,
+        5-second busy timeout, and foreign keys enabled.
+    """
     conn = sqlite3.connect(str(_CONFIG_DB_PATH))
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
@@ -79,7 +89,17 @@ CREATE INDEX IF NOT EXISTS idx_history_lookup
 
 
 def init_config_tables():
-    """确保配置表存在并迁移旧 schema。在 db.init_db() 之后调用。"""
+    """Ensure config tables exist and migrate legacy schema if needed.
+
+    Creates ``config_presets`` and ``config_ticker`` tables, as well as
+    the ``config_history`` table.  Performs a one-time migration of the
+    ``config_ticker`` table when its foreign key on ``preset_id`` lacks the
+    ``ON DELETE SET NULL`` clause.
+
+    Notes
+    -----
+    Should be called after ``db.init_db()``.
+    """
     logger.info("Config DB initialized at {}", _CONFIG_DB_PATH)
     with _get_conn() as conn:
         conn.executescript(_SCHEMA)
@@ -121,6 +141,18 @@ def init_config_tables():
 # ═══════════════════════════════════════════════════════════
 
 def list_presets(category: Optional[str] = None) -> List[Dict[str, Any]]:
+    """List all presets, optionally filtered by category.
+
+    Parameters
+    ----------
+    category : str or None
+        If provided, only presets in this category are returned.
+
+    Returns
+    -------
+    list of dict
+        Each dict contains a full ``config_presets`` row.
+    """
     logger.debug("Listing presets (category={})", category)
     with _get_conn() as conn:
         if category:
@@ -135,6 +167,18 @@ def list_presets(category: Optional[str] = None) -> List[Dict[str, Any]]:
 
 
 def get_preset(preset_id: int) -> Optional[Dict[str, Any]]:
+    """Get a single preset by its primary key.
+
+    Parameters
+    ----------
+    preset_id : int
+        The preset's primary key.
+
+    Returns
+    -------
+    dict or None
+        The preset row as a dict, or ``None`` if not found.
+    """
     logger.debug("Getting preset by id={}", preset_id)
     with _get_conn() as conn:
         row = conn.execute(
@@ -144,6 +188,18 @@ def get_preset(preset_id: int) -> Optional[Dict[str, Any]]:
 
 
 def get_preset_by_name(name: str) -> Optional[Dict[str, Any]]:
+    """Get a single preset by its unique name.
+
+    Parameters
+    ----------
+    name : str
+        The preset name.
+
+    Returns
+    -------
+    dict or None
+        The preset row as a dict, or ``None`` if not found.
+    """
     logger.debug("Getting preset by name={}", name)
     with _get_conn() as conn:
         row = conn.execute(
@@ -154,8 +210,33 @@ def get_preset_by_name(name: str) -> Optional[Dict[str, Any]]:
 
 def save_preset(name: str, params_json: str,
                 description: str = "", category: str = "通用") -> int:
-    """INSERT or UPSERT preset. Returns preset_id.
-    Raises ValueError on invalid input."""
+    """Insert or upsert a preset.
+
+    Uses ``INSERT ... ON CONFLICT ... DO UPDATE`` so the operation is atomic.
+    Raises ``ValueError`` when the name is empty or ``params_json`` is not
+    valid JSON.
+
+    Parameters
+    ----------
+    name : str
+        Preset name (must not be blank).
+    params_json : str
+        JSON-encoded parameter dictionary.
+    description : str, optional
+        Human-readable description (default ``""``).
+    category : str, optional
+        Category label (default ``"通用"``).
+
+    Returns
+    -------
+    int
+        The ``preset_id`` of the inserted or updated row.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is blank or ``params_json`` is not valid JSON.
+    """
     # P1-5: 入口校验 — 空名称或无效 JSON 直接拒绝
     if not name or not name.strip():
         raise ValueError("预设名称不能为空")
@@ -183,8 +264,22 @@ def save_preset(name: str, params_json: str,
 
 
 def delete_preset(preset_id: int) -> bool:
-    """删除预设。返回 True 表示成功删除了记录，False 表示记录不存在。
-    同时删除对应的 JSON 配置文件（如果存在），防止下次启动时被重新导入。"""
+    """Delete a preset by its primary key.
+
+    Also removes the corresponding JSON config file from ``_CONFIG_DIR`` if it
+    exists, preventing re-import on the next startup.
+
+    Parameters
+    ----------
+    preset_id : int
+        The preset's primary key.
+
+    Returns
+    -------
+    bool
+        ``True`` if a row was deleted, ``False`` if no preset with this ID
+        existed.
+    """
     logger.debug("Deleting preset id={}", preset_id)
     with _get_conn() as conn:
         # 先获取名称，以便同步删除 JSON 文件
@@ -206,8 +301,29 @@ def delete_preset(preset_id: int) -> bool:
 
 
 def rename_preset(preset_id: int, new_name: str) -> Optional[str]:
-    """重命名预设。成功返回新名称，名称冲突返回 None，预设不存在返回 None。
-    调用者应区分：冲突返回 None（名称已被占用），不存在也返回 None（追加日志判断）。"""
+    """Rename a preset.
+
+    Checks uniqueness of the new name before updating to avoid a
+    ``UNIQUE`` constraint violation.
+
+    Parameters
+    ----------
+    preset_id : int
+        The preset's primary key.
+    new_name : str
+        Desired new name (must not be blank).
+
+    Returns
+    -------
+    str or None
+        The new name on success, or ``None`` if the preset was not found or
+        the new name conflicts with an existing preset.
+
+    Notes
+    -----
+    Both failure cases (not found / name conflict) return ``None``.
+    Callers should inspect the log to distinguish between them.
+    """
     # P1-6: 空名称校验
     if not new_name or not new_name.strip():
         logger.warning("rename_preset: 拒绝空名称 (preset_id={})", preset_id)
@@ -234,8 +350,18 @@ def rename_preset(preset_id: int, new_name: str) -> Optional[str]:
 
 
 def apply_preset(preset_id: int) -> Optional[Dict[str, Any]]:
-    """解析 preset 的 params_json 为 dict。
-    Returns: 解析后的 dict，或 None（预设不存在 / JSON 损坏）。
+    """Parse a preset's ``params_json`` into a Python dict.
+
+    Parameters
+    ----------
+    preset_id : int
+        The preset's primary key.
+
+    Returns
+    -------
+    dict or None
+        The parsed parameters dict, or ``None`` if the preset does not exist
+        or its ``params_json`` is invalid.
     """
     p = get_preset(preset_id)
     if not p:
@@ -254,6 +380,21 @@ def apply_preset(preset_id: int) -> Optional[Dict[str, Any]]:
 # ═══════════════════════════════════════════════════════════
 
 def load_ticker_config(ticker: str, variant: str = "single") -> Optional[Dict[str, Any]]:
+    """Load a ticker's config from ``config_ticker``.
+
+    Parameters
+    ----------
+    ticker : str
+        Ticker symbol (e.g. ``"AAPL"``, ``"2382.HK"``).
+    variant : str, optional
+        Variant identifier (default ``"single"``).
+
+    Returns
+    -------
+    dict or None
+        The row as a dict, or ``None`` if no config exists for this ticker
+        and variant.
+    """
     logger.debug("Loading ticker config: ticker={}, variant={}", ticker, variant)
     with _get_conn() as conn:
         row = conn.execute(
@@ -266,6 +407,24 @@ def load_ticker_config(ticker: str, variant: str = "single") -> Optional[Dict[st
 
 def save_ticker_config(ticker: str, market: str, variant: str,
                        params_json: str, preset_id: Optional[int] = None):
+    """Insert or replace a ticker's config row.
+
+    Validates that ``preset_id`` references an existing preset; if it does
+    not, the reference is silently set to ``NULL``.
+
+    Parameters
+    ----------
+    ticker : str
+        Ticker symbol.
+    market : str
+        Market label (e.g. ``"US"``, ``"HK"``).
+    variant : str
+        Variant identifier (e.g. ``"single"``, ``"dual"``).
+    params_json : str
+        JSON-encoded parameter dictionary.
+    preset_id : int or None, optional
+        Foreign key to ``config_presets`` (default ``None``).
+    """
     logger.debug("Saving ticker config: ticker={}, variant={}, market={}, preset_id={}",
                  ticker, variant, market, preset_id)
     # P1-4: 校验 preset_id 存在性，避免 FK 引用不存在的预设
@@ -290,6 +449,23 @@ def record_history(ticker: str, variant: str,
                    old_json: str, new_json: str,
                    preset_id: Optional[int] = None,
                    source: str = "ui"):
+    """Insert a history entry recording a config change.
+
+    Parameters
+    ----------
+    ticker : str
+        Ticker symbol.
+    variant : str
+        Variant identifier.
+    old_json : str
+        Previous value of ``params_json`` (may be empty).
+    new_json : str
+        New value of ``params_json`` (may be empty).
+    preset_id : int or None, optional
+        Associated preset ID (default ``None``).
+    source : str, optional
+        Origin of the change, e.g. ``"ui"`` or ``"import"`` (default ``"ui"``).
+    """
     logger.debug("Recording history: ticker={}, variant={}, source={}", ticker, variant, source)
     with _get_conn() as conn:
         conn.execute(
@@ -300,6 +476,26 @@ def record_history(ticker: str, variant: str,
 
 def get_history(ticker: str, variant: str = "single",
                 limit: int = 20) -> List[Dict[str, Any]]:
+    """Retrieve the change history for a ticker and variant.
+
+    Joins with ``config_presets`` to include the preset name for each
+    history entry.
+
+    Parameters
+    ----------
+    ticker : str
+        Ticker symbol.
+    variant : str, optional
+        Variant identifier (default ``"single"``).
+    limit : int, optional
+        Maximum number of entries to return (default 20).
+
+    Returns
+    -------
+    list of dict
+        Each dict contains a ``config_history`` row, enriched with
+        ``preset_name`` from the joined preset.
+    """
     logger.debug("Getting history: ticker={}, variant={}, limit={}", ticker, variant, limit)
     with _get_conn() as conn:
         rows = conn.execute(
@@ -317,11 +513,25 @@ def get_history(ticker: str, variant: str = "single",
 # ═══════════════════════════════════════════════════════════
 
 def import_json_files_as_presets(force: bool = False):
-    """首次运行时将 config/*.json 导入为预设。
-    Args:
-        force: True 时覆盖同名预设
-    Returns:
-        (imported_count, errors_list) — errors_list 每项为 (filename, error_message)
+    """Import ``config/*.json`` files into the presets table.
+
+    Reads every ``*.json`` file in ``_CONFIG_DIR``, infers a category from
+    the file-name suffix (``_DP`` → 双滤波, ``_QS`` → 快速, else 单滤波),
+    and inserts each into ``config_presets``.
+
+    Parameters
+    ----------
+    force : bool, optional
+        If ``True``, overwrite existing presets with the same name
+        (default ``False``).
+
+    Returns
+    -------
+    imported : int
+        Number of files successfully imported.
+    errors : list of str
+        List of error messages; each item has the form
+        ``"filename: error description"``.
     """
     if not _CONFIG_DIR.exists():
         return 0, []
@@ -369,7 +579,17 @@ def import_json_files_as_presets(force: bool = False):
 # ═══════════════════════════════════════════════════════════
 
 def collect_current_params() -> Dict[str, Any]:
-    """从 st.session_state 收集当前所有配置参数。"""
+    """Collect all current configuration parameters from ``st.session_state``.
+
+    Reads global parameters (market, ticker, global_f, global_dual,
+    global_f2), view parameters (v0–v3 with their sub-keys), and
+    filter parameters (identified by Chinese-named keys).
+
+    Returns
+    -------
+    dict
+        Flat dictionary of all collected parameter values.
+    """
     import streamlit as st
 
     params = {}
