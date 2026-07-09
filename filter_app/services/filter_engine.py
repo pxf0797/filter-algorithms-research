@@ -517,6 +517,54 @@ def _schmitt_trigger(v: np.ndarray, a: np.ndarray, ewma_span: int = 60,
             "eps": eps_t, "sig": sig_t, "dur": dur_t}
 
 
+def _merge_segments(sig_t: np.ndarray) -> List[Tuple[int, int, int]]:
+    """收集连续非零段，合并相邻同号段（中间观望区并入同号段）。
+
+    Parameters
+    ----------
+    sig_t : np.ndarray
+        Schmitt 信号序列 (+1/0/-1)，长度 n。
+
+    Returns
+    -------
+    List[Tuple[int, int, int]]
+        [(start_idx, end_idx, direction), ...]
+        direction 为 +1（多）或 -1（空）。
+        当 sig_t 长度 < 2 时返回空列表。
+    """
+    n = len(sig_t)
+    if n < 2:
+        return []
+
+    # Step 1: 收集所有非零段
+    segments = []
+    i = 0
+    while i < n:
+        if sig_t[i] != 0:
+            start = i
+            val = sig_t[i]
+            while i < n and sig_t[i] == val:
+                i += 1
+            end = i - 1
+            segments.append((start, end, val))
+        else:
+            i += 1
+
+    if not segments:
+        return []
+
+    # Step 2: 合并相邻同号段（+1,0,+1 → 一个连续段）
+    merged = [segments[0]]
+    for seg in segments[1:]:
+        last = merged[-1]
+        if seg[2] == last[2]:
+            merged[-1] = (last[0], seg[1], seg[2])
+        else:
+            merged.append(seg)
+
+    return merged
+
+
 def _find_all_pairs(sig_t: np.ndarray) -> List[Tuple[int, int]]:
     """扫描 sig_t，找出窗口中所有多空切换对。
 
@@ -535,37 +583,11 @@ def _find_all_pairs(sig_t: np.ndarray) -> List[Tuple[int, int]]:
         每个 pair 的起始和结束均为 index。
         无有效配对时返回空列表。
     """
-    n = len(sig_t)
-    if n < 3:
+    merged = _merge_segments(sig_t)
+    if len(merged) < 2:
         return []
 
-    # Step 1: 收集所有非零段
-    segments = []  # [(start, end, val), ...]
-    i = 0
-    while i < n:
-        if sig_t[i] != 0:
-            start = i
-            val = sig_t[i]
-            while i < n and sig_t[i] == val:
-                i += 1
-            end = i - 1
-            segments.append((start, end, val))
-        else:
-            i += 1
-
-    if len(segments) < 2:
-        return []
-
-    # Step 2: 合并相邻同号段（+1,0,+1 → 一个连续多头段）
-    merged = [segments[0]]
-    for seg in segments[1:]:
-        last = merged[-1]
-        if seg[2] == last[2]:  # 同号 → 合并（含中间观望区）
-            merged[-1] = (last[0], seg[1], seg[2])
-        else:
-            merged.append(seg)
-
-    # Step 3: 相邻异号段配对 — 结束于相反信号的入口边缘
+    # 相邻异号段配对 — 结束于相反信号的入口边缘
     pairs = []
     for j in range(len(merged) - 1):
         s1, e1, v1 = merged[j]
@@ -574,6 +596,89 @@ def _find_all_pairs(sig_t: np.ndarray) -> List[Tuple[int, int]]:
             pairs.append((s1, s2))  # 结束于相反信号的入口（边缘）
 
     return pairs
+
+
+def _find_current_half_pair(
+    sig_t: np.ndarray,
+    merged: List[Tuple[int, int, int]],
+    edge_width: int = 3,
+) -> Optional[Dict[str, int]]:
+    """识别窗口最右侧的半边多空对。
+
+    半边 = merged 最后一段（方向非零时）。它"有起点、无终点"。
+    若最后一段方向为 0（即窗口末尾处于观望），则返回 None。
+
+    Parameters
+    ----------
+    sig_t : np.ndarray
+        Schmitt 信号序列。
+    merged : List[Tuple[int, int, int]]
+        _merge_segments 的返回值。
+    edge_width : int, optional
+        边缘区宽度（bar 数），起点距右边缘 <= edge_width 时视为未锁定，
+        默认 3。
+
+    Returns
+    -------
+    Optional[Dict[str, int]]
+        None 无有效半边（全为 0 或末尾在观望）；
+        Dict:
+            - "start" : 半边起点 bar 索引
+            - "current_idx" : 当前帧索引（= len(sig_t) - 1）
+            - "direction" : +1 多 / -1 空
+            - "is_locked" : 起点是否已锁定（距右边缘 > edge_width）
+            - "edge_distance" : 起点距右边缘的 bar 数
+    """
+    n = len(sig_t)
+    if n < 1:
+        return None
+    current_idx = n - 1
+
+    if not merged or sig_t[current_idx] == 0:
+        return None
+
+    last_seg = merged[-1]
+    start_idx = int(last_seg[0])
+    direction = int(last_seg[2])
+    edge_distance = current_idx - start_idx
+
+    return {
+        "start": start_idx,
+        "current_idx": current_idx,
+        "direction": direction,
+        "is_locked": edge_distance > edge_width,
+        "edge_distance": edge_distance,
+    }
+
+
+def _get_higher_tf_direction(
+    higher_sig: Optional[np.ndarray],
+    edge_width: int = 3,
+) -> int:
+    """获取高周期（C）当前方向 — 最右侧非零 sign。
+
+    从右向左扫描 higher_sig，返回第一个非零值。
+    与 _find_current_half_pair 不同，此函数不要求半边锁定，
+    只要存在非零 signal 即返回其方向。
+
+    Parameters
+    ----------
+    higher_sig : Optional[np.ndarray]
+        C 周期的 Schmitt 信号序列。None 表示 C 不可用。
+    edge_width : int, optional
+        保留参数，未使用（兼容接口），默认 3。
+
+    Returns
+    -------
+    int
+        +1（多）, -1（空）, 0（C 不可用或全零）。
+    """
+    if higher_sig is None or len(higher_sig) == 0:
+        return 0
+    for i in range(len(higher_sig) - 1, -1, -1):
+        if higher_sig[i] != 0:
+            return int(higher_sig[i])
+    return 0
 
 
 def _fit_parabolic(x: np.ndarray, y: np.ndarray, start: int, end: int) -> Optional[Dict[str, Any]]:
@@ -646,10 +751,162 @@ def _fit_physics_parabola(x: np.ndarray, y: np.ndarray, start: int, end: int) ->
     return {"a": a, "b": 0.0, "c": y0, "y_fit": y_fit, "x0": x0}
 
 
+def _run_half_pair_strategy(
+    t: np.ndarray,
+    filtered: np.ndarray,
+    sig_t: np.ndarray,
+    half_pair: Optional[Dict[str, int]],
+    higher_dir: int,
+    pred_pairs: List[Dict[str, Any]],
+    params: Optional[Dict[str, Any]] = None,
+    n_extend: int = 10,
+) -> List[Dict[str, Any]]:
+    """执行半边多空对策略：入场判定 + 离场扫描。
+
+    仅当 half_pair 非 None 且方向与 higher_dir 同向时才入场。
+    离场按优先级：① sig_t 连续反向（take_profit）> ② 趋势偏离（trend_deviation）。
+
+    Parameters
+    ----------
+    t : np.ndarray
+        时间索引。
+    filtered : np.ndarray
+        滤波价格。
+    sig_t : np.ndarray
+        B 周期 Schmitt 信号。
+    half_pair : Optional[Dict[str, int]]
+        _find_current_half_pair 返回值（B 周期）。None 表示无活跃半边。
+    higher_dir : int
+        _get_higher_tf_direction 返回值（C 周期方向）。
+    pred_pairs : List[Dict[str, Any]]
+        预测曲线列表（含 fit_result/pair_end）。
+    params : Optional[Dict[str, Any]], optional
+        策略参数字典，支持的 key:
+        - "N_confirm" : int, 反向连续 bar 数才确认反转，默认 2
+        - "MAX_DEV_PCT" : float, 趋势偏离阈值 (%)，默认 4.0
+        - "enable_gating" : bool, 是否启用 C 周期门控，默认 True
+        为 None 时使用默认值。
+    n_extend : int, optional
+        预测延伸点数（预留，默认 10）。
+
+    Returns
+    -------
+    List[Dict[str, Any]]
+        交易信号列表，每项：
+        - "entry_idx" : int, 入场 bar 索引
+        - "exit_idx" : int, 离场 bar 索引
+        - "direction" : int, +1 做多 / -1 做空
+        - "entry_price" : float, 入场价格
+        - "exit_price" : float, 离场价格
+        - "return_pct" : float, 收益率（百分比数值）
+        - "exit_reason" : str, "take_profit"|"trend_deviation"|"eod"
+        无有效入场机会时返回空列表。
+    """
+    if half_pair is None:
+        return []
+
+    if params is None:
+        params = {"N_confirm": 2, "MAX_DEV_PCT": 4.0, "enable_gating": True}
+
+    direction = half_pair["direction"]
+    entry_idx = half_pair["start"]
+    n = len(t)
+
+    if entry_idx < 0 or entry_idx >= n:
+        return []
+
+    entry_price = filtered[entry_idx]
+    if np.isnan(entry_price) or entry_price <= 0:
+        return []
+
+    # C 周期方向门控
+    enable_gating = params.get("enable_gating", True)
+    if enable_gating and higher_dir != direction:
+        return []
+
+    # ── 离场扫描 ──
+    N_confirm = params.get("N_confirm", 2)
+    MAX_DEV_PCT = params.get("MAX_DEV_PCT", 4.0)
+    is_long = direction == 1
+    opposite_dir = -direction
+
+    # 取最新的预测曲线用于偏离检查
+    fit_result = None
+    if pred_pairs:
+        latest_pred = pred_pairs[-1]
+        fit_result = latest_pred.get("fit_result")
+        if fit_result is not None:
+            a_val = fit_result.get("a")
+            b_val = fit_result.get("b", 0.0)
+            c_val = fit_result.get("c")
+            x0 = fit_result.get("x0")
+
+    exit_idx = None
+    exit_reason = "eod"
+    opposite_count = 0
+
+    for i in range(entry_idx + 1, n):
+        cur_price = filtered[i]
+        if np.isnan(cur_price) or cur_price <= 0:
+            continue
+
+        # Exit ①: sig_t 连续反向 >= N_confirm
+        if sig_t[i] == opposite_dir:
+            opposite_count += 1
+            if opposite_count >= N_confirm:
+                exit_idx = i
+                exit_reason = "take_profit"
+                break
+        else:
+            opposite_count = 0
+
+        # Exit ②: 趋势偏离（不利方向 > MAX_DEV_PCT）
+        if fit_result is not None:
+            if x0 is not None:
+                pred_val = np.polyval((a_val, b_val, c_val), i - x0)
+            else:
+                pred_val = np.polyval((a_val, b_val, c_val), i)
+
+            if not (np.isnan(pred_val) or pred_val <= 0):
+                if is_long:
+                    trend_broken = cur_price < pred_val * (1 - MAX_DEV_PCT / 100.0)
+                else:
+                    trend_broken = cur_price > pred_val * (1 + MAX_DEV_PCT / 100.0)
+
+                if trend_broken:
+                    exit_idx = i
+                    exit_reason = "trend_deviation"
+                    break
+
+    if exit_idx is None:
+        exit_idx = n - 1
+
+    exit_price = filtered[exit_idx]
+    if np.isnan(exit_price) or exit_price <= 0:
+        return []
+
+    if is_long:
+        trade_return = (exit_price - entry_price) / entry_price
+    else:
+        trade_return = (entry_price - exit_price) / entry_price
+
+    return [{
+        "entry_idx": int(entry_idx),
+        "exit_idx": int(exit_idx),
+        "direction": direction,
+        "entry_price": float(entry_price),
+        "exit_price": float(exit_price),
+        "return_pct": float(trade_return * 100),
+        "exit_reason": exit_reason,
+    }]
+
+
 def _compute_strategy_pnl(
     t: np.ndarray, filtered: np.ndarray, sig_t: np.ndarray,
     all_pairs: List[Tuple[int, int]], pred_pairs: List[Dict[str, Any]],
     stop_loss_pct: float, n_extend: int = 10,
+    strategy_mode: Optional[str] = None,
+    trade_signals: Optional[List[Dict[str, Any]]] = None,
 ) -> Tuple[np.ndarray, np.ndarray, List[Dict[str, Any]]]:
     """基于施密特触发器信号和预测曲线方向计算策略PnL。
 
@@ -673,6 +930,11 @@ def _compute_strategy_pnl(
         止损阈值百分比（如 2.0 表示 2%）。
     n_extend : int, optional
         预测延伸点数（默认 10）。
+    strategy_mode : Optional[str], optional
+        None=现有逻辑（向后兼容），"half_pair"=半边策略模式，默认 None。
+    trade_signals : Optional[List[Dict[str, Any]]], optional
+        strategy_mode="half_pair" 时传入 _run_half_pair_strategy 的返回值。
+        为 None 或空列表时退化为空结果。
 
     Returns
     -------
@@ -693,6 +955,84 @@ def _compute_strategy_pnl(
     long_capital = 100.0   # 做多已实现本金
     short_capital = 100.0  # 做空已实现本金
 
+    trade_records = []
+    trade_id = 0
+
+    # ── 半边策略模式 ──
+    if strategy_mode == "half_pair":
+        if trade_signals:
+            for sig in trade_signals:
+                direction = sig["direction"]
+                entry_idx = sig["entry_idx"]
+                exit_idx = sig["exit_idx"]
+                exit_reason = sig.get("exit_reason", "eod")
+
+                if entry_idx < 0 or exit_idx >= n or exit_idx < entry_idx:
+                    continue
+                entry_price = filtered[entry_idx]
+                exit_price = filtered[exit_idx]
+                if np.isnan(entry_price) or entry_price <= 0 or np.isnan(exit_price) or exit_price <= 0:
+                    continue
+
+                is_long = direction == 1
+
+                if is_long:
+                    trade_return = (exit_price - entry_price) / entry_price
+                else:
+                    trade_return = (entry_price - exit_price) / entry_price
+
+                trade_id += 1
+
+                if is_long:
+                    for i in range(entry_idx, exit_idx + 1):
+                        cur_p = filtered[i]
+                        if np.isnan(cur_p) or cur_p <= 0:
+                            continue
+                        unrealized = (cur_p - entry_price) / entry_price
+                        long_pnl[i] = long_capital * (1 + unrealized)
+                    long_capital *= (1 + trade_return)
+                    for i in range(exit_idx + 1, n):
+                        long_pnl[i] = long_capital
+                else:
+                    for i in range(entry_idx, exit_idx + 1):
+                        cur_p = filtered[i]
+                        if np.isnan(cur_p) or cur_p <= 0:
+                            continue
+                        unrealized = (entry_price - cur_p) / entry_price
+                        short_pnl[i] = short_capital * (1 + unrealized)
+                    short_capital *= (1 + trade_return)
+                    for i in range(exit_idx + 1, n):
+                        short_pnl[i] = short_capital
+
+                trade_records.append({
+                    "id": trade_id,
+                    "type": "long" if is_long else "short",
+                    "entry_idx": int(entry_idx),
+                    "exit_idx": int(exit_idx),
+                    "entry_price": float(entry_price),
+                    "exit_price": float(exit_price),
+                    "return_pct": float(trade_return * 100),
+                    "exit_reason": exit_reason,
+                })
+
+            # 前向填充：非持仓期维持上一个值不变
+            last_val = 100.0
+            for i in range(n):
+                if long_pnl[i] == 100.0 and i > 0 and last_val != 100.0:
+                    long_pnl[i] = last_val
+                if long_pnl[i] != 100.0 or (i == 0):
+                    last_val = long_pnl[i]
+            last_val = 100.0
+            for i in range(n):
+                if short_pnl[i] == 100.0 and i > 0 and last_val != 100.0:
+                    short_pnl[i] = last_val
+                if short_pnl[i] != 100.0 or (i == 0):
+                    last_val = short_pnl[i]
+
+            return long_pnl, short_pnl, trade_records
+
+        return long_pnl, short_pnl, []
+
     # 空数据保护
     if len(all_pairs) == 0 or len(pred_pairs) == 0:
         return long_pnl, short_pnl, []
@@ -701,9 +1041,6 @@ def _compute_strategy_pnl(
     pred_map = {}
     for pp in pred_pairs:
         pred_map[pp["pair_end"]] = pp
-
-    trade_records = []
-    trade_id = 0
 
     for pair_start, pair_end in all_pairs:
         if pair_end not in pred_map:

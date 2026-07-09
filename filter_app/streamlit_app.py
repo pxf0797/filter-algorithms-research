@@ -34,6 +34,15 @@ from services.filter_engine import (
     _fit_parabolic, _fit_physics_parabola,
     _compute_strategy_pnl, _align_pnl_to_current_tf, _compute_holding_masks,
 )
+# T1/T2: 半边多空对策略函数（filter_engine.py 中待实现）
+try:
+    from services.filter_engine import (
+        _merge_segments, _find_current_half_pair,
+        _get_higher_tf_direction, _run_half_pair_strategy,
+    )
+    _HALF_PAIR_AVAILABLE = True
+except ImportError:
+    _HALF_PAIR_AVAILABLE = False
 from services.data_loader import (
     _fetch_all_timeframes, _fetch_stock, _sync_to_display,
     _sync_all_cascading,
@@ -280,14 +289,48 @@ def _compute_strategy_display(t, filtered, schmitt, all_pairs, pred_pairs, cfg, 
     """Compute strategy PnL and display summary captions. Returns (long_pnl, short_pnl, trade_records)."""
     show_strategy = cfg.get("show_strategy", False)
     stop_loss_pct = cfg.get("stop_loss_pct", 2.0)
+    half_pair_strategy = cfg.get("half_pair_strategy", False)
     long_pnl = short_pnl = None
     trade_records = []
     if show_strategy and schmitt is not None and len(pred_pairs) > 0:
-        logger.debug(f"Computing strategy PnL: stop_loss={stop_loss_pct}%, n_extend={cfg.get('n_ext', 10)}")
-        long_pnl, short_pnl, trade_records = _compute_strategy_pnl(
-            t, filtered, schmitt["sig"], all_pairs, pred_pairs, stop_loss_pct,
-            n_extend=cfg.get("n_ext", 10),
-        )
+        if half_pair_strategy and _HALF_PAIR_AVAILABLE:
+            # ── 半边多空对策略（实验性）：获取 C 周期方向，半边上场 + 三重离场 ──
+            higher_tf = TF_HIERARCHY.get(tf)
+            higher_data = st.session_state.get(f"_pnl_{higher_tf}") if higher_tf else None
+            higher_sig = higher_data.get("sig") if isinstance(higher_data, dict) else None
+
+            sig_t = schmitt["sig"]
+            merged = _merge_segments(sig_t)
+            half_pair = _find_current_half_pair(sig_t, merged)
+            higher_dir = _get_higher_tf_direction(higher_sig)
+
+            if half_pair is not None:
+                half_pair_params = {
+                    "N_confirm": cfg.get("hp_n_confirm", 2),
+                    "MAX_DEV_PCT": cfg.get("hp_max_dev_pct", 4.0),
+                    "enable_gating": cfg.get("hp_enable_gating", True),
+                }
+                trade_signals = _run_half_pair_strategy(
+                    t, filtered, sig_t, half_pair, higher_dir,
+                    pred_pairs, half_pair_params,
+                    n_extend=cfg.get("n_ext", 10),
+                )
+                if trade_signals:
+                    long_pnl, short_pnl, trade_records = _compute_strategy_pnl(
+                        t, filtered, sig_t, all_pairs, pred_pairs, stop_loss_pct,
+                        n_extend=cfg.get("n_ext", 10),
+                        # T2 需在 _compute_strategy_pnl 中添加 strategy_mode/trade_signals 参数
+                        strategy_mode="half_pair",
+                        trade_signals=trade_signals,
+                    )
+            # 半边不成立时：long_pnl/short_pnl 保持 None，下方 has_strategy=False
+        else:
+            # ── 原有策略路径（方案D） ──
+            logger.debug(f"Computing strategy PnL: stop_loss={stop_loss_pct}%, n_extend={cfg.get('n_ext', 10)}")
+            long_pnl, short_pnl, trade_records = _compute_strategy_pnl(
+                t, filtered, schmitt["sig"], all_pairs, pred_pairs, stop_loss_pct,
+                n_extend=cfg.get("n_ext", 10),
+            )
 
     has_strategy = show_strategy and long_pnl is not None and len(trade_records) > 0
     if has_strategy and trade_records:
@@ -296,7 +339,8 @@ def _compute_strategy_display(t, filtered, schmitt, all_pairs, pred_pairs, cfg, 
         long_ret = long_pnl[-1] - 100.0
         short_ret = short_pnl[-1] - 100.0
         total_ret = long_ret + short_ret
-        c4.caption(f"交易: {len(trade_records)}笔 | 胜率: {win_trades}/{len(trade_records)}")
+        strategy_label = "半边多空对" if half_pair_strategy else "交易"
+        c4.caption(f"{strategy_label}: {len(trade_records)}笔 | 胜率: {win_trades}/{len(trade_records)}")
         c5.caption(f"多: {long_ret:+.2f}% | 空: {short_ret:+.2f}% | 总和: {total_ret:+.2f}%")
         peak_l = np.maximum.accumulate(long_pnl)
         drawdown_l = (long_pnl - peak_l) / peak_l * 100
@@ -309,6 +353,8 @@ def _compute_strategy_display(t, filtered, schmitt, all_pairs, pred_pairs, cfg, 
             "dates": dates, "t": t,
             "long_pnl": long_pnl, "short_pnl": short_pnl,
             "trade_records": trade_records,
+            "sig": schmitt["sig"],
+            "filtered": filtered,
         }
     return long_pnl, short_pnl, trade_records
 
@@ -660,6 +706,13 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     c1.caption(f"{ticker_full}·{cfg['tf']}  |  ¥{noisy[-1]:.2f}")
     c2.caption(f"σ={noisy.std():.2f}  平滑={rough:.1f}")
     c3.caption(f"{len(t)} 点")
+
+    # 半边多空对策略开关（需 T1/T2 就绪方可启用）
+    cfg["half_pair_strategy"] = st.checkbox(
+        "半边多空对策略", value=False,
+        key=f"{key}_half_pair",
+        help="使用基于C周期方向的半边多空对入场+离场策略（实验性）",
+    )
 
     # ── Step 6: Schmitt trigger ──
     schmitt = _compute_schmitt_trigger(filtered, t, cfg)
