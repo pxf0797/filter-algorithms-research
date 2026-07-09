@@ -34,6 +34,17 @@ from services.filter_engine import (
     _fit_parabolic, _fit_physics_parabola,
     _compute_strategy_pnl, _align_pnl_to_current_tf, _compute_holding_masks,
 )
+
+try:
+    from services.filter_engine import (
+        _merge_segments, _find_current_half_pair,
+        _get_higher_tf_direction, _run_half_pair_strategy,
+        _c_pair_state, _signed_deviation,
+    )
+    _HALF_PAIR_AVAILABLE = True
+except ImportError:
+    _HALF_PAIR_AVAILABLE = False
+
 from services.data_loader import (
     _fetch_all_timeframes, _fetch_stock, _sync_to_display,
     _sync_all_cascading,
@@ -276,6 +287,16 @@ def _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs) -> list:
     return pred_pairs
 
 
+def _find_higher_tf_in_views(configs, tf):
+    """从4视图配置中找到比tf更粗的周期中最接近的。返回higher_tf或None。"""
+    tf_idx = ALL_TFS.index(tf)
+    higher = [(ALL_TFS.index(c["tf"]), c["tf"]) for c in configs if ALL_TFS.index(c["tf"]) > tf_idx]
+    if not higher:
+        return None
+    higher.sort()
+    return higher[0][1]
+
+
 def _compute_strategy_display(t, filtered, schmitt, all_pairs, pred_pairs, cfg, tf, dates) -> tuple:
     """Compute strategy PnL and display summary captions. Returns (long_pnl, short_pnl, trade_records)."""
     show_strategy = cfg.get("show_strategy", False)
@@ -284,10 +305,36 @@ def _compute_strategy_display(t, filtered, schmitt, all_pairs, pred_pairs, cfg, 
     trade_records = []
     if show_strategy and schmitt is not None and len(pred_pairs) > 0:
         logger.debug(f"Computing strategy PnL: stop_loss={stop_loss_pct}%, n_extend={cfg.get('n_ext', 10)}")
-        long_pnl, short_pnl, trade_records = _compute_strategy_pnl(
-            t, filtered, schmitt["sig"], all_pairs, pred_pairs, stop_loss_pct,
-            n_extend=cfg.get("n_ext", 10),
-        )
+        n_extend = cfg.get("n_ext", 10)
+        sig_t = schmitt["sig"]
+
+        half_pair_strategy = cfg.get("half_pair_strategy", False) and _HALF_PAIR_AVAILABLE
+        if half_pair_strategy:
+            configs = st.session_state.get("_view_configs", [])
+            higher_tf = _find_higher_tf_in_views(configs, tf)
+            if higher_tf:
+                higher_data = st.session_state.get(f"_pnl_{higher_tf}", {})
+                higher_sig = higher_data.get("sig")
+                higher_dir = _get_higher_tf_direction(higher_sig) if higher_sig is not None else 0
+
+                merged = _merge_segments(sig_t)
+                half_pair = _find_current_half_pair(sig_t, merged)
+
+                params = {"N_confirm": 2, "MAX_DEV_PCT": 4.0, "enable_gating": True}
+                trade_signals = _run_half_pair_strategy(
+                    t, filtered, sig_t, half_pair, higher_dir, pred_pairs, params, n_extend)
+
+                long_pnl, short_pnl, trade_records = _compute_strategy_pnl(
+                    t, filtered, sig_t, all_pairs, pred_pairs, stop_loss_pct,
+                    n_extend=n_extend, strategy_mode="half_pair", trade_signals=trade_signals)
+            else:
+                long_pnl, short_pnl, trade_records = _compute_strategy_pnl(
+                    t, filtered, sig_t, all_pairs, pred_pairs, stop_loss_pct,
+                    n_extend=n_extend)
+        else:
+            long_pnl, short_pnl, trade_records = _compute_strategy_pnl(
+                t, filtered, sig_t, all_pairs, pred_pairs, stop_loss_pct,
+                n_extend=n_extend)
 
     has_strategy = show_strategy and long_pnl is not None and len(trade_records) > 0
     if has_strategy and trade_records:
@@ -309,6 +356,8 @@ def _compute_strategy_display(t, filtered, schmitt, all_pairs, pred_pairs, cfg, 
             "dates": dates, "t": t,
             "long_pnl": long_pnl, "short_pnl": short_pnl,
             "trade_records": trade_records,
+            "sig": schmitt["sig"],
+            "filtered": filtered,
         }
     return long_pnl, short_pnl, trade_records
 
@@ -1776,6 +1825,7 @@ def main() -> None:
 
     # ── Pass 1: 2x2 parameter panels ──
     configs = _render_param_panels(filter_id, dual, filter_id2)
+    st.session_state["_view_configs"] = configs
 
     # ticker 切换后，若处于回测模式则刷新回测状态（需在 _render_backtest_mode 前）
     _prev_bt_ticker = AppState.get("_bt_last_ticker", "")
