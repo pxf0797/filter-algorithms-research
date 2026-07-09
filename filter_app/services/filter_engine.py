@@ -809,6 +809,8 @@ def _run_half_pair_strategy(
         params = {"N_confirm": 2, "MAX_DEV_PCT": 4.0, "enable_gating": True}
 
     direction = half_pair["direction"]
+    if direction == 0:
+        return []  # 无方向半边不产生交易信号
     entry_idx = half_pair["start"]
     n = len(t)
 

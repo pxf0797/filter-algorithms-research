@@ -270,8 +270,8 @@ class TestRunHalfPairStrategy:
         assert len(signals) == 0, f"Expected 0 signals, got {len(signals)}"
 
     @pytest.mark.strategy
-    def test_no_entry_when_not_locked(self):
-        """is_locked=False → 不入场."""
+    def test_entry_without_lock(self):
+        """v2设计:未锁定(is_locked=False)也允许入场(起点即入场,不等锁定)."""
         n = 20
         t = np.arange(n, dtype=float)
         filtered = _rising_price(n)
@@ -281,7 +281,7 @@ class TestRunHalfPairStrategy:
         pred_pairs = _default_pred_pairs(filtered, pair_end=6)
         params = {"N_confirm": 2, "MAX_DEV_PCT": 4.0, "enable_gating": True}
         signals = _run_half_pair_strategy(t, filtered, sig_t, half_pair, higher_dir, pred_pairs, params)
-        assert len(signals) == 0, f"Expected 0 signals, got {len(signals)}"
+        assert len(signals) >= 1, f"v2不等锁定,起点即入场,应有交易信号,got {len(signals)}"
 
     @pytest.mark.strategy
     def test_entry_without_c_when_disabled(self):
