@@ -1240,55 +1240,87 @@ def _signed_deviation(
 
 def _c_pair_state(
     sig_C: np.ndarray,
-    price_C: np.ndarray,
+    price_C: Optional[np.ndarray],
     fit_C: Optional[Dict[str, Any]],
     d_B: int,
     params: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """C 周期配对状态判定 — MVP 简化 3 态。
+    """C 周期多空对状态判定 — 5 态完整版。
 
-    MVP 实现仅基于方向对比，不涉及偏离度阈值：
-      - STRONG_ALIGN : C 方向与 B 同向
-      - MISALIGN     : C 方向与 B 反向
-      - NO_DIRECTION : C 无有效方向
-
-    后续迭代会引入 _signed_deviation 和
-    N_confirm/MAX_DEV_PCT_C 参数以扩展到完整 5 态。
+    STRONG_ALIGN : C 方向与 B 同向，趋势健康（无离场信号）
+    WEAK_ALIGN   : C 方向与 B 同向，但趋势衰竭预警（反向苗头/偏离接近阈值）
+    C_ENDED      : C 方向与 B 同向，但已因偏离过大提前离场（C 已空仓）
+    MISALIGN     : C 方向与 B 反向
+    NO_DIRECTION : C 无有效方向
 
     Parameters
     ----------
     sig_C : np.ndarray
-        C 周期施密特信号（+1=多, -1=空, 0=观望）。
-    price_C : np.ndarray
-        C 周期滤波价格（MVP 暂不使用，为后续预留）。
+        C 周期 Schmitt 信号。
+    price_C : Optional[np.ndarray]
+        C 周期滤波价格（用于偏离计算，None 时跳过偏离检查）。
     fit_C : Optional[Dict[str, Any]]
-        C 周期拟合结果（MVP 暂不使用，为后续预留）。
+        C 周期预测拟合结果（含 "a"/"b"/"c"/"x0" 键）。
     d_B : int
         B 周期方向（+1=多, -1=空）。
     params : Optional[Dict[str, Any]], optional
-        预留参数，支持 N_confirm/MAX_DEV_PCT_C（默认 None）。
-
-    Returns
-    -------
-    str
-        状态枚举值：'STRONG_ALIGN' | 'MISALIGN' | 'NO_DIRECTION'。
+        {"N_confirm": 2, "MAX_DEV_PCT_C": 4.0, "WARN_DEV_PCT_C": 2.8}
     """
     if sig_C is None or len(sig_C) == 0:
         return "NO_DIRECTION"
 
-    # 从 sig_C 右到左找到第一个非零方向
+    if params is None:
+        params = {}
+    N_confirm = params.get("N_confirm", 2)
+    MAX_DEV = params.get("MAX_DEV_PCT_C", 4.0)
+    WARN_DEV = params.get("WARN_DEV_PCT_C", MAX_DEV * 0.7)
+
+    # 右到左取 C 当前方向
     dir_C = 0
     for val in sig_C[::-1]:
         if val == 1 or val == -1:
             dir_C = int(val)
             break
-
     if dir_C == 0:
         return "NO_DIRECTION"
-    if dir_C == d_B:
-        return "STRONG_ALIGN"
-    else:  # dir_C == -d_B
+    if dir_C == -d_B:
         return "MISALIGN"
+
+    # dir_C == d_B — 同向，检查离场信号
+    # ① 反转预警：反向尾巴 0 < reverse_run < N_confirm
+    reverse_run = 0
+    for val in sig_C[::-1]:
+        if val == -dir_C:
+            reverse_run += 1
+        else:
+            break
+    reversal_warning = 0 < reverse_run < N_confirm
+
+    # ② 偏离预警（需 price_C + fit_C 数据）
+    dev_warning = False
+    dev_exit = False
+    if price_C is not None and len(price_C) > 0 and fit_C is not None:
+        cur_price = float(price_C[-1])
+        a = fit_C.get("a")
+        b = fit_C.get("b", 0.0)
+        c = fit_C.get("c")
+        x0 = fit_C.get("x0")
+        if a is not None and c is not None and not np.isnan(cur_price):
+            idx = len(price_C) - 1
+            if x0 is not None:
+                pred_val = float(np.polyval((a, b, c), idx - x0))
+            else:
+                pred_val = float(np.polyval((a, b, c), idx))
+            if pred_val > 0 and not np.isnan(pred_val):
+                dev = _signed_deviation(cur_price, pred_val, dir_C)
+                if dev > MAX_DEV:
+                    return "C_ENDED"
+                if dev > WARN_DEV:
+                    dev_warning = True
+
+    if reversal_warning or dev_warning:
+        return "WEAK_ALIGN"
+    return "STRONG_ALIGN"
 
 
 def _run_half_pair_strategy(

@@ -230,6 +230,12 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
                             key=align_key,
                             disabled=not (cfg["show_strategy"] and cfg["show_cross_pnl"]),
                             help="高周期做多/空持仓时，本周期同向PnL才在子图体现，否则维持不变")
+                        half_pair_key = f"{key}_half_pair"
+                        cfg["half_pair_strategy"] = st.checkbox(
+                            "半边多空对策略", value=st.session_state.get(half_pair_key,
+                                st.session_state.get(f"_imp_{half_pair_key}", False)),
+                            key=half_pair_key, disabled=not cfg["show_strategy"],
+                            help="B周期起点即入场+C周期同向门控+N_confirm离场")
                     if cfg["show_strategy"]:
                         with c_strat[1]:
                             cfg["stop_loss_pct"] = st.slider(
