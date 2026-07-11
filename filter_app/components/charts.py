@@ -219,8 +219,8 @@ def _add_prediction_traces(t, filtered, fit_result, fit_start, pair_end, row,
 # ---------------------------------------------------------------------------
 # Shared PnL rendering helpers
 # ---------------------------------------------------------------------------
-def _render_entry_marker(fig, t, bar_idx, pnl_val, row, col=1,
-                         color="#d2991d", size=9, hovertext="") -> None:
+def _render_entry_marker(t, bar_idx, pnl_val, row, col=1,
+                         color="#d2991d", size=9, hovertext=""):
     """统一的入场标记（三角形）。"""
     if not (0 <= bar_idx < len(t)):
         return None
@@ -232,7 +232,7 @@ def _render_entry_marker(fig, t, bar_idx, pnl_val, row, col=1,
         xaxis=f"x{row}", yaxis=f"y{row}")
 
 
-def _render_exit_marker_with_label(fig, t, bar_idx, pnl_val, row, col=1,
+def _render_exit_marker_with_label(t, bar_idx, pnl_val, row, col=1,
                                    color="#d2991d", trade_type="long",
                                    exit_reason="", ret_pct=0.0,
                                    hovertext="") -> None:
