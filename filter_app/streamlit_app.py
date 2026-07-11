@@ -719,9 +719,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
         _raw_higher = st.session_state.get(f"_pnl_{_higher_tf}")
 
     # ── Step 1: Load chart data ──
-    _t0 = time.perf_counter()
     t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, n_pts, window_start=window_start, cutoff_date=cutoff_date)
-    _t_load = time.perf_counter() - _t0
     if err is not None:
         if "数据点不足" in str(err):
             st.caption(f"⏳ {tf} 在回测日期前无足够数据")
@@ -747,9 +745,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
         higher_pnl = None
 
     # ── Step 4: Compute filters ──
-    _t1 = time.perf_counter()
     filtered, filtered2 = _compute_filters(noisy, t, cfg)
-    _t_filter = time.perf_counter() - _t1
 
     # ── Step 5: Info captions ──
     rough = float(np.sum(np.diff(filtered, 2) ** 2)) if len(filtered) > 2 else 0.0
@@ -759,9 +755,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
     c3.caption(f"{len(t)} 点")
 
     # ── Step 6: Schmitt trigger ──
-    _t2 = time.perf_counter()
     schmitt = _compute_schmitt_trigger(filtered, t, cfg)
-    _t_schmitt = time.perf_counter() - _t2
     if cfg["show_sch"] and schmitt is None and len(t) > 0:
         st.warning(f"⚠️ 施密特信号不可用：bar数({len(t)}) < N_EWMA({cfg['ew']})。"
                    f"请降低 N_EWMA 至 ≤{len(t)} 或增加数据点数(N)。")
@@ -771,15 +765,11 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
         all_pairs = _find_all_pairs(schmitt["sig"])
 
     # ── Step 7: Prediction curves ──
-    _t3 = time.perf_counter()
     pred_pairs = _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs)
-    _t_pred = time.perf_counter() - _t3
 
     # ── Step 8: Strategy PnL ──
-    _t4 = time.perf_counter()
     long_pnl, short_pnl, trade_records = _compute_strategy_display(
         t, filtered, schmitt, all_pairs, pred_pairs, cfg, tf, dates)
-    _t_strategy = time.perf_counter() - _t4
     show_strategy = cfg.get("show_strategy", False)
     show_cross_pnl = cfg.get("show_cross_pnl", False)
     show_alignment = cfg.get("show_alignment", False)
@@ -809,7 +799,6 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
             rows, rh, titles, pnl_row, cross_row, align_row)
 
     # ── Step 10: Build figure (A: one-shot go.Figure from raw dicts) ──
-    _t5 = time.perf_counter()
     # 1. Collect ALL trace dicts, shapes, annotations from _add_* functions
     all_traces, all_shapes, all_annotations = [], [], []
     _layout_updates = {}  # yaxis config dicts merged later
@@ -887,18 +876,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
 
     # 5. ONE-SHOT Figure construction — NO Python Trace objects created
     fig = go.Figure(data=all_traces, layout=layout_dict)
-    _t_build = time.perf_counter() - _t5
-    _t6 = time.perf_counter()
     _render_plotly(fig, height=fh + 30, dates=dates)
-    _t_render = time.perf_counter() - _t6
-    _t_total = time.perf_counter() - _t0
-    # PERF-TRACE: 显示各阶段耗时（每视图首帧），注释掉此行即可关闭
-    st.caption(
-        f"⏱ {tf}: 加载{_t_load*1000:.0f}ms 滤波{_t_filter*1000:.0f}ms "
-        f"施密特{_t_schmitt*1000:.0f}ms 预测{_t_pred*1000:.0f}ms "
-        f"策略{_t_strategy*1000:.0f}ms 构图{_t_build*1000:.0f}ms "
-        f"渲染{_t_render*1000:.0f}ms | 总计{_t_total*1000:.0f}ms"
-    )
 
 
 # =====================================================================
