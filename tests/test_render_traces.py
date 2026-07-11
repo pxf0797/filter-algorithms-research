@@ -137,7 +137,7 @@ class TestAddPnlTraces:
         symbols = [tr.marker.symbol for tr in fig.data if tr.mode == "markers"]
         assert "triangle-up" in symbols       # 入场
         assert "circle" in symbols            # 止盈离场
-        assert any(tr.name == "多#1" for tr in fig.data)
+        # Merged: segment traces named "做多段"/"做空段" not per-trade names
 
     def test_stop_loss_marker_is_x(self):
         t, lp, sp = self._curves()
@@ -158,8 +158,8 @@ class TestAddPnlTraces:
         _add_pnl_traces(fig, t, lp, sp, trades, 1)
         symbols = [tr.marker.symbol for tr in fig.data if tr.mode == "markers"]
         assert "triangle-up" in symbols       # 有入场
-        assert "x" not in symbols and "circle" not in symbols  # eod 不画离场标记
-        assert len(fig.layout.annotations) == 0                # 无收益标注
+        assert "x" not in symbols and "circle" not in symbols  # eod: no exit marker
+        assert len(fig.layout.annotations) == 0                # eod: no annotation
 
     def test_annotation_arrow_on_take_profit(self):
         t, lp, sp = self._curves()
@@ -181,5 +181,6 @@ class TestAddPnlTraces:
         ]
         fig = make_subplots(rows=1, cols=1)
         _add_pnl_traces(fig, t, lp, sp, trades, 1)
-        seg_names = [tr.name for tr in fig.data if tr.name and "#" in tr.name]
-        assert "多#1" in seg_names and "空#2" in seg_names
+        # Merged segments: one trace per direction ("做多段"/"做空段"), not per-trade
+        seg_names = [tr.name for tr in fig.data]
+        assert "做多段" in seg_names and "做空段" in seg_names

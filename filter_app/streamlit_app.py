@@ -460,31 +460,58 @@ def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row) -> None
         line=dict(color="#3fb950", width=1.5, dash="solid")), row=pnl_row, col=1)
     fig.add_trace(go.Scattergl(x=t, y=short_pnl, mode="lines", name="做空PnL",
         line=dict(color="#f85149", width=1.5, dash="solid")), row=pnl_row, col=1)
+    # Trace merge: 逐笔交易段合并为 2 条 (多/空), NaN 分隔
+    _l_seg, _s_seg = [], []
+    _l_entry_x, _l_entry_y = [], []  # ▲ 入场标记
+    _s_entry_x, _s_entry_y = [], []
+    _l_exit_sl_x,   _l_exit_sl_y   = [], []  # ✕ 止损离场
+    _l_exit_tp_x,   _l_exit_tp_y   = [], []  # ○ 止盈离场
+    _s_exit_sl_x,   _s_exit_sl_y   = [], []
+    _s_exit_tp_x,   _s_exit_tp_y   = [], []
     for trade in trade_records:
         seg_t = t[trade["entry_idx"]:trade["exit_idx"] + 1]
         curve = long_pnl if trade["type"] == "long" else short_pnl
         seg_pnl = curve[trade["entry_idx"]:trade["exit_idx"] + 1]
-        is_long = trade["type"] == "long"
-        color = "#3fb950" if is_long else "#f85149"
-        label_prefix = "多" if is_long else "空"
-        fig.add_trace(go.Scattergl(x=seg_t, y=seg_pnl, mode="lines",
-            name=f"{label_prefix}#{trade['id']}",
-            line=dict(color=color, width=3), showlegend=False), row=pnl_row, col=1)
-        fig.add_trace(go.Scattergl(x=[seg_t[0]], y=[seg_pnl[0]], mode="markers",
-            marker=dict(color=color, symbol="triangle-up", size=8),
-            showlegend=False), row=pnl_row, col=1)
+        if trade["type"] == "long":
+            _l_seg.extend(zip(seg_t, seg_pnl)); _l_seg.append((float('nan'), float('nan')))
+            _l_entry_x.append(seg_t[0]); _l_entry_y.append(seg_pnl[0])
+        else:
+            _s_seg.extend(zip(seg_t, seg_pnl)); _s_seg.append((float('nan'), float('nan')))
+            _s_entry_x.append(seg_t[0]); _s_entry_y.append(seg_pnl[0])
+        if trade["exit_reason"] == "stop_loss":
+            (aplat_x := _l_exit_sl_x if trade["type"]=="long" else _s_exit_sl_x).append(seg_t[-1])
+            (aplat_y := _l_exit_sl_y if trade["type"]=="long" else _s_exit_sl_y).append(seg_pnl[-1])
+        elif trade["exit_reason"] == "take_profit":
+            (aplat_x := _l_exit_tp_x if trade["type"]=="long" else _s_exit_tp_x).append(seg_t[-1])
+            (aplat_y := _l_exit_tp_y if trade["type"]=="long" else _s_exit_tp_y).append(seg_pnl[-1])
         if trade["exit_reason"] in ("stop_loss", "take_profit"):
-            exit_marker = "x" if trade["exit_reason"] == "stop_loss" else "circle"
-            exit_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
-            fig.add_trace(go.Scattergl(x=[seg_t[-1]], y=[seg_pnl[-1]], mode="markers",
-                marker=dict(color=exit_color, symbol=exit_marker, size=8),
-                showlegend=False), row=pnl_row, col=1)
             ret_pct = trade["return_pct"]
             label_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
             arrow = "↑" if trade["type"] == "long" else "↓"
             fig.add_annotation(x=seg_t[-1], y=seg_pnl[-1], text=f"{arrow}{ret_pct:+.1f}%",
                 showarrow=False, font=dict(size=8, color=label_color), yshift=12,
                 row=pnl_row, col=1)
+    # Add merged segment traces (at most 2, with NaN gaps)
+    def _add_merged(xy_list, name, color, width=3):
+        if xy_list:
+            xs, ys = zip(*xy_list)
+            fig.add_trace(go.Scattergl(x=list(xs), y=list(ys), mode="lines",
+                name=name, line=dict(color=color, width=width),
+                showlegend=False), row=pnl_row, col=1)
+    _add_merged(_l_seg, "做多段", "#3fb950")
+    _add_merged(_s_seg, "做空段", "#f85149")
+    # Add merged marker traces (at most 6)
+    def _add_markers(xs, ys, symbol, color):
+        if xs:
+            fig.add_trace(go.Scattergl(x=xs, y=ys, mode="markers",
+                marker=dict(color=color, symbol=symbol, size=8),
+                showlegend=False), row=pnl_row, col=1)
+    _add_markers(_l_entry_x, _l_entry_y, "triangle-up", "#3fb950")
+    _add_markers(_s_entry_x, _s_entry_y, "triangle-up", "#f85149")
+    _add_markers(_l_exit_sl_x, _l_exit_sl_y, "x", "#f85149")
+    _add_markers(_s_exit_sl_x, _s_exit_sl_y, "x", "#f85149")
+    _add_markers(_l_exit_tp_x, _l_exit_tp_y, "circle", "#3fb950")
+    _add_markers(_s_exit_tp_x, _s_exit_tp_y, "circle", "#3fb950")
     fig.add_hline(y=100, line_dash="dash", line_color="gray", opacity=0.5, row=pnl_row, col=1)
     y_max_l = max(float(np.nanmax(long_pnl)), 100.0) * 1.02
     fig.add_trace(go.Scattergl(x=[t[0], t[-1], t[-1], t[0]],
@@ -672,7 +699,9 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         _raw_higher = st.session_state.get(f"_pnl_{_higher_tf}")
 
     # ── Step 1: Load chart data ──
+    _t0 = time.perf_counter()
     t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=window_start, cutoff_date=cutoff_date)
+    _t_load = time.perf_counter() - _t0
     if err is not None:
         if "数据点不足" in str(err):
             st.caption(f"⏳ {tf} 在回测日期前无足够数据")
@@ -698,7 +727,9 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         higher_pnl = None
 
     # ── Step 4: Compute filters ──
+    _t1 = time.perf_counter()
     filtered, filtered2 = _compute_filters(noisy, t, cfg)
+    _t_filter = time.perf_counter() - _t1
 
     # ── Step 5: Info captions ──
     rough = float(np.sum(np.diff(filtered, 2) ** 2)) if len(filtered) > 2 else 0.0
@@ -708,7 +739,9 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     c3.caption(f"{len(t)} 点")
 
     # ── Step 6: Schmitt trigger ──
+    _t2 = time.perf_counter()
     schmitt = _compute_schmitt_trigger(filtered, t, cfg)
+    _t_schmitt = time.perf_counter() - _t2
     if cfg["show_sch"] and schmitt is None and len(t) > 0:
         st.warning(f"⚠️ 施密特信号不可用：bar数({len(t)}) < N_EWMA({cfg['ew']})。"
                    f"请降低 N_EWMA 至 ≤{len(t)} 或增加数据点数(N)。")
@@ -718,11 +751,15 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         all_pairs = _find_all_pairs(schmitt["sig"])
 
     # ── Step 7: Prediction curves ──
+    _t3 = time.perf_counter()
     pred_pairs = _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs)
+    _t_pred = time.perf_counter() - _t3
 
     # ── Step 8: Strategy PnL ──
+    _t4 = time.perf_counter()
     long_pnl, short_pnl, trade_records = _compute_strategy_display(
         t, filtered, schmitt, all_pairs, pred_pairs, cfg, tf, dates)
+    _t_strategy = time.perf_counter() - _t4
     show_strategy = cfg.get("show_strategy", False)
     show_cross_pnl = cfg.get("show_cross_pnl", False)
     show_alignment = cfg.get("show_alignment", False)
@@ -752,6 +789,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
             rows, rh, titles, pnl_row, cross_row, align_row)
 
     # ── Step 10: Build figure ──
+    _t5 = time.perf_counter()
     fig = make_subplots(rows=rows, cols=1, shared_xaxes=True,
                         vertical_spacing=0.01, row_heights=rh, subplot_titles=titles)
 
@@ -806,6 +844,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     fig.update_xaxes(title_text="", row=rows, col=1,
                       tickvals=marker_positions, ticktext=marker_labels,
                       tickfont=dict(size=9, color="#8b949e"))
+    _t_build = time.perf_counter() - _t5
     fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
     fig.update_yaxes(title_text="价格", row=mr, col=1)
     fig.update_yaxes(title_text="残差", row=rr, col=1)
@@ -816,7 +855,17 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
                           tickvals=[-1, 0, 1], ticktext=["空", "观", "多"], range=[-1.5, 1.5])
     if ar is not None:
         fig.update_yaxes(title_text="加速度", row=ar, col=1)
+    _t6 = time.perf_counter()
     _render_plotly(fig, height=fh + 30, dates=dates)
+    _t_render = time.perf_counter() - _t6
+    _t_total = time.perf_counter() - _t0
+    # PERF-TRACE: 显示各阶段耗时（每视图首帧），注释掉此行即可关闭
+    st.caption(
+        f"⏱ {tf}: 加载{_t_load*1000:.0f}ms 滤波{_t_filter*1000:.0f}ms "
+        f"施密特{_t_schmitt*1000:.0f}ms 预测{_t_pred*1000:.0f}ms "
+        f"策略{_t_strategy*1000:.0f}ms 构图{_t_build*1000:.0f}ms "
+        f"渲染{_t_render*1000:.0f}ms | 总计{_t_total*1000:.0f}ms"
+    )
 
 
 # =====================================================================
