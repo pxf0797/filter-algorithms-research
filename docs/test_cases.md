@@ -1747,4 +1747,4 @@ pytest tests/ --cov=. --cov-report=html
 | | test_param_export_import.py | 6 | 18 |
 | 数据加载 | test_data_loader.py | 5 | 30 |
 | **回测模式** | **test_backtest.py** | **6** | **75** |
-| **合计** | **24 文件** | **167** | **830** |
+| **合计** | **23 文件** | **167** | **830** |

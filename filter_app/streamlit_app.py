@@ -7,6 +7,7 @@
 import hashlib
 import json
 import os
+import sqlite3
 import tempfile
 import time
 from pathlib import Path
@@ -14,6 +15,11 @@ from loguru import logger
 import streamlit as st
 import numpy as np
 import pandas as pd
+
+
+def _hash_array(arr):
+    """Hash numpy array for @st.cache_data hash_funcs (bytes of contiguous copy)."""
+    return hashlib.md5(np.ascontiguousarray(arr).data.tobytes()).hexdigest()
 import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -31,7 +37,7 @@ from db import (init_db, get_date_range, has_data,
 from services.filter_engine import (
     FILTERS,
     _schmitt_trigger, _find_all_pairs,
-    _fit_parabolic, _fit_physics_parabola,
+    _fit_physics_parabola,
     _compute_strategy_pnl, _align_pnl_to_current_tf, _compute_holding_masks,
 )
 from services.data_loader import (
@@ -161,7 +167,7 @@ def _date_markers(dates, tf) -> tuple[list, list]:
     return positions, labels
 
 
-def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=None, cutoff_date=None) -> tuple:
+def _load_chart_data(market, ticker_code, tf, n_pts, window_start=None, cutoff_date=None) -> tuple:
     """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err).
 
     浏览: window_start=None, cutoff_date=None
@@ -175,7 +181,7 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=No
         _is_backtest = True
     else:
         # 浏览模式：取最新 n_pts 条
-        ok, count = _sync_to_display(ticker_code, tf, day_offset=day_offset, n_pts=n_pts)
+        ok, count = _sync_to_display(ticker_code, tf, n_pts=n_pts)
         if not ok:
             # parquet 写入失败，直接走 API 回退
             return _cached_fetch_stock(market, ticker_code, tf, n_pts)
@@ -217,9 +223,10 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=No
     return _cached_fetch_stock(market, ticker_code, tf, n_pts)
 
 
+@st.cache_data(hash_funcs={np.ndarray: _hash_array}, show_spinner=False)
 def _compute_filters(noisy, t, cfg) -> tuple[np.ndarray, np.ndarray | None]:
     """Compute primary and optional secondary filter. Returns (filtered, filtered2).
-    Note: Not cached via @st.cache_data because params include unhashable np.ndarray."""
+    Cached: reuses prior result when noisy/t/cfg unchanged (np.ndarray via _hash_array)."""
     sf = FILTERS.get(cfg["_fid"])
     if sf is None:
         logger.warning(f"Unknown filter_id '{cfg['_fid']}', skipping primary filter")
@@ -247,9 +254,10 @@ def _compute_filters(noisy, t, cfg) -> tuple[np.ndarray, np.ndarray | None]:
     return filtered, filtered2
 
 
+@st.cache_data(hash_funcs={np.ndarray: _hash_array}, show_spinner=False)
 def _compute_schmitt_trigger(filtered, t, cfg) -> dict | None:
     """Compute Schmitt trigger signal. Returns schmitt dict or None.
-    Note: Not cached via @st.cache_data because params include unhashable np.ndarray."""
+    Cached with _hash_array for filtered/t ndarray inputs."""
     if not cfg["show_sch"] or np.all(np.isnan(filtered)) or len(t) < 2:
         return None
     _v = np.gradient(filtered, t)
@@ -258,13 +266,15 @@ def _compute_schmitt_trigger(filtered, t, cfg) -> dict | None:
     return _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
 
 
+@st.cache_data(hash_funcs={np.ndarray: _hash_array}, show_spinner=False)
 def _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs) -> list:
-    """Compute prediction curves for each pair. Returns list of pred_pairs dicts."""
+    """Compute prediction curves for each pair. Returns list of pred_pairs dicts.
+    Cached: pickle-serialize schmitt dict (window ≤300 rows, negligible overhead)."""
     if not cfg.get("show_pred") or schmitt is None:
         return []
     pred_pairs = []
     logger.debug(f"Computing prediction curves: {len(all_pairs)} pairs, mode={cfg.get('fit_mode')}")
-    fit_func = _fit_physics_parabola if cfg.get("fit_mode") == "parabola" else _fit_parabolic
+    fit_func = _fit_physics_parabola
     for pair_start, pair_end in all_pairs:
         if pair_end - pair_start >= 3:
             fit_result = fit_func(t, filtered, pair_start, pair_end)
@@ -372,136 +382,186 @@ def _insert_feedback_row(rows, rh, titles, pnl_row, cross_row, align_row):
     return rows + 1, rh, tuple(titles), feedback_row, cross_row, align_row
 
 
-def _add_main_price_traces(fig, t, noisy, ohlc, filtered, filtered2, cfg) -> None:
-    """Add K-line, close price, and filter lines to the main price subplot."""
-    fig.add_trace(go.Candlestick(x=t, open=ohlc["Open"].values.ravel(),
-        high=ohlc["High"].values.ravel(), low=ohlc["Low"].values.ravel(),
-        close=ohlc["Close"].values.ravel(), name="K",
-        increasing_line_color="#26a69a", decreasing_line_color="#ef5350",
-        showlegend=False), row=1, col=1)
-    fig.add_trace(go.Scatter(x=t, y=noisy, mode="lines", name="收盘",
-        line=dict(color="#5f6c80", width=1.0)), row=1, col=1)
+def _add_main_price_traces(t, noisy, ohlc, filtered, filtered2, cfg, mr):
+    """Return trace dicts for K-line, close, and filter lines.
+    mr is always 1 in the current layout; row1 axis IDs are "x"/"y" (no number suffix)."""
+    _ax = "x" if mr == 1 else f"x{mr}"
+    _ay = "y" if mr == 1 else f"y{mr}"
+    traces = [dict(type="candlestick", x=t,
+        open=ohlc["Open"].values.ravel(), high=ohlc["High"].values.ravel(),
+        low=ohlc["Low"].values.ravel(), close=ohlc["Close"].values.ravel(),
+        name="K", increasing_line_color="#26a69a", decreasing_line_color="#ef5350",
+        showlegend=False, xaxis=_ax, yaxis=_ay),
+        dict(type="scattergl", x=t, y=noisy, mode="lines", name="收盘",
+            line=dict(color="#5f6c80", width=1.0), xaxis=_ax, yaxis=_ay)]
     if not np.all(np.isnan(filtered)):
-        fig.add_trace(go.Scatter(x=t, y=filtered, mode="lines", name="滤波",
-            line=dict(color=cfg["fc"], width=2.0)), row=1, col=1)
+        traces.append(dict(type="scattergl", x=t, y=filtered, mode="lines",
+            name="滤波", line=dict(color=cfg["fc"], width=2.0), xaxis=_ax, yaxis=_ay))
     if cfg["_dual"] and filtered2 is not None and not np.all(np.isnan(filtered2)):
-        fig.add_trace(go.Scatter(x=t, y=filtered2, mode="lines", name="滤波2",
-            line=dict(color=cfg["fc2"], width=2.0)), row=1, col=1)
+        traces.append(dict(type="scattergl", x=t, y=filtered2, mode="lines",
+            name="滤波2", line=dict(color=cfg["fc2"], width=2.0), xaxis=_ax, yaxis=_ay))
+    return traces
 
 
-def _add_residual_traces(fig, t, filtered, noisy, filtered2, cfg, rr, vr) -> np.ndarray:
+def _add_residual_traces(t, filtered, noisy, filtered2, cfg, rr, vr):
     """Add residual, velocity, and acceleration traces to subplots. Returns acceleration array."""
     if len(t) < 2:
         return np.array([])
     if not np.all(np.isnan(filtered)):
-        fig.add_trace(go.Scatter(x=t, y=filtered - noisy, mode="lines", name="残差",
-            line=dict(color="#5f6c80", width=1.0, dash="dot")), row=rr, col=1)
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=rr, col=1)
-        vel = np.gradient(filtered, t)
-        acc = np.gradient(vel, t)
-        fig.add_trace(go.Scatter(x=t, y=vel, mode="lines", name="v",
-            line=dict(color=cfg["fc"], width=1.5)), row=vr, col=1)
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=vr, col=1)
-        return acc
+        vel = np.gradient(filtered, t); acc = np.gradient(vel, t)
+        return acc, [
+            dict(type="scattergl", x=t, y=filtered - noisy, mode="lines", name="残差",
+                line=dict(color="#5f6c80", width=1.0, dash="dot"),
+                xaxis=f"x{rr}", yaxis=f"y{rr}"),
+            dict(type="scattergl", x=t, y=vel, mode="lines", name="v",
+                line=dict(color=cfg["fc"], width=1.5), xaxis=f"x{vr}", yaxis=f"y{vr}")], [
+            dict(type="line", x0=0, x1=1, xref="paper", y0=0, y1=0, yref=f"y{rr}",
+                line=dict(color="gray", dash="dash"), opacity=0.5),
+            dict(type="line", x0=0, x1=1, xref="paper", y0=0, y1=0, yref=f"y{vr}",
+                line=dict(color="gray", dash="dash"), opacity=0.5)]
     vel = np.gradient(filtered, t) if not np.all(np.isnan(filtered)) else np.zeros_like(t)
-    return np.gradient(vel, t)
+    return np.gradient(vel, t), [], []
 
 
-def _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar, ssr) -> None:
-    """Add Schmitt trigger traces: eps bands, sigma_v, acceleration, Sig signal, pair bands."""
+def _add_schmitt_traces(t, schmitt, acc, all_pairs, sar, ssr):
+    """Return (traces, shapes) for Schmitt trigger subplots."""
     eps = schmitt["eps"]
     sig = schmitt["sig"]
-    fig.add_trace(go.Scatter(x=list(t) + list(t[::-1]), y=list(eps) + list(-eps[::-1]),
-        fill="toself", fillcolor="rgba(128,128,128,0.06)", line=dict(width=0),
-        name="±ε", hoverinfo="skip"), row=sar, col=1)
-    fig.add_trace(go.Scatter(x=t, y=eps, mode="lines", name="+ε",
-        line=dict(color="#f85149", width=0.8, dash="dash"), showlegend=False), row=sar, col=1)
-    fig.add_trace(go.Scatter(x=t, y=-eps, mode="lines", name="-ε",
-        line=dict(color="#f85149", width=0.8, dash="dash")), row=sar, col=1)
-    fig.add_trace(go.Scatter(x=t, y=schmitt["sigma_v"], mode="lines", name="σ(v)",
-        line=dict(color="#a371f7", width=1.0, dash="dot")), row=sar, col=1)
-    fig.add_trace(go.Scatter(x=t, y=acc, mode="lines", name="a",
-        line=dict(color="#d2991d", width=1.5)), row=sar, col=1)
-    fig.add_hline(y=0, line_dash="solid", line_color="gray", opacity=0.3, row=sar, col=1)
-    fig.add_trace(go.Scatter(x=t, y=sig.astype(float), mode="lines", name="Sig",
-        line=dict(color="#58a6ff", width=2, shape="hv")), row=ssr, col=1)
+    _sar_x = f"x{sar}"; _sar_y = f"y{sar}"; _ssr_x = f"x{ssr}"; _ssr_y = f"y{ssr}"
+    traces = [
+        dict(type="scattergl", x=list(t) + list(t[::-1]), y=list(eps) + list(-eps[::-1]),
+            fill="toself", fillcolor="rgba(128,128,128,0.06)", line=dict(width=0),
+            name="±ε", hoverinfo="skip", xaxis=_sar_x, yaxis=_sar_y),
+        dict(type="scattergl", x=t, y=eps, mode="lines", name="+ε",
+            line=dict(color="#f85149", width=0.8, dash="dash"), showlegend=False,
+            xaxis=_sar_x, yaxis=_sar_y),
+        dict(type="scattergl", x=t, y=-eps, mode="lines", name="-ε",
+            line=dict(color="#f85149", width=0.8, dash="dash"),
+            xaxis=_sar_x, yaxis=_sar_y),
+        dict(type="scattergl", x=t, y=schmitt["sigma_v"], mode="lines", name="σ(v)",
+            line=dict(color="#a371f7", width=1.0, dash="dot"),
+            xaxis=_sar_x, yaxis=_sar_y),
+        dict(type="scattergl", x=t, y=acc, mode="lines", name="a",
+            line=dict(color="#d2991d", width=1.5), xaxis=_sar_x, yaxis=_sar_y),
+        dict(type="scattergl", x=t, y=sig.astype(float), mode="lines", name="Sig",
+            line=dict(color="#58a6ff", width=2, shape="hv"),
+            xaxis=_ssr_x, yaxis=_ssr_y)]
     for state, cl in [(1, "rgba(63,185,80,0.06)"), (-1, "rgba(248,81,73,0.06)")]:
         msk = sig == state
         if msk.any():
-            fig.add_trace(go.Scatter(x=t[msk], y=np.where(msk, state, 0),
+            traces.append(dict(type="scattergl", x=t[msk], y=np.where(msk, state, 0),
                 mode="lines", line=dict(width=0), fill="tozeroy",
-                fillcolor=cl, showlegend=False, hoverinfo="skip"), row=ssr, col=1)
+                fillcolor=cl, showlegend=False, hoverinfo="skip",
+                xaxis=_ssr_x, yaxis=_ssr_y))
     for i, (p_start, p_end) in enumerate(all_pairs):
         direction = sig[p_end]
         y_lo, y_hi = (0, 1) if direction == 1 else (-1, 0)
         band_color = "rgba(88,166,255,0.10)" if i % 2 == 0 else "rgba(163,113,247,0.10)"
-        fig.add_trace(go.Scatter(
+        traces.append(dict(type="scattergl",
             x=[p_start, p_end, p_end, p_start],
             y=[y_hi, y_hi, y_lo, y_lo],
             fill="toself", fillcolor=band_color,
             mode="lines", line=dict(width=0),
             showlegend=False, hoverinfo="skip",
-        ), row=ssr, col=1)
+            xaxis=_ssr_x, yaxis=_ssr_y))
+    shapes = [dict(type="line", x0=0, x1=1, xref="paper", y0=0, y1=0, yref=f"y{sar}",
+        line=dict(color="gray", dash="solid"), opacity=0.3)]
+    return traces, shapes
 
 
-def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row) -> None:
-    """Add PnL curves, individual trade segments, markers, and annotations."""
-    fig.add_trace(go.Scatter(x=t, y=long_pnl, mode="lines", name="做多PnL",
-        line=dict(color="#3fb950", width=1.5, dash="solid")), row=pnl_row, col=1)
-    fig.add_trace(go.Scatter(x=t, y=short_pnl, mode="lines", name="做空PnL",
-        line=dict(color="#f85149", width=1.5, dash="solid")), row=pnl_row, col=1)
+def _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row):
+    """Return (traces, shapes, yaxes) for PnL subplot."""
+    _pnl_x = f"x{pnl_row}"; _pnl_y = f"y{pnl_row}"
+    _pnl_annotations = []  # collected annotations (replaces fig.add_annotation)
+    # Trace merge: 逐笔交易段合并为 2 条 (多/空), NaN 分隔
+    _l_seg, _s_seg = [], []
+    _l_entry_x, _l_entry_y = [], []  # ▲ 入场标记
+    _s_entry_x, _s_entry_y = [], []
+    _l_exit_sl_x,   _l_exit_sl_y   = [], []  # ✕ 止损离场
+    _l_exit_tp_x,   _l_exit_tp_y   = [], []  # ○ 止盈离场
+    _s_exit_sl_x,   _s_exit_sl_y   = [], []
+    _s_exit_tp_x,   _s_exit_tp_y   = [], []
     for trade in trade_records:
         seg_t = t[trade["entry_idx"]:trade["exit_idx"] + 1]
         curve = long_pnl if trade["type"] == "long" else short_pnl
         seg_pnl = curve[trade["entry_idx"]:trade["exit_idx"] + 1]
-        is_long = trade["type"] == "long"
-        color = "#3fb950" if is_long else "#f85149"
-        label_prefix = "多" if is_long else "空"
-        fig.add_trace(go.Scatter(x=seg_t, y=seg_pnl, mode="lines",
-            name=f"{label_prefix}#{trade['id']}",
-            line=dict(color=color, width=3), showlegend=False), row=pnl_row, col=1)
-        fig.add_trace(go.Scatter(x=[seg_t[0]], y=[seg_pnl[0]], mode="markers",
-            marker=dict(color=color, symbol="triangle-up", size=8),
-            showlegend=False), row=pnl_row, col=1)
+        if trade["type"] == "long":
+            _l_seg.extend(zip(seg_t, seg_pnl)); _l_seg.append((float('nan'), float('nan')))
+            _l_entry_x.append(seg_t[0]); _l_entry_y.append(seg_pnl[0])
+        else:
+            _s_seg.extend(zip(seg_t, seg_pnl)); _s_seg.append((float('nan'), float('nan')))
+            _s_entry_x.append(seg_t[0]); _s_entry_y.append(seg_pnl[0])
+        if trade["exit_reason"] == "stop_loss":
+            (aplat_x := _l_exit_sl_x if trade["type"]=="long" else _s_exit_sl_x).append(seg_t[-1])
+            (aplat_y := _l_exit_sl_y if trade["type"]=="long" else _s_exit_sl_y).append(seg_pnl[-1])
+        elif trade["exit_reason"] == "take_profit":
+            (aplat_x := _l_exit_tp_x if trade["type"]=="long" else _s_exit_tp_x).append(seg_t[-1])
+            (aplat_y := _l_exit_tp_y if trade["type"]=="long" else _s_exit_tp_y).append(seg_pnl[-1])
         if trade["exit_reason"] in ("stop_loss", "take_profit"):
-            exit_marker = "x" if trade["exit_reason"] == "stop_loss" else "circle"
-            exit_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
-            fig.add_trace(go.Scatter(x=[seg_t[-1]], y=[seg_pnl[-1]], mode="markers",
-                marker=dict(color=exit_color, symbol=exit_marker, size=8),
-                showlegend=False), row=pnl_row, col=1)
             ret_pct = trade["return_pct"]
             label_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
             arrow = "↑" if trade["type"] == "long" else "↓"
-            fig.add_annotation(x=seg_t[-1], y=seg_pnl[-1], text=f"{arrow}{ret_pct:+.1f}%",
-                showarrow=False, font=dict(size=8, color=label_color), yshift=12,
-                row=pnl_row, col=1)
-    fig.add_hline(y=100, line_dash="dash", line_color="gray", opacity=0.5, row=pnl_row, col=1)
+            _pnl_annotations.append(dict(x=seg_t[-1], y=seg_pnl[-1],
+                text=f"{arrow}{ret_pct:+.1f}%", showarrow=False,
+                font=dict(size=8, color=label_color), yshift=12,
+                xref=f"x{pnl_row}", yref=f"y{pnl_row}"))
+    # Collect all PnL traces, shapes, annotations into return values
+    _pnl_traces = [
+        dict(type="scattergl", x=t, y=long_pnl, mode="lines", name="做多PnL",
+            line=dict(color="#3fb950", width=1.5, dash="solid"),
+            xaxis=_pnl_x, yaxis=_pnl_y),
+        dict(type="scattergl", x=t, y=short_pnl, mode="lines", name="做空PnL",
+            line=dict(color="#f85149", width=1.5, dash="solid"),
+            xaxis=_pnl_x, yaxis=_pnl_y)]
+    if _l_seg:
+        xs, ys = zip(*_l_seg)
+        _pnl_traces.append(dict(type="scattergl", x=list(xs), y=list(ys), mode="lines",
+            name="做多段", line=dict(color="#3fb950", width=3), showlegend=False,
+            xaxis=_pnl_x, yaxis=_pnl_y))
+    if _s_seg:
+        xs, ys = zip(*_s_seg)
+        _pnl_traces.append(dict(type="scattergl", x=list(xs), y=list(ys), mode="lines",
+            name="做空段", line=dict(color="#f85149", width=3), showlegend=False,
+            xaxis=_pnl_x, yaxis=_pnl_y))
+    def _mk(xs, ys, sym, clr):
+        if xs: _pnl_traces.append(dict(type="scattergl", x=xs, y=ys, mode="markers",
+            marker=dict(color=clr, symbol=sym, size=8), showlegend=False,
+            xaxis=_pnl_x, yaxis=_pnl_y))
+    _mk(_l_entry_x, _l_entry_y, "triangle-up", "#3fb950")
+    _mk(_s_entry_x, _s_entry_y, "triangle-up", "#f85149")
+    _mk(_l_exit_sl_x, _l_exit_sl_y, "x", "#f85149")
+    _mk(_s_exit_sl_x, _s_exit_sl_y, "x", "#f85149")
+    _mk(_l_exit_tp_x, _l_exit_tp_y, "circle", "#3fb950")
+    _mk(_s_exit_tp_x, _s_exit_tp_y, "circle", "#3fb950")
     y_max_l = max(float(np.nanmax(long_pnl)), 100.0) * 1.02
-    fig.add_trace(go.Scatter(x=[t[0], t[-1], t[-1], t[0]],
-        y=[100, 100, y_max_l, y_max_l], fill="toself", fillcolor="rgba(63,185,80,0.04)",
-        mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"), row=pnl_row, col=1)
+    _pnl_traces.append(dict(type="scattergl",
+        x=[t[0], t[-1], t[-1], t[0]], y=[100, 100, y_max_l, y_max_l],
+        fill="toself", fillcolor="rgba(63,185,80,0.04)",
+        mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip",
+        xaxis=_pnl_x, yaxis=_pnl_y))
     y_min_s = min(float(np.nanmin(short_pnl)), 100.0) * 0.98
-    fig.add_trace(go.Scatter(x=[t[0], t[-1], t[-1], t[0]],
-        y=[100, 100, y_min_s, y_min_s], fill="toself", fillcolor="rgba(248,81,73,0.04)",
-        mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"), row=pnl_row, col=1)
-    fig.update_yaxes(title_text="PnL(%)", row=pnl_row, col=1, ticksuffix="%")
+    _pnl_traces.append(dict(type="scattergl",
+        x=[t[0], t[-1], t[-1], t[0]], y=[100, 100, y_min_s, y_min_s],
+        fill="toself", fillcolor="rgba(248,81,73,0.04)",
+        mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip",
+        xaxis=_pnl_x, yaxis=_pnl_y))
+    _pnl_shapes = [dict(type="line", x0=0, x1=1, xref="paper", y0=100, y1=100,
+        yref=f"y{pnl_row}", line=dict(color="gray", dash="dash"), opacity=0.5)]
+    _pnl_yaxes = {f"yaxis{pnl_row}": {"title_text": "PnL(%)", "ticksuffix": "%"}}
+    return _pnl_traces, _pnl_shapes, _pnl_annotations, _pnl_yaxes
 
 
-def _add_feedback_subplot(fig, t, trade_records, row) -> None:
-    """实际持仓状态子图：绿=做多持仓 / 红=做空持仓 / 空白=不持。
-
-    持仓 = Layer0 实际成交区间(entry→exit)，只显示状态不显示百分比。
-    """
+def _add_feedback_subplot(t, trade_records, row):
+    """返回 (shapes, yaxes) 用于实际持仓状态子图（绿=做多/红=做空/空白=不持）。"""
     n = len(t)
     long_mask = np.zeros(n, dtype=bool)
     short_mask = np.zeros(n, dtype=bool)
     for tr in trade_records:
         a = tr["entry_idx"]
-        if a >= n:
-            continue
+        if a >= n: continue
         b = min(tr["exit_idx"], n - 1)
         (long_mask if tr["type"] == "long" else short_mask)[a:b + 1] = True
-    _draw_holding_bands(fig, t, long_mask, short_mask, row)
+    return _draw_holding_bands(t, long_mask, short_mask, row)
 
 
 def _get_min_tf_and_count(configs, ticker_code) -> tuple:
@@ -579,7 +639,7 @@ def _load_backtest_config(ticker_code):
 # =====================================================================
 
 @st.fragment
-def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, window_start=None, cutoff_date=None) -> None:
+def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, higher_pnl=None, window_start=None, cutoff_date=None) -> None:
     """Fragment wrapper around ``_render_chart`` for per-view independent re-rendering.
 
     The ``@st.fragment`` decorator enables each of the four chart views
@@ -597,7 +657,6 @@ def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offs
         Unique view key (e.g. ``"v0"``, ``"v1"``).
     compact : bool, default True
         If True, use a smaller chart height.
-    day_offset : int, default 0
         Number of days to shift the window into the past.
     higher_pnl : dict or None
         Higher-timeframe PnL data from ``_align_pnl_to_current_tf``.
@@ -610,10 +669,10 @@ def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offs
     -------
     None
     """
-    _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl, window_start=window_start, cutoff_date=cutoff_date)
+    _render_chart(market, ticker_code, cfg, key, compact=compact, higher_pnl=higher_pnl, window_start=window_start, cutoff_date=cutoff_date)
 
 
-def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, window_start=None, cutoff_date=None) -> None:
+def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, window_start=None, cutoff_date=None) -> None:
     """Fetch data and render the multi-subplot chart figure.
 
     This is the core chart builder.  It:
@@ -637,8 +696,6 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         Unique view key.
     compact : bool, default True
         If True, reduce chart height.
-    day_offset : int, default 0
-        Shift the time window backward by *day_offset* days.
     higher_pnl : dict or None
         Higher-timeframe PnL data from ``_align_pnl_to_current_tf``.
         When non-None a cross-period PnL subplot is added.
@@ -662,7 +719,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         _raw_higher = st.session_state.get(f"_pnl_{_higher_tf}")
 
     # ── Step 1: Load chart data ──
-    t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=window_start, cutoff_date=cutoff_date)
+    t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, n_pts, window_start=window_start, cutoff_date=cutoff_date)
     if err is not None:
         if "数据点不足" in str(err):
             st.caption(f"⏳ {tf} 在回测日期前无足够数据")
@@ -741,81 +798,105 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         rows, rh, titles, feedback_row, cross_row, align_row = _insert_feedback_row(
             rows, rh, titles, pnl_row, cross_row, align_row)
 
-    # ── Step 10: Build figure ──
-    fig = make_subplots(rows=rows, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.01, row_heights=rh, subplot_titles=titles)
+    # ── Step 10: Build figure (A: one-shot go.Figure from raw dicts) ──
+    # 1. Collect ALL trace dicts, shapes, annotations from _add_* functions
+    all_traces, all_shapes, all_annotations = [], [], []
+    _layout_updates = {}  # yaxis config dicts merged later
 
-    _add_main_price_traces(fig, t, noisy, ohlc, filtered, filtered2, cfg)
-
+    all_traces += _add_main_price_traces(t, noisy, ohlc, filtered, filtered2, cfg, mr)
     for i, pp in enumerate(pred_pairs):
-        _add_prediction_traces(fig, t, filtered,
-                               pp["fit_result"], pp["fit_start"],
-                               pp["pair_end"], row=mr,
-                               n_extend=cfg.get("n_ext", 10),
-                               show_legend=(i == 0))
-
-    acc = _add_residual_traces(fig, t, filtered, noisy, filtered2, cfg, rr, vr)
-
+        all_traces += _add_prediction_traces(t, filtered,
+            pp["fit_result"], pp["fit_start"], pp["pair_end"], row=mr,
+            n_extend=cfg.get("n_ext", 10), show_legend=(i == 0))
+    acc, _tr, _sh = _add_residual_traces(t, filtered, noisy, filtered2, cfg, rr, vr)
+    all_traces += _tr; all_shapes += _sh
     if has_s:
-        _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar, ssr)
-
+        _tr, _sh = _add_schmitt_traces(t, schmitt, acc, all_pairs, sar, ssr)
+        all_traces += _tr; all_shapes += _sh
     if has_strategy:
-        _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row)
-
+        _tr, _sh, _an, _ya = _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row)
+        all_traces += _tr; all_shapes += _sh; all_annotations += _an; _layout_updates.update(_ya)
     if has_feedback and feedback_row is not None:
-        _add_feedback_subplot(fig, t, trade_records, feedback_row)
-
+        _sh, _ya = _add_feedback_subplot(t, trade_records, feedback_row)
+        all_shapes += _sh; _layout_updates.update(_ya)
     if has_cross and higher_pnl is not None and cross_row is not None:
-        _add_cross_pnl_subplot(fig, t, higher_pnl, row=cross_row, higher_tf=_higher_tf)
-
+        _sh, _ya = _add_cross_pnl_subplot(t, higher_pnl, row=cross_row)
+        all_shapes += _sh; _layout_updates.update(_ya)
     if has_alignment and _align_masks is not None and align_row is not None:
         long_mask, short_mask = _align_masks
-        _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
-                               long_mask, short_mask, row=align_row)
-        fig.update_yaxes(title_text="同向(%)", row=align_row, col=1, ticksuffix="%")
-
+        _tr, _sh, _an, _ya = _add_alignment_subplot(t, long_pnl, short_pnl, trade_records,
+            long_mask, short_mask, row=align_row)
+        all_traces += _tr; all_shapes += _sh; all_annotations += _an
+        _layout_updates.update(_ya)
     if ar is not None and not np.all(np.isnan(filtered)):
-        fig.add_trace(go.Scatter(x=t, y=acc, mode="lines", name="a",
-            line=dict(color="#ffa502", width=1.5)), row=ar, col=1)
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=ar, col=1)
+        all_traces.append(dict(type="scattergl", x=t, y=acc, mode="lines", name="a",
+            line=dict(color="#ffa502", width=1.5), xaxis=f"x{ar}", yaxis=f"y{ar}"))
+        all_shapes.append(dict(type="line", x0=0, x1=1, xref="paper", y0=0, y1=0,
+            yref=f"y{ar}", line=dict(color="gray", dash="dash"), opacity=0.5))
 
-    # ── Step 11: Final layout ──
-    fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=1, xref="x", yref="paper",
-                   line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"), visible=False)
+    # 2. Get subplot layout skeleton from make_subplots (layout only, discard empty traces)
+    _skeleton = make_subplots(rows=rows, cols=1, shared_xaxes=True,
+        vertical_spacing=0.01, row_heights=rh, subplot_titles=titles)
+    layout_dict = _skeleton.layout.to_plotly_json()
+
+    # 3. Add shapes, annotations, and +epsilon crosshair line
+    all_shapes.append(dict(type="line", x0=0, x1=0, y0=0, y1=1, xref="x", yref="paper",
+        line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"), visible=False))
     for pos in marker_positions:
-        fig.add_vline(x=pos, line=dict(color="rgba(255,255,255,0.10)", width=0.8, dash="dot"),
-                       layer="below")
+        all_shapes.append(dict(type="line", x0=pos, x1=pos, yref="paper", y0=0, y1=1,
+            line=dict(color="rgba(255,255,255,0.10)", width=0.8, dash="dot"), layer="below"))
+    layout_dict["shapes"] = layout_dict.get("shapes", []) + all_shapes
+    layout_dict["annotations"] = layout_dict.get("annotations", []) + all_annotations
+
+    # 4. Final layout customizations (matching original make_subplots-based setup)
     fh = (620 if has_s else 420) if compact else (960 if has_s else 700)
-    if has_cross:
-        fh += 120
-    if has_alignment:
-        fh += 75
-    fig.update_layout(template="plotly_dark", height=fh,
+    if has_cross: fh += 120
+    if has_alignment: fh += 75
+    layout_dict.update(template="plotly_dark", height=fh,
         margin=dict(l=10, r=10, t=25, b=10), hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=9)))
-    fig.update_xaxes(title_text="", row=rows, col=1,
-                      tickvals=marker_positions, ticktext=marker_labels,
-                      tickfont=dict(size=9, color="#8b949e"))
-    fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
-    fig.update_yaxes(title_text="价格", row=mr, col=1)
-    fig.update_yaxes(title_text="残差", row=rr, col=1)
-    fig.update_yaxes(title_text="速度", row=vr, col=1)
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+            font=dict(size=9)))
+    # axis customizations
+    layout_dict.setdefault(f"xaxis{rows}", {}).update(title_text="",
+        tickvals=list(marker_positions), ticktext=list(marker_labels),
+        tickfont=dict(size=9, color="#8b949e"))
+    layout_dict.setdefault("xaxis", {}).update(rangeslider_visible=False)
+    for _r, _t in [(mr,"价格"),(rr,"残差"),(vr,"速度")]:
+        _yk = "yaxis" if _r == 1 else f"yaxis{_r}"
+        layout_dict.setdefault(_yk, {}).update(title_text=_t)
     if has_s:
-        fig.update_yaxes(title_text="a±ε", row=sar, col=1)
-        fig.update_yaxes(title_text="Sig", row=ssr, col=1,
-                          tickvals=[-1, 0, 1], ticktext=["空", "观", "多"], range=[-1.5, 1.5])
+        layout_dict.setdefault(f"yaxis{sar}", {}).update(title_text="a±ε")
+        layout_dict.setdefault(f"yaxis{ssr}", {}).update(title_text="Sig",
+            tickvals=[-1,0,1], ticktext=["空","观","多"], range=[-1.5,1.5])
     if ar is not None:
-        fig.update_yaxes(title_text="加速度", row=ar, col=1)
+        layout_dict.setdefault(f"yaxis{ar}", {}).update(title_text="加速度")
+    # Merge yaxis updates from _add_* functions (e.g. PnL ticksuffix)
+    for k, v in _layout_updates.items():
+        layout_dict.setdefault(k, {}).update(v)
+
+    # 5. ONE-SHOT Figure construction — NO Python Trace objects created
+    fig = go.Figure(data=all_traces, layout=layout_dict)
     _render_plotly(fig, height=fh + 30, dates=dates)
 
 
 # =====================================================================
 @st.cache_resource
-def _get_db_connection() -> bool:
-    """Get database connection (cached across all sessions)."""
+def _cached_conn():
+    """Cached SQLite connection (reused across reruns, avoids new conn+PRAGMA each query)."""
+    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+@st.cache_resource
+def _get_db_connection() -> sqlite3.Connection:
+    """Get cached database connection, with schema init on first access."""
     logger.debug("Initializing database connection (cache miss)")
     init_db()
-    return True
+    return _cached_conn()
 
 
 # =====================================================================
@@ -1219,51 +1300,6 @@ def _render_param_panels(filter_id, dual, filter_id2) -> list:
     return configs
 
 
-def _render_time_nav(configs, ticker_code) -> int:
-    """Render time window navigation. Returns day_offset."""
-    if AppState.get("_cb_mode", False):
-        return 0  # 回测模式下不显示时间窗口导航
-    st.sidebar.markdown("---")
-    st.sidebar.caption("⏪ 时间窗口（按天移动）")
-    if not AppState.has("_day_offset"):
-        AppState.set("_day_offset", 0)
-    step_days = st.sidebar.selectbox("移动步长", [1, 3, 5, 10, 20, 30, 60, 90, 180, 365],
-                                      index=4, key="day_step",
-                                      format_func=lambda x: f"{x}天")
-    data_start = data_end = None
-    date_range = get_date_range(ticker_code)
-    if date_range:
-        data_start = pd.Timestamp(date_range[0][:10]).date()
-        data_end = pd.Timestamp(date_range[1][:10]).date()
-    cur_offset = AppState.get("_day_offset", 0)
-    n_pts = configs[0]["n_pts"] if configs else 120
-    if data_end:
-        win_end = data_end - pd.Timedelta(days=cur_offset)
-        win_start = win_end - pd.Timedelta(days=n_pts * 2)
-        has_older = data_start and win_start > data_start
-        has_newer = cur_offset > 0
-    else:
-        has_older = True
-        has_newer = cur_offset > 0
-    c_prev, c_next, c_home = st.sidebar.columns([1, 1, 0.8])
-    with c_prev:
-        disabled = not has_older
-        if st.button("◀ 前移", key="day_prev", use_container_width=True, disabled=disabled,
-                     help="无更早数据" if disabled else f"前移{step_days}天"):
-            AppState.set("_day_offset", AppState.get("_day_offset", 0) + step_days)
-    with c_next:
-        disabled = not has_newer
-        if st.button("后移 ▶", key="day_next", use_container_width=True, disabled=disabled,
-                     help="已是最新" if disabled else f"后移{step_days}天"):
-            AppState.set("_day_offset", max(0, AppState.get("_day_offset", 0) - step_days))
-    with c_home:
-        if st.button("最新", key="day_home", use_container_width=True, disabled=cur_offset == 0,
-                     help="已是最新"):
-            AppState.set("_day_offset", 0)
-    st.sidebar.caption(f"已偏移: {cur_offset} 天")
-    if data_start and data_end:
-        st.sidebar.caption(f"数据范围: {data_start} ~ {data_end}")
-    return AppState.get("_day_offset", 0)
 
 
 def _get_bar_date_from_db(ticker_code, tf, bar_index):
@@ -1842,7 +1878,6 @@ def main() -> None:
         AppState.set("_bt_last_ticker", ticker_code)
 
     # ── Time window navigation ──
-    day_offset = _render_time_nav(configs, ticker_code)
 
     # ── 回测模式切换 ──
     _render_backtest_mode(market, ticker_code, configs)
@@ -1887,7 +1922,7 @@ def main() -> None:
         col_idx = orig_i % 2
         with grid_cols[row_idx][col_idx]:
             _render_chart_fragment(market, ticker_code, cfg, f"v{orig_i}", compact=True,
-                                   day_offset=day_offset, window_start=window_start, cutoff_date=cutoff_date)
+                                   window_start=window_start, cutoff_date=cutoff_date)
 
     # ── Export config ──
     _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code)

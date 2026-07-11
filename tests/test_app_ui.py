@@ -188,14 +188,6 @@ class TestSidebarInteraction:
         assert dual is not None, "dual filter checkbox not found"
         assert dual.value is False
 
-    def test_day_step_selector_present(self, app):
-        """移动步长选择器存在"""
-        selectboxes = app.sidebar.selectbox
-        step = next((s for s in selectboxes if s.label == "移动步长"), None)
-        assert step is not None, "day_step selector not found"
-        # value is the selected option's internal value (int index)
-        assert step.value == 20
-
     def test_refresh_button_present(self, app):
         """刷新数据按钮存在"""
         buttons = app.sidebar.button
@@ -278,16 +270,6 @@ class TestWidgetInteraction:
         app.run(timeout=90)
         assert app.session_state["global_dual"] is True
 
-    def test_day_nav_buttons_present(self, app):
-        """日期导航按钮 (前移/后移/最新) 都存在"""
-        buttons = app.sidebar.button
-        labels = {b.label for b in buttons}
-        assert "◀ 前移" in labels
-        assert "后移 ▶" in labels
-        assert "最新" in labels
-
-
-# ─────────────────────────────────────────────
 # Layer 7: P0 回归扩展
 # ─────────────────────────────────────────────
 
@@ -336,14 +318,12 @@ class TestIsolationRegression:
             buttons = {b.label for b in app.sidebar.button}
             assert "刷新数据" in buttons, f"第{i+1}次: 刷新按钮缺失"
 
-    def test_fresh_app_day_nav_buttons_stable(self):
-        """多次重建后 day_nav 按钮始终存在"""
+    def test_fresh_app_stable(self):
+        """多次重建后 app 保持一致（day nav 按钮已删除）"""
         for i in range(3):
             app = _fresh_app()
             buttons = {b.label for b in app.sidebar.button}
-            for expected in ["◀ 前移", "后移 ▶", "最新"]:
-                assert expected in buttons, \
-                    f"第{i+1}次: '{expected}' 按钮缺失, 找到: {buttons}"
+            assert "刷新数据" in buttons
 
     def test_fresh_app_no_unexpected_exception(self):
         """多次重建后无意外异常（回归 test_app_does_not_crash_before_render）"""

@@ -458,13 +458,10 @@ class TestAddPredictionTraces:
         filtered = np.sin(t / 5.0)
         fit_result = _fit_parabolic(t, filtered, 10, 40)
         assert fit_result is not None, "Fit failed"
-        n_before = len(fig.data)
-        _add_prediction_traces(
-            fig, t, filtered, fit_result,
-            fit_start=10, pair_end=40, row=1, n_extend=10,
-        )
-        assert len(fig.data) == n_before + 3, \
-            f"Expected 3 new traces (fit + pred + residual), got {len(fig.data) - n_before}"
+        traces = _add_prediction_traces(
+            t, filtered, fit_result,
+            fit_start=10, pair_end=40, row=1, n_extend=10)
+        assert len(traces) == 3, f"Expected 3 dicts, got {len(traces)}"
 
     @pytest.mark.strategy
     def test_physics_fit_uses_vertex_anchor(self, subplot_fig):
@@ -475,12 +472,10 @@ class TestAddPredictionTraces:
         fit_result = _fit_physics_parabola(t, filtered, 10, 40)
         assert fit_result is not None, "Fit failed"
         assert "x0" in fit_result, "physics parabola must have x0 (vertex anchor)"
-        n_before = len(fig.data)
-        _add_prediction_traces(
-            fig, t, filtered, fit_result,
-            fit_start=10, pair_end=40, row=1, n_extend=10,
-        )
-        assert len(fig.data) == n_before + 3
+        traces = _add_prediction_traces(
+            t, filtered, fit_result,
+            fit_start=10, pair_end=40, row=1, n_extend=10)
+        assert len(traces) == 3
 
     @pytest.mark.strategy
     def test_no_extend_adds_only_fit_trace(self, subplot_fig):
@@ -490,10 +485,8 @@ class TestAddPredictionTraces:
         filtered = np.sin(t / 5.0)
         fit_result = _fit_parabolic(t, filtered, 10, 40)
         assert fit_result is not None, "Fit failed"
-        n_before = len(fig.data)
-        _add_prediction_traces(
-            fig, t, filtered, fit_result,
-            fit_start=10, pair_end=40, row=1, n_extend=0,
-        )
-        assert len(fig.data) == n_before + 1, \
+        traces = _add_prediction_traces(
+            t, filtered, fit_result,
+            fit_start=10, pair_end=40, row=1, n_extend=0)
+        assert len(traces) == 1, \
             f"n_extend=0 should add only fit trace, got {len(fig.data) - n_before}"

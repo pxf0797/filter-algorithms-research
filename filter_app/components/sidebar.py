@@ -181,14 +181,7 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
         if cfg["show_pred"]:
             with st.expander("预测参数", expanded=exp_all):
                 c3 = st.columns([1.5, 1.0])
-                fit_key = f"{key}_fm"
-                _fm_val = st.session_state.get(fit_key,
-                    st.session_state.get(f"_imp_{fit_key}", "parabola"))
-                fit_idx = 1 if _fm_val == "parabola" else 0
-                with c3[0]: cfg["fit_mode"] = st.radio("拟合方式",
-                    ["poly2", "parabola"], index=fit_idx, horizontal=True,
-                    format_func=lambda x: "二次多项式" if x=="poly2" else "抛物线拟合",
-                    key=fit_key)
+                cfg["fit_mode"] = "parabola"  # 固定: 仅抛物线拟合
                 with c3[1]: cfg["n_ext"] = st.slider("预测点数", 1, 50, cfg["n_ext"], 1, key=f"{key}_next")
             # 策略参数 — 仅在开启预测时可用
             if cfg["show_pred"]:
