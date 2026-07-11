@@ -30,7 +30,8 @@ class TestTracesReferenceCorrectRow:
         traces = _add_main_price_traces(t, noisy, _ohlc(n), noisy+0.5, None,
                                         {"fc":"#00d4aa","_dual":False,"fc2":"#ff6b6b"}, mr=1)
         for tr in traces:
-            assert tr["xaxis"] == "x1" and tr["yaxis"] == "y1"
+            # mr=1 → make_subplots 用 "x"/"y" 非 "x1"/"y1"
+            assert tr["xaxis"] == "x" and tr["yaxis"] == "y"
 
     def test_main_price_refs_dynamic_row(self):
         n=10; t=np.arange(n,dtype=float)
@@ -125,3 +126,79 @@ class TestFullFigureLayoutIntegrity:
         fig = go.Figure(data=traces, layout=ld)
         assert len(fig.data) == 3
         # go.Figure(data=dicts) 会内部降维 xaxis，只通过 layout 映射; 不在此层断言
+
+
+# ── 3. 轴名精确配对守卫：防止 row1 和 row>1 的 axis ID 混淆 ──
+
+class TestAxisNameConvention:
+    """守护方案A关键不变量：make_subplots 的 axis 命名规则与 trace dict 引用必须一致。
+
+    Row1: xaxis="x" / yaxis="y"（无数字后缀！）
+    RowN(N>1): xaxis="xN" / yaxis="yN"
+
+    任何 trace 引用不存在的 axis 名（如 xaxis="x1"），会被 Plotly 静默丢弃到默认轴，
+    导致子图布局错乱——这是调试成本极高的隐蔽 bug。
+    """
+
+    def _layout_axis_keys(self, rows):
+        skeleton = make_subplots(rows=rows, cols=1, shared_xaxes=True,
+            vertical_spacing=0.01, row_heights=[1.0/rows]*rows)
+        ld = skeleton.layout.to_plotly_json()
+        xk = {k for k in ld.keys() if k.startswith('xaxis')}
+        yk = {k for k in ld.keys() if k.startswith('yaxis')}
+        return xk, yk
+
+    def test_row1_has_no_number_suffix(self):
+        """Row1 axis = "x" / "y", NOT "x1" / "y1"."""
+        for rows in [4,5,6,7,8]:
+            xk, yk = self._layout_axis_keys(rows)
+            assert "xaxis" in xk and "yaxis" in yk, f"{rows}行: row1缺标准轴"
+            assert "xaxis1" not in xk, f"{rows}行: row1不应有xaxis1"
+            assert "yaxis1" not in yk, f"{rows}行: row1不应有yaxis1"
+
+    def test_row2_plus_all_have_number_suffix(self):
+        """Row2+ axis = "xN" / "yN"."""
+        for rows in [4,5,6,7,8]:
+            xk, yk = self._layout_axis_keys(rows)
+            for r in range(2, rows+1):
+                assert f"xaxis{r}" in xk, f"{rows}行: 缺xaxis{r}"
+                assert f"yaxis{r}" in yk, f"{rows}行: 缺yaxis{r}"
+
+    def test_all_pnl_trace_axes_exist_in_layout(self):
+        """PNL traces 的 xaxis/yaxis 引用必须在 layout 中存在."""
+        n=30; t=np.arange(n,dtype=float)
+        for pnl_row in [6,5,4]:
+            rows = pnl_row
+            xk, yk = self._layout_axis_keys(rows)
+            traces, _, _, _ = _add_pnl_traces(t, 100+0.3*t, 100+0.1*t, [], pnl_row=pnl_row)
+            for tr in traces:
+                assert self._axis_key(tr["xaxis"]) in xk, f"PNL xaxis={tr['xaxis']}(rows={rows})"
+                assert self._axis_key(tr["yaxis"]) in yk, f"PNL yaxis={tr['yaxis']}(rows={rows})"
+
+    def _axis_key(self, ref):
+        """trace dict 的 xaxis='x'→layout key 'xaxis'; 'x2'→'xaxis2'; 'y3'→'yaxis3'"""
+        if ref in ("x", "y"):
+            return ref + "axis"             # x→xaxis, y→yaxis
+        return ref[0] + "axis" + ref[1:]    # x2→xaxis2, y3→yaxis3
+
+    def test_main_price_traces_axis_exist_in_layout(self):
+        """主价格 traces 引用的 axis 在对应的 layout 中存在。"""
+        n=20; t=np.arange(n,dtype=float); noisy=np.linspace(100,110,n)
+        for mr, rows in [(1,4),(1,5),(1,6),(1,7),(1,8)]:
+            xk, yk = self._layout_axis_keys(rows)
+            traces = _add_main_price_traces(t, noisy, _ohlc(n), noisy+0.5, None,
+                {"fc":"#00d4aa","_dual":False,"fc2":"#ff6b6b"}, mr=mr)
+            for tr in traces:
+                assert self._axis_key(tr["xaxis"]) in xk, f"rows={rows}: xaxis={tr['xaxis']}"
+                assert self._axis_key(tr["yaxis"]) in yk, f"rows={rows}: yaxis={tr['yaxis']}"
+
+    def test_residual_traces_axis_exist_in_layout(self):
+        """残差/速度 traces 的 axis 引用在对应 layout 中存在。"""
+        n=30; t=np.arange(n,dtype=float); noisy=np.sin(t/3)+100
+        for rr, vr, rows in [(2,3,4),(2,3,5),(2,3,6)]:
+            xk, yk = self._layout_axis_keys(rows)
+            _, traces, _ = _add_residual_traces(t, noisy+0.2, noisy, None,
+                {"fc":"#00d4aa"}, rr=rr, vr=vr)
+            for tr in traces:
+                assert self._axis_key(tr["xaxis"]) in xk, f"rows={rows}: xaxis={tr['xaxis']}"
+                assert self._axis_key(tr["yaxis"]) in yk, f"rows={rows}: yaxis={tr['yaxis']}"
