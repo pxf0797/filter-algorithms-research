@@ -851,9 +851,6 @@ def _compute_strategy_pnl(
     return long_pnl, short_pnl, trade_records
 
 
-    return long_pnl, short_pnl, trade_records
-
-
 # ---------------------------------------------------------------------------
 # Cross-period PnL alignment helpers
 # ---------------------------------------------------------------------------
