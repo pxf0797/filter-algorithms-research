@@ -183,13 +183,16 @@ def _add_prediction_traces(t, filtered, fit_result, fit_start, pair_end, row,
     pred_color = "#a371f7"  # 紫色
     a, b, c = fit_result["a"], fit_result["b"], fit_result["c"]
 
+    # ★ row=1 的 axis id 是 "x"/"y"（无数字后缀），不是 "x1"/"y1"
+    _ax = "x" if row == 1 else f"x{row}"
+    _ay = "y" if row == 1 else f"y{row}"
     # 拟合段 — 橙色实线
     x_fit = t[fit_start:pair_end + 1]; y_fit = fit_result["y_fit"]
     traces = [dict(type="scattergl", x=x_fit, y=y_fit,
         mode="lines", name=f"{name}(拟合)",
         line=dict(color=fit_color, width=2),
         legendgroup=name, showlegend=show_legend,
-        xaxis=f"x{row}", yaxis=f"y{row}")]
+        xaxis=_ax, yaxis=_ay)]
 
     # 前向延伸 — 紫色虚线
     y_ext = None; _ax_r1 = f"x{row+1}"; _ay_r1 = f"y{row+1}"
@@ -201,7 +204,7 @@ def _add_prediction_traces(t, filtered, fit_result, fit_start, pair_end, row,
             mode="lines", name=f"{name}(预测)",
             line=dict(color=pred_color, width=2, dash="dash"),
             legendgroup=name, showlegend=show_legend,
-            xaxis=f"x{row}", yaxis=f"y{row}"))
+            xaxis=_ax, yaxis=_ay))
 
     # 残差子图 — 前向预测段与最后已知滤波价格的残差
     if y_ext is not None and n_extend > 0:
