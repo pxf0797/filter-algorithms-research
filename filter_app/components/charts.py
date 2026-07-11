@@ -269,7 +269,7 @@ def _render_pnl_curves(t, long_filtered, short_filtered, row, col=1,
         showlegend=show_legend, xaxis=_ax, yaxis=_ay)]
 
 
-def _render_baseline(fig, row, col=1, y=100, opacity=0.5) -> None:
+def _render_baseline(row, col=1, y=100, opacity=0.5):
     """Return hline shape dict for PnL baseline."""
     return dict(type="line", x0=0, x1=1, xref="paper", y0=y, y1=y,
         yref=f"y{row}", line=dict(color="gray", dash="dash"), opacity=opacity)
