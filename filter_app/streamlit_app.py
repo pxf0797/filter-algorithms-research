@@ -811,11 +811,23 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
 
 # =====================================================================
 @st.cache_resource
-def _get_db_connection() -> bool:
-    """Get database connection (cached across all sessions)."""
+def _cached_conn():
+    """Cached SQLite connection (reused across reruns, avoids new conn+PRAGMA each query)."""
+    import sqlite3
+    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+@st.cache_resource
+def _get_db_connection() -> sqlite3.Connection:
+    """Get cached database connection, with schema init on first access."""
     logger.debug("Initializing database connection (cache miss)")
     init_db()
-    return True
+    return _cached_conn()
 
 
 # =====================================================================
