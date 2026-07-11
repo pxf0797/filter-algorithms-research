@@ -469,6 +469,7 @@ def _add_schmitt_traces(t, schmitt, acc, all_pairs, sar, ssr):
 def _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row):
     """Return (traces, shapes, yaxes) for PnL subplot."""
     _pnl_x = f"x{pnl_row}"; _pnl_y = f"y{pnl_row}"
+    _pnl_annotations = []  # collected annotations (replaces fig.add_annotation)
     # Trace merge: 逐笔交易段合并为 2 条 (多/空), NaN 分隔
     _l_seg, _s_seg = [], []
     _l_entry_x, _l_entry_y = [], []  # ▲ 入场标记
@@ -497,10 +498,11 @@ def _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row):
             ret_pct = trade["return_pct"]
             label_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
             arrow = "↑" if trade["type"] == "long" else "↓"
-            fig.add_annotation(x=seg_t[-1], y=seg_pnl[-1], text=f"{arrow}{ret_pct:+.1f}%",
-                showarrow=False, font=dict(size=8, color=label_color), yshift=12,
-                row=pnl_row, col=1)
-    # Collect all PnL traces into a single batch add_traces
+            _pnl_annotations.append(dict(x=seg_t[-1], y=seg_pnl[-1],
+                text=f"{arrow}{ret_pct:+.1f}%", showarrow=False,
+                font=dict(size=8, color=label_color), yshift=12,
+                xref=f"x{pnl_row}", yref=f"y{pnl_row}"))
+    # Collect all PnL traces, shapes, annotations into return values
     _pnl_traces = [
         dict(type="scattergl", x=t, y=long_pnl, mode="lines", name="做多PnL",
             line=dict(color="#3fb950", width=1.5, dash="solid"),
@@ -543,7 +545,7 @@ def _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row):
     _pnl_shapes = [dict(type="line", x0=0, x1=1, xref="paper", y0=100, y1=100,
         yref=f"y{pnl_row}", line=dict(color="gray", dash="dash"), opacity=0.5)]
     _pnl_yaxes = {f"yaxis{pnl_row}": {"title_text": "PnL(%)", "ticksuffix": "%"}}
-    return _pnl_traces, _pnl_shapes, _pnl_yaxes
+    return _pnl_traces, _pnl_shapes, _pnl_annotations, _pnl_yaxes
 
 
 def _add_feedback_subplot(t, trade_records, row):
@@ -820,8 +822,8 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
         _tr, _sh = _add_schmitt_traces(t, schmitt, acc, all_pairs, sar, ssr)
         all_traces += _tr; all_shapes += _sh
     if has_strategy:
-        _tr, _sh, _ya = _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row)
-        all_traces += _tr; all_shapes += _sh; _layout_updates.update(_ya)
+        _tr, _sh, _an, _ya = _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row)
+        all_traces += _tr; all_shapes += _sh; all_annotations += _an; _layout_updates.update(_ya)
     if has_feedback and feedback_row is not None:
         _sh, _ya = _add_feedback_subplot(t, trade_records, feedback_row)
         all_shapes += _sh; _layout_updates.update(_ya)
