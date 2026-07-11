@@ -1,8 +1,8 @@
 # 测试文档 — filter_research
 
-**实际测试计数**：333 个测试 / 12 个测试文件 / 66 个测试类 (+ 6 个独立函数)
+**实际测试计数**：830 个测试 / 24 个测试文件
 
-pytest 输出：`pytest tests/ --collect-only -q` 确认 333 个测试被收集。
+pytest 输出：`pytest tests/ --collect-only -q` 确认 830 个测试被收集。
 
 ---
 
@@ -55,7 +55,7 @@ tests/
 | 10 | `test_preset_ui_actions.py` | 8 | 45 | 13.5% | — |
 | 11 | `test_db.py` | 14 | 57 | 17.4% | — |
 | 12 | `test_integration.py` | 0 (6 函数) | 6 | 1.8% | — |
-| | **合计** | **66 类 + 6 函数** | **333** | **100%** | |
+| | **合计** | **66 类 + 6 函数** | **830** | **100%** | |
 
 ---
 
@@ -208,7 +208,7 @@ tests/
 ### 基础用法
 
 ```bash
-# 运行全部 333 个测试
+# 运行全部 830 个测试
 python -m pytest tests/ -v
 
 # 运行全部测试（含覆盖率报告）
@@ -321,4 +321,4 @@ open htmlcov/index.html
 - **12 个测试文件**：`tests/` 目录中所有 `test_*.py` 文件
 - **66 个测试类**：分布在 10 个类式测试文件中（`test_integration.py` 不含类）
 - **6 个独立函数**：`test_integration.py` 的 6 个顶级函数
-- **333 个测试**：来自 `pytest --collect-only -q` 的精确计数
+- **830 个测试**：来自 `pytest --collect-only -q` 的精确计数

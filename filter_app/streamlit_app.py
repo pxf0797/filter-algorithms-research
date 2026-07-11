@@ -20,7 +20,7 @@ from plotly.subplots import make_subplots
 from config_db import (init_config_tables, list_presets, apply_preset,
                         save_preset, delete_preset, rename_preset,
                         get_history,
-                        import_json_files_as_presets)
+                        import_json_files_as_presets, VIEW_PARAM_SPECS)
 from db import (init_db, get_date_range, has_data,
                 check_data_health, get_db_size_mb, snapshot_db, list_snapshots,
                 restore_snapshot, prune_snapshots, clear_display_cache,
@@ -41,6 +41,7 @@ from services.data_loader import (
 from components.charts import (
     _render_plotly, _add_prediction_traces,
     _add_cross_pnl_subplot, _add_alignment_subplot,
+    _draw_holding_bands,
 )
 from components.sidebar import (
     _render_params, ALL_TFS, DEFAULT_TFS, TF_HIERARCHY,
@@ -321,36 +322,54 @@ def _determine_subplot_layout(has_s, has_strategy, has_cross, has_alignment, _hi
             if has_cross:
                 if has_alignment:
                     rows = 8
-                    rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.24, 0.15, 0.12]
-                    titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}PnL参考", "同向性判断")
+                    rh = [0.48, 0.11, 0.06, 0.06, 0.08, 0.24, 0.05, 0.18]
+                    titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}持仓状态", "同向性判断")
                     pnl_row = 6
                     cross_row = 7
                     align_row = 8
                 else:
                     rows = 7
-                    rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.27, 0.18]
-                    titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}PnL参考")
+                    rh = [0.56, 0.11, 0.06, 0.06, 0.08, 0.27, 0.06]
+                    titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}持仓状态")
                     pnl_row = 6
                     cross_row = 7
                     align_row = None
             else:
                 rows = 6
-                rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.375]
+                rh = [0.44, 0.11, 0.06, 0.06, 0.08, 0.375]
                 titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)")
                 pnl_row = 6
                 cross_row = None
                 align_row = None
         else:
             rows = 5
-            rh = [0.28, 0.14, 0.18, 0.18, 0.22]
+            rh = [0.57, 0.14, 0.09, 0.09, 0.11]
             titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t")
             pnl_row = None
             cross_row = None
             align_row = None
         return rows, rh, titles, 1, 2, 3, 4, 5, None, pnl_row, cross_row, align_row
     else:
-        return 4, [0.40, 0.18, 0.20, 0.22], ("价格&滤波", "残差", "速度v", "加速度a"), \
+        return 4, [0.61, 0.18, 0.10, 0.11], ("价格&滤波", "残差", "速度v", "加速度a"), \
                1, 2, 3, None, None, 4, None, None, None
+
+
+def _insert_feedback_row(rows, rh, titles, pnl_row, cross_row, align_row):
+    """在 pnl_row 下方插入「实际持仓过程」子图行；cross/align 行顺延。
+
+    从 PnL 行高匀一部分给新行，保持总高不膨胀，不改动 _determine_subplot_layout
+    的组合分支。Returns (rows, rh, titles, feedback_row, cross_row, align_row)。
+    """
+    feedback_row = pnl_row + 1
+    rh = list(rh)
+    fb_h = rh[pnl_row - 1] * 0.14
+    rh[pnl_row - 1] = rh[pnl_row - 1] - fb_h
+    rh.insert(pnl_row, fb_h)                       # 插到 PnL 行之后
+    titles = list(titles)
+    titles.insert(pnl_row, "实际持仓状态")          # 0-index=pnl_row 即 PnL 之后
+    cross_row = cross_row + 1 if cross_row is not None else None
+    align_row = align_row + 1 if align_row is not None else None
+    return rows + 1, rh, tuple(titles), feedback_row, cross_row, align_row
 
 
 def _add_main_price_traces(fig, t, noisy, ohlc, filtered, filtered2, cfg) -> None:
@@ -466,6 +485,23 @@ def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row) -> None
         y=[100, 100, y_min_s, y_min_s], fill="toself", fillcolor="rgba(248,81,73,0.04)",
         mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"), row=pnl_row, col=1)
     fig.update_yaxes(title_text="PnL(%)", row=pnl_row, col=1, ticksuffix="%")
+
+
+def _add_feedback_subplot(fig, t, trade_records, row) -> None:
+    """实际持仓状态子图：绿=做多持仓 / 红=做空持仓 / 空白=不持。
+
+    持仓 = Layer0 实际成交区间(entry→exit)，只显示状态不显示百分比。
+    """
+    n = len(t)
+    long_mask = np.zeros(n, dtype=bool)
+    short_mask = np.zeros(n, dtype=bool)
+    for tr in trade_records:
+        a = tr["entry_idx"]
+        if a >= n:
+            continue
+        b = min(tr["exit_idx"], n - 1)
+        (long_mask if tr["type"] == "long" else short_mask)[a:b + 1] = True
+    _draw_holding_bands(fig, t, long_mask, short_mask, row)
 
 
 def _get_min_tf_and_count(configs, ticker_code) -> tuple:
@@ -682,6 +718,9 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     show_alignment = cfg.get("show_alignment", False)
     has_strategy = show_strategy and long_pnl is not None and len(trade_records) > 0
 
+    show_pnl_feedback = cfg.get("show_pnl_feedback", False)
+    has_feedback = has_strategy and show_pnl_feedback
+
     # ── Step 9: Determine subplot layout ──
     has_s = schmitt is not None
     has_cross = (show_cross_pnl and higher_pnl is not None and
@@ -696,6 +735,11 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
 
     rows, rh, titles, mr, rr, vr, sar, ssr, ar, pnl_row, cross_row, align_row = \
         _determine_subplot_layout(has_s, has_strategy, has_cross, has_alignment, _higher_tf)
+
+    feedback_row = None
+    if has_feedback and pnl_row is not None:
+        rows, rh, titles, feedback_row, cross_row, align_row = _insert_feedback_row(
+            rows, rh, titles, pnl_row, cross_row, align_row)
 
     # ── Step 10: Build figure ──
     fig = make_subplots(rows=rows, cols=1, shared_xaxes=True,
@@ -718,9 +762,11 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     if has_strategy:
         _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row)
 
+    if has_feedback and feedback_row is not None:
+        _add_feedback_subplot(fig, t, trade_records, feedback_row)
+
     if has_cross and higher_pnl is not None and cross_row is not None:
         _add_cross_pnl_subplot(fig, t, higher_pnl, row=cross_row, higher_tf=_higher_tf)
-        fig.update_yaxes(title_text=f"{_higher_tf}(%)", row=cross_row, col=1, ticksuffix="%")
 
     if has_alignment and _align_masks is not None and align_row is not None:
         long_mask, short_mask = _align_masks
@@ -1589,6 +1635,15 @@ def _render_db_backup() -> None:
                         st.error(f"删除失败: {e}")
 
 
+def _view_export_params(cfg, i) -> dict:
+    """按单一真源 VIEW_PARAM_SPECS 从单个视图 cfg 构建导出键值。
+
+    export(JSON) 与测试共用此函数，参数增删只跟随 VIEW_PARAM_SPECS，不会漏。
+    """
+    return {f"v{i}_{suffix}": cfg.get(cfg_key, default)
+            for suffix, cfg_key, default in VIEW_PARAM_SPECS}
+
+
 def _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code) -> None:
     """Render config export download button."""
     st.sidebar.markdown("---")
@@ -1597,21 +1652,7 @@ def _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_c
         "global_f": filter_id, "global_dual": dual, "global_f2": filter_id2,
     }
     for i, cfg in enumerate(configs):
-        export_data[f"v{i}_tf"] = cfg["tf"]
-        export_data[f"v{i}_n"] = cfg["n_pts"]
-        export_data[f"v{i}_sch"] = cfg["show_sch"]
-        export_data[f"v{i}_pred"] = cfg["show_pred"]
-        export_data[f"v{i}_ke"] = cfg["ke"]
-        export_data[f"v{i}_sm"] = cfg["sm"]
-        export_data[f"v{i}_ew"] = cfg["ew"]
-        export_data[f"v{i}_fm"] = cfg["fit_mode"]
-        export_data[f"v{i}_next"] = cfg["n_ext"]
-        export_data[f"v{i}_fc"] = cfg["fc"]
-        export_data[f"v{i}_fc2"] = cfg["fc2"]
-        export_data[f"v{i}_strat"] = cfg.get("show_strategy", False)
-        export_data[f"v{i}_sl"] = cfg.get("stop_loss_pct", 2.0)
-        export_data[f"v{i}_cross_pnl"] = cfg.get("show_cross_pnl", False)
-        export_data[f"v{i}_align"] = cfg.get("show_alignment", False)
+        export_data.update(_view_export_params(cfg, i))
         f1 = FILTERS.get(filter_id, {})
         for pname, pval in cfg.get("pv", {}).items():
             label = f1["params"].get(pname, (pname,))[0]

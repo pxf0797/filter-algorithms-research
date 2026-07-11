@@ -5,16 +5,15 @@ import numpy as np
 from unittest.mock import MagicMock, patch
 import sys
 
+from config_db import VIEW_PARAM_SPECS
+
 # ============================================================
 # 1. 导出完整性：所有必需参数都出现在导出JSON中
 # ============================================================
 
 # 每个视图必须包含的参数（与 streamlit_app.py 的 export_data 对应）
-REQUIRED_PER_VIEW_KEYS = [
-    "tf", "n", "sch", "pred", "ke", "sm", "ew",
-    "fm", "next", "fc", "fc2", "strat", "sl",
-    "cross_pnl", "align",
-]
+# 单一真源派生：新增/删除参数只改 config_db.VIEW_PARAM_SPECS，本表自动同步
+REQUIRED_PER_VIEW_KEYS = [suffix for suffix, _, _ in VIEW_PARAM_SPECS]
 
 REQUIRED_GLOBAL_KEYS = ["market", "ticker", "global_f", "global_dual", "global_f2"]
 
@@ -25,18 +24,15 @@ class TestExportCompleteness:
     """验证导出JSON包含所有必需的参数"""
 
     def test_all_per_view_keys_exported(self):
-        """每个视图的15个参数都在导出中"""
-        with open(CONFIG_PATH) as f:
-            config = json.load(f)
-
+        """导出函数(registry 驱动)包含每个视图的全部参数(含新增 pnlfb)"""
+        from streamlit_app import _view_export_params
+        # 合成一个含全部 cfg 键的视图配置
+        cfg = {cfg_key: (default if default is not None else "x")
+               for _, cfg_key, default in VIEW_PARAM_SPECS}
         for i in range(4):
-            for key in REQUIRED_PER_VIEW_KEYS:
-                export_key = f"v{i}_{key}"
-                assert export_key in config, (
-                    f"缺失导出键: {export_key}\n"
-                    f"请在 streamlit_app.py export_data 中添加: "
-                    f"export_data['{export_key}'] = cfg.get('...')"
-                )
+            out = _view_export_params(cfg, i)
+            for suffix, _, _ in VIEW_PARAM_SPECS:
+                assert f"v{i}_{suffix}" in out, f"导出缺失: v{i}_{suffix}"
 
     def test_global_keys_exported(self):
         """全局参数在导出中"""
@@ -352,3 +348,59 @@ class TestImportIdempotency:
         assert "v0_tf" not in session_state
         assert "market" in session_state
         assert "_imp_market" in session_state
+
+
+# ============================================================
+# 5. 单一参数清单守卫：防止未来新增参数漏接持久化
+# ============================================================
+
+class TestParamRegistryGuard:
+    """VIEW_PARAM_SPECS 作为单一真源，守卫 export/DB 覆盖完整。"""
+
+    def test_registry_includes_pnlfb(self):
+        """回归：show_pnl_feedback 必须在持久化清单中(历史曾两处都漏)。"""
+        cfg_keys = {cfg_key for _, cfg_key, _ in VIEW_PARAM_SPECS}
+        assert "show_pnl_feedback" in cfg_keys
+
+    def test_sidebar_params_covered_by_registry(self):
+        """守卫：sidebar 产生的每个可持久化 cfg 参数都必须在 VIEW_PARAM_SPECS。
+
+        解析 sidebar.py 源码里的 cfg["..."]= 赋值；新增参数若忘了接入清单，此测试失败。
+        """
+        import re
+        from pathlib import Path
+        sidebar_src = (Path(__file__).resolve().parent.parent
+                       / "filter_app" / "components" / "sidebar.py")
+        src = sidebar_src.read_text(encoding="utf-8")
+        assigned = set(re.findall(r'cfg\["([a-z_0-9]+)"\]\s*=', src))
+        non_persist = {"pv", "pv2"}          # 滤波器参数走独立(中文key)机制
+        persistable = assigned - non_persist
+        registry_cfg_keys = {cfg_key for _, cfg_key, _ in VIEW_PARAM_SPECS}
+        missing = persistable - registry_cfg_keys
+        assert not missing, (
+            f"这些 sidebar 参数未接入持久化清单 config_db.VIEW_PARAM_SPECS: {missing}\n"
+            f"新增可持久化参数时，请在 VIEW_PARAM_SPECS 添加 (后缀, cfg键, 默认值)。"
+        )
+
+    def test_export_helper_covers_pnlfb(self):
+        """JSON 导出函数包含 v{i}_pnlfb。"""
+        from streamlit_app import _view_export_params
+        out = _view_export_params({"show_pnl_feedback": True}, 2)
+        assert out["v2_pnlfb"] is True
+
+    def test_collect_current_params_includes_pnlfb(self, monkeypatch):
+        """DB 收集 collect_current_params 包含 v{i}_pnlfb。"""
+        import streamlit as st
+        fake_state = {"v0_pnlfb": True, "v1_pnlfb": False, "v0_tf": "60m"}
+        monkeypatch.setattr(st, "session_state", fake_state, raising=False)
+        from config_db import collect_current_params
+        params = collect_current_params()
+        assert params.get("v0_pnlfb") is True
+        assert params.get("v1_pnlfb") is False
+
+    def test_json_roundtrip_pnlfb(self):
+        """JSON 导出→序列化→读回：pnlfb 值被保留。"""
+        from streamlit_app import _view_export_params
+        exported = _view_export_params({"show_pnl_feedback": True}, 0)
+        blob = json.loads(json.dumps(exported))     # 模拟 download→upload
+        assert blob["v0_pnlfb"] is True

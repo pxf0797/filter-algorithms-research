@@ -1,6 +1,6 @@
 # 多周期股票滤波分析工具 — 测试用例文档
 
-> 自动生成于 2026-06-28 (更新于 2026-07-05) | 测试总数: 662（pytest 收集，不含 test_streamlit_app.py 的 25 个 mock 测试） | Python 3.12 + pytest
+> 自动生成于 2026-06-28 (更新于 2026-07-11) | 测试总数: 830（pytest --collect-only -q 收集） | Python 3.12 + pytest
 >
 > 另见 [测试规格文档](tests/test_cases.md)（手动编写的测试规格，含 Bug 回归矩阵、UI 交互测试、跨周期测试场景和集成测试说明）。本文档为自动生成的测试用例参考表格。
 
@@ -292,7 +292,7 @@
 
 ---
 
-### 1.3 状态管理 (`test_state.py`) — 59 用例
+### 1.3 状态管理 (`test_state.py`) — 62 用例
 
 #### 默认值初始化 (`TestAppStateInitDefaults`)
 
@@ -508,7 +508,7 @@
 
 ---
 
-### 2.3 交易策略 (`test_strategy.py`) — 18 用例
+### 2.3 交易策略 (`test_strategy.py`) — 20 用例
 
 #### 抛物线拟合 (`TestFitParabolic`)
 
@@ -544,6 +544,8 @@
 | TC-STRAT-013 | 独立资金池 | 多个交易对 | compute_strategy_pnl | 各交易对资金独立计算 |
 | TC-STRAT-014 | 连续交易 | 多笔连续交易 | compute_strategy_pnl | P&L 正确累计 |
 | TC-STRAT-015 | 极端止损值 | 止损设置极端值 | compute_strategy_pnl | 不崩溃，P&L 合理 |
+| TC-STRAT-019 | 无预测时策略仍交易 | 有效信号对，不传入 predictions | compute_strategy_pnl | 策略仍正常计算 P&L，不依赖预测 |
+| TC-STRAT-020 | 下行二次项不再阻止多头 | 下行二次项拟合 + 多头信号 | compute_strategy_pnl | 多头交易不被二次项符号否决 |
 
 #### 预测轨迹 (`TestAddPredictionTraces`)
 
@@ -554,6 +556,28 @@
 | TC-STRAT-018 | no_extend 仅添加拟合线 | subplot_fig | add_prediction_traces(extend=False) | 图中仅有拟合线，无预测延伸 |
 
 ---
+
+### 2.4 级联合成 (`test_cascading_synthesis.py`) — 53 用例
+
+回测级联合成测试，验证跨时间帧 K 线数据的合成逻辑，包括时区偏移处理、周期起点计算、合成需求判定、更细时间帧查找、OHLCV 聚合、输出 DataFrame 构建以及端到端级联合成一致性。
+
+| 测试类 | 方法数 | 说明 |
+|--------|--------|------|
+| `TestOffsetToTz` | 4 | 时区偏移 → timezone 对象转换 |
+| `TestEnsureTzNaive` | 3 | 确保时间戳不含时区信息 |
+| `TestGetTzSuffix` | 5 | 时区后缀提取与格式化 |
+| `TestFormatSynthDate` | 3 | 合成日期格式化（分钟/日线/空） |
+| `TestGetPeriodStartTs` | 9 | 各时间帧周期起始时间戳计算 |
+| `TestGetQueryStartForSynthesis` | 3 | 查询起始时间计算 |
+| `TestFindImmediateFinerTf` | 4 | 查找相邻更细时间帧 |
+| `TestNeedsSynthesis` | 5 | 合成需求判定（截止时间 vs 数据范围） |
+| `TestNeedsSynthesisRegression` | 1 | 合成需求回归测试（参数化） |
+| `TestBoundarySynthesis` | 3 | 合成边界条件 |
+| `TestAggregateBars` | 2 | OHLCV 聚合计算 |
+| `TestBuildOutputDf` | 4 | 输出 DataFrame 构建与截断 |
+| `TestCrossPeriodFilter` | 5 | 跨周期柱线过滤 |
+| `TestCascadeEndToEnd` | 1 | 端到端级联合成一致性 |
+| `TestModule` | 1 | 模块导入测试 |
 
 ## 3. UI 组件测试
 
@@ -1127,13 +1151,9 @@
 | 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
 |--------|---------|---------|---------|---------|
 | TC-CHART-060 | 多头参考线添加 | Plotly figure | render_cross_pnl_subplot | 多头参考线存在 |
-| TC-CHART-061 | 空头参考线添加 | Plotly figure | render_cross_pnl_subplot | 空头参考线存在 |
 | TC-CHART-062 | 双向参考线 | Plotly figure | render_cross_pnl_subplot | 两根参考线都存在 |
 | TC-CHART-063 | 无数据不添加 trace | Plotly figure，空数据 | render_cross_pnl_subplot | 不添加新 trace |
-| TC-CHART-064 | 入场标记渲染 | 含入场标记数据 | render_cross_pnl_subplot | 入场标记被渲染 |
-| TC-CHART-065 | 出场标记渲染 | 含出场标记数据 | render_cross_pnl_subplot | 出场标记被渲染 |
 | TC-CHART-066 | 基线始终添加 | Plotly figure | render_cross_pnl_subplot | 基线 trace 存在 |
-| TC-CHART-067 | marker 颜色为金色 | Plotly figure | render_cross_pnl_subplot | marker.color 为 gold |
 
 #### 对齐子图 (`TestAlignmentSubplot`)
 
@@ -1181,7 +1201,7 @@
 | TC-CHART-087 | sig 为 1 和 -1 时添加不同颜色的 fill | Plotly fig + 双向 sig | _add_schmitt_traces | 含双向 sig fill traces |
 
 ---
-### 4.2 时间对齐 (`test_alignment.py`) — 6 用例
+### 4.2 时间对齐 (`test_alignment.py`) — 10 用例
 
 #### 对齐 P&L 到当前时间帧 (`TestAlignPnlToCurrentTf`)
 
@@ -1193,6 +1213,20 @@
 | TC-ALIGN-004 | 更高 TF 日期为 None | sample_dates_intraday + None higher | align_pnl_to_current_tf | 正确处理 None |
 | TC-ALIGN-005 | 标记位置 | 含标记日期 | align_pnl_to_current_tf | 标记位置正确 |
 | TC-ALIGN-006 | higher TF 比 current TF 短 | higher 数据更少 | align_pnl_to_current_tf | 合理处理对齐 |
+
+#### 日末高位持仓延续 (`TestEodHigherPositionExtend`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-ALIGN-007 | EOD 出场映射到最后当前 bar | EOD 出场标记 | eod_exit_maps_to_last_current_bar | 出场映射到当前时间帧的最后一根 bar |
+| TC-ALIGN-008 | 非 EOD 出场不延续 | 非 EOD 出场标记 | non_eod_exit_not_extended | 出场位置不变 |
+
+#### 窗口前入场延伸 (`TestPreWindowEntryExtend`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-ALIGN-009 | 窗口前入场包含起始位置 | 入场在窗口之前 | pre_window_entry_includes_start | entry 被延伸到窗口起始位置 |
+| TC-ALIGN-010 | 完全在窗口前的持仓不显示 | 持仓完全在窗口之前 | position_entirely_before_window_not_shown | 该持仓不在窗口中渲染 |
 
 ---
 
@@ -1221,6 +1255,29 @@
 | TC-ASUB-012 | trade_records 与 masks 结合 | trade_records | render_alignment_subplot | 交易记录与遮罩匹配 |
 | TC-ASUB-013 | mask 不匹配时跳过 trade_record | 不匹配数据 | render_alignment_subplot | 不匹配记录被跳过 |
 | TC-ASUB-014 | 入场越界 | 入场索引超出范围 | render_alignment_subplot | 越界入场被跳过 |
+
+### 4.4 持仓反馈子图 (`test_feedback_subplot.py`) — 6 用例
+
+实际持仓状态带状图可视化测试。全部为独立函数（无测试类）。
+
+| 测试方法 | 说明 |
+|---------|------|
+| `test_contiguous_runs` | 连续运行区间识别 |
+| `test_draw_holding_bands_shapes` | 持仓带状图绘制 |
+| `test_draw_holding_bands_empty` | 空数据不绘制 |
+| `test_insert_feedback_row_shifts_rows` | 插入反馈行后后续行下移 |
+| `test_add_feedback_subplot_state_only` | 仅状态绑定的反馈子图 |
+| `test_add_feedback_subplot_empty_trades` | 无交易时反馈子图安全 |
+
+### 4.5 主图 Trace 渲染 (`test_render_traces.py`) — 15 用例
+
+主图价格、残差、PnL 三条 trace 路径的渲染测试。
+
+| 测试类 | 方法数 | 说明 |
+|--------|--------|------|
+| `TestAddMainPriceTraces` | 4 | 主价格蜡烛图/滤波线渲染，双滤波安全 |
+| `TestAddResidualTraces` | 5 | 残差与速度 trace，含 NaN/空数据/常值信号处理 |
+| `TestAddPnlTraces` | 6 | PnL 曲线与止盈止损标记，含 EOD 出场/注释箭头 |
 
 ---
 
@@ -1376,7 +1433,7 @@
 
 ---
 
-### 6.2 参数导出导入 (`test_param_export_import.py`) — 13 用例
+### 6.2 参数导出导入 (`test_param_export_import.py`) — 18 用例
 
 #### 导出完整性 (`TestExportCompleteness`)
 
@@ -1415,6 +1472,16 @@
 |--------|---------|---------|---------|---------|
 | TC-PARAM-012 | 重复导入幂等 | session_state + 导出数据 | import → import 再次 | 两次导入结果一致 |
 | TC-PARAM-013 | 部分导入无残留 | session_state + 部分数据 | import(部分) → 检查 | 无意外残留值 |
+
+#### 参数单一真源守卫 (`TestParamRegistryGuard`)
+
+| 用例ID | 测试目的 | 前置条件 | 操作步骤 | 通过标准 |
+|--------|---------|---------|---------|---------|
+| TC-PARAM-014 | 注册表包含 PnL 反馈键 | 无 | test_registry_includes_pnlfb | PnL feedback 参数在注册表中声明 |
+| TC-PARAM-015 | 侧边栏参数被注册表覆盖 | 无 | test_sidebar_params_covered_by_registry | 所有侧边栏参数键都在注册表中 |
+| TC-PARAM-016 | 导出辅助函数覆盖 PnLFB | session_state | test_export_helper_covers_pnlfb | 导出结果包含 PnL feedback 参数 |
+| TC-PARAM-017 | collect_current_params 包含 PnLFB | session_state + monkeypatch | test_collect_current_params_includes_pnlfb | 采集参数包含 PnL feedback |
+| TC-PARAM-018 | JSON 往返 PnLFB | session_state | test_json_roundtrip_pnlfb | 导出后再导入，PnLFB 值不变 |
 
 ---
 
@@ -1481,7 +1548,7 @@
 
 ## 8. 回测模式测试
 
-### 8.1 回测功能 (`test_backtest.py`) — 53 用例
+### 8.1 回测功能 (`test_backtest.py`) — 75 用例
 
 #### 模式切换 (`TestBacktestModeSwitch`)
 
@@ -1545,7 +1612,7 @@
 
 ---
 
-### 8.2 回测播放状态分离 (`test_backtest.py` / `test_state.py`) — 31 用例
+### 8.2 回测播放状态分离 (`test_backtest.py` / `test_state.py`) — 37 用例
 
 #### 状态分离测试 (`TestBacktestSliderKeys` — `test_state.py`)
 
@@ -1661,20 +1728,23 @@ pytest tests/ --cov=. --cov-report=html
 | | test_state.py | 12 | 62 |
 | 算法核心 | test_filters.py | 6 | 22 |
 | | test_signals.py | 2 | 16 |
-| | test_strategy.py | 5 | 18 |
+| | test_strategy.py | 5 | 20 |
+| | test_cascading_synthesis.py | 15 | 53 |
 | UI 组件 | test_sidebar.py | 8 | 36 |
 | | test_preset_ui.py | 14 | 60 |
 | | test_preset_ui_actions.py | 7 | 45 |
 | | test_app_ui.py | 8 | 33 |
 | | test_streamlit_app.py | 5 | 25 |
 | 可视化 | test_charts.py | 14 | 90 |
-| | test_alignment.py | 1 | 6 |
+| | test_alignment.py | 3 | 10 |
 | | test_alignment_subplot.py | 2 | 14 |
+| | test_feedback_subplot.py | 0 | 6 |
+| | test_render_traces.py | 3 | 15 |
 | 集成测试 | test_integration.py | 0 | 6 |
 | | test_integration_flows.py | 5 | 9 |
 | | test_app_smoke.py | 0 | 1 |
 | 边界与参数 | test_boundary.py | 11 | 30 |
-| | test_param_export_import.py | 5 | 13 |
+| | test_param_export_import.py | 6 | 18 |
 | 数据加载 | test_data_loader.py | 5 | 30 |
-| **回测模式** | **test_backtest.py** | **6** | **56** |
-| **合计** | **21 文件** | **146** | **662** |
+| **回测模式** | **test_backtest.py** | **6** | **75** |
+| **合计** | **24 文件** | **167** | **830** |

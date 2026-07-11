@@ -578,6 +578,33 @@ def import_json_files_as_presets(force: bool = False):
 # Streamlit helpers
 # ═══════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════
+# 单一参数清单 — 每视图 v0~v3 可持久化参数的唯一真源
+# 新增/删除可持久化参数时只改这一处；JSON 导出与 DB 收集都从此驱动，
+# 避免两处手动键表漂移(历史 bug: show_pnl_feedback 曾两处都漏保存)。
+# (session_state 后缀, cfg 键, 导出默认值)
+# ═══════════════════════════════════════════════════════════
+VIEW_PARAM_SPECS = [
+    ("tf", "tf", None),
+    ("n", "n_pts", None),
+    ("sch", "show_sch", False),
+    ("pred", "show_pred", False),
+    ("ke", "ke", None),
+    ("sm", "sm", None),
+    ("ew", "ew", None),
+    ("fm", "fit_mode", None),
+    ("next", "n_ext", 8),
+    ("fc", "fc", None),
+    ("fc2", "fc2", None),
+    ("strat", "show_strategy", False),
+    ("sl", "stop_loss_pct", 2.0),
+    ("cross_pnl", "show_cross_pnl", False),
+    ("align", "show_alignment", False),
+    ("pnlfb", "show_pnl_feedback", False),
+]
+VIEW_PARAM_SUFFIXES = [suffix for suffix, _, _ in VIEW_PARAM_SPECS]
+
+
 def collect_current_params() -> Dict[str, Any]:
     """Collect all current configuration parameters from ``st.session_state``.
 
@@ -598,11 +625,9 @@ def collect_current_params() -> Dict[str, Any]:
         if k in st.session_state:
             params[k] = st.session_state[k]
 
-    # 视图参数 v0~v3
+    # 视图参数 v0~v3（键表来自单一真源 VIEW_PARAM_SUFFIXES）
     for vi in range(4):
-        for pk in ["tf", "n", "sch", "pred", "ke", "sm", "ew",
-                    "fm", "next", "fc", "fc2", "strat", "sl",
-                    "cross_pnl", "align"]:
+        for pk in VIEW_PARAM_SUFFIXES:
             k = f"v{vi}_{pk}"
             if k in st.session_state:
                 params[k] = st.session_state[k]

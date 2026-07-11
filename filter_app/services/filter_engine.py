@@ -706,30 +706,10 @@ def _compute_strategy_pnl(
     trade_id = 0
 
     for pair_start, pair_end in all_pairs:
-        if pair_end not in pred_map:
-            continue
-        pp = pred_map[pair_end]
-        fit_result = pp["fit_result"]
-
-        # ---- 计算外推预测方向 ----
-        a, b, c = fit_result["a"], fit_result["b"], fit_result["c"]
-        x0 = fit_result.get("x0", None)
-
-        x_pred = np.arange(pair_end, pair_end + n_extend)
-        if x0 is not None:
-            y_pred = np.polyval((a, b, c), x_pred - x0)
-        else:
-            y_pred = np.polyval((a, b, c), x_pred)
-
-        if len(y_pred) < 2:
-            continue
-        pred_up = y_pred[-1] > y_pred[0]
-
-        # ---- 判断交易方向 ----
+        # ---- 判断交易方向（仅凭 Sig 反转方向；入场不再依赖抛物线预测）----
         v2 = sig_t[pair_end]
-        is_long = (v2 == 1 and pred_up)
-        is_short = (v2 == -1 and not pred_up)
-
+        is_long = (v2 == 1)
+        is_short = (v2 == -1)
         if not is_long and not is_short:
             continue
 
@@ -738,6 +718,14 @@ def _compute_strategy_pnl(
         entry_price = filtered[entry_idx]
         if np.isnan(entry_price) or entry_price <= 0:
             continue
+
+        # ---- 预测轨道（可选）：仅用于保护期止损参考；无预测则回退相对入场价固定% ----
+        pp = pred_map.get(pair_end)
+        a = b = c = x0 = None
+        if pp is not None:
+            fit_result = pp["fit_result"]
+            a, b, c = fit_result["a"], fit_result["b"], fit_result["c"]
+            x0 = fit_result.get("x0", None)
 
         # ---- 扫描：分段混合（方案D） ----
         # 预测保护期 [entry+1, entry+N_ext]：止损 + 止盈 双重保护
@@ -754,10 +742,13 @@ def _compute_strategy_pnl(
 
             # 预测保护期内：检查止损
             if i <= protect_end:
-                if x0 is not None:
-                    pred_val = np.polyval((a, b, c), i - x0)
+                if a is not None:
+                    # 有预测：相对预测价轨道
+                    pred_val = np.polyval((a, b, c), i - x0) if x0 is not None \
+                        else np.polyval((a, b, c), i)
                 else:
-                    pred_val = np.polyval((a, b, c), i)
+                    # 无预测：回退到相对入场价固定%
+                    pred_val = entry_price
 
                 if not (np.isnan(pred_val) or pred_val <= 0):
                     if is_long:
@@ -948,21 +939,36 @@ def _align_pnl_to_current_tf(
         exit_time = hd[exit_j]
 
         # 找到当前周期中 ≤ entry_time 的最近bar
+        # 若开仓在当前窗口起点之前，但仓位延续进窗口(exit ≥ 窗口起点)，则从
+        # 窗口起点(bar0)开始显示，把当前周期起始点包含在内(与 eod 右延续镜像)。
         entry_mask = cd <= entry_time
         if entry_mask.any():
             entry_bar = int(np.max(np.where(entry_mask)[0]))
+        elif n > 0 and exit_time >= cd[0]:
+            entry_bar = 0
+        else:
+            entry_bar = None
+        if entry_bar is not None:
             pnl_at_entry = aligned_long[entry_bar] if trade["type"] == "long" else aligned_short[entry_bar]
             entry_markers.append((entry_bar, trade["type"], pnl_at_entry if not np.isnan(pnl_at_entry) else 100.0))
 
         # 离场：≤ exit_time 的最近bar
+        # eod = 高周期该仓位未真正结束(跑到数据末端被强制平仓)，低周期应延续到
+        #       最新bar(右边缘)，而非停在高周期末bar对应的较早位置(半边多空对)。
+        exit_reason = trade.get("exit_reason", "")
         exit_mask = cd <= exit_time
-        if exit_mask.any():
+        if exit_reason == "eod":
+            exit_bar = n - 1
+        elif exit_mask.any():
             exit_bar = int(np.max(np.where(exit_mask)[0]))
+        else:
+            exit_bar = None
+        if exit_bar is not None:
             pnl_at_exit = aligned_long[exit_bar] if trade["type"] == "long" else aligned_short[exit_bar]
             exit_markers.append((exit_bar, trade["type"],
                                  pnl_at_exit if not np.isnan(pnl_at_exit) else 100.0,
                                  trade.get("return_pct", 0.0),
-                                 trade.get("exit_reason", "")))
+                                 exit_reason))
 
     return {
         "aligned_long": aligned_long,

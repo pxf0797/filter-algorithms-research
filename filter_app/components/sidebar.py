@@ -230,6 +230,12 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
                             key=align_key,
                             disabled=not (cfg["show_strategy"] and cfg["show_cross_pnl"]),
                             help="高周期做多/空持仓时，本周期同向PnL才在子图体现，否则维持不变")
+                        fb_key = f"{key}_pnlfb"
+                        cfg["show_pnl_feedback"] = st.checkbox(
+                            "显示实际持仓状态", value=st.session_state.get(fb_key,
+                                st.session_state.get(f"_imp_{fb_key}", False)),
+                            key=fb_key, disabled=not cfg["show_strategy"],
+                            help="在PnL下方显示实际多空持仓状态(绿=做多持仓/红=做空持仓/空白=不持)")
                     if cfg["show_strategy"]:
                         with c_strat[1]:
                             cfg["stop_loss_pct"] = st.slider(
@@ -311,6 +317,8 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
         st.session_state.get(f"_imp_{key}_cross_pnl", cfg.get("show_cross_pnl", False)))
     cfg["show_alignment"] = st.session_state.get(f"{key}_align",
         st.session_state.get(f"_imp_{key}_align", cfg.get("show_alignment", False)))
+    cfg["show_pnl_feedback"] = st.session_state.get(f"{key}_pnlfb",
+        st.session_state.get(f"_imp_{key}_pnlfb", cfg.get("show_pnl_feedback", False)))
     cfg["fc"] = st.session_state.get(f"{key}_fc",
         st.session_state.get(f"_imp_{key}_fc", cfg.get("fc", "#00d4aa")))
     if dual and filter_id2:

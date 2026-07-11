@@ -10,6 +10,8 @@ import numpy as np
 import streamlit as st
 import plotly.graph_objects as go
 
+from services.filter_engine import _compute_holding_masks
+
 
 # ---------------------------------------------------------------------------
 # Plotly cross-subplot crosshair helper
@@ -348,52 +350,44 @@ def _render_fill_background(fig, t, y_values, row, col=1,
 # ---------------------------------------------------------------------------
 # Cross-period PnL reference subplot
 # ---------------------------------------------------------------------------
+def _contiguous_runs(mask):
+    """返回布尔数组中连续 True 段的 (start, end) 闭区间列表。"""
+    runs, s = [], None
+    for i, v in enumerate(mask):
+        if v and s is None:
+            s = i
+        elif (not v) and s is not None:
+            runs.append((s, i - 1)); s = None
+    if s is not None:
+        runs.append((s, len(mask) - 1))
+    return runs
+
+
+def _draw_holding_bands(fig, t, long_mask, short_mask, row) -> None:
+    """双轨持仓状态色块：上轨绿=做多持仓、下轨红=做空持仓、空白=不持。
+
+    y 轴为类别(做多/做空)，无百分比。当前周期"实际持仓状态"面板与高周期状态子图共用。
+    """
+    n = len(t)
+    hw = (t[1] - t[0]) / 2.0 if n > 1 else 0.5
+    for a, b in _contiguous_runs(long_mask):
+        fig.add_shape(type="rect", x0=t[a] - hw, x1=t[b] + hw, y0=0.55, y1=0.95,
+            fillcolor="#3fb950", line_width=0, row=row, col=1)
+    for a, b in _contiguous_runs(short_mask):
+        fig.add_shape(type="rect", x0=t[a] - hw, x1=t[b] + hw, y0=0.05, y1=0.45,
+            fillcolor="#f85149", line_width=0, row=row, col=1)
+    fig.update_yaxes(range=[0, 1], tickvals=[0.25, 0.75], ticktext=["做空", "做多"],
+                     showgrid=False, row=row, col=1)
+
+
 def _add_cross_pnl_subplot(fig, t, aligned, row, higher_tf="") -> None:
-    """在指定row添加高周期PnL参考子图（事件标记+参考线+盈亏标注）。"""
-    color_long = "#3fb950"
-    color_short = "#f85149"
-    marker_color = "#d2991d"  # 金色，高周期标记统一色
-    tf_label = higher_tf or "高周期"
+    """高周期持仓状态色块子图：绿=高周期做多持仓、红=高周期做空持仓、空白=不持。
 
-    # 高周期做多PnL参考线（虚线）
-    mask_long = ~np.isnan(aligned["aligned_long"])
-    if mask_long.any():
-        fig.add_trace(go.Scatter(
-            x=t[mask_long], y=aligned["aligned_long"][mask_long],
-            mode="lines", name=f"{tf_label}多",
-            line=dict(color=color_long, width=1.2, dash="dot"),
-            showlegend=False,
-        ), row=row, col=1)
-
-    # 高周期做空PnL参考线（点线）
-    mask_short = ~np.isnan(aligned["aligned_short"])
-    if mask_short.any():
-        fig.add_trace(go.Scatter(
-            x=t[mask_short], y=aligned["aligned_short"][mask_short],
-            mode="lines", name=f"{tf_label}空",
-            line=dict(color=color_short, width=1.2, dash="dot"),
-            showlegend=False,
-        ), row=row, col=1)
-
-    # 入场标记（▲三角形）
-    for bar_idx, trade_type, pnl_val in aligned["entry_markers"]:
-        _render_entry_marker(
-            fig, t, bar_idx, pnl_val, row,
-            color=marker_color, size=9,
-            hovertext=f"{tf_label}入场 {'多' if trade_type == 'long' else '空'}",
-        )
-
-    # 离场标记 + 盈亏标注
-    for bar_idx, trade_type, pnl_val, ret_pct, exit_reason in aligned["exit_markers"]:
-        _render_exit_marker_with_label(
-            fig, t, bar_idx, pnl_val, row,
-            color=marker_color, trade_type=trade_type,
-            exit_reason=exit_reason, ret_pct=ret_pct,
-            hovertext=f"{tf_label}离场 {'多' if trade_type == 'long' else '空'} | {ret_pct:+.2f}%",
-        )
-
-    # 100基准线
-    _render_baseline(fig, row, opacity=0.4)
+    复用 _compute_holding_masks 从对齐后的 entry/exit_markers 得高周期持仓区间。
+    """
+    long_mask, short_mask = _compute_holding_masks(
+        len(t), aligned["entry_markers"], aligned["exit_markers"])
+    _draw_holding_bands(fig, t, long_mask, short_mask, row)
 
 
 def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,

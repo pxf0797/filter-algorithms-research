@@ -799,159 +799,67 @@ class TestRenderPlotlyHtml:
 # ===================================================================
 
 class TestCrossPnlSubplot:
-    """_add_cross_pnl_subplot 行为."""
+    """_add_cross_pnl_subplot 行为（高周期持仓状态色块）."""
 
-    def test_long_reference_line_added(self):
-        """高周期做多参考线应在有数据时添加."""
+    def test_no_trades_no_blocks(self):
+        """无高周期成交 → 不添加任何色块 shape."""
+        fig = _make_fig()
+        t = np.arange(100, dtype=float)
+        aligned = {"entry_markers": [], "exit_markers": []}
+
+        from components.charts import _add_cross_pnl_subplot
+        n0 = len(fig.layout.shapes or [])
+        _add_cross_pnl_subplot(fig, t, aligned, row=2)
+
+        assert len(fig.layout.shapes or []) == n0
+
+    def test_long_holding_block(self):
+        """高周期做多持仓区间 → 至少一个色块 shape."""
         fig = _make_fig()
         t = np.arange(100, dtype=float)
         aligned = {
-            "aligned_long": np.array([np.nan]*50 + [105.0]*50),
-            "aligned_short": np.array([np.nan]*100),
-            "entry_markers": [],
-            "exit_markers": [],
+            "entry_markers": [(20, "long", 100.0)],
+            "exit_markers": [(40, "long", 110.0, 10.0, "take_profit")],
         }
 
         from components.charts import _add_cross_pnl_subplot
-        initial_len = len(fig.data)
+        n0 = len(fig.layout.shapes or [])
         _add_cross_pnl_subplot(fig, t, aligned, row=2)
 
-        # 应增加 long trace
-        assert len(fig.data) == initial_len + 1
-        trace = fig.data[-1]
-        assert trace.line.dash == "dot"
+        assert len(fig.layout.shapes or []) >= n0 + 1
 
-    def test_short_reference_line_added(self):
-        """高周期做空参考线应在有数据时添加."""
+    def test_long_and_short_blocks(self):
+        """多空各有持仓 → 至少两个色块 shape."""
         fig = _make_fig()
         t = np.arange(100, dtype=float)
         aligned = {
-            "aligned_long": np.array([np.nan]*100),
-            "aligned_short": np.array([np.nan]*50 + [95.0]*50),
-            "entry_markers": [],
-            "exit_markers": [],
+            "entry_markers": [(20, "long", 100.0), (60, "short", 95.0)],
+            "exit_markers": [
+                (40, "long", 110.0, 10.0, "take_profit"),
+                (80, "short", 90.0, -5.0, "stop_loss"),
+            ],
         }
 
         from components.charts import _add_cross_pnl_subplot
-        initial_len = len(fig.data)
+        n0 = len(fig.layout.shapes or [])
         _add_cross_pnl_subplot(fig, t, aligned, row=2)
 
-        # 应增加 short trace
-        assert len(fig.data) == initial_len + 1
-        trace = fig.data[-1]
-        assert trace.line.dash == "dot"
+        assert len(fig.layout.shapes or []) >= n0 + 2
 
-    def test_both_reference_lines(self):
-        """同时有做多和做空数据时添加两条线."""
+    def test_no_pnl_curve_traces(self):
+        """新版为色块，不再添加 PnL 曲线/标记 data trace."""
         fig = _make_fig()
         t = np.arange(100, dtype=float)
         aligned = {
-            "aligned_long": np.array([np.nan]*25 + [105.0]*75),
-            "aligned_short": np.array([np.nan]*50 + [95.0]*50),
-            "entry_markers": [],
-            "exit_markers": [],
+            "entry_markers": [(20, "long", 100.0)],
+            "exit_markers": [(40, "long", 110.0, 10.0, "take_profit")],
         }
 
         from components.charts import _add_cross_pnl_subplot
-        initial_len = len(fig.data)
+        d0 = len(fig.data)
         _add_cross_pnl_subplot(fig, t, aligned, row=2)
 
-        # long + short 参考线 = 2
-        assert len(fig.data) == initial_len + 2
-
-    def test_no_data_adds_no_trace(self):
-        """全 NaN 时不应添加 data trace."""
-        fig = _make_fig()
-        t = np.arange(100, dtype=float)
-        aligned = {
-            "aligned_long": np.array([np.nan]*100),
-            "aligned_short": np.array([np.nan]*100),
-            "entry_markers": [],
-            "exit_markers": [],
-        }
-
-        from components.charts import _add_cross_pnl_subplot
-        initial_len = len(fig.data)
-        _add_cross_pnl_subplot(fig, t, aligned, row=2)
-
-        # 不应添加任何 data trace (但会添加 baseline shape)
-        assert len(fig.data) == initial_len
-
-    def test_entry_markers_rendered(self):
-        """入场标记应通过 _render_entry_marker 添加."""
-        fig = _make_fig()
-        t = np.arange(100, dtype=float)
-        aligned = {
-            "aligned_long": np.array([np.nan]*100),
-            "aligned_short": np.array([np.nan]*100),
-            "entry_markers": [(50, "long", 100.0)],
-            "exit_markers": [],
-        }
-
-        from components.charts import _add_cross_pnl_subplot
-        initial_len = len(fig.data)
-        _add_cross_pnl_subplot(fig, t, aligned, row=2)
-
-        # 0 条参考线（全 NaN）+ 1 个入场标记 = 1
-        assert len(fig.data) == initial_len + 1
-        assert fig.data[-1].marker.symbol == "triangle-up"
-
-    def test_exit_markers_rendered(self):
-        """离场标记 + 盈亏标注应添加."""
-        fig = _make_fig()
-        t = np.arange(100, dtype=float)
-        aligned = {
-            "aligned_long": np.array([np.nan]*100),
-            "aligned_short": np.array([np.nan]*100),
-            "entry_markers": [],
-            "exit_markers": [(60, "long", 110.0, 5.0, "take_profit")],
-        }
-
-        from components.charts import _add_cross_pnl_subplot
-        initial_len = len(fig.data)
-        _add_cross_pnl_subplot(fig, t, aligned, row=2)
-
-        # 0 条参考线 + 1 个离场标记 trace = 1
-        assert len(fig.data) == initial_len + 1
-
-    def test_baseline_always_added(self):
-        """基准线应始终添加（通过 shapes）. """
-        fig = _make_fig()
-        t = np.arange(100, dtype=float)
-        aligned = {
-            "aligned_long": np.array([np.nan]*100),
-            "aligned_short": np.array([np.nan]*100),
-            "entry_markers": [],
-            "exit_markers": [],
-        }
-
-        from components.charts import _add_cross_pnl_subplot
-        initial_shapes = len(fig.layout.shapes or [])
-        _add_cross_pnl_subplot(fig, t, aligned, row=2)
-
-        shapes = fig.layout.shapes or []
-        assert len(shapes) == initial_shapes + 1
-
-    def test_marker_color_is_gold(self):
-        """高周期标记统一使用金色."""
-        fig = _make_fig()
-        t = np.arange(100, dtype=float)
-        aligned = {
-            "aligned_long": np.array([np.nan]*100),
-            "aligned_short": np.array([np.nan]*100),
-            "entry_markers": [(50, "long", 100.0)],
-            "exit_markers": [(60, "long", 110.0, 5.0, "take_profit")],
-        }
-
-        from components.charts import _add_cross_pnl_subplot
-        _add_cross_pnl_subplot(fig, t, aligned, row=2)
-
-        # 入场标记颜色
-        entry_trace = fig.data[-2]
-        assert entry_trace.marker.color == "#d2991d"
-        # 离场标记颜色
-        exit_trace = fig.data[-1]
-        assert exit_trace.marker.color == "#d2991d"
+        assert len(fig.data) == d0
 
 
 # ===================================================================
@@ -1291,33 +1199,27 @@ class TestRenderPlotlySerialization:
 # ===================================================================
 
 class TestCrossPnlSubplotTrades:
-    """_add_cross_pnl_subplot 的 trade 标记边界."""
+    """_add_cross_pnl_subplot 色块边界（高周期持仓区间）."""
 
     def test_cross_pnl_empty_higher_trades(self):
-        """空 entry/exit markers 且全 NaN 参考线时不应添加 traces."""
+        """空 entry/exit markers → 无色块、无 data trace."""
         fig = _make_fig()
         t = np.arange(100, dtype=float)
-        aligned = {
-            "aligned_long": np.array([np.nan] * 100),
-            "aligned_short": np.array([np.nan] * 100),
-            "entry_markers": [],
-            "exit_markers": [],
-        }
+        aligned = {"entry_markers": [], "exit_markers": []}
 
         from components.charts import _add_cross_pnl_subplot
-        initial_len = len(fig.data)
+        d0 = len(fig.data)
+        s0 = len(fig.layout.shapes or [])
         _add_cross_pnl_subplot(fig, t, aligned, row=2)
 
-        # 0 条参考线 + 0 个标记 = 0 新 traces（但有 baseline shape）
-        assert len(fig.data) == initial_len
+        assert len(fig.data) == d0
+        assert len(fig.layout.shapes or []) == s0
 
     def test_cross_pnl_with_trades(self):
-        """同时有入场和离场标记时应添加对应 traces."""
+        """多空各一段持仓 → 至少两个色块 shape，且不加 data trace."""
         fig = _make_fig()
         t = np.arange(100, dtype=float)
         aligned = {
-            "aligned_long": np.array([np.nan] * 100),
-            "aligned_short": np.array([np.nan] * 100),
             "entry_markers": [
                 (20, "long", 100.0),
                 (60, "short", 95.0),
@@ -1329,11 +1231,12 @@ class TestCrossPnlSubplotTrades:
         }
 
         from components.charts import _add_cross_pnl_subplot
-        initial_len = len(fig.data)
+        d0 = len(fig.data)
+        s0 = len(fig.layout.shapes or [])
         _add_cross_pnl_subplot(fig, t, aligned, row=2)
 
-        traces_added = len(fig.data) - initial_len
-        assert traces_added == 4  # 2 entry + 2 exit
+        assert len(fig.data) == d0
+        assert len(fig.layout.shapes or []) >= s0 + 2
 
 
 # ===================================================================
