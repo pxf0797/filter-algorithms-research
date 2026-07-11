@@ -382,8 +382,8 @@ def _insert_feedback_row(rows, rh, titles, pnl_row, cross_row, align_row):
     return rows + 1, rh, tuple(titles), feedback_row, cross_row, align_row
 
 
-def _add_main_price_traces(fig, t, noisy, ohlc, filtered, filtered2, cfg) -> None:
-    """Add K-line, close price, and filter lines to the main price subplot."""
+def _add_main_price_traces(t, noisy, ohlc, filtered, filtered2, cfg):
+    """Return trace dicts for K-line, close, and filter lines."""
     traces = [dict(type="candlestick", x=t,
         open=ohlc["Open"].values.ravel(), high=ohlc["High"].values.ravel(),
         low=ohlc["Low"].values.ravel(), close=ohlc["Close"].values.ravel(),
@@ -397,30 +397,31 @@ def _add_main_price_traces(fig, t, noisy, ohlc, filtered, filtered2, cfg) -> Non
     if cfg["_dual"] and filtered2 is not None and not np.all(np.isnan(filtered2)):
         traces.append(dict(type="scattergl", x=t, y=filtered2, mode="lines",
             name="滤波2", line=dict(color=cfg["fc2"], width=2.0), xaxis="x", yaxis="y"))
-    fig.add_traces(traces)
+    return traces
 
 
-def _add_residual_traces(fig, t, filtered, noisy, filtered2, cfg, rr, vr) -> np.ndarray:
+def _add_residual_traces(t, filtered, noisy, filtered2, cfg, rr, vr):
     """Add residual, velocity, and acceleration traces to subplots. Returns acceleration array."""
     if len(t) < 2:
         return np.array([])
     if not np.all(np.isnan(filtered)):
         vel = np.gradient(filtered, t); acc = np.gradient(vel, t)
-        fig.add_traces([
+        return acc, [
             dict(type="scattergl", x=t, y=filtered - noisy, mode="lines", name="残差",
                 line=dict(color="#5f6c80", width=1.0, dash="dot"),
                 xaxis=f"x{rr}", yaxis=f"y{rr}"),
             dict(type="scattergl", x=t, y=vel, mode="lines", name="v",
-                line=dict(color=cfg["fc"], width=1.5), xaxis=f"x{vr}", yaxis=f"y{vr}")])
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=rr, col=1)
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=vr, col=1)
-        return acc
+                line=dict(color=cfg["fc"], width=1.5), xaxis=f"x{vr}", yaxis=f"y{vr}")], [
+            dict(type="line", x0=0, x1=1, xref="paper", y0=0, y1=0, yref=f"y{rr}",
+                line=dict(color="gray", dash="dash"), opacity=0.5),
+            dict(type="line", x0=0, x1=1, xref="paper", y0=0, y1=0, yref=f"y{vr}",
+                line=dict(color="gray", dash="dash"), opacity=0.5)]
     vel = np.gradient(filtered, t) if not np.all(np.isnan(filtered)) else np.zeros_like(t)
-    return np.gradient(vel, t)
+    return np.gradient(vel, t), [], []
 
 
-def _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar, ssr) -> None:
-    """Add Schmitt trigger traces: eps bands, sigma_v, acceleration, Sig signal, pair bands."""
+def _add_schmitt_traces(t, schmitt, acc, all_pairs, sar, ssr):
+    """Return (traces, shapes) for Schmitt trigger subplots."""
     eps = schmitt["eps"]
     sig = schmitt["sig"]
     _sar_x = f"x{sar}"; _sar_y = f"y{sar}"; _ssr_x = f"x{ssr}"; _ssr_y = f"y{ssr}"
@@ -460,12 +461,13 @@ def _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar, ssr) -> None:
             mode="lines", line=dict(width=0),
             showlegend=False, hoverinfo="skip",
             xaxis=_ssr_x, yaxis=_ssr_y))
-    fig.add_traces(traces)
-    fig.add_hline(y=0, line_dash="solid", line_color="gray", opacity=0.3, row=sar, col=1)
+    shapes = [dict(type="line", x0=0, x1=1, xref="paper", y0=0, y1=0, yref=f"y{sar}",
+        line=dict(color="gray", dash="solid"), opacity=0.3)]
+    return traces, shapes
 
 
-def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row) -> None:
-    """Add PnL curves, individual trade segments, markers, and annotations."""
+def _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row):
+    """Return (traces, shapes, yaxes) for PnL subplot."""
     _pnl_x = f"x{pnl_row}"; _pnl_y = f"y{pnl_row}"
     # Trace merge: 逐笔交易段合并为 2 条 (多/空), NaN 分隔
     _l_seg, _s_seg = [], []
@@ -538,26 +540,23 @@ def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row) -> None
         fill="toself", fillcolor="rgba(248,81,73,0.04)",
         mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip",
         xaxis=_pnl_x, yaxis=_pnl_y))
-    fig.add_traces(_pnl_traces)
-    fig.add_hline(y=100, line_dash="dash", line_color="gray", opacity=0.5, row=pnl_row, col=1)
-    fig.update_yaxes(title_text="PnL(%)", row=pnl_row, col=1, ticksuffix="%")
+    _pnl_shapes = [dict(type="line", x0=0, x1=1, xref="paper", y0=100, y1=100,
+        yref=f"y{pnl_row}", line=dict(color="gray", dash="dash"), opacity=0.5)]
+    _pnl_yaxes = {f"yaxis{pnl_row}": {"title_text": "PnL(%)", "ticksuffix": "%"}}
+    return _pnl_traces, _pnl_shapes, _pnl_yaxes
 
 
-def _add_feedback_subplot(fig, t, trade_records, row) -> None:
-    """实际持仓状态子图：绿=做多持仓 / 红=做空持仓 / 空白=不持。
-
-    持仓 = Layer0 实际成交区间(entry→exit)，只显示状态不显示百分比。
-    """
+def _add_feedback_subplot(t, trade_records, row):
+    """返回 (shapes, yaxes) 用于实际持仓状态子图（绿=做多/红=做空/空白=不持）。"""
     n = len(t)
     long_mask = np.zeros(n, dtype=bool)
     short_mask = np.zeros(n, dtype=bool)
     for tr in trade_records:
         a = tr["entry_idx"]
-        if a >= n:
-            continue
+        if a >= n: continue
         b = min(tr["exit_idx"], n - 1)
         (long_mask if tr["type"] == "long" else short_mask)[a:b + 1] = True
-    _draw_holding_bands(fig, t, long_mask, short_mask, row)
+    return _draw_holding_bands(t, long_mask, short_mask, row)
 
 
 def _get_min_tf_and_count(configs, ticker_code) -> tuple:
@@ -804,73 +803,85 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
         rows, rh, titles, feedback_row, cross_row, align_row = _insert_feedback_row(
             rows, rh, titles, pnl_row, cross_row, align_row)
 
-    # ── Step 10: Build figure ──
+    # ── Step 10: Build figure (A: one-shot go.Figure from raw dicts) ──
     _t5 = time.perf_counter()
-    fig = make_subplots(rows=rows, cols=1, shared_xaxes=True,
-                        vertical_spacing=0.01, row_heights=rh, subplot_titles=titles)
+    # 1. Collect ALL trace dicts, shapes, annotations from _add_* functions
+    all_traces, all_shapes, all_annotations = [], [], []
+    _layout_updates = {}  # yaxis config dicts merged later
 
-    _add_main_price_traces(fig, t, noisy, ohlc, filtered, filtered2, cfg)
-
+    all_traces += _add_main_price_traces(t, noisy, ohlc, filtered, filtered2, cfg)
     for i, pp in enumerate(pred_pairs):
-        _add_prediction_traces(fig, t, filtered,
-                               pp["fit_result"], pp["fit_start"],
-                               pp["pair_end"], row=mr,
-                               n_extend=cfg.get("n_ext", 10),
-                               show_legend=(i == 0))
-
-    acc = _add_residual_traces(fig, t, filtered, noisy, filtered2, cfg, rr, vr)
-
+        all_traces += _add_prediction_traces(t, filtered,
+            pp["fit_result"], pp["fit_start"], pp["pair_end"], row=mr,
+            n_extend=cfg.get("n_ext", 10), show_legend=(i == 0))
+    acc, _tr, _sh = _add_residual_traces(t, filtered, noisy, filtered2, cfg, rr, vr)
+    all_traces += _tr; all_shapes += _sh
     if has_s:
-        _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar, ssr)
-
+        _tr, _sh = _add_schmitt_traces(t, schmitt, acc, all_pairs, sar, ssr)
+        all_traces += _tr; all_shapes += _sh
     if has_strategy:
-        _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row)
-
+        _tr, _sh, _ya = _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row)
+        all_traces += _tr; all_shapes += _sh; _layout_updates.update(_ya)
     if has_feedback and feedback_row is not None:
-        _add_feedback_subplot(fig, t, trade_records, feedback_row)
-
+        _sh, _ya = _add_feedback_subplot(t, trade_records, feedback_row)
+        all_shapes += _sh; _layout_updates.update(_ya)
     if has_cross and higher_pnl is not None and cross_row is not None:
-        _add_cross_pnl_subplot(fig, t, higher_pnl, row=cross_row, higher_tf=_higher_tf)
-
+        _sh, _ya = _add_cross_pnl_subplot(t, higher_pnl, row=cross_row)
+        all_shapes += _sh; _layout_updates.update(_ya)
     if has_alignment and _align_masks is not None and align_row is not None:
         long_mask, short_mask = _align_masks
-        _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
-                               long_mask, short_mask, row=align_row)
-        fig.update_yaxes(title_text="同向(%)", row=align_row, col=1, ticksuffix="%")
-
+        _tr, _sh, _an, _ya = _add_alignment_subplot(t, long_pnl, short_pnl, trade_records,
+            long_mask, short_mask, row=align_row)
+        all_traces += _tr; all_shapes += _sh; all_annotations += _an
+        _layout_updates.update(_ya)
     if ar is not None and not np.all(np.isnan(filtered)):
-        fig.add_trace(go.Scattergl(x=t, y=acc, mode="lines", name="a",
-            line=dict(color="#ffa502", width=1.5)), row=ar, col=1)
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=ar, col=1)
+        all_traces.append(dict(type="scattergl", x=t, y=acc, mode="lines", name="a",
+            line=dict(color="#ffa502", width=1.5), xaxis=f"x{ar}", yaxis=f"y{ar}"))
+        all_shapes.append(dict(type="line", x0=0, x1=1, xref="paper", y0=0, y1=0,
+            yref=f"y{ar}", line=dict(color="gray", dash="dash"), opacity=0.5))
 
-    # ── Step 11: Final layout ──
-    fig.add_shape(type="line", x0=0, x1=0, y0=0, y1=1, xref="x", yref="paper",
-                   line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"), visible=False)
+    # 2. Get subplot layout skeleton from make_subplots (layout only, discard empty traces)
+    _skeleton = make_subplots(rows=rows, cols=1, shared_xaxes=True,
+        vertical_spacing=0.01, row_heights=rh, subplot_titles=titles)
+    layout_dict = _skeleton.layout.to_plotly_json()
+
+    # 3. Add shapes, annotations, and +epsilon crosshair line
+    all_shapes.append(dict(type="line", x0=0, x1=0, y0=0, y1=1, xref="x", yref="paper",
+        line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"), visible=False))
     for pos in marker_positions:
-        fig.add_vline(x=pos, line=dict(color="rgba(255,255,255,0.10)", width=0.8, dash="dot"),
-                       layer="below")
+        all_shapes.append(dict(type="line", x0=pos, x1=pos, yref="paper", y0=0, y1=1,
+            line=dict(color="rgba(255,255,255,0.10)", width=0.8, dash="dot"), layer="below"))
+    layout_dict["shapes"] = layout_dict.get("shapes", []) + all_shapes
+    layout_dict["annotations"] = layout_dict.get("annotations", []) + all_annotations
+
+    # 4. Final layout customizations (matching original make_subplots-based setup)
     fh = (620 if has_s else 420) if compact else (960 if has_s else 700)
-    if has_cross:
-        fh += 120
-    if has_alignment:
-        fh += 75
-    fig.update_layout(template="plotly_dark", height=fh,
+    if has_cross: fh += 120
+    if has_alignment: fh += 75
+    layout_dict.update(template="plotly_dark", height=fh,
         margin=dict(l=10, r=10, t=25, b=10), hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=9)))
-    fig.update_xaxes(title_text="", row=rows, col=1,
-                      tickvals=marker_positions, ticktext=marker_labels,
-                      tickfont=dict(size=9, color="#8b949e"))
-    _t_build = time.perf_counter() - _t5
-    fig.update_xaxes(rangeslider_visible=False, row=1, col=1)
-    fig.update_yaxes(title_text="价格", row=mr, col=1)
-    fig.update_yaxes(title_text="残差", row=rr, col=1)
-    fig.update_yaxes(title_text="速度", row=vr, col=1)
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+            font=dict(size=9)))
+    # axis customizations
+    layout_dict.setdefault(f"xaxis{rows}", {}).update(title_text="",
+        tickvals=list(marker_positions), ticktext=list(marker_labels),
+        tickfont=dict(size=9, color="#8b949e"))
+    layout_dict.setdefault("xaxis", {}).update(rangeslider_visible=False)
+    for _r, _t in [(mr,"价格"),(rr,"残差"),(vr,"速度")]:
+        layout_dict.setdefault(f"yaxis{_r}", {}).update(title_text=_t)
     if has_s:
-        fig.update_yaxes(title_text="a±ε", row=sar, col=1)
-        fig.update_yaxes(title_text="Sig", row=ssr, col=1,
-                          tickvals=[-1, 0, 1], ticktext=["空", "观", "多"], range=[-1.5, 1.5])
+        layout_dict.setdefault(f"yaxis{sar}", {}).update(title_text="a±ε")
+        layout_dict.setdefault(f"yaxis{ssr}", {}).update(title_text="Sig",
+            tickvals=[-1,0,1], ticktext=["空","观","多"], range=[-1.5,1.5])
     if ar is not None:
-        fig.update_yaxes(title_text="加速度", row=ar, col=1)
+        layout_dict.setdefault(f"yaxis{ar}", {}).update(title_text="加速度")
+    # Merge yaxis updates from _add_* functions (e.g. PnL ticksuffix)
+    for k, v in _layout_updates.items():
+        layout_dict.setdefault(k, {}).update(v)
+
+    # 5. ONE-SHOT Figure construction — NO Python Trace objects created
+    fig = go.Figure(data=all_traces, layout=layout_dict)
+    _t_build = time.perf_counter() - _t5
     _t6 = time.perf_counter()
     _render_plotly(fig, height=fh + 30, dates=dates)
     _t_render = time.perf_counter() - _t6

@@ -108,7 +108,7 @@ class TestAlignmentSubplot:
         short_mask = np.zeros(n, dtype=bool)
 
         fig = make_subplots(rows=1, cols=1)
-        _add_alignment_subplot(fig, t, long_pnl, short_pnl, [],
+        _add_alignment_subplot(t, long_pnl, short_pnl, [],
                                long_mask, short_mask, row=1)
         # 不应有trace以外的问题，不崩溃即可
 
@@ -129,7 +129,7 @@ class TestAlignmentSubplot:
         short_mask = np.zeros(n, dtype=bool)
 
         fig = make_subplots(rows=1, cols=1)
-        _add_alignment_subplot(fig, t, long_pnl, short_pnl, [],
+        _add_alignment_subplot(t, long_pnl, short_pnl, [],
                                long_mask, short_mask, row=1)
 
         # 提取long_filtered trace (subplot下trace顺序与add_trace一致)
@@ -162,7 +162,7 @@ class TestAlignmentSubplot:
         long_mask = np.zeros(n, dtype=bool)
 
         fig = make_subplots(rows=1, cols=1)
-        _add_alignment_subplot(fig, t, long_pnl, short_pnl, [],
+        _add_alignment_subplot(t, long_pnl, short_pnl, [],
                                long_mask, short_mask, row=1)
 
         short_trace = fig.data[1]
@@ -176,7 +176,7 @@ class TestAlignmentSubplot:
     def test_no_crash_with_empty_data(self):
         """空 trade_records: 仅生成做多/做空曲线 + 填充区域 (无交易分段)."""
         fig = make_subplots(rows=1, cols=1)
-        _add_alignment_subplot(fig, np.arange(5, dtype=float),
+        _add_alignment_subplot(np.arange(5, dtype=float),
                                np.ones(5) * 100, np.ones(5) * 100,
                                [],
                                np.zeros(5, dtype=bool), np.zeros(5, dtype=bool),
@@ -200,7 +200,7 @@ class TestAlignmentSubplot:
         ]
 
         fig = make_subplots(rows=1, cols=1)
-        _add_alignment_subplot(fig, t, long_pnl, short_pnl, trades,
+        _add_alignment_subplot(t, long_pnl, short_pnl, trades,
                                long_mask, short_mask, row=1)
         # 有trades时应包含高亮trace（line width=3）
         # 至少2条主曲线 + 1条高亮（如果exit_index和mask匹配）
@@ -220,7 +220,7 @@ class TestAlignmentSubplot:
         ]
 
         fig = make_subplots(rows=1, cols=1)
-        _add_alignment_subplot(fig, t, long_pnl, short_pnl, trades,
+        _add_alignment_subplot(t, long_pnl, short_pnl, trades,
                                long_mask, short_mask, row=1)
         # mask全False → 不会画出高亮segment线
         # 验证信号是否处理了（至少不崩溃)
@@ -241,5 +241,5 @@ class TestAlignmentSubplot:
 
         fig = make_subplots(rows=1, cols=1)
         # 不应raise
-        _add_alignment_subplot(fig, t, long_pnl, short_pnl, trades,
+        _add_alignment_subplot(t, long_pnl, short_pnl, trades,
                                long_mask, short_mask, row=1)

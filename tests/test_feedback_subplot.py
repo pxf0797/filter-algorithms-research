@@ -27,7 +27,7 @@ def test_draw_holding_bands_shapes():
     short_mask = np.zeros(n, dtype=bool); short_mask[18:25] = True
     fig = make_subplots(rows=2, cols=1)
     d0 = len(fig.data)
-    _draw_holding_bands(fig, x, long_mask, short_mask, row=2)
+    _draw_holding_bands(x, long_mask, short_mask, row=2)
     assert len(fig.data) == d0                    # 只加 shapes
     assert len(fig.layout.shapes) >= 2            # 多空各一色块
 
@@ -35,7 +35,7 @@ def test_draw_holding_bands_shapes():
 def test_draw_holding_bands_empty():
     n = 10
     fig = make_subplots(rows=2, cols=1)
-    _draw_holding_bands(fig, np.arange(n), np.zeros(n, bool), np.zeros(n, bool), row=2)
+    _draw_holding_bands(np.arange(n), np.zeros(n, bool), np.zeros(n, bool), row=2)
     assert len(fig.layout.shapes) == 0
 
 

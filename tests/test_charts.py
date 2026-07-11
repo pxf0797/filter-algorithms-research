@@ -2,8 +2,8 @@
 Tests for charts.py pure-logic helper functions.
 
 Tests cover the non-Streamlit parts:
-- _render_entry_marker() 返回的 go.Scatter 对象
-- _render_exit_marker_with_label() 止损/止盈差异
+- tr = _render_entry_marker() 返回的 go.Scatter 对象
+- tr, ann = _render_exit_marker_with_label() 止损/止盈差异
 - _render_baseline() 基线位置
 - _render_fill_background() 填充配置
 - _render_pnl_curves() 多空曲线
@@ -110,22 +110,22 @@ class TestRenderEntryMarker:
         t = np.arange(100, dtype=float)
         initial_len = len(fig.data)
 
-        _render_entry_marker(fig, t, 50, 100.0, row=1)
+        tr = _render_entry_marker(t, 50, 100.0, row=1)
 
         # 默认子图布局 + 1 trace
-        assert len(fig.data) == initial_len + 1
+        assert isinstance(tr, dict)
 
     def test_trace_is_marker_with_triangle(self):
         """添加的 trace 应该是 triangle-up 标记."""
         fig = _make_fig()
         t = np.arange(100, dtype=float)
 
-        _render_entry_marker(fig, t, 50, 100.0, row=1)
+        tr = _render_entry_marker(t, 50, 100.0, row=1)
 
-        trace = fig.data[-1]
-        assert trace.mode == "markers"
-        assert trace.marker.symbol == "triangle-up"
-        assert trace.marker.size == 9
+        trace = tr
+        assert tr.mode == "markers"
+        assert tr.marker.symbol == "triangle-up"
+        assert tr.marker.size == 9
 
     def test_invalid_index_does_not_add_trace(self):
         """bar_idx 超出范围时不应添加 trace."""
@@ -134,34 +134,34 @@ class TestRenderEntryMarker:
         initial_len = len(fig.data)
 
         # 负数索引
-        _render_entry_marker(fig, t, -1, 100.0, row=1)
-        assert len(fig.data) == initial_len
+        tr = _render_entry_marker(t, -1, 100.0, row=1)
+        assert tr is None
 
         # 越界索引
-        _render_entry_marker(fig, t, 1000, 100.0, row=1)
-        assert len(fig.data) == initial_len
+        tr = _render_entry_marker(t, 1000, 100.0, row=1)
+        assert tr is None
 
     def test_custom_color_and_size(self):
         """支持自定义 color 和 size."""
         fig = _make_fig()
         t = np.arange(100, dtype=float)
 
-        _render_entry_marker(fig, t, 30, 105.0, row=1,
+        tr = _render_entry_marker(t, 30, 105.0, row=1,
                              color="#ff0000", size=12)
 
-        trace = fig.data[-1]
-        assert trace.marker.color == "#ff0000"
-        assert trace.marker.size == 12
+        trace = tr
+        assert tr.marker.color == "#ff0000"
+        assert tr.marker.size == 12
 
     def test_showlegend_false(self):
         """入场标记应隐藏图例."""
         fig = _make_fig()
         t = np.arange(100, dtype=float)
 
-        _render_entry_marker(fig, t, 25, 100.0, row=1)
+        tr = _render_entry_marker(t, 25, 100.0, row=1)
 
-        trace = fig.data[-1]
-        assert trace.showlegend is False
+        trace = tr
+        assert tr.showlegend is False
 
     def test_hovertext_passed_through(self):
         """hovertext 参数应透传给 trace."""
@@ -169,11 +169,11 @@ class TestRenderEntryMarker:
         t = np.arange(100, dtype=float)
         hover = "入场 多"
 
-        _render_entry_marker(fig, t, 10, 100.0, row=1, hovertext=hover)
+        tr = _render_entry_marker(t, 10, 100.0, row=1, hovertext=hover)
 
-        trace = fig.data[-1]
-        assert trace.hovertext == hover
-        assert trace.hoverinfo == "text"
+        trace = tr
+        assert tr.hovertext == hover
+        assert tr.hoverinfo == "text"
 
     def test_empty_t_array(self):
         """t 为空数组时不应崩溃."""
@@ -181,19 +181,19 @@ class TestRenderEntryMarker:
         t = np.array([], dtype=float)
         initial_len = len(fig.data)
 
-        _render_entry_marker(fig, t, 0, 100.0, row=1)
-        assert len(fig.data) == initial_len
+        tr = _render_entry_marker(t, 0, 100.0, row=1)
+        assert tr is None
 
     def test_marker_line_has_border(self):
         """标记应有半透明边框."""
         fig = _make_fig()
         t = np.arange(100, dtype=float)
 
-        _render_entry_marker(fig, t, 40, 100.0, row=1)
+        tr = _render_entry_marker(t, 40, 100.0, row=1)
 
-        trace = fig.data[-1]
-        assert trace.marker.line.width == 1
-        assert trace.marker.line.color == "rgba(0,0,0,0.3)"
+        trace = tr
+        assert tr.marker.line.width == 1
+        assert tr.marker.line.color == "rgba(0,0,0,0.3)"
 
 
 # ===================================================================
@@ -208,50 +208,50 @@ class TestRenderExitMarker:
         fig = _make_fig()
         t = np.arange(100, dtype=float)
 
-        _render_exit_marker_with_label(
+        tr, ann = _render_exit_marker_with_label(
             fig, t, 50, 110.0, row=1,
             exit_reason="stop_loss", ret_pct=5.0,
         )
 
-        trace = fig.data[-1]
-        assert trace.marker.symbol == "x"
+        trace = tr
+        assert tr.marker.symbol == "x"
         # 止损应为红色
-        assert trace.marker.line.color == "#f85149"
+        assert tr.marker.line.color == "#f85149"
 
     def test_take_profit_uses_circle(self):
         """止盈 (exit_reason='take_profit') 应使用 circle 符号."""
         fig = _make_fig()
         t = np.arange(100, dtype=float)
 
-        _render_exit_marker_with_label(
+        tr, ann = _render_exit_marker_with_label(
             fig, t, 50, 110.0, row=1,
             exit_reason="take_profit", ret_pct=5.0,
         )
 
-        trace = fig.data[-1]
-        assert trace.marker.symbol == "circle"
+        trace = tr
+        assert tr.marker.symbol == "circle"
         # 止盈应为绿色
-        assert trace.marker.line.color == "#3fb950"
+        assert tr.marker.line.color == "#3fb950"
 
     def test_unknown_reason_defaults_to_circle(self):
         """未知 exit_reason 应默认为 circle."""
         fig = _make_fig()
         t = np.arange(100, dtype=float)
 
-        _render_exit_marker_with_label(
+        tr, ann = _render_exit_marker_with_label(
             fig, t, 50, 110.0, row=1,
             exit_reason="unknown", ret_pct=3.0,
         )
 
-        trace = fig.data[-1]
-        assert trace.marker.symbol == "circle"
+        trace = tr
+        assert tr.marker.symbol == "circle"
 
     def test_annotation_text_contains_return_pct(self):
         """标注文字应包含收益率."""
         fig = _make_fig()
         t = np.arange(100, dtype=float)
 
-        _render_exit_marker_with_label(
+        tr, ann = _render_exit_marker_with_label(
             fig, t, 50, 110.0, row=1,
             exit_reason="take_profit", ret_pct=5.0,
         )
@@ -267,7 +267,7 @@ class TestRenderExitMarker:
         fig = _make_fig()
         t = np.arange(100, dtype=float)
 
-        _render_exit_marker_with_label(
+        tr, ann = _render_exit_marker_with_label(
             fig, t, 50, 110.0, row=1,
             trade_type="long", exit_reason="take_profit", ret_pct=3.0,
         )
@@ -280,7 +280,7 @@ class TestRenderExitMarker:
         fig = _make_fig()
         t = np.arange(100, dtype=float)
 
-        _render_exit_marker_with_label(
+        tr, ann = _render_exit_marker_with_label(
             fig, t, 50, 110.0, row=1,
             trade_type="short", exit_reason="take_profit", ret_pct=3.0,
         )
@@ -293,7 +293,7 @@ class TestRenderExitMarker:
         fig = _make_fig()
         t = np.arange(100, dtype=float)
 
-        _render_exit_marker_with_label(
+        tr, ann = _render_exit_marker_with_label(
             fig, t, 50, 95.0, row=1,
             exit_reason="stop_loss", ret_pct=-2.5,
         )
@@ -307,24 +307,24 @@ class TestRenderExitMarker:
         t = np.arange(100, dtype=float)
         initial_len = len(fig.data)
 
-        _render_exit_marker_with_label(
+        tr, ann = _render_exit_marker_with_label(
             fig, t, -1, 100.0, row=1,
             exit_reason="stop_loss", ret_pct=1.0,
         )
-        assert len(fig.data) == initial_len
+        assert tr is None
 
     def test_marker_color_passed_through(self):
         """标记主体颜色应透传."""
         fig = _make_fig()
         t = np.arange(100, dtype=float)
 
-        _render_exit_marker_with_label(
+        tr, ann = _render_exit_marker_with_label(
             fig, t, 40, 105.0, row=1,
             color="#ff0000", exit_reason="stop_loss", ret_pct=-1.0,
         )
 
-        trace = fig.data[-1]
-        assert trace.marker.color == "#ff0000"
+        trace = tr
+        assert tr.marker.color == "#ff0000"
 
 
 # ===================================================================
@@ -339,7 +339,7 @@ class TestRenderBaseline:
         fig = _make_fig()
         initial_count = len(fig.layout.shapes or [])
 
-        _render_baseline(fig, row=1)
+        _render_baseline(row=1)
 
         shapes = fig.layout.shapes or []
         assert len(shapes) == initial_count + 1
@@ -349,7 +349,7 @@ class TestRenderBaseline:
         """基准线应在 y=100 位置."""
         fig = _make_fig()
 
-        _render_baseline(fig, row=1)
+        _render_baseline(row=1)
 
         shapes = fig.layout.shapes or []
         hline = shapes[-1]
@@ -360,7 +360,7 @@ class TestRenderBaseline:
         """基准线应为虚线."""
         fig = _make_fig()
 
-        _render_baseline(fig, row=1)
+        _render_baseline(row=1)
 
         shapes = fig.layout.shapes or []
         assert shapes[-1].line.dash == "dash"
@@ -369,7 +369,7 @@ class TestRenderBaseline:
         """基准线应为灰色."""
         fig = _make_fig()
 
-        _render_baseline(fig, row=1)
+        _render_baseline(row=1)
 
         shapes = fig.layout.shapes or []
         assert shapes[-1].line.color == "gray"
@@ -378,7 +378,7 @@ class TestRenderBaseline:
         """opacity 参数应传递到 shapes 的 line 属性或 shape 上."""
         fig = _make_fig()
 
-        _render_baseline(fig, row=1, opacity=0.8)
+        _render_baseline(row=1, opacity=0.8)
 
         shapes = fig.layout.shapes or []
         assert len(shapes) > 0
@@ -387,7 +387,7 @@ class TestRenderBaseline:
         """支持自定义 y 位置."""
         fig = _make_fig()
 
-        _render_baseline(fig, row=1, y=200)
+        _render_baseline(row=1, y=200)
 
         shapes = fig.layout.shapes or []
         assert shapes[-1].y0 == 200
@@ -408,9 +408,9 @@ class TestRenderFillBackground:
         y_values = np.full(100, 105.0)
         initial_len = len(fig.data)
 
-        _render_fill_background(fig, t, y_values, row=1)
+        _render_fill_background(t, y_values, row=1)
 
-        assert len(fig.data) == initial_len + 1
+        assert isinstance(tr, dict)
 
     def test_fill_toself(self):
         """填充 trace 应使用 fill='toself' 模式."""
@@ -418,11 +418,11 @@ class TestRenderFillBackground:
         t = np.arange(100, dtype=float)
         y_values = np.full(100, 105.0)
 
-        _render_fill_background(fig, t, y_values, row=1)
+        _render_fill_background(t, y_values, row=1)
 
-        trace = fig.data[-1]
-        assert trace.fill == "toself"
-        assert trace.line.width == 0
+        trace = tr
+        assert tr.fill == "toself"
+        assert tr.line.width == 0
 
     def test_fill_color_passed_through(self):
         """fillcolor 应透传."""
@@ -430,11 +430,11 @@ class TestRenderFillBackground:
         t = np.arange(100, dtype=float)
         y_values = np.full(100, 105.0)
 
-        _render_fill_background(fig, t, y_values, row=1,
+        _render_fill_background(t, y_values, row=1,
                                color="rgba(255,0,0,0.1)")
 
-        trace = fig.data[-1]
-        assert trace.fillcolor == "rgba(255,0,0,0.1)"
+        trace = tr
+        assert tr.fillcolor == "rgba(255,0,0,0.1)"
 
     def test_hoverinfo_skip(self):
         """填充区域的 hover 应跳过."""
@@ -442,10 +442,10 @@ class TestRenderFillBackground:
         t = np.arange(100, dtype=float)
         y_values = np.full(100, 105.0)
 
-        _render_fill_background(fig, t, y_values, row=1)
+        _render_fill_background(t, y_values, row=1)
 
-        trace = fig.data[-1]
-        assert trace.hoverinfo == "skip"
+        trace = tr
+        assert tr.hoverinfo == "skip"
 
     def test_baseline_y_max_computation(self):
         """y_max 应为 max(y_values, baseline) * 1.02."""
@@ -453,9 +453,9 @@ class TestRenderFillBackground:
         t = np.arange(100, dtype=float)
         y_values = np.full(100, 200.0)
 
-        _render_fill_background(fig, t, y_values, row=1, baseline=100)
+        _render_fill_background(t, y_values, row=1, baseline=100)
 
-        trace = fig.data[-1]
+        trace = tr
         # x: [t[0], t[-1], t[-1], t[0]]
         # y: [baseline, baseline, y_max, y_max]
         np.testing.assert_approx_equal(trace.y[2], 200 * 1.02)
@@ -477,9 +477,9 @@ class TestRenderPnLCurves:
         short_pnl = np.full(100, 95.0)
         initial_len = len(fig.data)
 
-        _render_pnl_curves(fig, t, long_pnl, short_pnl, row=1)
+        _render_pnl_curves(t, long_pnl, short_pnl, row=1)
 
-        assert len(fig.data) == initial_len + 2
+        assert isinstance(tr, dict)
 
     def test_trace_names_default(self):
         """trace 名称默认应为做多PnL/做空PnL."""
@@ -488,10 +488,10 @@ class TestRenderPnLCurves:
         long_pnl = np.full(100, 105.0)
         short_pnl = np.full(100, 95.0)
 
-        _render_pnl_curves(fig, t, long_pnl, short_pnl, row=1)
+        _render_pnl_curves(t, long_pnl, short_pnl, row=1)
 
         assert fig.data[-2].name == "做多PnL"
-        assert fig.data[-1].name == "做空PnL"
+        assert tr.name == "做空PnL"
 
     def test_custom_names(self):
         """支持自定义名称."""
@@ -500,11 +500,11 @@ class TestRenderPnLCurves:
         long_pnl = np.full(100, 105.0)
         short_pnl = np.full(100, 95.0)
 
-        _render_pnl_curves(fig, t, long_pnl, short_pnl, row=1,
+        _render_pnl_curves(t, long_pnl, short_pnl, row=1,
                            long_name="Long", short_name="Short")
 
         assert fig.data[-2].name == "Long"
-        assert fig.data[-1].name == "Short"
+        assert tr.name == "Short"
 
     def test_custom_colors(self):
         """支持自定义颜色."""
@@ -513,11 +513,11 @@ class TestRenderPnLCurves:
         long_pnl = np.full(100, 105.0)
         short_pnl = np.full(100, 95.0)
 
-        _render_pnl_curves(fig, t, long_pnl, short_pnl, row=1,
+        _render_pnl_curves(t, long_pnl, short_pnl, row=1,
                            long_color="blue", short_color="red")
 
         assert fig.data[-2].line.color == "blue"
-        assert fig.data[-1].line.color == "red"
+        assert tr.line.color == "red"
 
 
 # ===================================================================
@@ -809,7 +809,7 @@ class TestCrossPnlSubplot:
 
         from components.charts import _add_cross_pnl_subplot
         n0 = len(fig.layout.shapes or [])
-        _add_cross_pnl_subplot(fig, t, aligned, row=2)
+        _add_cross_pnl_subplot(t, aligned, row=2)
 
         assert len(fig.layout.shapes or []) == n0
 
@@ -824,7 +824,7 @@ class TestCrossPnlSubplot:
 
         from components.charts import _add_cross_pnl_subplot
         n0 = len(fig.layout.shapes or [])
-        _add_cross_pnl_subplot(fig, t, aligned, row=2)
+        _add_cross_pnl_subplot(t, aligned, row=2)
 
         assert len(fig.layout.shapes or []) >= n0 + 1
 
@@ -842,7 +842,7 @@ class TestCrossPnlSubplot:
 
         from components.charts import _add_cross_pnl_subplot
         n0 = len(fig.layout.shapes or [])
-        _add_cross_pnl_subplot(fig, t, aligned, row=2)
+        _add_cross_pnl_subplot(t, aligned, row=2)
 
         assert len(fig.layout.shapes or []) >= n0 + 2
 
@@ -857,7 +857,7 @@ class TestCrossPnlSubplot:
 
         from components.charts import _add_cross_pnl_subplot
         d0 = len(fig.data)
-        _add_cross_pnl_subplot(fig, t, aligned, row=2)
+        _add_cross_pnl_subplot(t, aligned, row=2)
 
         assert len(fig.data) == d0
 
@@ -888,8 +888,8 @@ class TestAlignmentSubplot:
 
         # 2 PnL 曲线 + 2 fill backgrounds = 4 traces
         traces_added = len(fig.data) - initial_len
-        assert traces_added >= 2  # 至少 2 条 PnL 曲线
-        assert traces_added <= 6  # 最多 4+2 可选高亮
+        assert trs_added >= 2  # 至少 2 条 PnL 曲线
+        assert trs_added <= 6  # 最多 4+2 可选高亮
 
     def test_trade_highlighted_when_masked(self):
         """有交易记录且在 mask 范围内时应高亮."""
@@ -1005,7 +1005,7 @@ class TestPredictionTraces:
         pair_end = 49
 
         from components.charts import _add_prediction_traces
-        _add_prediction_traces(fig, t, filtered, fit_result, fit_start,
+        _add_prediction_traces(t, filtered, fit_result, fit_start,
                                pair_end, row=2, n_extend=10)
 
         # _make_fig creates 4 dummy traces, _add_prediction_traces adds 3 more
@@ -1026,7 +1026,7 @@ class TestPredictionTraces:
         pair_end = 49
 
         from components.charts import _add_prediction_traces
-        _add_prediction_traces(fig, t, filtered, fit_result, fit_start,
+        _add_prediction_traces(t, filtered, fit_result, fit_start,
                                pair_end, row=2, n_extend=0)
 
         traces = fig.data
@@ -1044,7 +1044,7 @@ class TestPredictionTraces:
         pair_end = 49
 
         from components.charts import _add_prediction_traces
-        _add_prediction_traces(fig, t, filtered, fit_result, fit_start,
+        _add_prediction_traces(t, filtered, fit_result, fit_start,
                                pair_end, row=2, n_extend=5)
 
         names = [tr.name for tr in fig.data if tr.name is not None]
@@ -1063,7 +1063,7 @@ class TestPredictionTraces:
         pair_end = 49
 
         from components.charts import _add_prediction_traces
-        _add_prediction_traces(fig, t, filtered, fit_result, fit_start,
+        _add_prediction_traces(t, filtered, fit_result, fit_start,
                                pair_end, row=2, n_extend=10)
 
         traces = fig.data
@@ -1087,7 +1087,7 @@ class TestPredictionTraces:
         pair_end = 49
 
         from components.charts import _add_prediction_traces
-        _add_prediction_traces(fig, t, filtered, fit_result, fit_start,
+        _add_prediction_traces(t, filtered, fit_result, fit_start,
                                pair_end, row=2, n_extend=10)
 
         traces = fig.data
@@ -1210,7 +1210,7 @@ class TestCrossPnlSubplotTrades:
         from components.charts import _add_cross_pnl_subplot
         d0 = len(fig.data)
         s0 = len(fig.layout.shapes or [])
-        _add_cross_pnl_subplot(fig, t, aligned, row=2)
+        _add_cross_pnl_subplot(t, aligned, row=2)
 
         assert len(fig.data) == d0
         assert len(fig.layout.shapes or []) == s0
@@ -1233,7 +1233,7 @@ class TestCrossPnlSubplotTrades:
         from components.charts import _add_cross_pnl_subplot
         d0 = len(fig.data)
         s0 = len(fig.layout.shapes or [])
-        _add_cross_pnl_subplot(fig, t, aligned, row=2)
+        _add_cross_pnl_subplot(t, aligned, row=2)
 
         assert len(fig.data) == d0
         assert len(fig.layout.shapes or []) >= s0 + 2
