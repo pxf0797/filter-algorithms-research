@@ -243,3 +243,50 @@ class TestEodHigherPositionExtend:
 
         assert res["exit_markers"], "应有离场marker"
         assert res["exit_markers"][0][0] < len(current_dates) - 1   # 未延续到最右
+
+
+class TestPreWindowEntryExtend:
+    """高周期在当前窗口起点之前开仓 → 从起始点(bar0)开始显示(与 eod 右延续镜像)."""
+
+    def test_pre_window_entry_includes_start(self):
+        """窗口前开仓、仓位延续进窗口 → 入场映射到 bar0，起始点已在持仓内."""
+        higher_dates = pd.DatetimeIndex(["2025-12-31", "2026-01-01", "2026-01-02"])
+        current_dates = pd.DatetimeIndex([
+            "2026-01-01 00:00", "2026-01-01 10:00",
+            "2026-01-02 00:00", "2026-01-02 10:00",
+        ])
+        higher_long = np.array([100.0, 103.0, 106.0])
+        higher_short = np.full(3, 100.0)
+        # 开仓 bar0(12-31, 窗口前), 平仓 bar2(01-02, take_profit)
+        higher_trades = [{
+            "entry_idx": 0, "exit_idx": 2, "type": "long",
+            "return_pct": 6.0, "exit_reason": "take_profit",
+        }]
+        res = _align_pnl_to_current_tf(
+            higher_dates, higher_long, higher_short, higher_trades, current_dates)
+
+        entry_bars = [m[0] for m in res["entry_markers"]]
+        assert entry_bars == [0]              # 从窗口起点开始
+
+        long_mask, _ = _compute_holding_masks(
+            len(current_dates), res["entry_markers"], res["exit_markers"])
+        assert bool(long_mask[0])             # 起始点已包含在持仓内
+
+    def test_position_entirely_before_window_not_shown(self):
+        """整段仓位都在窗口之前 → 不产生 marker(不误显)."""
+        higher_dates = pd.DatetimeIndex(["2025-12-30", "2025-12-31", "2026-01-05"])
+        current_dates = pd.DatetimeIndex([
+            "2026-01-05 00:00", "2026-01-05 10:00",
+        ])
+        higher_long = np.array([100.0, 103.0, 106.0])
+        higher_short = np.full(3, 100.0)
+        # 开仓 bar0(12-30) 平仓 bar1(12-31), 都在窗口(01-05)之前
+        higher_trades = [{
+            "entry_idx": 0, "exit_idx": 1, "type": "long",
+            "return_pct": 3.0, "exit_reason": "take_profit",
+        }]
+        res = _align_pnl_to_current_tf(
+            higher_dates, higher_long, higher_short, higher_trades, current_dates)
+
+        assert res["entry_markers"] == []
+        assert res["exit_markers"] == []

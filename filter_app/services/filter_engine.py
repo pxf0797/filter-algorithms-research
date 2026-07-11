@@ -951,9 +951,16 @@ def _align_pnl_to_current_tf(
         exit_time = hd[exit_j]
 
         # 找到当前周期中 ≤ entry_time 的最近bar
+        # 若开仓在当前窗口起点之前，但仓位延续进窗口(exit ≥ 窗口起点)，则从
+        # 窗口起点(bar0)开始显示，把当前周期起始点包含在内(与 eod 右延续镜像)。
         entry_mask = cd <= entry_time
         if entry_mask.any():
             entry_bar = int(np.max(np.where(entry_mask)[0]))
+        elif n > 0 and exit_time >= cd[0]:
+            entry_bar = 0
+        else:
+            entry_bar = None
+        if entry_bar is not None:
             pnl_at_entry = aligned_long[entry_bar] if trade["type"] == "long" else aligned_short[entry_bar]
             entry_markers.append((entry_bar, trade["type"], pnl_at_entry if not np.isnan(pnl_at_entry) else 100.0))
 
