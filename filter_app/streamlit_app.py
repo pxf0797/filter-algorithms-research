@@ -41,6 +41,7 @@ from services.data_loader import (
 from components.charts import (
     _render_plotly, _add_prediction_traces,
     _add_cross_pnl_subplot, _add_alignment_subplot,
+    _draw_holding_bands,
 )
 from components.sidebar import (
     _render_params, ALL_TFS, DEFAULT_TFS, TF_HIERARCHY,
@@ -322,14 +323,14 @@ def _determine_subplot_layout(has_s, has_strategy, has_cross, has_alignment, _hi
                 if has_alignment:
                     rows = 8
                     rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.24, 0.15, 0.12]
-                    titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}PnL参考", "同向性判断")
+                    titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}持仓状态", "同向性判断")
                     pnl_row = 6
                     cross_row = 7
                     align_row = 8
                 else:
                     rows = 7
                     rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.27, 0.18]
-                    titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}PnL参考")
+                    titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}持仓状态")
                     pnl_row = 6
                     cross_row = 7
                     align_row = None
@@ -486,46 +487,21 @@ def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row) -> None
     fig.update_yaxes(title_text="PnL(%)", row=pnl_row, col=1, ticksuffix="%")
 
 
-def _contiguous_runs(mask):
-    """返回布尔数组中连续 True 段的 (start, end) 闭区间列表。"""
-    runs, s = [], None
-    for i, v in enumerate(mask):
-        if v and s is None:
-            s = i
-        elif (not v) and s is not None:
-            runs.append((s, i - 1)); s = None
-    if s is not None:
-        runs.append((s, len(mask) - 1))
-    return runs
-
-
 def _add_feedback_subplot(fig, t, trade_records, row) -> None:
-    """实际持仓状态子图：两条轨(做多绿/做空红)，持仓=色块、不持=空白。
+    """实际持仓状态子图：绿=做多持仓 / 红=做空持仓 / 空白=不持。
 
-    只显示持有/不持状态，不显示百分比。持仓 = Layer0 实际成交区间(entry→exit)。
+    持仓 = Layer0 实际成交区间(entry→exit)，只显示状态不显示百分比。
     """
     n = len(t)
-    hw = (t[1] - t[0]) / 2.0 if n > 1 else 0.5
-
-    def _hold_mask(direction):
-        m = np.zeros(n, dtype=bool)
-        for tr in trade_records:
-            if tr["type"] != direction:
-                continue
-            a = tr["entry_idx"]
-            if a < n:
-                m[a:min(tr["exit_idx"], n - 1) + 1] = True
-        return m
-
-    for a, b in _contiguous_runs(_hold_mask("long")):
-        fig.add_shape(type="rect", x0=t[a] - hw, x1=t[b] + hw, y0=0.55, y1=0.95,
-            fillcolor="#3fb950", line_width=0, row=row, col=1)
-    for a, b in _contiguous_runs(_hold_mask("short")):
-        fig.add_shape(type="rect", x0=t[a] - hw, x1=t[b] + hw, y0=0.05, y1=0.45,
-            fillcolor="#f85149", line_width=0, row=row, col=1)
-
-    fig.update_yaxes(range=[0, 1], tickvals=[0.25, 0.75], ticktext=["做空", "做多"],
-                     showgrid=False, row=row, col=1)
+    long_mask = np.zeros(n, dtype=bool)
+    short_mask = np.zeros(n, dtype=bool)
+    for tr in trade_records:
+        a = tr["entry_idx"]
+        if a >= n:
+            continue
+        b = min(tr["exit_idx"], n - 1)
+        (long_mask if tr["type"] == "long" else short_mask)[a:b + 1] = True
+    _draw_holding_bands(fig, t, long_mask, short_mask, row)
 
 
 def _get_min_tf_and_count(configs, ticker_code) -> tuple:
@@ -791,7 +767,6 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
 
     if has_cross and higher_pnl is not None and cross_row is not None:
         _add_cross_pnl_subplot(fig, t, higher_pnl, row=cross_row, higher_tf=_higher_tf)
-        fig.update_yaxes(title_text=f"{_higher_tf}(%)", row=cross_row, col=1, ticksuffix="%")
 
     if has_alignment and _align_masks is not None and align_row is not None:
         long_mask, short_mask = _align_masks
