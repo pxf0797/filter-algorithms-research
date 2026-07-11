@@ -379,13 +379,13 @@ def _add_main_price_traces(fig, t, noisy, ohlc, filtered, filtered2, cfg) -> Non
         close=ohlc["Close"].values.ravel(), name="K",
         increasing_line_color="#26a69a", decreasing_line_color="#ef5350",
         showlegend=False), row=1, col=1)
-    fig.add_trace(go.Scatter(x=t, y=noisy, mode="lines", name="收盘",
+    fig.add_trace(go.Scattergl(x=t, y=noisy, mode="lines", name="收盘",
         line=dict(color="#5f6c80", width=1.0)), row=1, col=1)
     if not np.all(np.isnan(filtered)):
-        fig.add_trace(go.Scatter(x=t, y=filtered, mode="lines", name="滤波",
+        fig.add_trace(go.Scattergl(x=t, y=filtered, mode="lines", name="滤波",
             line=dict(color=cfg["fc"], width=2.0)), row=1, col=1)
     if cfg["_dual"] and filtered2 is not None and not np.all(np.isnan(filtered2)):
-        fig.add_trace(go.Scatter(x=t, y=filtered2, mode="lines", name="滤波2",
+        fig.add_trace(go.Scattergl(x=t, y=filtered2, mode="lines", name="滤波2",
             line=dict(color=cfg["fc2"], width=2.0)), row=1, col=1)
 
 
@@ -394,12 +394,12 @@ def _add_residual_traces(fig, t, filtered, noisy, filtered2, cfg, rr, vr) -> np.
     if len(t) < 2:
         return np.array([])
     if not np.all(np.isnan(filtered)):
-        fig.add_trace(go.Scatter(x=t, y=filtered - noisy, mode="lines", name="残差",
+        fig.add_trace(go.Scattergl(x=t, y=filtered - noisy, mode="lines", name="残差",
             line=dict(color="#5f6c80", width=1.0, dash="dot")), row=rr, col=1)
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=rr, col=1)
         vel = np.gradient(filtered, t)
         acc = np.gradient(vel, t)
-        fig.add_trace(go.Scatter(x=t, y=vel, mode="lines", name="v",
+        fig.add_trace(go.Scattergl(x=t, y=vel, mode="lines", name="v",
             line=dict(color=cfg["fc"], width=1.5)), row=vr, col=1)
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=vr, col=1)
         return acc
@@ -411,31 +411,31 @@ def _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar, ssr) -> None:
     """Add Schmitt trigger traces: eps bands, sigma_v, acceleration, Sig signal, pair bands."""
     eps = schmitt["eps"]
     sig = schmitt["sig"]
-    fig.add_trace(go.Scatter(x=list(t) + list(t[::-1]), y=list(eps) + list(-eps[::-1]),
+    fig.add_trace(go.Scattergl(x=list(t) + list(t[::-1]), y=list(eps) + list(-eps[::-1]),
         fill="toself", fillcolor="rgba(128,128,128,0.06)", line=dict(width=0),
         name="±ε", hoverinfo="skip"), row=sar, col=1)
-    fig.add_trace(go.Scatter(x=t, y=eps, mode="lines", name="+ε",
+    fig.add_trace(go.Scattergl(x=t, y=eps, mode="lines", name="+ε",
         line=dict(color="#f85149", width=0.8, dash="dash"), showlegend=False), row=sar, col=1)
-    fig.add_trace(go.Scatter(x=t, y=-eps, mode="lines", name="-ε",
+    fig.add_trace(go.Scattergl(x=t, y=-eps, mode="lines", name="-ε",
         line=dict(color="#f85149", width=0.8, dash="dash")), row=sar, col=1)
-    fig.add_trace(go.Scatter(x=t, y=schmitt["sigma_v"], mode="lines", name="σ(v)",
+    fig.add_trace(go.Scattergl(x=t, y=schmitt["sigma_v"], mode="lines", name="σ(v)",
         line=dict(color="#a371f7", width=1.0, dash="dot")), row=sar, col=1)
-    fig.add_trace(go.Scatter(x=t, y=acc, mode="lines", name="a",
+    fig.add_trace(go.Scattergl(x=t, y=acc, mode="lines", name="a",
         line=dict(color="#d2991d", width=1.5)), row=sar, col=1)
     fig.add_hline(y=0, line_dash="solid", line_color="gray", opacity=0.3, row=sar, col=1)
-    fig.add_trace(go.Scatter(x=t, y=sig.astype(float), mode="lines", name="Sig",
+    fig.add_trace(go.Scattergl(x=t, y=sig.astype(float), mode="lines", name="Sig",
         line=dict(color="#58a6ff", width=2, shape="hv")), row=ssr, col=1)
     for state, cl in [(1, "rgba(63,185,80,0.06)"), (-1, "rgba(248,81,73,0.06)")]:
         msk = sig == state
         if msk.any():
-            fig.add_trace(go.Scatter(x=t[msk], y=np.where(msk, state, 0),
+            fig.add_trace(go.Scattergl(x=t[msk], y=np.where(msk, state, 0),
                 mode="lines", line=dict(width=0), fill="tozeroy",
                 fillcolor=cl, showlegend=False, hoverinfo="skip"), row=ssr, col=1)
     for i, (p_start, p_end) in enumerate(all_pairs):
         direction = sig[p_end]
         y_lo, y_hi = (0, 1) if direction == 1 else (-1, 0)
         band_color = "rgba(88,166,255,0.10)" if i % 2 == 0 else "rgba(163,113,247,0.10)"
-        fig.add_trace(go.Scatter(
+        fig.add_trace(go.Scattergl(
             x=[p_start, p_end, p_end, p_start],
             y=[y_hi, y_hi, y_lo, y_lo],
             fill="toself", fillcolor=band_color,
@@ -446,9 +446,9 @@ def _add_schmitt_traces(fig, t, schmitt, acc, all_pairs, sar, ssr) -> None:
 
 def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row) -> None:
     """Add PnL curves, individual trade segments, markers, and annotations."""
-    fig.add_trace(go.Scatter(x=t, y=long_pnl, mode="lines", name="做多PnL",
+    fig.add_trace(go.Scattergl(x=t, y=long_pnl, mode="lines", name="做多PnL",
         line=dict(color="#3fb950", width=1.5, dash="solid")), row=pnl_row, col=1)
-    fig.add_trace(go.Scatter(x=t, y=short_pnl, mode="lines", name="做空PnL",
+    fig.add_trace(go.Scattergl(x=t, y=short_pnl, mode="lines", name="做空PnL",
         line=dict(color="#f85149", width=1.5, dash="solid")), row=pnl_row, col=1)
     for trade in trade_records:
         seg_t = t[trade["entry_idx"]:trade["exit_idx"] + 1]
@@ -457,16 +457,16 @@ def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row) -> None
         is_long = trade["type"] == "long"
         color = "#3fb950" if is_long else "#f85149"
         label_prefix = "多" if is_long else "空"
-        fig.add_trace(go.Scatter(x=seg_t, y=seg_pnl, mode="lines",
+        fig.add_trace(go.Scattergl(x=seg_t, y=seg_pnl, mode="lines",
             name=f"{label_prefix}#{trade['id']}",
             line=dict(color=color, width=3), showlegend=False), row=pnl_row, col=1)
-        fig.add_trace(go.Scatter(x=[seg_t[0]], y=[seg_pnl[0]], mode="markers",
+        fig.add_trace(go.Scattergl(x=[seg_t[0]], y=[seg_pnl[0]], mode="markers",
             marker=dict(color=color, symbol="triangle-up", size=8),
             showlegend=False), row=pnl_row, col=1)
         if trade["exit_reason"] in ("stop_loss", "take_profit"):
             exit_marker = "x" if trade["exit_reason"] == "stop_loss" else "circle"
             exit_color = "#f85149" if trade["exit_reason"] == "stop_loss" else "#3fb950"
-            fig.add_trace(go.Scatter(x=[seg_t[-1]], y=[seg_pnl[-1]], mode="markers",
+            fig.add_trace(go.Scattergl(x=[seg_t[-1]], y=[seg_pnl[-1]], mode="markers",
                 marker=dict(color=exit_color, symbol=exit_marker, size=8),
                 showlegend=False), row=pnl_row, col=1)
             ret_pct = trade["return_pct"]
@@ -477,11 +477,11 @@ def _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row) -> None
                 row=pnl_row, col=1)
     fig.add_hline(y=100, line_dash="dash", line_color="gray", opacity=0.5, row=pnl_row, col=1)
     y_max_l = max(float(np.nanmax(long_pnl)), 100.0) * 1.02
-    fig.add_trace(go.Scatter(x=[t[0], t[-1], t[-1], t[0]],
+    fig.add_trace(go.Scattergl(x=[t[0], t[-1], t[-1], t[0]],
         y=[100, 100, y_max_l, y_max_l], fill="toself", fillcolor="rgba(63,185,80,0.04)",
         mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"), row=pnl_row, col=1)
     y_min_s = min(float(np.nanmin(short_pnl)), 100.0) * 0.98
-    fig.add_trace(go.Scatter(x=[t[0], t[-1], t[-1], t[0]],
+    fig.add_trace(go.Scattergl(x=[t[0], t[-1], t[-1], t[0]],
         y=[100, 100, y_min_s, y_min_s], fill="toself", fillcolor="rgba(248,81,73,0.04)",
         mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip"), row=pnl_row, col=1)
     fig.update_yaxes(title_text="PnL(%)", row=pnl_row, col=1, ticksuffix="%")
@@ -775,7 +775,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         fig.update_yaxes(title_text="同向(%)", row=align_row, col=1, ticksuffix="%")
 
     if ar is not None and not np.all(np.isnan(filtered)):
-        fig.add_trace(go.Scatter(x=t, y=acc, mode="lines", name="a",
+        fig.add_trace(go.Scattergl(x=t, y=acc, mode="lines", name="a",
             line=dict(color="#ffa502", width=1.5)), row=ar, col=1)
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=ar, col=1)
 

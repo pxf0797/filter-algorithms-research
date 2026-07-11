@@ -218,7 +218,7 @@ def _add_prediction_traces(fig, t, filtered, fit_result, fit_start, pair_end, ro
     # 拟合段 — 橙色实线
     x_fit = t[fit_start:pair_end + 1]
     y_fit = fit_result["y_fit"]
-    fig.add_trace(go.Scatter(
+    fig.add_trace(go.Scattergl(
         x=x_fit, y=y_fit,
         mode="lines", name=f"{name}(拟合)",
         line=dict(color=fit_color, width=2),
@@ -235,7 +235,7 @@ def _add_prediction_traces(fig, t, filtered, fit_result, fit_start, pair_end, ro
             y_ext = np.polyval((a, b, c), x_ext - x0)
         else:
             y_ext = np.polyval((a, b, c), x_ext)
-        fig.add_trace(go.Scatter(
+        fig.add_trace(go.Scattergl(
             x=x_ext, y=y_ext,
             mode="lines", name=f"{name}(预测)",
             line=dict(color=pred_color, width=2, dash="dash"),
@@ -249,7 +249,7 @@ def _add_prediction_traces(fig, t, filtered, fit_result, fit_start, pair_end, ro
         residual = y_ext - baseline
         upward = y_ext[-1] > y_ext[0]
         res_color = "#f85149" if upward else "#3fb950"
-        fig.add_trace(go.Scatter(
+        fig.add_trace(go.Scattergl(
             x=x_ext, y=residual,
             mode="lines", name=f"{name}(残差)",
             line=dict(color=res_color, width=1.5, dash="dot"),
@@ -266,7 +266,7 @@ def _render_entry_marker(fig, t, bar_idx, pnl_val, row, col=1,
     """统一的入场标记（三角形）。"""
     if not (0 <= bar_idx < len(t)):
         return
-    fig.add_trace(go.Scatter(
+    fig.add_trace(go.Scattergl(
         x=[t[bar_idx]], y=[pnl_val],
         mode="markers",
         marker=dict(color=color, symbol="triangle-up", size=size,
@@ -287,7 +287,7 @@ def _render_exit_marker_with_label(fig, t, bar_idx, pnl_val, row, col=1,
     is_sl = exit_reason == "stop_loss"
     sym = "x" if is_sl else "circle"
     ec = "#f85149" if is_sl else "#3fb950"
-    fig.add_trace(go.Scatter(
+    fig.add_trace(go.Scattergl(
         x=[t[bar_idx]], y=[pnl_val],
         mode="markers",
         marker=dict(color=color, symbol=sym, size=9,
@@ -314,13 +314,13 @@ def _render_pnl_curves(fig, t, long_filtered, short_filtered, row, col=1,
                        long_name="做多PnL", short_name="做空PnL",
                        show_legend=False) -> None:
     """为子图渲染橙色/绿色PnL基线曲线。"""
-    fig.add_trace(go.Scatter(
+    fig.add_trace(go.Scattergl(
         x=t, y=long_filtered,
         mode="lines", name=long_name,
         line=dict(color=long_color, width=1.5, dash="solid"),
         showlegend=show_legend,
     ), row=row, col=col)
-    fig.add_trace(go.Scatter(
+    fig.add_trace(go.Scattergl(
         x=t, y=short_filtered,
         mode="lines", name=short_name,
         line=dict(color=short_color, width=1.5, dash="solid"),
@@ -338,7 +338,7 @@ def _render_fill_background(fig, t, y_values, row, col=1,
                             color="rgba(63,185,80,0.04)", baseline=100) -> None:
     """渲染PnL区域半透明背景。"""
     y_max = max(float(np.nanmax(y_values)), baseline) * 1.02
-    fig.add_trace(go.Scatter(
+    fig.add_trace(go.Scattergl(
         x=[t[0], t[-1], t[-1], t[0]],
         y=[baseline, baseline, y_max, y_max],
         fill="toself", fillcolor=color,
@@ -426,7 +426,7 @@ def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
         seg_pnl = curve[seg_range]
         color = "#3fb950" if is_long else "#f85149"
 
-        fig.add_trace(go.Scatter(
+        fig.add_trace(go.Scattergl(
             x=seg_t, y=seg_pnl,
             mode="lines",
             name=f"{'多' if is_long else '空'}#{trade['id']}",
