@@ -383,8 +383,10 @@ def _insert_feedback_row(rows, rh, titles, pnl_row, cross_row, align_row):
 
 
 def _add_main_price_traces(t, noisy, ohlc, filtered, filtered2, cfg, mr):
-    """Return trace dicts for K-line, close, and filter lines."""
-    _ax = f"x{mr}"; _ay = f"y{mr}"
+    """Return trace dicts for K-line, close, and filter lines.
+    mr is always 1 in the current layout; row1 axis IDs are "x"/"y" (no number suffix)."""
+    _ax = "x" if mr == 1 else f"x{mr}"
+    _ay = "y" if mr == 1 else f"y{mr}"
     traces = [dict(type="candlestick", x=t,
         open=ohlc["Open"].values.ravel(), high=ohlc["High"].values.ravel(),
         low=ohlc["Low"].values.ravel(), close=ohlc["Close"].values.ravel(),
