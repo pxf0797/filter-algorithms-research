@@ -706,30 +706,10 @@ def _compute_strategy_pnl(
     trade_id = 0
 
     for pair_start, pair_end in all_pairs:
-        if pair_end not in pred_map:
-            continue
-        pp = pred_map[pair_end]
-        fit_result = pp["fit_result"]
-
-        # ---- 计算外推预测方向 ----
-        a, b, c = fit_result["a"], fit_result["b"], fit_result["c"]
-        x0 = fit_result.get("x0", None)
-
-        x_pred = np.arange(pair_end, pair_end + n_extend)
-        if x0 is not None:
-            y_pred = np.polyval((a, b, c), x_pred - x0)
-        else:
-            y_pred = np.polyval((a, b, c), x_pred)
-
-        if len(y_pred) < 2:
-            continue
-        pred_up = y_pred[-1] > y_pred[0]
-
-        # ---- 判断交易方向 ----
+        # ---- 判断交易方向（仅凭 Sig 反转方向；入场不再依赖抛物线预测）----
         v2 = sig_t[pair_end]
-        is_long = (v2 == 1 and pred_up)
-        is_short = (v2 == -1 and not pred_up)
-
+        is_long = (v2 == 1)
+        is_short = (v2 == -1)
         if not is_long and not is_short:
             continue
 
@@ -738,6 +718,14 @@ def _compute_strategy_pnl(
         entry_price = filtered[entry_idx]
         if np.isnan(entry_price) or entry_price <= 0:
             continue
+
+        # ---- 预测轨道（可选）：仅用于保护期止损参考；无预测则回退相对入场价固定% ----
+        pp = pred_map.get(pair_end)
+        a = b = c = x0 = None
+        if pp is not None:
+            fit_result = pp["fit_result"]
+            a, b, c = fit_result["a"], fit_result["b"], fit_result["c"]
+            x0 = fit_result.get("x0", None)
 
         # ---- 扫描：分段混合（方案D） ----
         # 预测保护期 [entry+1, entry+N_ext]：止损 + 止盈 双重保护
@@ -754,10 +742,13 @@ def _compute_strategy_pnl(
 
             # 预测保护期内：检查止损
             if i <= protect_end:
-                if x0 is not None:
-                    pred_val = np.polyval((a, b, c), i - x0)
+                if a is not None:
+                    # 有预测：相对预测价轨道
+                    pred_val = np.polyval((a, b, c), i - x0) if x0 is not None \
+                        else np.polyval((a, b, c), i)
                 else:
-                    pred_val = np.polyval((a, b, c), i)
+                    # 无预测：回退到相对入场价固定%
+                    pred_val = entry_price
 
                 if not (np.isnan(pred_val) or pred_val <= 0):
                     if is_long:

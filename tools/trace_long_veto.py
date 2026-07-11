@@ -1,9 +1,9 @@
-# 根因追踪：3690 60min "该做多没做多"
+# 根因追踪 + 修复验证：3690 60min "该做多没做多"
 #
-# 结论：入场被 _compute_prediction_pairs 的 `pair_end - pair_start >= 3` 门槛
+# 根因(已修复)：入场曾被 _compute_prediction_pairs 的 `pair_end-pair_start>=3` 门槛
 #       + _compute_strategy_pnl 的 `if pair_end not in pred_map: continue` 静默丢弃。
-#       当"反转前的段+间隔"< 3 根(快速反转)时，该 pair 无预测 → 入场(多/空)被跳过。
-#       本数据中强上涨段前都是 1 根下跌 blip → 做多入场被系统性丢掉。
+#       修复(入场与预测解耦)后：入场仅凭 sig；无预测的 pair 也入场，止损回退固定%。
+#       预期：应做多的 [16,37,51] 现在全部入场，被丢弃=[]。
 import sqlite3, sys
 import numpy as np
 sys.path.insert(0, "filter_app")
@@ -33,9 +33,9 @@ for ps, pe in all_pairs:
     d = "做多" if v2 == 1 else ("做空" if v2 == -1 else "-")
     has_pred = gap >= 3
     if not has_pred:
-        res = f"★丢弃(gap={gap}<3, 无预测→跳过{d})"
+        res = f"无预测(gap={gap}<3)→止损回退固定%，仍入场{d}"
     else:
-        res = f"进入方向判定→{d}"
+        res = f"有预测轨道→入场{d}"
     print(f"({ps:>3},{pe:>3}) {gap:>4} {v2:>7} {d:>6} {str(has_pred):>7}  {res}")
 
 # ---- 完整策略成交 ----

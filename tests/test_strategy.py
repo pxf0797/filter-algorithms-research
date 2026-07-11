@@ -234,6 +234,48 @@ class TestComputeStrategyPnL:
         assert trades[0]["type"] == "short"
 
     @pytest.mark.strategy
+    def test_entry_without_prediction_still_trades(self):
+        """回归: gap<3 无预测的 pair 仍应入场(入场与抛物线预测解耦)。
+
+        修复前: _compute_prediction_pairs 的 >=3 门槛导致无预测 →
+        `pair_end not in pred_map: continue` 静默丢弃入场(3690 60min 做多被丢)。
+        """
+        n = 40
+        t = np.arange(n, dtype=float)
+        filtered = 100.0 + 0.5 * t          # 持续上涨
+        sig_t = np.zeros(n, dtype=int)
+        sig_t[5] = -1                        # 一根下跌 blip
+        sig_t[7:20] = 1                      # 之后上涨段
+        all_pairs = [(5, 7)]                 # gap=2 <3 → 该 pair 无预测
+        # pred_pairs 非空(含一个无关 pair 的预测)以通过顶层守卫；但 pair_end=7 不在
+        # pred_map → 专测"该具体 pair 无预测时仍入场"(真实 3690 场景: 混合有/无预测)。
+        pred_pairs = [{"fit_result": {"a": 0.0, "b": 0.5, "c": 100.0, "x0": None},
+                       "fit_start": 25, "pair_end": 30}]
+        long_pnl, short_pnl, trades = _compute_strategy_pnl(
+            t, filtered, sig_t, all_pairs, pred_pairs, 2.0, 10)
+        longs = [tr for tr in trades if tr["type"] == "long" and tr["entry_idx"] == 7]
+        assert len(longs) >= 1, "无预测的 pair(pair_end=7) 也应入场做多(不再被静默丢弃)"
+
+    @pytest.mark.strategy
+    def test_downward_parabola_no_longer_vetoes_long(self):
+        """回归: sig=+1 但抛物线外推向下(pred_up=False)，去掉过滤后仍应做多。"""
+        n = 40
+        t = np.arange(n, dtype=float)
+        filtered = 100.0 + 0.5 * t
+        sig_t = np.zeros(n, dtype=int)
+        sig_t[5] = -1
+        sig_t[10:30] = 1
+        pair_end = 10
+        # 向下的抛物线(y=-x+100 递减 → pred_up 会是 False)
+        fit_result = {"a": 0.0, "b": -1.0, "c": 100.0, "x0": None}
+        all_pairs = [(5, pair_end)]
+        pred_pairs = [{"fit_result": fit_result, "fit_start": 5, "pair_end": pair_end}]
+        long_pnl, short_pnl, trades = _compute_strategy_pnl(
+            t, filtered, sig_t, all_pairs, pred_pairs, 2.0, 10)
+        longs = [tr for tr in trades if tr["type"] == "long"]
+        assert len(longs) >= 1, "去掉 pred_up 过滤后，向下抛物线不应再否决做多"
+
+    @pytest.mark.strategy
     def test_stop_loss_trigger(self):
         """Stop-loss triggers when price moves sharply against prediction."""
         n = 100
