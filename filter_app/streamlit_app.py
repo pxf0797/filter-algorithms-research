@@ -20,7 +20,7 @@ from plotly.subplots import make_subplots
 from config_db import (init_config_tables, list_presets, apply_preset,
                         save_preset, delete_preset, rename_preset,
                         get_history,
-                        import_json_files_as_presets)
+                        import_json_files_as_presets, VIEW_PARAM_SPECS)
 from db import (init_db, get_date_range, has_data,
                 check_data_health, get_db_size_mb, snapshot_db, list_snapshots,
                 restore_snapshot, prune_snapshots, clear_display_cache,
@@ -362,7 +362,7 @@ def _insert_feedback_row(rows, rh, titles, pnl_row, cross_row, align_row):
     """
     feedback_row = pnl_row + 1
     rh = list(rh)
-    fb_h = rh[pnl_row - 1] * 0.28
+    fb_h = rh[pnl_row - 1] * 0.14
     rh[pnl_row - 1] = rh[pnl_row - 1] - fb_h
     rh.insert(pnl_row, fb_h)                       # 插到 PnL 行之后
     titles = list(titles)
@@ -1635,6 +1635,15 @@ def _render_db_backup() -> None:
                         st.error(f"删除失败: {e}")
 
 
+def _view_export_params(cfg, i) -> dict:
+    """按单一真源 VIEW_PARAM_SPECS 从单个视图 cfg 构建导出键值。
+
+    export(JSON) 与测试共用此函数，参数增删只跟随 VIEW_PARAM_SPECS，不会漏。
+    """
+    return {f"v{i}_{suffix}": cfg.get(cfg_key, default)
+            for suffix, cfg_key, default in VIEW_PARAM_SPECS}
+
+
 def _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code) -> None:
     """Render config export download button."""
     st.sidebar.markdown("---")
@@ -1643,21 +1652,7 @@ def _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_c
         "global_f": filter_id, "global_dual": dual, "global_f2": filter_id2,
     }
     for i, cfg in enumerate(configs):
-        export_data[f"v{i}_tf"] = cfg["tf"]
-        export_data[f"v{i}_n"] = cfg["n_pts"]
-        export_data[f"v{i}_sch"] = cfg["show_sch"]
-        export_data[f"v{i}_pred"] = cfg["show_pred"]
-        export_data[f"v{i}_ke"] = cfg["ke"]
-        export_data[f"v{i}_sm"] = cfg["sm"]
-        export_data[f"v{i}_ew"] = cfg["ew"]
-        export_data[f"v{i}_fm"] = cfg["fit_mode"]
-        export_data[f"v{i}_next"] = cfg["n_ext"]
-        export_data[f"v{i}_fc"] = cfg["fc"]
-        export_data[f"v{i}_fc2"] = cfg["fc2"]
-        export_data[f"v{i}_strat"] = cfg.get("show_strategy", False)
-        export_data[f"v{i}_sl"] = cfg.get("stop_loss_pct", 2.0)
-        export_data[f"v{i}_cross_pnl"] = cfg.get("show_cross_pnl", False)
-        export_data[f"v{i}_align"] = cfg.get("show_alignment", False)
+        export_data.update(_view_export_params(cfg, i))
         f1 = FILTERS.get(filter_id, {})
         for pname, pval in cfg.get("pv", {}).items():
             label = f1["params"].get(pname, (pname,))[0]
