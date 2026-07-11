@@ -54,6 +54,12 @@ _align_pnl_to_current_tf(...)  →  aligned（含 entry_markers / exit_markers�
 - **单/双轨决策**：本版采用**双轨**（做多/做空各一轨），与当前周期「实际持仓状态」面板一致。若需单轨「方向 regime 带」（一条轨按方向着色），改 `_draw_holding_bands` 即可。
 - `_compute_holding_masks` 的 entry→exit 配对沿用现有实现（每个 entry 配下一个同向 exit，无 exit 则持有到末 bar）。
 
+## 7. 优化记录
+
+- **子图高度**：高周期状态子图（`cross_row`）为状态条，高度缩到约原来的 1/3（`_determine_subplot_layout` 的 `rh`：0.18→0.06、0.15→0.05），腾出的高度给主价格图。
+- **eod 持仓延续到最右**（半边多空对）：高周期最后一个仓位若尚未真正结束，会被 Layer0 在高周期末 bar 以 `exit_reason="eod"` 强制平仓；对齐到低周期时该 eod 离场的时间戳落在偏左位置，导致色块延续不到最新 bar。修复：`_align_pnl_to_current_tf` 中 `exit_reason=="eod"` 时把 `exit_bar` 设为当前周期最后一根 bar，使高周期"仍在持仓"的色块延续到右边缘。
+
 ---
 
-> 变更历史：v1（本文件）= 高周期 PnL 参考 → 高周期持仓状态色块，双轨，复用现有掩码。
+> 变更历史：v1 = 高周期 PnL 参考 → 高周期持仓状态色块，双轨，复用现有掩码。
+> v1.1 = 子图高度缩至 ~1/3；eod（未结束）高周期仓位色块延续到最右边缘。

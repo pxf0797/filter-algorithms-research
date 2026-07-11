@@ -958,14 +958,22 @@ def _align_pnl_to_current_tf(
             entry_markers.append((entry_bar, trade["type"], pnl_at_entry if not np.isnan(pnl_at_entry) else 100.0))
 
         # 离场：≤ exit_time 的最近bar
+        # eod = 高周期该仓位未真正结束(跑到数据末端被强制平仓)，低周期应延续到
+        #       最新bar(右边缘)，而非停在高周期末bar对应的较早位置(半边多空对)。
+        exit_reason = trade.get("exit_reason", "")
         exit_mask = cd <= exit_time
-        if exit_mask.any():
+        if exit_reason == "eod":
+            exit_bar = n - 1
+        elif exit_mask.any():
             exit_bar = int(np.max(np.where(exit_mask)[0]))
+        else:
+            exit_bar = None
+        if exit_bar is not None:
             pnl_at_exit = aligned_long[exit_bar] if trade["type"] == "long" else aligned_short[exit_bar]
             exit_markers.append((exit_bar, trade["type"],
                                  pnl_at_exit if not np.isnan(pnl_at_exit) else 100.0,
                                  trade.get("return_pct", 0.0),
-                                 trade.get("exit_reason", "")))
+                                 exit_reason))
 
     return {
         "aligned_long": aligned_long,

@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from services.filter_engine import _align_pnl_to_current_tf
+from services.filter_engine import _align_pnl_to_current_tf, _compute_holding_masks
 
 
 # =========================================================================
@@ -195,3 +195,51 @@ class TestAlignPnlToCurrentTf:
         # 前向填充: 所有 intraday bar 都 ≤ 最后 daily bar → 全部对齐
         assert len(result["aligned_long"]) == len(current_dates), "结果长度应匹配"
         assert not np.all(np.isnan(result["aligned_long"])), "时间重叠时应全部对齐"
+
+
+class TestEodHigherPositionExtend:
+    """eod(高周期仓位未真正结束) → 低周期持仓延续到最右边缘."""
+
+    def test_eod_exit_maps_to_last_current_bar(self):
+        """eod 离场应映射到当前周期最后一根bar，持仓掩码延续到最右."""
+        higher_dates = pd.DatetimeIndex(["2026-01-01", "2026-01-02"])
+        current_dates = pd.DatetimeIndex([
+            "2026-01-01 00:00", "2026-01-01 10:00",
+            "2026-01-02 00:00", "2026-01-02 10:00",
+            "2026-01-02 13:00", "2026-01-02 15:00",
+        ])
+        higher_long = np.array([100.0, 105.0])
+        higher_short = np.array([100.0, 100.0])
+        # 做多仓位 bar0→bar1(末bar, eod 强制平仓, 未真正结束)
+        higher_trades = [{
+            "entry_idx": 0, "exit_idx": 1, "type": "long",
+            "return_pct": 5.0, "exit_reason": "eod",
+        }]
+        res = _align_pnl_to_current_tf(
+            higher_dates, higher_long, higher_short, higher_trades, current_dates)
+
+        exit_bars = [m[0] for m in res["exit_markers"]]
+        assert exit_bars == [len(current_dates) - 1]      # eod → 延续到最右
+
+        long_mask, _ = _compute_holding_masks(
+            len(current_dates), res["entry_markers"], res["exit_markers"])
+        assert bool(long_mask[-1])                        # 最新bar仍持仓
+
+    def test_non_eod_exit_not_extended(self):
+        """正常离场(take_profit)不强制延续到最右."""
+        higher_dates = pd.DatetimeIndex(["2026-01-01", "2026-01-02", "2026-01-03"])
+        current_dates = pd.DatetimeIndex([
+            "2026-01-01 10:00", "2026-01-02 10:00",
+            "2026-01-03 10:00", "2026-01-03 14:00",
+        ])
+        higher_long = np.array([100.0, 105.0, 103.0])
+        higher_short = np.full(3, 100.0)
+        higher_trades = [{
+            "entry_idx": 0, "exit_idx": 1, "type": "long",
+            "return_pct": 5.0, "exit_reason": "take_profit",
+        }]
+        res = _align_pnl_to_current_tf(
+            higher_dates, higher_long, higher_short, higher_trades, current_dates)
+
+        assert res["exit_markers"], "应有离场marker"
+        assert res["exit_markers"][0][0] < len(current_dates) - 1   # 未延续到最右

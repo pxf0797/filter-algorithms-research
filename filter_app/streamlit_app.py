@@ -322,14 +322,14 @@ def _determine_subplot_layout(has_s, has_strategy, has_cross, has_alignment, _hi
             if has_cross:
                 if has_alignment:
                     rows = 8
-                    rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.24, 0.15, 0.12]
+                    rh = [0.34, 0.11, 0.12, 0.12, 0.16, 0.24, 0.05, 0.12]
                     titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}持仓状态", "同向性判断")
                     pnl_row = 6
                     cross_row = 7
                     align_row = 8
                 else:
                     rows = 7
-                    rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.27, 0.18]
+                    rh = [0.36, 0.11, 0.12, 0.12, 0.16, 0.27, 0.06]
                     titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}持仓状态")
                     pnl_row = 6
                     cross_row = 7
