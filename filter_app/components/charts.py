@@ -195,35 +195,27 @@ def _add_prediction_traces(fig, t, filtered, fit_result, fit_start, pair_end, ro
     ), row=row, col=1)
 
     # 前向延伸 — 紫色虚线
-    y_ext = None
+    y_ext = None; _ax_r1 = f"x{row+1}"; _ay_r1 = f"y{row+1}"
     if n_extend > 0:
         x_ext = np.arange(pair_end, pair_end + n_extend)
         x0 = fit_result.get("x0", None)
-        if x0 is not None:
-            y_ext = np.polyval((a, b, c), x_ext - x0)
-        else:
-            y_ext = np.polyval((a, b, c), x_ext)
-        fig.add_trace(go.Scattergl(
-            x=x_ext, y=y_ext,
+        y_ext = np.polyval((a, b, c), x_ext - x0) if x0 is not None else np.polyval((a, b, c), x_ext)
+        fig.add_traces([dict(type="scattergl", x=x_ext, y=y_ext,
             mode="lines", name=f"{name}(预测)",
             line=dict(color=pred_color, width=2, dash="dash"),
-            legendgroup=name,
-            showlegend=show_legend,
-        ), row=row, col=1)
+            legendgroup=name, showlegend=show_legend,
+            xaxis=f"x{row}", yaxis=f"y{row}")])
 
     # 残差子图 — 前向预测段与最后已知滤波价格的残差
     if y_ext is not None and n_extend > 0:
-        baseline = filtered[pair_end]
-        residual = y_ext - baseline
+        baseline = filtered[pair_end]; residual = y_ext - baseline
         upward = y_ext[-1] > y_ext[0]
         res_color = "#f85149" if upward else "#3fb950"
-        fig.add_trace(go.Scattergl(
-            x=x_ext, y=residual,
+        fig.add_traces([dict(type="scattergl", x=x_ext, y=residual,
             mode="lines", name=f"{name}(残差)",
             line=dict(color=res_color, width=1.5, dash="dot"),
-            legendgroup=name,
-            showlegend=show_legend,
-        ), row=row + 1, col=1)
+            legendgroup=name, showlegend=show_legend,
+            xaxis=_ax_r1, yaxis=_ay_r1)])
 
 
 # ---------------------------------------------------------------------------
@@ -234,15 +226,12 @@ def _render_entry_marker(fig, t, bar_idx, pnl_val, row, col=1,
     """统一的入场标记（三角形）。"""
     if not (0 <= bar_idx < len(t)):
         return
-    fig.add_trace(go.Scattergl(
-        x=[t[bar_idx]], y=[pnl_val],
+    fig.add_traces([dict(type="scattergl", x=[t[bar_idx]], y=[pnl_val],
         mode="markers",
         marker=dict(color=color, symbol="triangle-up", size=size,
                     line=dict(width=1, color="rgba(0,0,0,0.3)")),
-        showlegend=False,
-        hovertext=hovertext,
-        hoverinfo="text",
-    ), row=row, col=col)
+        showlegend=False, hovertext=hovertext, hoverinfo="text",
+        xaxis=f"x{row}", yaxis=f"y{row}")])
 
 
 def _render_exit_marker_with_label(fig, t, bar_idx, pnl_val, row, col=1,
@@ -253,17 +242,12 @@ def _render_exit_marker_with_label(fig, t, bar_idx, pnl_val, row, col=1,
     if not (0 <= bar_idx < len(t)):
         return
     is_sl = exit_reason == "stop_loss"
-    sym = "x" if is_sl else "circle"
-    ec = "#f85149" if is_sl else "#3fb950"
-    fig.add_trace(go.Scattergl(
-        x=[t[bar_idx]], y=[pnl_val],
+    sym = "x" if is_sl else "circle"; ec = "#f85149" if is_sl else "#3fb950"
+    fig.add_traces([dict(type="scattergl", x=[t[bar_idx]], y=[pnl_val],
         mode="markers",
-        marker=dict(color=color, symbol=sym, size=9,
-                    line=dict(width=1, color=ec)),
-        showlegend=False,
-        hovertext=hovertext,
-        hoverinfo="text",
-    ), row=row, col=col)
+        marker=dict(color=color, symbol=sym, size=9, line=dict(width=1, color=ec)),
+        showlegend=False, hovertext=hovertext, hoverinfo="text",
+        xaxis=f"x{row}", yaxis=f"y{row}")])
 
     label_color = "#f85149" if is_sl else "#3fb950"
     arrow = "↑" if trade_type == "long" else "↓"
@@ -282,18 +266,14 @@ def _render_pnl_curves(fig, t, long_filtered, short_filtered, row, col=1,
                        long_name="做多PnL", short_name="做空PnL",
                        show_legend=False) -> None:
     """为子图渲染橙色/绿色PnL基线曲线。"""
-    fig.add_trace(go.Scattergl(
-        x=t, y=long_filtered,
-        mode="lines", name=long_name,
-        line=dict(color=long_color, width=1.5, dash="solid"),
-        showlegend=show_legend,
-    ), row=row, col=col)
-    fig.add_trace(go.Scattergl(
-        x=t, y=short_filtered,
-        mode="lines", name=short_name,
-        line=dict(color=short_color, width=1.5, dash="solid"),
-        showlegend=show_legend,
-    ), row=row, col=col)
+    _ax = f"x{row}"; _ay = f"y{row}"
+    fig.add_traces([
+        dict(type="scattergl", x=t, y=long_filtered, mode="lines", name=long_name,
+            line=dict(color=long_color, width=1.5, dash="solid"),
+            showlegend=show_legend, xaxis=_ax, yaxis=_ay),
+        dict(type="scattergl", x=t, y=short_filtered, mode="lines", name=short_name,
+            line=dict(color=short_color, width=1.5, dash="solid"),
+            showlegend=show_legend, xaxis=_ax, yaxis=_ay)])
 
 
 def _render_baseline(fig, row, col=1, y=100, opacity=0.5) -> None:
@@ -394,13 +374,10 @@ def _add_alignment_subplot(fig, t, long_pnl, short_pnl, trade_records,
         seg_pnl = curve[seg_range]
         color = "#3fb950" if is_long else "#f85149"
 
-        fig.add_trace(go.Scattergl(
-            x=seg_t, y=seg_pnl,
-            mode="lines",
-            name=f"{'多' if is_long else '空'}#{trade['id']}",
-            line=dict(color=color, width=3),
-            showlegend=False,
-        ), row=row, col=1)
+        fig.add_traces([dict(type="scattergl", x=seg_t, y=seg_pnl,
+            mode="lines", name=f"{'多' if is_long else '空'}#{trade['id']}",
+            line=dict(color=color, width=3), showlegend=False,
+            xaxis=f"x{row}", yaxis=f"y{row}")])
 
         if mask[entry_i]:
             _render_entry_marker(
