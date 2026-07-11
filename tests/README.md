@@ -1,8 +1,8 @@
 # 测试文档 — filter_research
 
-**实际测试计数**：830 个测试 / 24 个测试文件
+**实际测试计数**：779 个测试 / 23 个测试文件
 
-pytest 输出：`pytest tests/ --collect-only -q` 确认 830 个测试被收集。
+pytest 输出：`pytest tests/ --collect-only -q` 确认 779 个测试被收集。
 
 ---
 
