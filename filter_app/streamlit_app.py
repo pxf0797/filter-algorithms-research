@@ -382,21 +382,22 @@ def _insert_feedback_row(rows, rh, titles, pnl_row, cross_row, align_row):
     return rows + 1, rh, tuple(titles), feedback_row, cross_row, align_row
 
 
-def _add_main_price_traces(t, noisy, ohlc, filtered, filtered2, cfg):
+def _add_main_price_traces(t, noisy, ohlc, filtered, filtered2, cfg, mr):
     """Return trace dicts for K-line, close, and filter lines."""
+    _ax = f"x{mr}"; _ay = f"y{mr}"
     traces = [dict(type="candlestick", x=t,
         open=ohlc["Open"].values.ravel(), high=ohlc["High"].values.ravel(),
         low=ohlc["Low"].values.ravel(), close=ohlc["Close"].values.ravel(),
         name="K", increasing_line_color="#26a69a", decreasing_line_color="#ef5350",
-        showlegend=False, xaxis="x", yaxis="y"),
+        showlegend=False, xaxis=_ax, yaxis=_ay),
         dict(type="scattergl", x=t, y=noisy, mode="lines", name="收盘",
-            line=dict(color="#5f6c80", width=1.0), xaxis="x", yaxis="y")]
+            line=dict(color="#5f6c80", width=1.0), xaxis=_ax, yaxis=_ay)]
     if not np.all(np.isnan(filtered)):
         traces.append(dict(type="scattergl", x=t, y=filtered, mode="lines",
-            name="滤波", line=dict(color=cfg["fc"], width=2.0), xaxis="x", yaxis="y"))
+            name="滤波", line=dict(color=cfg["fc"], width=2.0), xaxis=_ax, yaxis=_ay))
     if cfg["_dual"] and filtered2 is not None and not np.all(np.isnan(filtered2)):
         traces.append(dict(type="scattergl", x=t, y=filtered2, mode="lines",
-            name="滤波2", line=dict(color=cfg["fc2"], width=2.0), xaxis="x", yaxis="y"))
+            name="滤波2", line=dict(color=cfg["fc2"], width=2.0), xaxis=_ax, yaxis=_ay))
     return traces
 
 
@@ -811,7 +812,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
     all_traces, all_shapes, all_annotations = [], [], []
     _layout_updates = {}  # yaxis config dicts merged later
 
-    all_traces += _add_main_price_traces(t, noisy, ohlc, filtered, filtered2, cfg)
+    all_traces += _add_main_price_traces(t, noisy, ohlc, filtered, filtered2, cfg, mr)
     for i, pp in enumerate(pred_pairs):
         all_traces += _add_prediction_traces(t, filtered,
             pp["fit_result"], pp["fit_start"], pp["pair_end"], row=mr,

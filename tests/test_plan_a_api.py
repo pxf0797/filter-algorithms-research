@@ -25,7 +25,7 @@ class TestMainPriceAndResidualReturnDicts:
     def test_main_price_returns_list_of_dicts(self):
         n=20; t=np.arange(n,dtype=float); noisy=np.linspace(100,110,n)
         traces = _add_main_price_traces(t, noisy, _ohlc(n), noisy+0.5, None,
-                                        {"fc":"#00d4aa","_dual":False,"fc2":"#ff6b6b"})
+                                        {"fc":"#00d4aa","_dual":False,"fc2":"#ff6b6b"}, mr=1)
         assert isinstance(traces, list) and len(traces) >= 2
         assert all(isinstance(d, dict) for d in traces)
         assert traces[0]["type"] == "candlestick"

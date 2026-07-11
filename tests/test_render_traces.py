@@ -26,24 +26,24 @@ class TestAddMainPriceTraces:
     def test_candlestick_close_filter(self):
         n=20; t=np.arange(n,dtype=float); noisy=np.linspace(100,110,n)
         traces = _add_main_price_traces(t, noisy, _ohlc(n), noisy+0.5, None,
-                                        {"fc":"#00d4aa","_dual":False,"fc2":"#ff6b6b"})
+                                        {"fc":"#00d4aa","_dual":False,"fc2":"#ff6b6b"}, mr=1)
         assert isinstance(traces, list) and len(traces) >= 2
         assert traces[0]["type"]=="candlestick" and traces[1]["type"]=="scattergl"
     def test_dual_filter_adds_second(self):
         n=20; t=np.arange(n,dtype=float); noisy=np.linspace(100,110,n)
         traces = _add_main_price_traces(t, noisy, _ohlc(n), noisy+0.5, noisy-0.5,
-                                        {"fc":"#00d4aa","_dual":True,"fc2":"#ff6b6b"})
+                                        {"fc":"#00d4aa","_dual":True,"fc2":"#ff6b6b"}, mr=1)
         assert len(traces) >= 3  # K + close + filter1 + filter2
     def test_all_nan_filter_omitted(self):
         n=20; t=np.arange(n,dtype=float); noisy=np.linspace(100,110,n)
         traces = _add_main_price_traces(t, noisy, _ohlc(n), np.full(n,np.nan), None,
-                                        {"fc":"#00d4aa","_dual":False,"fc2":"#ff6b6b"})
+                                        {"fc":"#00d4aa","_dual":False,"fc2":"#ff6b6b"}, mr=1)
         names = [d.get("name","") for d in traces]
         assert "滤波" not in names and "K" in names
     def test_dual_but_filtered2_none_safe(self):
         n=20; t=np.arange(n,dtype=float); noisy=np.linspace(100,110,n)
         traces = _add_main_price_traces(t, noisy, _ohlc(n), noisy+0.5, None,
-                                        {"fc":"#00d4aa","_dual":True,"fc2":"#ff6b6b"})
+                                        {"fc":"#00d4aa","_dual":True,"fc2":"#ff6b6b"}, mr=1)
         assert len(traces) >= 2  # no crash, just no filter2
 
 
