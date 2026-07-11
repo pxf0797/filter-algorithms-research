@@ -171,11 +171,11 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
     return np.arange(n, dtype=float), close, result_ohlc, full, None, dates
 
 
-def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int = 120,
+def _sync_to_display(ticker_code: str, tf: str, n_pts: int = 120,
                      cutoff_date: Optional[str] = None) -> Tuple[bool, int]:
     """同步数据到 display parquet 文件。
 
-    浏览模式（cutoff_date=None）：取最新 n_pts 条，支持 day_offset 日期偏移。
+    浏览模式（cutoff_date=None）：取最新 n_pts 条。
     回测模式（cutoff_date=YYYY-MM-DD）：取截止到 cutoff_date 的最后 n_pts 条，日期对齐。
 
     Parameters
@@ -184,7 +184,6 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int 
         股票代码。
     tf : str
         周期名称。
-    day_offset : int, default 0
         日期偏移天数，用于浏览模式。
     n_pts : int, default 120
         需要的数据点数。
@@ -216,7 +215,7 @@ def _sync_to_display(ticker_code: str, tf: str, day_offset: int = 0, n_pts: int 
         return False, 0
 
     # 浏览模式：原有逻辑（n_pts 窗口）
-    df = query_kline(ticker_code, tf, n_pts, day_offset=day_offset)
+    df = query_kline(ticker_code, tf, n_pts, day_offset=0)
     if len(df) < 5:
         return False, len(df)
     df["Date"] = pd.to_datetime(df["Date"])

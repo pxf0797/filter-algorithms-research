@@ -94,31 +94,6 @@ class TestBacktestModeSwitch:
         assert DEFAULTS.get("_bt_cutoff_date") == ""
 
 
-# ── TestRenderTimeNav ────────────────────────────────────────────────────────
-
-class TestRenderTimeNav:
-    """回测模式下 _render_time_nav 返回 0 且不渲染导航组件."""
-
-    def test_time_nav_returns_zero_in_backtest_mode(self):
-        """_cb_mode=True 时 _render_time_nav 返回 0."""
-        AppState.set("_cb_mode", True)
-        # 模拟 _render_time_nav 内的逻辑
-        if AppState.get("_cb_mode", False):
-            day_offset = 0
-        else:
-            day_offset = 99
-        assert day_offset == 0
-
-    def test_time_nav_not_zero_in_browse_mode(self):
-        """_cb_mode=False 时不走早期返回分支."""
-        AppState.set("_cb_mode", False)
-        if AppState.get("_cb_mode", False):
-            day_offset = 0
-        else:
-            day_offset = None  # 代表走了正常导航流程
-        assert day_offset != 0
-
-
 # ── TestSyncToDisplay ────────────────────────────────────────────────────────
 
 class TestSyncToDisplay:
@@ -176,7 +151,7 @@ class TestSyncToDisplay:
         import pandas as pd
 
         with patch("services.data_loader.query_kline", return_value=pd.DataFrame()) as mock_query:
-            ok, count = _sync_to_display("AAPL", "1d", day_offset=0, n_pts=120, cutoff_date=None)
+            ok, count = _sync_to_display("AAPL", "1d", n_pts=120, cutoff_date=None)
 
             assert ok is False
             assert count == 0

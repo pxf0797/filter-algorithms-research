@@ -37,7 +37,7 @@ from db import (init_db, get_date_range, has_data,
 from services.filter_engine import (
     FILTERS,
     _schmitt_trigger, _find_all_pairs,
-    _fit_parabolic, _fit_physics_parabola,
+    _fit_physics_parabola,
     _compute_strategy_pnl, _align_pnl_to_current_tf, _compute_holding_masks,
 )
 from services.data_loader import (
@@ -167,7 +167,7 @@ def _date_markers(dates, tf) -> tuple[list, list]:
     return positions, labels
 
 
-def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=None, cutoff_date=None) -> tuple:
+def _load_chart_data(market, ticker_code, tf, n_pts, window_start=None, cutoff_date=None) -> tuple:
     """Load chart data from display cache or fetch from API. Returns (t, noisy, ohlc, ticker_full, dates, err).
 
     浏览: window_start=None, cutoff_date=None
@@ -181,7 +181,7 @@ def _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=No
         _is_backtest = True
     else:
         # 浏览模式：取最新 n_pts 条
-        ok, count = _sync_to_display(ticker_code, tf, day_offset=day_offset, n_pts=n_pts)
+        ok, count = _sync_to_display(ticker_code, tf, n_pts=n_pts)
         if not ok:
             # parquet 写入失败，直接走 API 回退
             return _cached_fetch_stock(market, ticker_code, tf, n_pts)
@@ -274,7 +274,7 @@ def _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs) -> list:
         return []
     pred_pairs = []
     logger.debug(f"Computing prediction curves: {len(all_pairs)} pairs, mode={cfg.get('fit_mode')}")
-    fit_func = _fit_physics_parabola if cfg.get("fit_mode") == "parabola" else _fit_parabolic
+    fit_func = _fit_physics_parabola
     for pair_start, pair_end in all_pairs:
         if pair_end - pair_start >= 3:
             fit_result = fit_func(t, filtered, pair_start, pair_end)
@@ -616,7 +616,7 @@ def _load_backtest_config(ticker_code):
 # =====================================================================
 
 @st.fragment
-def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, window_start=None, cutoff_date=None) -> None:
+def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, higher_pnl=None, window_start=None, cutoff_date=None) -> None:
     """Fragment wrapper around ``_render_chart`` for per-view independent re-rendering.
 
     The ``@st.fragment`` decorator enables each of the four chart views
@@ -634,7 +634,6 @@ def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offs
         Unique view key (e.g. ``"v0"``, ``"v1"``).
     compact : bool, default True
         If True, use a smaller chart height.
-    day_offset : int, default 0
         Number of days to shift the window into the past.
     higher_pnl : dict or None
         Higher-timeframe PnL data from ``_align_pnl_to_current_tf``.
@@ -647,10 +646,10 @@ def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, day_offs
     -------
     None
     """
-    _render_chart(market, ticker_code, cfg, key, compact=compact, day_offset=day_offset, higher_pnl=higher_pnl, window_start=window_start, cutoff_date=cutoff_date)
+    _render_chart(market, ticker_code, cfg, key, compact=compact, higher_pnl=higher_pnl, window_start=window_start, cutoff_date=cutoff_date)
 
 
-def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, higher_pnl=None, window_start=None, cutoff_date=None) -> None:
+def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, window_start=None, cutoff_date=None) -> None:
     """Fetch data and render the multi-subplot chart figure.
 
     This is the core chart builder.  It:
@@ -674,8 +673,6 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
         Unique view key.
     compact : bool, default True
         If True, reduce chart height.
-    day_offset : int, default 0
-        Shift the time window backward by *day_offset* days.
     higher_pnl : dict or None
         Higher-timeframe PnL data from ``_align_pnl_to_current_tf``.
         When non-None a cross-period PnL subplot is added.
@@ -700,7 +697,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
 
     # ── Step 1: Load chart data ──
     _t0 = time.perf_counter()
-    t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, day_offset, n_pts, window_start=window_start, cutoff_date=cutoff_date)
+    t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, n_pts, window_start=window_start, cutoff_date=cutoff_date)
     _t_load = time.perf_counter() - _t0
     if err is not None:
         if "数据点不足" in str(err):
@@ -1289,51 +1286,6 @@ def _render_param_panels(filter_id, dual, filter_id2) -> list:
     return configs
 
 
-def _render_time_nav(configs, ticker_code) -> int:
-    """Render time window navigation. Returns day_offset."""
-    if AppState.get("_cb_mode", False):
-        return 0  # 回测模式下不显示时间窗口导航
-    st.sidebar.markdown("---")
-    st.sidebar.caption("⏪ 时间窗口（按天移动）")
-    if not AppState.has("_day_offset"):
-        AppState.set("_day_offset", 0)
-    step_days = st.sidebar.selectbox("移动步长", [1, 3, 5, 10, 20, 30, 60, 90, 180, 365],
-                                      index=4, key="day_step",
-                                      format_func=lambda x: f"{x}天")
-    data_start = data_end = None
-    date_range = get_date_range(ticker_code)
-    if date_range:
-        data_start = pd.Timestamp(date_range[0][:10]).date()
-        data_end = pd.Timestamp(date_range[1][:10]).date()
-    cur_offset = AppState.get("_day_offset", 0)
-    n_pts = configs[0]["n_pts"] if configs else 120
-    if data_end:
-        win_end = data_end - pd.Timedelta(days=cur_offset)
-        win_start = win_end - pd.Timedelta(days=n_pts * 2)
-        has_older = data_start and win_start > data_start
-        has_newer = cur_offset > 0
-    else:
-        has_older = True
-        has_newer = cur_offset > 0
-    c_prev, c_next, c_home = st.sidebar.columns([1, 1, 0.8])
-    with c_prev:
-        disabled = not has_older
-        if st.button("◀ 前移", key="day_prev", use_container_width=True, disabled=disabled,
-                     help="无更早数据" if disabled else f"前移{step_days}天"):
-            AppState.set("_day_offset", AppState.get("_day_offset", 0) + step_days)
-    with c_next:
-        disabled = not has_newer
-        if st.button("后移 ▶", key="day_next", use_container_width=True, disabled=disabled,
-                     help="已是最新" if disabled else f"后移{step_days}天"):
-            AppState.set("_day_offset", max(0, AppState.get("_day_offset", 0) - step_days))
-    with c_home:
-        if st.button("最新", key="day_home", use_container_width=True, disabled=cur_offset == 0,
-                     help="已是最新"):
-            AppState.set("_day_offset", 0)
-    st.sidebar.caption(f"已偏移: {cur_offset} 天")
-    if data_start and data_end:
-        st.sidebar.caption(f"数据范围: {data_start} ~ {data_end}")
-    return AppState.get("_day_offset", 0)
 
 
 def _get_bar_date_from_db(ticker_code, tf, bar_index):
@@ -1912,7 +1864,6 @@ def main() -> None:
         AppState.set("_bt_last_ticker", ticker_code)
 
     # ── Time window navigation ──
-    day_offset = _render_time_nav(configs, ticker_code)
 
     # ── 回测模式切换 ──
     _render_backtest_mode(market, ticker_code, configs)
@@ -1957,7 +1908,7 @@ def main() -> None:
         col_idx = orig_i % 2
         with grid_cols[row_idx][col_idx]:
             _render_chart_fragment(market, ticker_code, cfg, f"v{orig_i}", compact=True,
-                                   day_offset=day_offset, window_start=window_start, cutoff_date=cutoff_date)
+                                   window_start=window_start, cutoff_date=cutoff_date)
 
     # ── Export config ──
     _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code)

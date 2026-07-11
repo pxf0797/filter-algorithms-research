@@ -397,7 +397,7 @@ class TestSyncToDisplay:
             mock_path_cls.return_value = fake_path
 
             from services.data_loader import _sync_to_display
-            ok, count = _sync_to_display("AAPL", "日线", 0, 20)
+            ok, count = _sync_to_display("AAPL", "日线", n_pts=20)
             assert ok is True
             assert count == 20
 
@@ -414,7 +414,7 @@ class TestSyncToDisplay:
         with patch("services.data_loader.query_kline",
                    return_value=mock_df):
             from services.data_loader import _sync_to_display
-            ok, count = _sync_to_display("AAPL", "日线", 0, 3)
+            ok, count = _sync_to_display("AAPL", "日线", n_pts=3)
             assert ok is False
             assert count == 3
 
