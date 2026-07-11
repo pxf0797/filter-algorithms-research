@@ -322,35 +322,35 @@ def _determine_subplot_layout(has_s, has_strategy, has_cross, has_alignment, _hi
             if has_cross:
                 if has_alignment:
                     rows = 8
-                    rh = [0.34, 0.11, 0.12, 0.12, 0.16, 0.24, 0.05, 0.12]
+                    rh = [0.62, 0.11, 0.06, 0.06, 0.08, 0.16, 0.05, 0.12]
                     titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}持仓状态", "同向性判断")
                     pnl_row = 6
                     cross_row = 7
                     align_row = 8
                 else:
                     rows = 7
-                    rh = [0.36, 0.11, 0.12, 0.12, 0.16, 0.27, 0.06]
+                    rh = [0.65, 0.11, 0.06, 0.06, 0.08, 0.18, 0.06]
                     titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}持仓状态")
                     pnl_row = 6
                     cross_row = 7
                     align_row = None
             else:
                 rows = 6
-                rh = [0.24, 0.11, 0.12, 0.12, 0.16, 0.375]
+                rh = [0.565, 0.11, 0.06, 0.06, 0.08, 0.25]
                 titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)")
                 pnl_row = 6
                 cross_row = None
                 align_row = None
         else:
             rows = 5
-            rh = [0.28, 0.14, 0.18, 0.18, 0.22]
+            rh = [0.57, 0.14, 0.09, 0.09, 0.11]
             titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t")
             pnl_row = None
             cross_row = None
             align_row = None
         return rows, rh, titles, 1, 2, 3, 4, 5, None, pnl_row, cross_row, align_row
     else:
-        return 4, [0.40, 0.18, 0.20, 0.22], ("价格&滤波", "残差", "速度v", "加速度a"), \
+        return 4, [0.61, 0.18, 0.10, 0.11], ("价格&滤波", "残差", "速度v", "加速度a"), \
                1, 2, 3, None, None, 4, None, None, None
 
 
