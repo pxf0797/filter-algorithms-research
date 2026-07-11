@@ -1,6 +1,6 @@
 # 测试文档 — filter_research
 
-**实际测试计数**：801 个测试 / 23 个测试文件
+**实际测试计数**：818 个测试 / 24 个测试文件
 
 pytest 输出：`pytest tests/ --collect-only -q` 确认 801 个测试被收集。
 
@@ -24,7 +24,10 @@ tests/
 ├── test_preset_ui.py                # 预设管理集成测试 — 逻辑层（60 测试，16 类）
 ├── test_preset_ui_actions.py        # 预设管理 UI 行为测试（45 测试，8 类）
 ├── test_db.py                       # db.py 完整单元测试（57 测试，14 类）
-└── test_integration.py              # 端到端集成测试（6 个独立函数）
+├── test_integration.py              # 端到端集成测试（6 个独立函数）
+├── test_plan_a_api.py               # 方案A API 回归（15 测试，6 类）
+├── test_plan_a_e2e.py               # 方案A 端到端 Figure 序列化（7 测试，1 类）
+└── test_plan_a_gaps.py              # 审计缺口补充（17 测试，7 类）
 ```
 
 ### 标记（pytest markers）
@@ -318,7 +321,7 @@ open htmlcov/index.html
 
 ### 6.6 文件计数说明
 
-- **12 个测试文件**：`tests/` 目录中所有 `test_*.py` 文件
-- **66 个测试类**：分布在 10 个类式测试文件中（`test_integration.py` 不含类）
+- **24 个测试文件**：`tests/` 目录中所有 `test_*.py` 文件
+- **66+ 个测试类**：分布在 10+ 个类式测试文件中（`test_integration.py` 不含类）
 - **6 个独立函数**：`test_integration.py` 的 6 个顶级函数
-- **830 个测试**：来自 `pytest --collect-only -q` 的精确计数
+- **818 个测试**：来自 `pytest --collect-only -q` 的精确计数
