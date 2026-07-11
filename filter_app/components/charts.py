@@ -18,48 +18,16 @@ from services.filter_engine import _compute_holding_masks
 # ---------------------------------------------------------------------------
 def _render_plotly(fig, height=750, dates=None) -> None:
     """Render Plotly chart with cross-subplot crosshair (no value tooltip)."""
-    fig_dict = {"data": [], "layout": fig.layout.to_plotly_json()}
+    # Use fig.to_json() directly (handles NaN/Inf/np arrays natively),
+    # then inject _dates into layout for JS crosshair tooltip.
+    figure_json = fig.to_json()
     if dates is not None:
-        # Store date strings in layout for JS tooltip
-        if hasattr(dates[0], 'strftime'):
-            fig_dict["layout"]["_dates"] = [d.strftime("%Y-%m-%d %H:%M") for d in dates]
-        else:
-            fig_dict["layout"]["_dates"] = [str(d) for d in dates]
-    for trace in fig.data:
-        tr = trace.to_plotly_json()
-        if isinstance(tr.get("x"), dict) and "bdata" in tr["x"]:
-            tr["x"] = trace.x.tolist()
-        if isinstance(tr.get("y"), dict) and "bdata" in tr["y"]:
-            tr["y"] = trace.y.tolist()
-        fig_dict["data"].append(tr)
-
-    class _NpEncoder(json.JSONEncoder):
-        def default(self, obj):
-            if isinstance(obj, np.ndarray):
-                return obj.tolist()
-            if isinstance(obj, (np.integer,)):
-                return int(obj)
-            if isinstance(obj, (np.floating,)):
-                if np.isnan(obj) or np.isinf(obj):
-                    return None
-                return float(obj)
-            return super().default(obj)
-
-    def _sanitize_for_json(obj):
-        """递归替换 NaN/Inf 为 None (JSON null)。"""
-
-        if isinstance(obj, dict):
-            return {k: _sanitize_for_json(v) for k, v in obj.items()}
-        if isinstance(obj, (list, tuple)):
-            return [_sanitize_for_json(v) for v in obj]
-        if isinstance(obj, float):
-            if np.isnan(obj) or np.isinf(obj):
-                return None
-        if isinstance(obj, np.ndarray):
-            return _sanitize_for_json(obj.tolist())
-        return obj
-
-    figure_json = json.dumps(_sanitize_for_json(fig_dict), cls=_NpEncoder)
+        date_strs = [d.strftime("%Y-%m-%d %H:%M") if hasattr(d, 'strftime') else str(d)
+                     for d in dates]
+        # Post-inject _dates after serialization (custom attrs not in to_json output)
+        import re
+        figure_json = re.sub(r'("layout"\s*:\s*\{)', r'\1"_dates":' +
+                             json.dumps(date_strs) + r',', figure_json, count=1)
     div_id = f"plot-{uuid.uuid4().hex[:8]}"
 
     html = """<!DOCTYPE html>
