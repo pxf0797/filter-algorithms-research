@@ -232,10 +232,10 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
                             help="高周期做多/空持仓时，本周期同向PnL才在子图体现，否则维持不变")
                         fb_key = f"{key}_pnlfb"
                         cfg["show_pnl_feedback"] = st.checkbox(
-                            "显示实际持仓过程", value=st.session_state.get(fb_key,
+                            "显示实际持仓状态", value=st.session_state.get(fb_key,
                                 st.session_state.get(f"_imp_{fb_key}", False)),
                             key=fb_key, disabled=not cfg["show_strategy"],
-                            help="在PnL下方按回撤反馈显示实际多空持仓/清仓过程(二值)")
+                            help="在PnL下方显示实际多空持仓状态(绿=做多持仓/红=做空持仓/空白=不持)")
                     if cfg["show_strategy"]:
                         with c_strat[1]:
                             cfg["stop_loss_pct"] = st.slider(
@@ -244,19 +244,6 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
                                     st.session_state.get(f"_imp_{sl_key}", 2.0)), 0.1,
                                 key=sl_key,
                                 help="预测偏差超过此阈值即止损离场")
-                            if cfg.get("show_pnl_feedback"):
-                                ddc_key = f"{key}_pnlddc"
-                                ddr_key = f"{key}_pnlddr"
-                                cfg["pnl_dd_clear"] = st.slider(
-                                    "清仓回撤(%)", 1.0, 30.0,
-                                    st.session_state.get(ddc_key,
-                                        st.session_state.get(f"_imp_{ddc_key}", 8.0)), 0.5,
-                                    key=ddc_key, help="理论回撤越过此值→清仓")
-                                cfg["pnl_dd_recover"] = st.slider(
-                                    "恢复回撤(%)", 0.5, 15.0,
-                                    st.session_state.get(ddr_key,
-                                        st.session_state.get(f"_imp_{ddr_key}", 3.0)), 0.5,
-                                    key=ddr_key, help="回撤回落到此值内→恢复(需<清仓回撤)")
                     else:
                         cfg["stop_loss_pct"] = st.session_state.get(sl_key,
                             st.session_state.get(f"_imp_{sl_key}", 2.0))
@@ -332,10 +319,6 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
         st.session_state.get(f"_imp_{key}_align", cfg.get("show_alignment", False)))
     cfg["show_pnl_feedback"] = st.session_state.get(f"{key}_pnlfb",
         st.session_state.get(f"_imp_{key}_pnlfb", cfg.get("show_pnl_feedback", False)))
-    cfg["pnl_dd_clear"] = st.session_state.get(f"{key}_pnlddc",
-        st.session_state.get(f"_imp_{key}_pnlddc", cfg.get("pnl_dd_clear", 8.0)))
-    cfg["pnl_dd_recover"] = st.session_state.get(f"{key}_pnlddr",
-        st.session_state.get(f"_imp_{key}_pnlddr", cfg.get("pnl_dd_recover", 3.0)))
     cfg["fc"] = st.session_state.get(f"{key}_fc",
         st.session_state.get(f"_imp_{key}_fc", cfg.get("fc", "#00d4aa")))
     if dual and filter_id2:

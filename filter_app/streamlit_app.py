@@ -33,7 +33,6 @@ from services.filter_engine import (
     _schmitt_trigger, _find_all_pairs,
     _fit_parabolic, _fit_physics_parabola,
     _compute_strategy_pnl, _align_pnl_to_current_tf, _compute_holding_masks,
-    _compute_pnl_feedback_positions,
 )
 from services.data_loader import (
     _fetch_all_timeframes, _fetch_stock, _sync_to_display,
@@ -362,11 +361,11 @@ def _insert_feedback_row(rows, rh, titles, pnl_row, cross_row, align_row):
     """
     feedback_row = pnl_row + 1
     rh = list(rh)
-    fb_h = rh[pnl_row - 1] * 0.42
+    fb_h = rh[pnl_row - 1] * 0.28
     rh[pnl_row - 1] = rh[pnl_row - 1] - fb_h
     rh.insert(pnl_row, fb_h)                       # 插到 PnL 行之后
     titles = list(titles)
-    titles.insert(pnl_row, "实际持仓过程(%)")       # 0-index=pnl_row 即 PnL 之后
+    titles.insert(pnl_row, "实际持仓状态")          # 0-index=pnl_row 即 PnL 之后
     cross_row = cross_row + 1 if cross_row is not None else None
     align_row = align_row + 1 if align_row is not None else None
     return rows + 1, rh, tuple(titles), feedback_row, cross_row, align_row
@@ -500,47 +499,33 @@ def _contiguous_runs(mask):
     return runs
 
 
-def _add_feedback_subplot(fig, t, fb, long_pnl, short_pnl, row) -> None:
-    """实际持仓过程子图：理论(虚线) vs 实际(实线) + 底部持仓状态带 + 清仓/恢复标记。
+def _add_feedback_subplot(fig, t, trade_records, row) -> None:
+    """实际持仓状态子图：两条轨(做多绿/做空红)，持仓=色块、不持=空白。
 
-    绿=做多、红=做空。实际线在清仓期水平冻结；底部状态带 绿/红=持仓、空白=清仓。
+    只显示持有/不持状态，不显示百分比。持仓 = Layer0 实际成交区间(entry→exit)。
     """
-    # 理论(影子, 虚线) 与 实际(实线)
-    fig.add_trace(go.Scatter(x=t, y=long_pnl, mode="lines", name="理论多",
-        line=dict(color="#3fb950", width=1.0, dash="dot"), opacity=0.4,
-        showlegend=False, hoverinfo="skip"), row=row, col=1)
-    fig.add_trace(go.Scatter(x=t, y=short_pnl, mode="lines", name="理论空",
-        line=dict(color="#f85149", width=1.0, dash="dot"), opacity=0.4,
-        showlegend=False, hoverinfo="skip"), row=row, col=1)
-    fig.add_trace(go.Scatter(x=t, y=fb["actual_long"], mode="lines", name="实际多",
-        line=dict(color="#3fb950", width=2.0)), row=row, col=1)
-    fig.add_trace(go.Scatter(x=t, y=fb["actual_short"], mode="lines", name="实际空",
-        line=dict(color="#f85149", width=2.0)), row=row, col=1)
+    n = len(t)
+    hw = (t[1] - t[0]) / 2.0 if n > 1 else 0.5
 
-    # 底部持仓状态带（domain 坐标）：绿=做多持仓, 红=做空持仓, 空白=清仓
-    for a, b in _contiguous_runs(fb["long_active"]):
-        fig.add_shape(type="rect", xref="x", yref="y domain",
-            x0=t[a], x1=t[b], y0=0.00, y1=0.06,
-            fillcolor="rgba(63,185,80,0.55)", line_width=0, row=row, col=1)
-    for a, b in _contiguous_runs(fb["short_active"]):
-        fig.add_shape(type="rect", xref="x", yref="y domain",
-            x0=t[a], x1=t[b], y0=0.07, y1=0.13,
-            fillcolor="rgba(248,81,73,0.55)", line_width=0, row=row, col=1)
+    def _hold_mask(direction):
+        m = np.zeros(n, dtype=bool)
+        for tr in trade_records:
+            if tr["type"] != direction:
+                continue
+            a = tr["entry_idx"]
+            if a < n:
+                m[a:min(tr["exit_idx"], n - 1) + 1] = True
+        return m
 
-    # 清仓(▼红) / 恢复(▲蓝) 标记
-    def _marks(idxs, curve, symbol, color):
-        if not idxs:
-            return
-        fig.add_trace(go.Scatter(x=[t[i] for i in idxs], y=[curve[i] for i in idxs],
-            mode="markers", marker=dict(symbol=symbol, size=8, color=color),
-            showlegend=False, hoverinfo="skip"), row=row, col=1)
-    _marks(fb["long_clears"], fb["actual_long"], "triangle-down", "#b71c1c")
-    _marks(fb["long_recovers"], fb["actual_long"], "triangle-up", "#1565c0")
-    _marks(fb["short_clears"], fb["actual_short"], "triangle-down", "#b71c1c")
-    _marks(fb["short_recovers"], fb["actual_short"], "triangle-up", "#1565c0")
+    for a, b in _contiguous_runs(_hold_mask("long")):
+        fig.add_shape(type="rect", x0=t[a] - hw, x1=t[b] + hw, y0=0.55, y1=0.95,
+            fillcolor="#3fb950", line_width=0, row=row, col=1)
+    for a, b in _contiguous_runs(_hold_mask("short")):
+        fig.add_shape(type="rect", x0=t[a] - hw, x1=t[b] + hw, y0=0.05, y1=0.45,
+            fillcolor="#f85149", line_width=0, row=row, col=1)
 
-    fig.add_hline(y=100, line_dash="dash", line_color="gray", opacity=0.5, row=row, col=1)
-    fig.update_yaxes(title_text="实际持仓(%)", row=row, col=1, ticksuffix="%")
+    fig.update_yaxes(range=[0, 1], tickvals=[0.25, 0.75], ticktext=["做空", "做多"],
+                     showgrid=False, row=row, col=1)
 
 
 def _get_min_tf_and_count(configs, ticker_code) -> tuple:
@@ -759,12 +744,6 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
 
     show_pnl_feedback = cfg.get("show_pnl_feedback", False)
     has_feedback = has_strategy and show_pnl_feedback
-    feedback_out = None
-    if has_feedback:
-        feedback_out = _compute_pnl_feedback_positions(
-            long_pnl, short_pnl,
-            dd_clear=cfg.get("pnl_dd_clear", 8.0) / 100.0,
-            dd_recover=cfg.get("pnl_dd_recover", 3.0) / 100.0)
 
     # ── Step 9: Determine subplot layout ──
     has_s = schmitt is not None
@@ -807,8 +786,8 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
     if has_strategy:
         _add_pnl_traces(fig, t, long_pnl, short_pnl, trade_records, pnl_row)
 
-    if has_feedback and feedback_row is not None and feedback_out is not None:
-        _add_feedback_subplot(fig, t, feedback_out, long_pnl, short_pnl, feedback_row)
+    if has_feedback and feedback_row is not None:
+        _add_feedback_subplot(fig, t, trade_records, feedback_row)
 
     if has_cross and higher_pnl is not None and cross_row is not None:
         _add_cross_pnl_subplot(fig, t, higher_pnl, row=cross_row, higher_tf=_higher_tf)

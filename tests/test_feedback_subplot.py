@@ -1,11 +1,12 @@
 """
-Smoke tests for Layer 1 feedback subplot rendering & layout insertion
+Smoke tests for the "实际持仓状态" subplot rendering & layout insertion
 (_insert_feedback_row, _add_feedback_subplot, _contiguous_runs).
+
+持仓状态直接来自实际成交区间(entry→exit)，无 PnL 反馈门控。
 """
 
 import numpy as np
 from plotly.subplots import make_subplots
-from services.filter_engine import _compute_pnl_feedback_positions
 from streamlit_app import (
     _insert_feedback_row, _add_feedback_subplot, _contiguous_runs,
 )
@@ -28,21 +29,26 @@ def test_insert_feedback_row_shifts_rows():
     assert cr2 == 8                          # cross 顺延
     assert ar2 is None
     assert len(rh2) == 8 and len(t2) == 8
-    assert t2[6] == "实际持仓过程(%)"          # 插在 PnL(索引5) 之后
+    assert t2[6] == "实际持仓状态"             # 插在 PnL(索引5) 之后
     assert abs(sum(rh2) - sum(rh)) < 1e-9    # 总高不变
 
 
-def test_add_feedback_subplot_no_error():
+def test_add_feedback_subplot_state_only():
     n = 60
     x = np.arange(n)
-    long_pnl = 100 + np.concatenate([
-        np.linspace(0, 18, 30), np.linspace(18, 4, 15), np.linspace(4, 15, 15)])
-    short_pnl = 100 + np.linspace(0, 6, n)
-    fb = _compute_pnl_feedback_positions(long_pnl, short_pnl,
-                                         dd_clear=0.08, dd_recover=0.03)
-    assert len(fb["long_clears"]) > 0        # 合成数据确实触发清仓
+    trade_records = [
+        {"type": "long", "entry_idx": 3, "exit_idx": 20},
+        {"type": "short", "entry_idx": 25, "exit_idx": 40},
+        {"type": "long", "entry_idx": 45, "exit_idx": 58},
+    ]
     fig = make_subplots(rows=2, cols=1)
-    before = len(fig.data)
-    _add_feedback_subplot(fig, x, fb, long_pnl, short_pnl, row=2)
-    assert len(fig.data) > before            # 加了曲线/标记 trace
-    assert len(fig.layout.shapes) >= 1       # 底部状态带 shape
+    _add_feedback_subplot(fig, x, trade_records, row=2)
+    # 至少多空各一个持仓色块（rect shape）
+    assert len(fig.layout.shapes) >= 2
+
+
+def test_add_feedback_subplot_empty_trades():
+    x = np.arange(10)
+    fig = make_subplots(rows=2, cols=1)
+    _add_feedback_subplot(fig, x, [], row=2)   # 无成交不报错，无色块
+    assert len(fig.layout.shapes) == 0
