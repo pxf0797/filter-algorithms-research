@@ -7,6 +7,7 @@
 import hashlib
 import json
 import os
+import sqlite3
 import tempfile
 import time
 from pathlib import Path
@@ -822,7 +823,6 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, day_offset=0, hig
 @st.cache_resource
 def _cached_conn():
     """Cached SQLite connection (reused across reruns, avoids new conn+PRAGMA each query)."""
-    import sqlite3
     conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
