@@ -133,41 +133,44 @@ class TestComputeOwnMarkers:
         assert result["exit_markers"][0] == (4, "B", "red", "pair_end", dates[4])
 
     def test_stop_loss_exit(self):
-        """A stop-loss trade record produces an extra exit marker."""
+        """Long trade with stop_loss exit — markers from trade_records."""
         dates = _make_dates("2024-01-01", periods=10)
         t = np.arange(10)
         schmitt = _make_schmitt([0, 0, 0, 1, 1, 1, 1, 0, 0, 0])
-        all_pairs = [(3, 6)]             # long pair entry at 3, exit at 6
+        all_pairs = [(3, 6)]
         trade_records = [
-            {"exit_reason": "stop_loss", "exit_idx": 5, "type": "long"},
+            {"type": "long", "entry_idx": 2, "exit_idx": 7,
+             "return_pct": 3.5, "exit_reason": "stop_loss"},
         ]
 
         result = _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
 
-        assert len(result["exit_markers"]) == 2, (
-            "Should have 2 exits: one pair_end + one stop_loss"
-        )
-        stop_loss_exits = [e for e in result["exit_markers"] if e[3] == "stop_loss"]
-        assert len(stop_loss_exits) == 1
-        assert stop_loss_exits[0] == (
-            5, "S", "green", "stop_loss", dates[5],
+        # trade_records non-empty → markers come from trades, not all_pairs
+        assert len(result["entry_markers"]) == 1
+        assert result["entry_markers"][0] == (2, "B", "green", dates[2])
+        assert len(result["exit_markers"]) == 1
+        assert result["exit_markers"][0] == (
+            7, "S", "green", "stop_loss", dates[7],
         ), "Long stop_loss → green S at exit_idx"
 
     def test_short_stop_loss_exit(self):
-        """Short stop-loss produces a red B exit marker."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 0, 0, -1, -1, 0, 0, 0, 0, 0])
+        """Short trade with stop_loss exit — markers from trade_records."""
+        dates = _make_dates("2024-01-01", periods=20)
+        t = np.arange(20)
+        schmitt = _make_schmitt([0] * 20)
         all_pairs = [(3, 6)]
         trade_records = [
-            {"exit_reason": "stop_loss", "exit_idx": 5, "type": "short"},
+            {"type": "short", "entry_idx": 12, "exit_idx": 18,
+             "return_pct": 2.1, "exit_reason": "stop_loss"},
         ]
 
         result = _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
 
-        stop_loss_exits = [e for e in result["exit_markers"] if e[3] == "stop_loss"]
-        assert len(stop_loss_exits) == 1
-        assert stop_loss_exits[0][:4] == (5, "B", "red", "stop_loss")
+        # trade_records non-empty → markers come from trades, not all_pairs
+        assert len(result["entry_markers"]) == 1
+        assert result["entry_markers"][0] == (12, "S", "red", dates[12])
+        assert len(result["exit_markers"]) == 1
+        assert result["exit_markers"][0][:4] == (18, "B", "red", "stop_loss")
 
     def test_multiple_pairs(self):
         """Multiple schmitt pairs produce correct entry/exit markers."""
@@ -207,6 +210,48 @@ class TestComputeOwnMarkers:
 
         assert result["entry_markers"] == []
         assert result["exit_markers"] == []
+
+    def test_trade_records_take_priority_over_pairs(self):
+        """trade_records 非空时，标记来自交易记录而非 all_pairs."""
+        dates = pd.date_range('2026-01-05', periods=20, freq='B')
+        schmitt = {'sig': np.array([0,0,1,1,1,1,1,1,1,1,1,0,-1,-1,-1,-1,-1,-1,-1,-1])}
+        all_pairs = [(2, 9), (12, 19)]  # 2 pairs
+        trade_records = [
+            {"type": "long", "entry_idx": 3, "exit_idx": 7, "return_pct": 2.0, "exit_reason": "take_profit"},
+        ]  # only 1 trade
+
+        result = _compute_own_markers(np.arange(20, dtype=float), dates, schmitt, all_pairs, trade_records)
+        # Should have exactly 1 entry + 1 exit (from trade_records), not 2+2 (from all_pairs)
+        assert len(result["entry_markers"]) == 1
+        assert len(result["exit_markers"]) == 1
+        assert result["entry_markers"][0][1] == "B"  # long entry
+        assert result["entry_markers"][0][2] == "green"
+        assert result["exit_markers"][0][3] == "take_profit"
+
+    def test_short_trade_sequence_is_S_then_B(self):
+        """做空: 先S(红)入场, 后B(红)出场."""
+        dates = pd.date_range('2026-01-05', periods=20, freq='B')
+        schmitt = {'sig': np.zeros(20)}
+        trade_records = [
+            {"type": "short", "entry_idx": 5, "exit_idx": 15, "return_pct": 3.0, "exit_reason": "pair_end"},
+        ]
+        result = _compute_own_markers(np.arange(20, dtype=float), dates, schmitt, [], trade_records)
+        assert result["entry_markers"][0][1] == "S"
+        assert result["entry_markers"][0][2] == "red"
+        assert result["exit_markers"][0][1] == "B"
+        assert result["exit_markers"][0][2] == "red"
+
+    def test_long_trade_sequence_is_B_then_S(self):
+        """做多: 先B(绿)入场, 后S(绿)出场."""
+        dates = pd.date_range('2026-01-05', periods=20, freq='B')
+        trade_records = [
+            {"type": "long", "entry_idx": 5, "exit_idx": 15, "return_pct": 3.0, "exit_reason": "pair_end"},
+        ]
+        result = _compute_own_markers(np.arange(20, dtype=float), dates, None, [], trade_records)
+        assert result["entry_markers"][0][1] == "B"
+        assert result["entry_markers"][0][2] == "green"
+        assert result["exit_markers"][0][1] == "S"
+        assert result["exit_markers"][0][2] == "green"
 
     def test_pair_end_out_of_bounds_skipped(self):
         """pair_end >= len(sig) should be skipped."""

@@ -62,52 +62,47 @@ def _find_date_index(dates, target_date):
 
 
 def _compute_own_markers(t, dates, schmitt, all_pairs, trade_records):
-    """从本级 Schmitt 对和交易记录直接计算 BS 标记（操作周期）。
-
-    Returns
-    -------
-    dict
-        {"entry_markers": [...], "exit_markers": [...]}
-        每条标记: (bar_idx, label, color, date)
-        出场标记额外包含 exit_type: (bar_idx, label, color, exit_type, date)
-    """
+    """从策略交易记录生成 BS 标记（优先），回退到 Schmitt 原始对。"""
     entry = []
     exit_ = []
-
-    if schmitt is None or not all_pairs:
-        return {"entry_markers": entry, "exit_markers": exit_}
-
-    sig = schmitt["sig"]
     n_dates = len(dates) if dates is not None else 0
 
-    for pair_start, pair_end in all_pairs:
-        if pair_end >= len(sig):
-            continue
-        direction = sig[pair_end]
-
-        d_entry = dates[pair_start] if pair_start < n_dates else None
-        d_exit = dates[pair_end] if pair_end < n_dates else None
-
-        if direction == 1:  # 做多
-            entry.append((int(pair_start), "B", "green", d_entry))
-            exit_.append((int(pair_end), "S", "green", "pair_end", d_exit))
-        elif direction == -1:  # 做空
-            entry.append((int(pair_start), "S", "red", d_entry))
-            exit_.append((int(pair_end), "B", "red", "pair_end", d_exit))
-
-    # 偏离退出 (stop_loss)
-    for trade in trade_records:
-        if trade.get("exit_reason") == "stop_loss":
-            exit_idx = trade["exit_idx"]
+    if trade_records:
+        # 优先：从实际策略交易记录生成标记
+        for trade in trade_records:
             is_long = trade["type"] == "long"
-            if exit_idx < n_dates:
-                exit_.append((
-                    int(exit_idx),
-                    "S" if is_long else "B",
-                    "green" if is_long else "red",
-                    "stop_loss",
-                    dates[exit_idx],
-                ))
+            entry_idx = trade["entry_idx"]
+            exit_idx = trade["exit_idx"]
+            exit_reason = trade.get("exit_reason", "")
+
+            d_entry = dates[entry_idx] if entry_idx < n_dates else None
+            d_exit = dates[exit_idx] if exit_idx < n_dates else None
+
+            if is_long:
+                # 做多: 先B(绿) 后S(绿)
+                entry.append((int(entry_idx), "B", "green", d_entry))
+                exit_.append((int(exit_idx), "S", "green", exit_reason, d_exit))
+            else:
+                # 做空: 先S(红) 后B(红)
+                entry.append((int(entry_idx), "S", "red", d_entry))
+                exit_.append((int(exit_idx), "B", "red", exit_reason, d_exit))
+
+    elif schmitt is not None and all_pairs:
+        # 回退：从 Schmitt 原始对生成标记（策略未启用时）
+        sig = schmitt["sig"]
+        for pair_start, pair_end in all_pairs:
+            if pair_end >= len(sig):
+                continue
+            direction = sig[pair_end]
+            d_entry = dates[pair_start] if pair_start < n_dates else None
+            d_exit = dates[pair_end] if pair_end < n_dates else None
+
+            if direction == 1:
+                entry.append((int(pair_start), "B", "green", d_entry))
+                exit_.append((int(pair_end), "S", "green", "pair_end", d_exit))
+            elif direction == -1:
+                entry.append((int(pair_start), "S", "red", d_entry))
+                exit_.append((int(pair_end), "B", "red", "pair_end", d_exit))
 
     return {"entry_markers": entry, "exit_markers": exit_}
 

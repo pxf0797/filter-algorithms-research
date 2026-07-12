@@ -1869,11 +1869,37 @@ def main() -> None:
     _handle_pending_apply()
     _render_config_import()
 
-    # ── Market & ticker ──
-    market, ticker_code = _render_market_ticker()
+    # ── Market ──
+    market = st.sidebar.radio("市场", ["美股 US", "A股(沪深)", "港股 HK"],
+                               horizontal=True, key="market")
 
-    # ── Operating timeframe (BS markers) — next to stock code ──
-    operating_tf = _render_operating_tf_selector()
+    # ── Stock code + Operating TF on the same row ──
+    c_code, c_op = st.sidebar.columns([1, 1.2])
+    with c_code:
+        ticker_code = st.text_input("股票代码", value="AAPL", key="ticker").strip()
+    with c_op:
+        operating_tf = _render_operating_tf_selector()
+
+    # ── Stock name lookup ──
+    if ticker_code:
+        @st.cache_data(show_spinner=False, ttl=3600)
+        def _stock_name(mkt, code) -> str:
+            if not code or not code.strip():
+                return ""
+            try:
+                if mkt == "A股(沪深)":
+                    full = code + (".SS" if code[0] == "6" else ".SZ")
+                elif mkt == "港股 HK":
+                    full = code.zfill(4) + ".HK"
+                else:
+                    full = code.upper()
+                return yf.Ticker(full).info.get("longName") or ""
+            except Exception as e:
+                logger.debug(f"Stock name lookup failed for {full}: {e}")
+                return ""
+        name = _stock_name(market, ticker_code)
+        if name:
+            st.sidebar.caption(f"📌 {name}")
 
     # ── Initial fetch ──
     _handle_initial_fetch(market, ticker_code)

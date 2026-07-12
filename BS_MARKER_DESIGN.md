@@ -14,6 +14,12 @@
 | 平空出场 | short exit | 🔴 红 | **B** |
 
 > 颜色跟随**持仓方向**：多头相关标记全绿，空头相关标记全红。
+>
+> **标记来源优先级**：BS 标记优先从策略交易记录（`trade_records`）生成。策略未启用（`trade_records` 为空）时，回退到 Schmitt 原始信号对（`all_pairs`）。
+>
+> **交易序列**：
+> - 做多：先 B(绿)入场，后 S(绿)出场
+> - 做空：先 S(红)入场，后 B(红)出场
 
 ## 3. 新增侧边栏参数
 
@@ -28,19 +34,23 @@
 
 ### 4.1 操作周期（本级）
 
-BS 标记直接由本级的 Schmitt 触发器和交易记录驱动：
+BS 标记优先从策略交易记录（`trade_records`）生成；未启用策略时回退到 Schmitt 原始对（`all_pairs`）。
 
-**入场：** Schmitt 信号对（`all_pairs`）的起点
-- sig=1 → 绿 **B**
-- sig=-1 → 红 **S**
+**来源一：策略交易记录（优先）**
 
-**出场（两类）：**
-- **多空对结束**（pair 自然结束）：pair_end 位置
+当 `trade_records` 非空时，标记完全由交易记录生成：
+- 做多序列：先 B(绿)入场（`entry_idx`），后 S(绿)出场（`exit_idx`，附 `exit_reason`）
+- 做空序列：先 S(红)入场（`entry_idx`），后 B(红)出场（`exit_idx`，附 `exit_reason`）
+
+**来源二：Schmitt 原始对（回退）**
+
+当 `trade_records` 为空时：
+- **入场：** Schmitt 信号对（`all_pairs`）的起点
+  - sig=1 → 绿 **B**
+  - sig=-1 → 红 **S**
+- **出场：** pair 自然结束位置
   - long pair 结束 → 绿 **S**
   - short pair 结束 → 红 **B**
-- **偏离退出**（stop_loss）：trade_records 中 `exit_reason="stop_loss"` 的位置
-  - long stop_loss → 绿 **S**
-  - short stop_loss → 红 **B**
 
 > 注：`exit_reason="take_profit"` 和 `"eod"` 也标记，但用不同符号（○）。
 
@@ -144,12 +154,12 @@ K 线图上显示 B/S 标记
 
 ## 11. 测试覆盖
 
-测试文件: `filter_app/tests/test_bs_marker.py`（39 个测试用例）
+测试文件: `filter_app/tests/test_bs_marker.py`（42 个测试用例）
 
 | 测试类 | 覆盖内容 | 用例数 |
 |--------|----------|--------|
 | `TestFindDateIndex` | 日期查找：早于/晚于/范围内/精确匹配/None/空 | 7 |
-| `TestComputeOwnMarkers` | 操作周期直接标记：做多/做空/止损/多对/边界 | 8 |
+| `TestComputeOwnMarkers` | 操作周期直接标记：做多/做空/止损/多对/边界/交易记录优先/序列方向 | 11 |
 | `TestCascadeMarkers` | 级联标记：入场同向/反向跳过/出场/止损立即/早日期/晚日期/None | 10 |
 | `TestComputeBsMarkers` | 顶层调度：同周期/低周期级联/高周期跳过/无 higher_bs | 5 |
 | `TestGetLowerTfs` | 周期链查询：日线/15分钟/最低/顶级/未知 | 5 |
