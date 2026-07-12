@@ -72,6 +72,27 @@ class TestFindDateIndex:
         result = _find_date_index(dates, None)
         assert result is None, "Expected None when target_date is None"
 
+    def test_tz_naive_vs_aware_comparison(self):
+        """Fix regression: tz-naive target vs tz-aware dates should work."""
+        # Simulate 日线 (tz-naive) vs 60分钟 (tz-aware from HK exchange)
+        dates_tz_aware = pd.date_range('2026-05-29 09:30', periods=50, freq='1h', tz='Asia/Hong_Kong')
+        target_tz_naive = pd.Timestamp('2026-05-30')  # daily date within range, no tz
+
+        result = _find_date_index(dates_tz_aware, target_tz_naive)
+        # Should find the correct bar, NOT return None (which was the bug)
+        assert result is not None, (
+            f"tz-naive vs tz-aware comparison should work after fix, got None"
+        )
+        assert result >= 0, f"Expected valid index, got {result}"
+
+    def test_tz_aware_target_vs_naive_dates(self):
+        """Tz-aware target date vs tz-naive dates should work."""
+        dates_naive = pd.date_range('2026-06-01', periods=30, freq='D')
+        target_aware = pd.Timestamp('2026-06-15 14:30:00+08:00')
+
+        result = _find_date_index(dates_naive, target_aware)
+        assert result is not None, f"Expected valid index, got None"
+
 
 # ── _compute_own_markers ─────────────────────────────────────────────
 

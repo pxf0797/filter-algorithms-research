@@ -39,14 +39,22 @@ def _find_date_index(dates, target_date):
         return None
     try:
         target_ts = pd.Timestamp(target_date)
-        first_date = pd.Timestamp(dates[0])
-        last_date = pd.Timestamp(dates[-1])
+        # Normalize timezone: strip tz to avoid TypeError when comparing
+        # tz-naive (日线/周线/月线) with tz-aware (分钟线 from HK exchange)
+        if target_ts.tz is not None:
+            target_ts = target_ts.tz_localize(None)
+        # Convert to DatetimeIndex and normalize tz
+        dates_idx = pd.DatetimeIndex(dates)
+        if dates_idx.tz is not None:
+            dates_idx = dates_idx.tz_localize(None)
+        first_date = dates_idx[0]
+        last_date = dates_idx[-1]
         if target_ts < first_date:
             return 0
         if target_ts > last_date:
             return None
-        for i, d in enumerate(dates):
-            if pd.Timestamp(d) >= target_ts:
+        for i, d in enumerate(dates_idx):
+            if d >= target_ts:
                 return i
         return None
     except Exception:
