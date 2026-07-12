@@ -372,3 +372,68 @@ def _add_alignment_subplot(t, long_pnl, short_pnl, trade_records,
     shapes = [_render_baseline(row, opacity=0.5)]
     yaxes = {f"yaxis{row}": {"title_text": "同向(%)", "ticksuffix": "%"}}
     return traces, shapes, annotations, yaxes
+
+
+# ---------------------------------------------------------------------------
+# BS 仓位操作标识 — K 线主图上的买卖标记
+# ---------------------------------------------------------------------------
+
+def _make_bs_annotation(x, y, text, color):
+    """构建单个 B/S 标记的 Plotly annotation dict。
+
+    Parameters
+    ----------
+    x : float — bar 索引
+    y : float — 价格位置
+    text : str — "B" 或 "S"
+    color : str — "green" 或 "red"
+    """
+    bg = "#2ea043" if color == "green" else "#f85149"
+    return dict(
+        x=x, y=y, text=f"<b>{text}</b>", showarrow=False,
+        font=dict(color="#ffffff", size=9, family="Arial"),
+        bgcolor=bg, borderpad=2,
+        xref="x", yref="y",
+    )
+
+
+def _add_bs_markers(t, ohlc, bs_markers):
+    """为 K 线主图生成 B/S 标记的 Plotly annotation 列表。
+
+    入场标记放在 K 线 low 下方，出场标记放在 high 上方。
+
+    Parameters
+    ----------
+    t : np.ndarray — bar 索引
+    ohlc : pd.DataFrame — 含 Open/High/Low/Close 列
+    bs_markers : dict or None — compute_bs_markers 的返回值
+
+    Returns
+    -------
+    list[dict] — Plotly annotation dicts
+    """
+    annotations = []
+    if bs_markers is None:
+        return annotations
+
+    n = len(t)
+    high_vals = ohlc["High"].values.ravel()
+    low_vals = ohlc["Low"].values.ravel()
+
+    # 入场标记 — K 线下方
+    for item in bs_markers.get("entry_markers", []):
+        bar_idx = item[0]
+        label, color = item[1], item[2]
+        if bar_idx < n:
+            y_pos = low_vals[bar_idx] * 0.997
+            annotations.append(_make_bs_annotation(t[bar_idx], y_pos, label, color))
+
+    # 出场标记 — K 线上方
+    for item in bs_markers.get("exit_markers", []):
+        bar_idx = item[0]
+        label, color = item[1], item[2]
+        if bar_idx < n:
+            y_pos = high_vals[bar_idx] * 1.003
+            annotations.append(_make_bs_annotation(t[bar_idx], y_pos, label, color))
+
+    return annotations

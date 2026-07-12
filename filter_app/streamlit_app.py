@@ -47,8 +47,9 @@ from services.data_loader import (
 from components.charts import (
     _render_plotly, _add_prediction_traces,
     _add_cross_pnl_subplot, _add_alignment_subplot,
-    _draw_holding_bands,
+    _draw_holding_bands, _add_bs_markers,
 )
+from services.bs_marker import compute_bs_markers, TF_LOWER, get_lower_tfs
 from components.sidebar import (
     _render_params, ALL_TFS, DEFAULT_TFS, TF_HIERARCHY,
 )
@@ -778,6 +779,22 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
     show_pnl_feedback = cfg.get("show_pnl_feedback", False)
     has_feedback = has_strategy and show_pnl_feedback
 
+    # ── Step 8.5: BS markers (仓位操作标识) ──
+    _op_tf = st.session_state.get("operating_tf", "日线")
+    _lower_tfs = get_lower_tfs(_op_tf)
+    _show_bs = (tf == _op_tf) or (tf in _lower_tfs)
+    bs_markers = None
+    if _show_bs:
+        _higher_tf_key = TF_HIERARCHY.get(tf)
+        _higher_bs = None
+        if tf != _op_tf and _higher_tf_key:
+            _higher_bs = st.session_state.get(f"_bs_{_higher_tf_key}")
+        bs_markers = compute_bs_markers(
+            t, dates, schmitt, all_pairs, trade_records,
+            tf, _op_tf, higher_bs=_higher_bs,
+        )
+        st.session_state[f"_bs_{tf}"] = bs_markers
+
     # ── Step 9: Determine subplot layout ──
     has_s = schmitt is not None
     has_cross = (show_cross_pnl and higher_pnl is not None and
@@ -833,6 +850,8 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
             line=dict(color="#ffa502", width=1.5), xaxis=f"x{ar}", yaxis=f"y{ar}"))
         all_shapes.append(dict(type="line", x0=0, x1=1, xref="paper", y0=0, y1=0,
             yref=f"y{ar}", line=dict(color="gray", dash="dash"), opacity=0.5))
+    if bs_markers is not None:
+        all_annotations += _add_bs_markers(t, ohlc, bs_markers)
 
     # 2. Get subplot layout skeleton from make_subplots (layout only, discard empty traces)
     _skeleton = make_subplots(rows=rows, cols=1, shared_xaxes=True,
@@ -1283,6 +1302,19 @@ def _render_filter_selectors() -> tuple:
         filter_id2 = st.sidebar.selectbox("滤波器 2", list(FILTERS.keys()),
             format_func=lambda x: FILTERS.get(x, {}).get("name", x), key="global_f2")
     return filter_id, dual, filter_id2
+
+
+def _render_operating_tf_selector() -> str:
+    """Render operating timeframe selector for BS markers."""
+    st.sidebar.markdown("---")
+    operating_tf = st.sidebar.selectbox(
+        "🎯 操作周期",
+        ALL_TFS,
+        index=ALL_TFS.index("日线"),
+        key="operating_tf",
+        help="仅此周期及更低周期显示 BS 买卖标记。选择周期后，该周期作为操作锚点向下级联。",
+    )
+    return operating_tf
 
 
 def _render_param_panels(filter_id, dual, filter_id2) -> list:
@@ -1850,6 +1882,9 @@ def main() -> None:
 
     # ── Filter selectors ──
     filter_id, dual, filter_id2 = _render_filter_selectors()
+
+    # ── Operating timeframe (BS markers) ──
+    operating_tf = _render_operating_tf_selector()
 
     # ── Pass 1: 2x2 parameter panels ──
     configs = _render_param_panels(filter_id, dual, filter_id2)

@@ -1,0 +1,217 @@
+"""
+BS 仓位操作标识计算模块
+
+为指定周期计算 K 线图上的 B（做多入场/平空出场）/ S（做空入场/平多出场）标记。
+支持从操作周期向低一级周期的级联传播。
+
+标记规则（颜色跟随持仓方向）：
+  做多入场 — 绿 B    做空入场 — 红 S
+  平多出场 — 绿 S    平空出场 — 红 B
+"""
+
+import numpy as np
+import pandas as pd
+
+# 周期层级反向映射（高 → 低），用于 BS 标记级联
+TF_LOWER = {
+    "季线": "月线", "月线": "周线", "周线": "日线",
+    "日线": "60分钟", "60分钟": "15分钟", "15分钟": "5分钟",
+    "5分钟": "1分钟", "1分钟": None,
+}
+
+
+def _find_date_index(dates, target_date):
+    """在 dates 数组中查找第一个 >= target_date 的 bar 索引。
+
+    Parameters
+    ----------
+    dates : pd.DatetimeIndex or None
+    target_date : pd.Timestamp or str or None
+
+    Returns
+    -------
+    int or None
+    """
+    if dates is None or len(dates) == 0 or target_date is None:
+        return None
+    try:
+        target_ts = pd.Timestamp(target_date)
+        for i, d in enumerate(dates):
+            if pd.Timestamp(d) >= target_ts:
+                return i
+        return len(dates) - 1
+    except Exception:
+        return None
+
+
+def _compute_own_markers(t, dates, schmitt, all_pairs, trade_records):
+    """从本级 Schmitt 对和交易记录直接计算 BS 标记（操作周期）。
+
+    Returns
+    -------
+    dict
+        {"entry_markers": [...], "exit_markers": [...]}
+        每条标记: (bar_idx, label, color, date)
+        出场标记额外包含 exit_type: (bar_idx, label, color, exit_type, date)
+    """
+    entry = []
+    exit_ = []
+
+    if schmitt is None or not all_pairs:
+        return {"entry_markers": entry, "exit_markers": exit_}
+
+    sig = schmitt["sig"]
+    n_dates = len(dates) if dates is not None else 0
+
+    for pair_start, pair_end in all_pairs:
+        if pair_end >= len(sig):
+            continue
+        direction = sig[pair_end]
+
+        d_entry = dates[pair_start] if pair_start < n_dates else None
+        d_exit = dates[pair_end] if pair_end < n_dates else None
+
+        if direction == 1:  # 做多
+            entry.append((int(pair_start), "B", "green", d_entry))
+            exit_.append((int(pair_end), "S", "green", "pair_end", d_exit))
+        elif direction == -1:  # 做空
+            entry.append((int(pair_start), "S", "red", d_entry))
+            exit_.append((int(pair_end), "B", "red", "pair_end", d_exit))
+
+    # 偏离退出 (stop_loss)
+    for trade in trade_records:
+        if trade.get("exit_reason") == "stop_loss":
+            exit_idx = trade["exit_idx"]
+            is_long = trade["type"] == "long"
+            if exit_idx < n_dates:
+                exit_.append((
+                    int(exit_idx),
+                    "S" if is_long else "B",
+                    "green" if is_long else "red",
+                    "stop_loss",
+                    dates[exit_idx],
+                ))
+
+    return {"entry_markers": entry, "exit_markers": exit_}
+
+
+def _compute_cascade_markers(t, dates, schmitt, all_pairs,
+                              trade_records, higher_bs):
+    """从高一级周期的 BS 标记级联计算本级标记。
+
+    入场：等本级同向 Schmitt 信号出现后标记
+    出场（pair_end）：找本级对应 pair 结束位置标记
+    出场（stop_loss）：立即在对应时间位置标记
+    """
+    entry = []
+    exit_ = []
+
+    if schmitt is None:
+        return {"entry_markers": entry, "exit_markers": exit_}
+
+    sig = schmitt["sig"]
+    n_dates = len(dates) if dates is not None else 0
+    higher_entries = higher_bs.get("entry_markers", [])
+    higher_exits = higher_bs.get("exit_markers", [])
+
+    # ── 级联入场 ──
+    for h_idx, h_label, h_color, h_date in higher_entries:
+        if h_date is None:
+            continue
+        start_bar = _find_date_index(dates, h_date)
+        if start_bar is None:
+            continue
+
+        # h_label="B" → 做多 → expected_dir=1; h_label="S" → 做空 → expected_dir=-1
+        expected_dir = 1 if h_label == "B" else -1
+
+        for pair_start, pair_end in all_pairs:
+            if pair_start >= start_bar and pair_end < len(sig):
+                if sig[pair_end] == expected_dir:
+                    label = "B" if expected_dir == 1 else "S"
+                    color = "green" if expected_dir == 1 else "red"
+                    d = dates[pair_start] if pair_start < n_dates else None
+                    entry.append((int(pair_start), label, color, d))
+                    break
+
+    # ── 级联出场 ──
+    for h_exit in higher_exits:
+        h_idx, h_label, h_color, h_exit_type, h_date = h_exit
+        if h_date is None:
+            continue
+        start_bar = _find_date_index(dates, h_date)
+        if start_bar is None:
+            continue
+
+        if h_exit_type == "stop_loss":
+            # 偏离退出：立即在对应时间位置标记
+            if start_bar < n_dates:
+                exit_.append((int(start_bar), h_label, h_color, "stop_loss", dates[start_bar]))
+        else:
+            # 多空对结束：「S ← 平多」→ 找 long pair 结束；「B ← 平空」→ 找 short pair 结束
+            expected_dir = 1 if h_label == "S" else -1
+
+            for pair_start, pair_end in all_pairs:
+                if pair_start >= start_bar and pair_end < len(sig):
+                    if sig[pair_end] == expected_dir:
+                        d = dates[pair_end] if pair_end < n_dates else None
+                        exit_.append((int(pair_end), h_label, h_color, "pair_end", d))
+                        break
+
+    return {"entry_markers": entry, "exit_markers": exit_}
+
+
+def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
+                        tf, operating_tf, higher_bs=None):
+    """为单个视图计算 BS 标记。
+
+    Parameters
+    ----------
+    t : np.ndarray
+        Bar 索引数组。
+    dates : pd.DatetimeIndex
+        Bar 日期。
+    schmitt : dict or None
+        Schmitt 触发器输出（含 ``sig`` 数组）。
+    all_pairs : list[(int, int)]
+        Schmitt 信号对列表。
+    trade_records : list[dict]
+        策略交易记录。
+    tf : str
+        当前视图的周期。
+    operating_tf : str
+        用户选择的操作周期。仅此周期及更低周期显示 BS 标记。
+    higher_bs : dict or None
+        紧邻高一级周期的 BS 标记（用于级联）。操作周期本身为 None。
+
+    Returns
+    -------
+    dict
+        {"entry_markers": [...], "exit_markers": [...]}
+    """
+    if tf == operating_tf:
+        return _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
+    elif higher_bs is not None:
+        return _compute_cascade_markers(t, dates, schmitt, all_pairs,
+                                         trade_records, higher_bs)
+    else:
+        return {"entry_markers": [], "exit_markers": []}
+
+
+def get_lower_tfs(operating_tf):
+    """获取操作周期以下的所有周期（级联链）。
+
+    Parameters
+    ----------
+    operating_tf : str
+
+    Returns
+    -------
+    list[str]
+    """
+    result = []
+    tf = TF_LOWER.get(operating_tf)
+    while tf is not None:
+        result.append(tf)
+        tf = TF_LOWER.get(tf)
+    return result
