@@ -212,6 +212,66 @@ class TestComputeOwnMarkers:
         assert result["entry_markers"] == []
         assert result["exit_markers"] == []
 
+    def test_trade_records_primary_all_pairs_fallback(self):
+        """trade_records非空→从交易生成; 为空→回退all_pairs."""
+        dates = pd.date_range('2026-01-05', periods=30, freq='B')
+        sig = np.array([0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, -1, -1, -1,
+                        -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+        schmitt = {'sig': sig}
+        all_pairs = [(2, 9), (12, 19)]
+
+        # With trade_records → from trades (1 entry + 1 exit)
+        trade_records = [
+            {"type": "long", "entry_idx": 3, "exit_idx": 8,
+             "return_pct": 2.0, "exit_reason": "take_profit"},
+        ]
+        result = _compute_own_markers(
+            np.arange(30, dtype=float), dates, schmitt, all_pairs,
+            trade_records,
+        )
+        assert len(result["entry_markers"]) == 1
+        assert result["entry_markers"][0][0] == 3   # trade entry_idx, not pair_start=2
+        assert result["exit_markers"][0][0] == 8    # trade exit_idx, not pair_end=9
+        assert result["exit_markers"][0][3] == "take_profit"
+
+        # Without trade_records → fallback to all_pairs (2 entries + 2 exits)
+        result2 = _compute_own_markers(
+            np.arange(30, dtype=float), dates, schmitt, all_pairs, [],
+        )
+        assert len(result2["entry_markers"]) == 2
+        assert result2["entry_markers"][0][0] == 2   # pair_start
+
+    def test_trade_records_aligns_with_tongxiang_panduan(self):
+        """BS标记入场点=trade_records的entry_idx(pair_end信号确认点)."""
+        dates = pd.date_range('2026-01-05', periods=30, freq='B')
+        # 模拟: all_pairs pair=(2,9), sig[9]=1(做多)
+        # trade_records entry_idx=9 (pair_end, 信号确认点)
+        trade_records = [
+            {"type": "long", "entry_idx": 9, "exit_idx": 20,
+             "return_pct": 15.0, "exit_reason": "take_profit"},
+        ]
+        result = _compute_own_markers(
+            np.arange(30, dtype=float), dates, None, [(2, 9)],
+            trade_records,
+        )
+        assert result["entry_markers"][0][0] == 9    # 对齐 trade_records entry_idx (pair_end)
+        assert result["entry_markers"][0][1] == "B"  # green B for long
+
+    def test_short_trade_sequence_S_then_B(self):
+        """做空交易: 先S(红)入场, 后B(红)出场."""
+        dates = pd.date_range('2026-01-05', periods=30, freq='B')
+        trade_records = [
+            {"type": "short", "entry_idx": 5, "exit_idx": 15,
+             "return_pct": -3.0, "exit_reason": "stop_loss"},
+        ]
+        result = _compute_own_markers(
+            np.arange(30, dtype=float), dates, None, [], trade_records,
+        )
+        assert result["entry_markers"][0][1] == "S"
+        assert result["entry_markers"][0][2] == "red"
+        assert result["exit_markers"][0][1] == "B"
+        assert result["exit_markers"][0][2] == "red"
+
 
 # ── _compute_cascade_markers ─────────────────────────────────────────
 

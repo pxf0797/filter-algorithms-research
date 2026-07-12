@@ -62,34 +62,51 @@ def _find_date_index(dates, target_date):
 
 
 def _compute_own_markers(t, dates, schmitt, all_pairs, trade_records):
-    """从 Schmitt 同向段 (all_pairs) 直接生成 BS 标记。
+    """从策略交易记录(trade_records)生成 BS 标记，对齐同向性判断。
 
-    每个同向段的 pair_start 标入场，pair_end 标出场。
-    trade_records 参数保留但不使用（接口兼容）。
+    trade_records 非空时从中生成标记（入场=entry_idx, 出场=exit_idx）。
+    trade_records 为空时回退到 all_pairs（Schmitt 原始对）。
     """
     entry = []
     exit_ = []
     n_dates = len(dates) if dates is not None else 0
 
-    if schmitt is None or not all_pairs:
-        return {"entry_markers": entry, "exit_markers": exit_}
+    if trade_records:
+        # 优先：从策略交易记录生成（与同向性判断对齐）
+        for trade in trade_records:
+            is_long = trade["type"] == "long"
+            entry_idx = trade["entry_idx"]
+            exit_idx = trade["exit_idx"]
+            exit_reason = trade.get("exit_reason", "")
 
-    sig = schmitt["sig"]
+            d_entry = dates[entry_idx] if entry_idx < n_dates else None
+            d_exit = dates[exit_idx] if exit_idx < n_dates else None
 
-    for pair_start, pair_end in all_pairs:
-        if pair_end >= len(sig):
-            continue
-        direction = sig[pair_end]
+            if is_long:
+                # 做多: B(绿)入场, S(绿)出场
+                entry.append((int(entry_idx), "B", "green", d_entry))
+                exit_.append((int(exit_idx), "S", "green", exit_reason, d_exit))
+            else:
+                # 做空: S(红)入场, B(红)出场
+                entry.append((int(entry_idx), "S", "red", d_entry))
+                exit_.append((int(exit_idx), "B", "red", exit_reason, d_exit))
 
-        d_entry = dates[pair_start] if pair_start < n_dates else None
-        d_exit = dates[pair_end] if pair_end < n_dates else None
+    elif schmitt is not None and all_pairs:
+        # 回退：策略未启用时从 Schmitt 原始对生成
+        sig = schmitt["sig"]
+        for pair_start, pair_end in all_pairs:
+            if pair_end >= len(sig):
+                continue
+            direction = sig[pair_end]
+            d_entry = dates[pair_start] if pair_start < n_dates else None
+            d_exit = dates[pair_end] if pair_end < n_dates else None
 
-        if direction == 1:  # 做多同向段
-            entry.append((int(pair_start), "B", "green", d_entry))
-            exit_.append((int(pair_end), "S", "green", "pair_end", d_exit))
-        elif direction == -1:  # 做空同向段
-            entry.append((int(pair_start), "S", "red", d_entry))
-            exit_.append((int(pair_end), "B", "red", "pair_end", d_exit))
+            if direction == 1:
+                entry.append((int(pair_start), "B", "green", d_entry))
+                exit_.append((int(pair_end), "S", "green", "pair_end", d_exit))
+            elif direction == -1:
+                entry.append((int(pair_start), "S", "red", d_entry))
+                exit_.append((int(pair_end), "B", "red", "pair_end", d_exit))
 
     return {"entry_markers": entry, "exit_markers": exit_}
 

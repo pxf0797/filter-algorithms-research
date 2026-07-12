@@ -51,13 +51,15 @@ all_pairs = [(2, 9), (12, 19), (25, 30), ...]
 ```
 
 **关键属性**:
-- `pair_start`: 同向段的起始 bar 索引（入场点）
-- `pair_end`: 同向段的结束 bar 索引（正常出场点）
+- `pair_start`: 同向段的起始 bar 索引（信号首次出现的时刻，Schmitt 刚翻转）
+- `pair_end`: 同向段的结束 bar 索引（信号确认的时刻，此时方向已由预测曲线验证）
 - 同向段之间是反向或中性区域
+
+> **时序差异（关键）**: `all_pairs` 的 `pair_start` 是信号**首次出现**的时刻（Schmitt 触发器刚翻转），而 `trade_records` 的入场点是 `pair_end` 时刻——即信号**确认**的时刻（预测曲线已验证方向）。同向性判断子图使用 `trade_records` 的时机，BS 标记也必须对齐到同一时机。详见 [1.5 同向性判断](#15-同向性判断)。
 
 ### 1.3 BS 标记
 
-**BS 标记** 是在同向段的关键位置标注的买卖点，直接显示在 K 线主图上。
+**BS 标记** 是在同向段的关键位置标注的买卖点，直接显示在 K 线主图上。BS 标记的入场/出场时机必须与系统的**同向性判断（alignment）子图**保持一致——即使用 `trade_records`（`pair_end` 确认点）而非原始 `all_pairs`（`pair_start` 首次出现点）。
 
 ```
 同向段生命周期:
@@ -83,7 +85,42 @@ all_pairs = [(2, 9), (12, 19), (25, 30), ...]
 | `trade_records` | 策略交易记录（含止损、盈亏等） | 策略内部使用 |
 | `higher_bs` | 上级周期传递下来的 BS 标记 | 级联用 |
 
-> **重要**: BS 标记的数据来源是 `all_pairs`（Schmitt 原始同向段），**不是** `trade_records`（策略交易记录）。两者可能不一致——策略可能因止损在同向段中途退出，但 BS 标记始终基于同向段的边界。
+### 1.5 同向性判断（Alignment Subplot）
+
+**同向性判断子图** 是系统 K 线界面中的一个独立子图，用于展示策略在各个周期的方向判断是否一致。BS 标记必须与该子图对齐。
+
+**数据来源**: 同向性判断子图由 `_compute_strategy_pnl` 生成的 `trade_records` 驱动，**不是** 由原始 `all_pairs`（Schmitt 同向段）驱动。
+
+**关键差异**:
+
+| 数据源 | 入场时机 | 含义 | 是否用于同向性判断 |
+|--------|----------|------|-------------------|
+| `all_pairs` | `pair_start`（信号首次出现） | Schmitt 刚翻转，方向"猜测"阶段 | 否 |
+| `trade_records` | `pair_end`（信号确认点） | 预测曲线已验证方向，"确认"阶段 | **是** |
+
+**为什么必须对齐**:
+
+1. 同向性判断子图展示的是 `trade_records` 中的方向判断结果
+2. 如果 BS 标记使用 `all_pairs` 的 `pair_start` 时机，BS 标记会**早于**同向性判断的确认时点
+3. 用户在 K 线主图上看到 🟢B 标在 bar=2，但同向性判断子图显示方向确认在 bar=9——产生视觉矛盾
+4. BS 标记使用 `trade_records` 的时机后，主图 BS 标注与同向性判断子图完全对齐，用户看到的买卖点和方向判断是同一套逻辑
+
+**数据流关系**:
+
+```
+Schmitt 触发器
+   │
+   ├──→ all_pairs (pair_start 时机)  ──→ 原始同向段，仅供参考
+   │
+   └──→ _compute_strategy_pnl
+           │
+           └──→ trade_records (pair_end 时机)  ──→ 同向性判断子图
+                                                      │
+                                                      ▼
+                                                  BS 标记（优先使用）
+```
+
+> **结论**: BS 标记优先使用 `trade_records`，确保主图的买卖点标注与同向性判断子图使用相同的入场/出场时机。`all_pairs` 仅在 `trade_records` 不可用时作为回退方案。
 
 ---
 
@@ -131,11 +168,37 @@ all_pairs = [(2, 9), (12, 19), (25, 30), ...]
 
 ## 3. 操作周期（本级）
 
-操作周期（如日线）的 BS 标记 **直接** 从自己的 Schmitt 同向段（`all_pairs`）生成，不依赖任何上级周期。
+操作周期（如日线）的 BS 标记 **优先** 从 `trade_records`（来自 `_compute_strategy_pnl`）生成，`all_pairs` 作为回退。这确保 BS 标记的入场/出场时机与系统的**同向性判断（alignment）子图**使用相同的数据源和确认时点（`pair_end`）。
+
+> **数据源优先级**: `trade_records`（优先）→ `all_pairs`（回退）。仅在 `_compute_strategy_pnl` 未执行或 `trade_records` 为空时，才回退到 `all_pairs`。
 
 ### 3.1 生成算法
 
 ```
+优先路径 — 使用 trade_records（推荐）:
+─────────────────────────────────────
+输入: trade_records = [
+        {entry_bar: e1, exit_bar: x1, direction: 1, ...},
+        {entry_bar: e2, exit_bar: x2, direction: -1, ...},
+        ...
+      ]
+
+对于 trade_records 中的每笔交易:
+
+  判断方向 (来自 trade_records 而非 sig):
+    direction = record.direction  # 1=做多, -1=做空
+
+  标记入场 (在 bar=entry_bar):      ← pair_end 确认点
+    if LONG:  标记 🟢B
+    if SHORT: 标记 🔴S
+
+  标记出场 (在 bar=exit_bar):
+    if LONG:  标记 🟢S
+    if SHORT: 标记 🔴B
+
+
+回退路径 — 使用 all_pairs（仅在 trade_records 不可用时）:
+─────────────────────────────────────────────────────────
 输入: all_pairs = [(start_1, end_1), (start_2, end_2), ...]
       sig = [0, 0, 1, 1, ..., -1, -1, ...]
 
@@ -147,7 +210,7 @@ all_pairs = [(2, 9), (12, 19), (25, 30), ...]
     elif sig[pair_end] == -1:
       direction = SHORT  # 做空
 
-  标记入场 (在 bar=pair_start):
+  标记入场 (在 bar=pair_start):      ← pair_start 首次出现点（回退行为）
     if LONG:  标记 🟢B
     if SHORT: 标记 🔴S
 
@@ -158,21 +221,38 @@ all_pairs = [(2, 9), (12, 19), (25, 30), ...]
 
 ### 3.2 具体示例
 
+**优先路径（使用 trade_records）**:
+
+```
+假设日线 trade_records = [
+  {entry_bar: 9,  exit_bar: 30, direction: 1, ...},   # 做多交易
+  {entry_bar: 30, exit_bar: 45, direction: -1, ...},  # 做空交易
+]
+
+处理交易记录 #1, direction=1 → 做多:
+  bar=9:  标 🟢B (入场，pair_end 确认点，与同向性判断对齐)
+  bar=30: 标 🟢S (出场)
+
+处理交易记录 #2, direction=-1 → 做空:
+  bar=30: 标 🔴S (入场，pair_end 确认点)
+  bar=45: 标 🔴B (出场)
+```
+
+**注意**: trade_records 的 `entry_bar` 是 `pair_end` 时刻（信号确认点），而非 `all_pairs` 的 `pair_start`（信号首次出现）。这保证了 BS 标记与同向性判断子图使用相同的入场时机。
+
+**回退路径（使用 all_pairs，仅在 trade_records 不可用时）**:
+
 ```
 假设日线 all_pairs = [(2, 9), (12, 19), (25, 30)]
       sig[9] = 1, sig[19] = -1, sig[30] = 1
 
 处理 (2, 9), sig[9]=1 → 做多同向段:
-  bar=2:  标 🟢B (入场，同向段第一个点)
+  bar=2:  标 🟢B (入场，pair_start 首次出现点)
   bar=9:  标 🟢S (出场，同向段结束)
 
 处理 (12, 19), sig[19]=-1 → 做空同向段:
-  bar=12: 标 🔴S (入场，同向段第一个点)
+  bar=12: 标 🔴S (入场，pair_start 首次出现点)
   bar=19: 标 🔴B (出场，同向段结束)
-
-处理 (25, 30), sig[30]=1 → 做多同向段:
-  bar=25: 标 🟢B (入场)
-  bar=30: 标 🟢S (出场)
 ```
 
 ### 3.3 K 线图上的视觉效果
@@ -196,23 +276,53 @@ all_pairs = [(2, 9), (12, 19), (25, 30), ...]
 在代码中，操作周期的 BS 标记由 `_compute_own_markers()` 函数生成：
 
 ```python
-def _compute_own_markers(all_pairs, sig):
-    """从自身的 all_pairs 生成 BS 标记。"""
+def _compute_own_markers(trade_records=None, all_pairs=None, sig=None):
+    """生成操作周期的 BS 标记。
+
+    优先使用 trade_records（与同向性判断子图对齐），
+    all_pairs 作为回退。
+    """
     markers = []
-    for pair_start, pair_end in all_pairs:
-        direction = sig[pair_end]  # 1=做多, -1=做空
-        markers.append({
-            "bar": pair_start,
-            "type": "B" if direction == 1 else "S",  # 入场
-            "color": "green" if direction == 1 else "red",
-            "label": "entry",
-        })
-        markers.append({
-            "bar": pair_end,
-            "type": "S" if direction == 1 else "B",  # 出场
-            "color": "green" if direction == 1 else "red",
-            "label": "exit",
-        })
+
+    # 优先路径: trade_records（entry_bar 是 pair_end 确认点）
+    if trade_records:
+        for record in trade_records:
+            direction = record["direction"]  # 1=做多, -1=做空
+            markers.append({
+                "bar": record["entry_bar"],
+                "type": "B" if direction == 1 else "S",
+                "color": "green" if direction == 1 else "red",
+                "label": "entry",
+                "source": "trade_records",  # 标记数据来源
+            })
+            markers.append({
+                "bar": record["exit_bar"],
+                "type": "S" if direction == 1 else "B",
+                "color": "green" if direction == 1 else "red",
+                "label": "exit",
+                "source": "trade_records",
+            })
+        return markers
+
+    # 回退路径: all_pairs（仅 trade_records 不可用时）
+    if all_pairs and sig is not None:
+        for pair_start, pair_end in all_pairs:
+            direction = sig[pair_end]  # 1=做多, -1=做空
+            markers.append({
+                "bar": pair_start,  # pair_start 而非 pair_end（回退行为）
+                "type": "B" if direction == 1 else "S",
+                "color": "green" if direction == 1 else "red",
+                "label": "entry",
+                "source": "all_pairs",  # 标记为回退来源
+            })
+            markers.append({
+                "bar": pair_end,
+                "type": "S" if direction == 1 else "B",
+                "color": "green" if direction == 1 else "red",
+                "label": "exit",
+                "source": "all_pairs",
+            })
+
     return markers
 ```
 
@@ -423,6 +533,22 @@ def _compute_cascade_markers(higher_bs, lower_all_pairs, lower_sig, bar_time_map
                         │  → sig[], all_pairs │
                         └──────────┬──────────┘
                                    │
+                        ┌──────────▼──────────┐
+                        │ _compute_strategy_   │
+                        │   pnl()              │
+                        │ → trade_records      │
+                        │ (pair_end 确认点)     │
+                        └──────────┬──────────┘
+                                   │
+                    ┌──────────────┼──────────────┐
+                    │              │              │
+                    ▼              │              │
+          ┌─────────────────┐     │              │
+          │ 同向性判断子图    │     │              │
+          │ (alignment)      │     │              │
+          │ 使用 trade_records│     │              │
+          └─────────────────┘     │              │
+                                  │              │
               ┌────────────────────┼────────────────────┐
               │                    │                    │
      ┌────────▼────────┐  ┌───────▼────────┐  ┌───────▼────────┐
@@ -430,9 +556,12 @@ def _compute_cascade_markers(higher_bs, lower_all_pairs, lower_sig, bar_time_map
      │                  │  │                │  │                │
      │ _compute_own_    │  │ _compute_      │  │ _compute_      │
      │   markers()      │  │   cascade_     │  │   cascade_     │
-     │      │           │  │   markers()    │  │   markers()    │
-     │      ▼           │  │      │         │  │      │         │
-     │  BS标记(entry    │  │      ▼         │  │      ▼         │
+     │ 优先:trade_      │  │   markers()    │  │   markers()    │
+     │ records          │  │      │         │  │      │         │
+     │ 回退:all_pairs   │  │      ▼         │  │      ▼         │
+     │      │           │  │  BS标记(entry   │  │  BS标记(entry   │
+     │      ▼           │  │  + exit) ───────┼──│→ + exit) ───────┼──→ ...
+     │  BS标记(entry    │  │                │  │                │
      │  + exit) ────────┼──│→ higher_bs ────┼──│→ higher_bs     │
      │      │           │  │  → BS标记      │  │  → BS标记      │
      └──────┼───────────┘  └───────────────┘  └────────────────┘
@@ -664,9 +793,11 @@ filter_app/
 
 ## 附录 B: 常见问题
 
-**Q: 为什么 BS 标记和实际交易记录可能不一致？**
+**Q: BS 标记和实际交易记录是什么关系？**
 
-A: BS 标记来自 `all_pairs`（Schmitt 同向段），而交易记录来自 `trade_records`（策略执行结果）。策略可能在同一同向段内多次进出（如部分止盈后再入场），而 BS 标记只在同向段边界标一次。
+A: BS 标记**优先**使用 `trade_records`（来自 `_compute_strategy_pnl`）来生成，确保 BS 标记的入场/出场时机与系统的**同向性判断（alignment）子图**保持一致。`all_pairs` 仅作为回退方案。关键区别在于：`trade_records` 的入场点是 `pair_end` 时刻（信号确认点），而 `all_pairs` 的入场点是 `pair_start` 时刻（信号首次出现）。使用 `trade_records` 后，BS 标记与同向性判断子图使用同一套数据和时机。
+
+> **旧方案（已弃用）**: ~~BS 标记来自 `all_pairs`（Schmitt 同向段），而交易记录来自 `trade_records`（策略执行结果）。策略可能在同一同向段内多次进出（如部分止盈后再入场），而 BS 标记只在同向段边界标一次。~~
 
 **Q: 级联时为什么要等低一级同向确认？**
 
