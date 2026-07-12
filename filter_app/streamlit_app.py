@@ -789,9 +789,12 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
         _higher_bs = None
         if tf != _op_tf and _higher_tf_key:
             _higher_bs = st.session_state.get(f"_bs_{_higher_tf_key}")
+        # 操作周期: 使用已有的 higher_pnl（同向性判断数据），无需重新计算
+        _aligned = higher_pnl if (tf == _op_tf and higher_pnl is not None) else None
         bs_markers = compute_bs_markers(
             t, dates, schmitt, all_pairs, trade_records,
             tf, _op_tf, higher_bs=_higher_bs,
+            aligned_markers=_aligned,
         )
         st.session_state[f"_bs_{tf}"] = bs_markers
 

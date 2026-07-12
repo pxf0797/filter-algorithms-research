@@ -6,12 +6,10 @@ import pandas as pd
 import pytest
 
 from services.bs_marker import (
-    _find_date_index,
-    _compute_own_markers,
+    compute_bs_markers, _compute_own_from_trades, _compute_own_from_alignment,
+    _compute_own_from_pairs, _find_date_index,
     _compute_cascade_markers,
-    compute_bs_markers,
-    TF_LOWER,
-    get_lower_tfs,
+    TF_LOWER, get_lower_tfs,
 )
 
 
@@ -94,7 +92,7 @@ class TestFindDateIndex:
         assert result is not None, f"Expected valid index, got None"
 
 
-# ── _compute_own_markers ─────────────────────────────────────────────
+# ── _compute_own_from_pairs ──────────────────────────────────────────
 
 class TestComputeOwnMarkers:
 
@@ -104,9 +102,8 @@ class TestComputeOwnMarkers:
         t = np.arange(10)
         schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
         all_pairs = [(3, 4)]
-        trade_records = []
 
-        result = _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
+        result = _compute_own_from_pairs(t, dates, schmitt, all_pairs)
 
         assert len(result["entry_markers"]) == 1, "Long pair should produce 1 entry"
         assert result["entry_markers"][0] == (
@@ -123,9 +120,8 @@ class TestComputeOwnMarkers:
         t = np.arange(10)
         schmitt = _make_schmitt([0, 0, 0, -1, -1, 0, 0, 0, 0, 0])
         all_pairs = [(3, 4)]
-        trade_records = []
 
-        result = _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
+        result = _compute_own_from_pairs(t, dates, schmitt, all_pairs)
 
         assert len(result["entry_markers"]) == 1
         assert result["entry_markers"][0] == (3, "S", "red", dates[3])
@@ -138,9 +134,8 @@ class TestComputeOwnMarkers:
         t = np.arange(10)
         schmitt = _make_schmitt([0, 1, 1, 0, -1, -1, 0, 0, 0, 0])
         all_pairs = [(1, 2), (4, 5)]      # long at 1-2, short at 4-5
-        trade_records = []
 
-        result = _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
+        result = _compute_own_from_pairs(t, dates, schmitt, all_pairs)
 
         assert len(result["entry_markers"]) == 2
         assert result["entry_markers"][0] == (1, "B", "green", dates[1])
@@ -153,9 +148,8 @@ class TestComputeOwnMarkers:
         dates = _make_dates("2024-01-01", periods=10)
         t = np.arange(10)
         all_pairs = [(3, 4)]
-        trade_records = []
 
-        result = _compute_own_markers(t, dates, None, all_pairs, trade_records)
+        result = _compute_own_from_pairs(t, dates, None, all_pairs)
 
         assert result["entry_markers"] == []
         assert result["exit_markers"] == []
@@ -164,9 +158,8 @@ class TestComputeOwnMarkers:
         dates = _make_dates("2024-01-01", periods=10)
         t = np.arange(10)
         schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
-        trade_records = []
 
-        result = _compute_own_markers(t, dates, schmitt, [], trade_records)
+        result = _compute_own_from_pairs(t, dates, schmitt, [])
 
         assert result["entry_markers"] == []
         assert result["exit_markers"] == []
@@ -178,8 +171,7 @@ class TestComputeOwnMarkers:
         schmitt = _make_schmitt([0, 0, 0, 0, 0, -1, -1, -1, -1, -1,
                                   -1, -1, -1, -1, -1, -1, 0, 0, 0, 0])
         all_pairs = [(5, 15)]
-        trade_records = []
-        result = _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
+        result = _compute_own_from_pairs(t, dates, schmitt, all_pairs)
         assert result["entry_markers"][0][1] == "S"
         assert result["entry_markers"][0][2] == "red"
         assert result["exit_markers"][0][1] == "B"
@@ -192,8 +184,7 @@ class TestComputeOwnMarkers:
         schmitt = _make_schmitt([0, 0, 0, 0, 0, 1, 1, 1, 1, 1,
                                   1, 1, 1, 1, 1, 1, 0, 0, 0, 0])
         all_pairs = [(5, 15)]
-        trade_records = []
-        result = _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
+        result = _compute_own_from_pairs(t, dates, schmitt, all_pairs)
         assert result["entry_markers"][0][1] == "B"
         assert result["entry_markers"][0][2] == "green"
         assert result["exit_markers"][0][1] == "S"
@@ -205,9 +196,8 @@ class TestComputeOwnMarkers:
         t = np.arange(5)
         schmitt = _make_schmitt([1, 1, 1, 1, 1])
         all_pairs = [(0, 99)]              # end far beyond sig
-        trade_records = []
 
-        result = _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
+        result = _compute_own_from_pairs(t, dates, schmitt, all_pairs)
 
         assert result["entry_markers"] == []
         assert result["exit_markers"] == []
@@ -225,9 +215,8 @@ class TestComputeOwnMarkers:
             {"type": "long", "entry_idx": 3, "exit_idx": 8,
              "return_pct": 2.0, "exit_reason": "take_profit"},
         ]
-        result = _compute_own_markers(
-            np.arange(30, dtype=float), dates, schmitt, all_pairs,
-            trade_records,
+        result = _compute_own_from_trades(
+            np.arange(30, dtype=float), dates, trade_records,
         )
         assert len(result["entry_markers"]) == 1
         assert result["entry_markers"][0][0] == 3   # trade entry_idx, not pair_start=2
@@ -235,8 +224,8 @@ class TestComputeOwnMarkers:
         assert result["exit_markers"][0][3] == "take_profit"
 
         # Without trade_records → fallback to all_pairs (2 entries + 2 exits)
-        result2 = _compute_own_markers(
-            np.arange(30, dtype=float), dates, schmitt, all_pairs, [],
+        result2 = _compute_own_from_pairs(
+            np.arange(30, dtype=float), dates, schmitt, all_pairs,
         )
         assert len(result2["entry_markers"]) == 2
         assert result2["entry_markers"][0][0] == 2   # pair_start
@@ -250,9 +239,8 @@ class TestComputeOwnMarkers:
             {"type": "long", "entry_idx": 9, "exit_idx": 20,
              "return_pct": 15.0, "exit_reason": "take_profit"},
         ]
-        result = _compute_own_markers(
-            np.arange(30, dtype=float), dates, None, [(2, 9)],
-            trade_records,
+        result = _compute_own_from_trades(
+            np.arange(30, dtype=float), dates, trade_records,
         )
         assert result["entry_markers"][0][0] == 9    # 对齐 trade_records entry_idx (pair_end)
         assert result["entry_markers"][0][1] == "B"  # green B for long
@@ -264,9 +252,40 @@ class TestComputeOwnMarkers:
             {"type": "short", "entry_idx": 5, "exit_idx": 15,
              "return_pct": -3.0, "exit_reason": "stop_loss"},
         ]
-        result = _compute_own_markers(
-            np.arange(30, dtype=float), dates, None, [], trade_records,
+        result = _compute_own_from_trades(
+            np.arange(30, dtype=float), dates, trade_records,
         )
+        assert result["entry_markers"][0][1] == "S"
+        assert result["entry_markers"][0][2] == "red"
+        assert result["exit_markers"][0][1] == "B"
+        assert result["exit_markers"][0][2] == "red"
+
+
+# ── _compute_own_from_alignment ──────────────────────────────────────
+
+class TestComputeOwnFromAlignment:
+
+    def test_long_aligned_entry_creates_green_B(self):
+        """同向性判断long entry → 绿B."""
+        dates = pd.date_range('2026-01-05', periods=30, freq='B')
+        aligned = {
+            "entry_markers": [(10, "long", 100.0, dates[10])],
+            "exit_markers": [(20, "long", 112.0, 12.0, "take_profit", dates[20])],
+        }
+        result = _compute_own_from_alignment(np.arange(30, dtype=float), dates, aligned)
+        assert result["entry_markers"][0][1] == "B"
+        assert result["entry_markers"][0][2] == "green"
+        assert result["exit_markers"][0][1] == "S"
+        assert result["exit_markers"][0][2] == "green"
+
+    def test_short_aligned_entry_creates_red_S(self):
+        """同向性判断short entry → 红S."""
+        dates = pd.date_range('2026-01-05', periods=30, freq='B')
+        aligned = {
+            "entry_markers": [(5, "short", 100.0, dates[5])],
+            "exit_markers": [(15, "short", 95.0, -5.0, "stop_loss", dates[15])],
+        }
+        result = _compute_own_from_alignment(np.arange(30, dtype=float), dates, aligned)
         assert result["entry_markers"][0][1] == "S"
         assert result["entry_markers"][0][2] == "red"
         assert result["exit_markers"][0][1] == "B"
@@ -484,7 +503,7 @@ class TestCascadeMarkers:
 class TestComputeBsMarkers:
 
     def test_operating_tf_uses_own_markers(self):
-        """tf == operating_tf → delegates to _compute_own_markers."""
+        """tf == operating_tf → delegates to _compute_own_from_pairs."""
         dates = _make_dates("2024-01-01", periods=10)
         t = np.arange(10)
         schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
@@ -498,6 +517,18 @@ class TestComputeBsMarkers:
 
         assert len(result["entry_markers"]) == 1
         assert result["entry_markers"][0] == (3, "B", "green", dates[3])
+
+    def test_operating_tf_uses_aligned_markers(self):
+        """操作周期有aligned_markers时优先使用同向性判断数据."""
+        dates = pd.date_range('2026-01-05', periods=30, freq='B')
+        aligned = {
+            "entry_markers": [(10, "long", 100.0, dates[10])],
+            "exit_markers": [],
+        }
+        result = compute_bs_markers(
+            np.arange(30, dtype=float), dates, None, [], [],
+            '日线', '日线', aligned_markers=aligned)
+        assert result["entry_markers"][0][1] == "B"
 
     def test_lower_tf_uses_cascade(self):
         """tf < operating_tf with higher_bs → delegates to _compute_cascade_markers."""

@@ -1,7 +1,8 @@
 # BS 仓位操作标识 — 策略文档
 
-> **版本**: 1.0
+> **版本**: 2.0
 > **最后更新**: 2026-07-12
+> **变更摘要**: BS 标记数据源从 `all_pairs` 改为 `trade_records` 优先，以对齐同向性判断（alignment）子图
 > **适用范围**: 基于 Schmitt 触发器的多周期 K 线交易信号系统
 
 ---
@@ -771,8 +772,9 @@ st.session_state[f"_bs_{current_tf}"] = current_markers
 | all_pairs | — | `[(start, end), ...]` 同向段列表 |
 | sig | — | Schmitt 信号数组，`1`=做多, `-1`=做空, `0`=中性 |
 | higher_bs | — | 从上级周期传递下来的 BS 标记列表 |
-| pair_start | — | 同向段的起始 bar 索引 |
-| pair_end | — | 同向段的结束 bar 索引 |
+| 同向性判断 | Alignment Subplot | 系统 K 线界面的独立子图，展示各周期方向判断是否一致，由 `trade_records` 驱动 |
+| pair_start | — | 同向段的起始 bar 索引（信号首次出现） |
+| pair_end | — | 同向段的结束 bar 索引（信号确认点，`trade_records` 的入场时机） |
 
 ---
 

@@ -61,56 +61,94 @@ def _find_date_index(dates, target_date):
         return None
 
 
-def _compute_own_markers(t, dates, schmitt, all_pairs, trade_records):
-    """从策略交易记录(trade_records)生成 BS 标记，对齐同向性判断。
+def _compute_own_from_trades(t, dates, trade_records):
+    """从本周期 trade_records 生成 BS 标记（回退：顶周期无更高参考时使用）。
 
     trade_records 非空时从中生成标记（入场=entry_idx, 出场=exit_idx）。
-    trade_records 为空时回退到 all_pairs（Schmitt 原始对）。
     """
     entry = []
     exit_ = []
     n_dates = len(dates) if dates is not None else 0
 
-    if trade_records:
-        # 优先：从策略交易记录生成（与同向性判断对齐）
-        for trade in trade_records:
-            is_long = trade["type"] == "long"
-            entry_idx = trade["entry_idx"]
-            exit_idx = trade["exit_idx"]
-            exit_reason = trade.get("exit_reason", "")
+    for trade in trade_records:
+        is_long = trade["type"] == "long"
+        entry_idx = trade["entry_idx"]
+        exit_idx = trade["exit_idx"]
+        exit_reason = trade.get("exit_reason", "")
 
-            d_entry = dates[entry_idx] if entry_idx < n_dates else None
-            d_exit = dates[exit_idx] if exit_idx < n_dates else None
+        d_entry = dates[entry_idx] if entry_idx < n_dates else None
+        d_exit = dates[exit_idx] if exit_idx < n_dates else None
 
-            if is_long:
-                # 做多: B(绿)入场, S(绿)出场
-                entry.append((int(entry_idx), "B", "green", d_entry))
-                exit_.append((int(exit_idx), "S", "green", exit_reason, d_exit))
-            else:
-                # 做空: S(红)入场, B(红)出场
-                entry.append((int(entry_idx), "S", "red", d_entry))
-                exit_.append((int(exit_idx), "B", "red", exit_reason, d_exit))
-
-    elif schmitt is not None and all_pairs:
-        # 回退：策略未启用时从 Schmitt 原始对生成
-        sig = schmitt["sig"]
-        for pair_start, pair_end in all_pairs:
-            if pair_end >= len(sig):
-                continue
-            direction = sig[pair_end]
-            d_entry = dates[pair_start] if pair_start < n_dates else None
-            d_exit = dates[pair_end] if pair_end < n_dates else None
-
-            if direction == 1:
-                entry.append((int(pair_start), "B", "green", d_entry))
-                exit_.append((int(pair_end), "S", "green", "pair_end", d_exit))
-            elif direction == -1:
-                entry.append((int(pair_start), "S", "red", d_entry))
-                exit_.append((int(pair_end), "B", "red", "pair_end", d_exit))
+        if is_long:
+            # 做多: B(绿)入场, S(绿)出场
+            entry.append((int(entry_idx), "B", "green", d_entry))
+            exit_.append((int(exit_idx), "S", "green", exit_reason, d_exit))
+        else:
+            # 做空: S(红)入场, B(红)出场
+            entry.append((int(entry_idx), "S", "red", d_entry))
+            exit_.append((int(exit_idx), "B", "red", exit_reason, d_exit))
 
     return {"entry_markers": entry, "exit_markers": exit_}
 
 
+def _compute_own_from_pairs(t, dates, schmitt, all_pairs):
+    """从 all_pairs 生成 BS 标记（最后回退：无策略交易时使用）。"""
+    entry = []
+    exit_ = []
+    n_dates = len(dates) if dates is not None else 0
+
+    if schmitt is None or not all_pairs:
+        return {"entry_markers": entry, "exit_markers": exit_}
+
+    sig = schmitt["sig"]
+    for pair_start, pair_end in all_pairs:
+        if pair_end >= len(sig):
+            continue
+        direction = sig[pair_end]
+        d_entry = dates[pair_start] if pair_start < n_dates else None
+        d_exit = dates[pair_end] if pair_end < n_dates else None
+
+        if direction == 1:
+            entry.append((int(pair_start), "B", "green", d_entry))
+            exit_.append((int(pair_end), "S", "green", "pair_end", d_exit))
+        elif direction == -1:
+            entry.append((int(pair_start), "S", "red", d_entry))
+            exit_.append((int(pair_end), "B", "red", "pair_end", d_exit))
+
+    return {"entry_markers": entry, "exit_markers": exit_}
+
+
+def _compute_own_from_alignment(t, dates, aligned_markers):
+    """从高一级周期的同向性判断数据(aligned markers)生成 BS 标记。
+
+    aligned_markers 来自 _align_pnl_to_current_tf:
+      entry_markers: [(bar_idx, type, pnl_val, date), ...]
+      exit_markers: [(bar_idx, type, pnl_val, ret_pct, reason, date), ...]
+    type: "long" or "short"
+    """
+    entry = []
+    exit_ = []
+    n_dates = len(dates) if dates is not None else 0
+
+    for bar_idx, trade_type, pnl_val, date in aligned_markers.get("entry_markers", []):
+        if bar_idx >= n_dates:
+            continue
+        is_long = trade_type == "long"
+        label = "B" if is_long else "S"
+        color = "green" if is_long else "red"
+        entry.append((int(bar_idx), label, color, dates[bar_idx] if bar_idx < n_dates else None))
+
+    for item in aligned_markers.get("exit_markers", []):
+        bar_idx, trade_type, pnl_val = item[0], item[1], item[2]
+        if bar_idx >= n_dates:
+            continue
+        is_long = trade_type == "long"
+        label = "S" if is_long else "B"
+        color = "green" if is_long else "red"
+        reason = item[4] if len(item) > 4 else "pair_end"
+        exit_.append((int(bar_idx), label, color, reason, dates[bar_idx] if bar_idx < n_dates else None))
+
+    return {"entry_markers": entry, "exit_markers": exit_}
 
 
 def _compute_cascade_markers(t, dates, schmitt, all_pairs,
@@ -180,7 +218,8 @@ def _compute_cascade_markers(t, dates, schmitt, all_pairs,
 
 
 def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
-                        tf, operating_tf, higher_bs=None):
+                        tf, operating_tf, higher_bs=None,
+                        aligned_markers=None):
     """为单个视图计算 BS 标记。
 
     Parameters
@@ -194,13 +233,17 @@ def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
     all_pairs : list[(int, int)]
         Schmitt 信号对列表。
     trade_records : list[dict]
-        策略交易记录（保留参数，操作周期不从此读取）。
+        策略交易记录（操作周期无 aligned_markers 时的回退）。
     tf : str
         当前视图的周期。
     operating_tf : str
         用户选择的操作周期。仅此周期及更低周期显示 BS 标记。
     higher_bs : dict or None
         紧邻高一级周期的 BS 标记（用于级联）。操作周期本身为 None。
+    aligned_markers : dict or None
+        从 _align_pnl_to_current_tf 获取的高一级周期同向性判断数据。
+        Format: {"entry_markers": [(bar_idx, type, pnl_val, date), ...],
+                 "exit_markers": [(bar_idx, type, pnl_val, ret_pct, reason, date), ...]}
 
     Returns
     -------
@@ -208,7 +251,12 @@ def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
         {"entry_markers": [...], "exit_markers": [...]}
     """
     if tf == operating_tf:
-        return _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
+        if aligned_markers is not None:
+            return _compute_own_from_alignment(t, dates, aligned_markers)
+        elif trade_records:
+            return _compute_own_from_trades(t, dates, trade_records)
+        else:
+            return _compute_own_from_pairs(t, dates, schmitt, all_pairs)
     elif higher_bs is not None and (higher_bs.get("entry_markers") or higher_bs.get("exit_markers")):
         return _compute_cascade_markers(t, dates, schmitt, all_pairs,
                                          trade_records, higher_bs)
