@@ -1874,9 +1874,6 @@ def main() -> None:
                 for k, v in params.items():
                     AppState.set(k, v)
                 logger.info(f"Auto-applied preset: {aapl_preset['name']}")
-        # 确保 market/ticker 为 AAPL 美股（预设数据可能有误）
-        AppState.set("market", "美股 US")
-        AppState.set("ticker", "AAPL")
         AppState.set("_preset_auto_applied", True)
 
     st.sidebar.title("多周期股票滤波分析")
