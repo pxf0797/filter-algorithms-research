@@ -18,16 +18,27 @@ from services.filter_engine import _compute_holding_masks
 # ---------------------------------------------------------------------------
 def _render_plotly(fig, height=750, dates=None) -> None:
     """Render Plotly chart with cross-subplot crosshair (no value tooltip)."""
-    # Use fig.to_json() directly (handles NaN/Inf/np arrays natively),
-    # then inject _dates into layout for JS crosshair tooltip.
-    figure_json = fig.to_json()
+    from plotly.utils import PlotlyJSONEncoder
+
+    # Serialize manually instead of fig.to_json():
+    #  1. _dates is injected into layout (not supported by fig.to_json output)
+    #  2. fig.to_json() bdata-encodes x-arrays as base64 which changes the
+    #     JS-side array type and breaks the _nearestIdx binary search
+    fig_dict = {"data": [], "layout": fig.layout.to_plotly_json()}
+
     if dates is not None:
         date_strs = [d.strftime("%Y-%m-%d %H:%M") if hasattr(d, 'strftime') else str(d)
                      for d in dates]
-        # Post-inject _dates after serialization (custom attrs not in to_json output)
-        import re
-        figure_json = re.sub(r'("layout"\s*:\s*\{)', r'\1"_dates":' +
-                             json.dumps(date_strs) + r',', figure_json, count=1)
+        fig_dict["layout"]["_dates"] = date_strs
+
+    for trace in fig.data:
+        tr = trace.to_plotly_json()
+        # Convert numpy x to plain list so JS crosshair gets a regular Array
+        if isinstance(tr.get("x"), np.ndarray):
+            tr["x"] = tr["x"].tolist()
+        fig_dict["data"].append(tr)
+
+    figure_json = json.dumps(fig_dict, cls=PlotlyJSONEncoder)
     div_id = f"plot-{uuid.uuid4().hex[:8]}"
 
     html = """<!DOCTYPE html>

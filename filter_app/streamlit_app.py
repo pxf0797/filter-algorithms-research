@@ -1874,11 +1874,20 @@ def main() -> None:
                                horizontal=True, key="market")
 
     # ── Stock code + Operating TF on the same row ──
-    c_code, c_op = st.sidebar.columns([1, 1.2])
-    with c_code:
+    c1, c2 = st.sidebar.columns([1, 1])
+    with c1:
         ticker_code = st.text_input("股票代码", value="AAPL", key="ticker").strip()
-    with c_op:
-        operating_tf = _render_operating_tf_selector()
+    with c2:
+        view_tfs = []
+        for i in range(4):
+            tf = st.session_state.get(f"v{i}_tf", DEFAULT_TFS[i])
+            if tf not in view_tfs:
+                view_tfs.append(tf)
+        view_tfs.sort(key=lambda x: ALL_TFS.index(x), reverse=True)
+        operating_tf = st.selectbox(
+            "🎯 操作周期", view_tfs, index=0,
+            key="operating_tf",
+        )
 
     # ── Stock name lookup ──
     if ticker_code:
