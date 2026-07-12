@@ -1,783 +1,234 @@
-# BS 仓位操作标识 — 策略文档
+# BS 仓位操作标识 — 完整设计方案 v4
 
-> **版本**: 3.0
-> **最后更新**: 2026-07-12
-> **变更摘要**: BS 标记 = 本周期 all_pairs ∩ 高一级 holding_masks（同向性掩码过滤），替换之前的 `aligned_markers` 透传
-> **适用范围**: 基于 Schmitt 触发器的多周期 K 线交易信号系统
+## 1. 核心定义
 
----
+**BS 标记 = 策略交易记录（PnL）经过同向性判断（holding masks）过滤后的结果。**
 
-## 目录
-
-1. [核心概念](#1-核心概念)
-2. [标记规则](#2-标记规则)
-3. [操作周期（本级）](#3-操作周期本级)
-4. [低一级周期（级联）](#4-低一级周期级联)
-5. [再低一级及更深周期](#5-再低一级及更深周期)
-6. [数据流](#6-数据流)
-7. [边界情况](#7-边界情况)
-8. [完整示例](#8-完整示例)
-9. [术语表](#9-术语表)
-
----
-
-## 1. 核心概念
-
-### 1.1 Schmitt 触发器
-
-Schmitt 触发器是一个滞回比较器，用于将价格序列转换为离散的方向信号。它避免了传统交叉信号在阈值附近反复跳变的问题——只有价格偏离超过滞回带时，方向才会翻转。
-
-```
-价格序列:  [100, 102, 105, 103, 101,  98,  95,  97,  99, 104, 107, 110]
-             ↓     ↓     ↓     ↓     ↓    ↓    ↓    ↓    ↓    ↓    ↓    ↓
-信号 sig:  [ 0,   0,   1,   1,   1,   1,  -1,  -1,  -1,   1,   1,   1 ]
-                        ↑                        ↑              ↑
-                    上穿阈值                  下穿阈值       再次上穿
-```
-
-### 1.2 同向段（Same-Direction Segment）
-
-**定义**: Schmitt 触发器产生的连续同向信号区间。
-
-一个 `all_pairs` 元素 `(pair_start, pair_end)` 就是一个同向段：
-
-- `sig[pair_end] == 1`  → **做多同向段**（该段内价格总体看涨）
-- `sig[pair_end] == -1` → **做空同向段**（该段内价格总体看跌）
-
-```
-all_pairs = [(2, 9), (12, 19), (25, 30), ...]
-              ↑            ↑
-         做多同向段     做空同向段
-         (sig[9]=1)    (sig[19]=-1)
-```
-
-**关键属性**:
-- `pair_start`: 同向段的起始 bar 索引（信号首次出现的时刻，Schmitt 刚翻转）
-- `pair_end`: 同向段的结束 bar 索引（信号确认的时刻，此时方向已由预测曲线验证）
-- 同向段之间是反向或中性区域
-
-> **时序差异（关键）**: `all_pairs` 的 `pair_start` 是信号**首次出现**的时刻（Schmitt 触发器刚翻转），而 `trade_records` 的入场点是 `pair_end` 时刻——即信号**确认**的时刻。BS 标记使用 `all_pairs` 的 `pair_start` 作为入场点，但通过 `holding_masks` 过滤确保只标记同向性判断确认的持仓区间内的同向段。详见 [1.5 同向性判断](#15-同向性判断)。
-
-### 1.3 BS 标记
-
-**BS 标记** 是在同向段的关键位置标注的买卖点，直接显示在 K 线主图上。BS 标记 = 本周期 `all_pairs` 过滤高一级 `holding_masks`——只保留与持仓区间有交集的同向段，确保 BS 标记与同向性判断保持一致。
-
-```
-同向段生命周期:
-
-  pair_start                              pair_end
-      ↓                                       ↓
-  ────[■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■]──── 时间 →
-      ↑                                       ↑
-    入场点                                 出场点
-   (标 B 或 S)                           (标 S 或 B)
-```
-
-- **入场**: 同向段第一个点（`pair_start`），信号刚确立，进入仓位
-- **出场**: 同向段结束点（`pair_end`），信号翻转，平仓离场
-- **异常出场**: 止损触发，不等同向段自然结束，强制平仓
-
-### 1.4 关键数据结构
-
-| 结构 | 含义 | 示例 |
-|------|------|------|
-| `sig` | Schmitt 信号数组，长度 = 价格 bar 数 | `[0, 0, 1, 1, -1, -1]` |
-| `all_pairs` | 同向段列表，每个元素 `(start, end)` | `[(2, 3), (4, 5)]` |
-| `holding_masks` | 持仓区间掩码 `(long_mask, short_mask)` | 同向性判断结果，用于过滤 all_pairs |
-| `higher_bs` | 上级周期传递下来的 BS 标记 | 级联用 |
-
-### 1.5 同向性判断（Alignment / Holding Masks）
-
-**同向性判断** 决定哪些同向段是有效的持仓区间。系统通过 `_compute_holding_masks` 生成两个布尔掩码：
-
-- **long_mask**: 标记做多持仓区间（bars 范围内为 `True` 表示处于做多状态）
-- **short_mask**: 标记做空持仓区间（bars 范围内为 `True` 表示处于做空状态）
-
-BS 标记 = 本周期 `all_pairs` **过滤** 高一级的 `holding_masks`：
-
-```
-BS 标记 = { pair ∈ all_pairs  |  pair 与同向 mask 有交集 }
-```
-
-- 做多对（sig[pair_end] == 1）: pair 至少有一个 bar 在 `long_mask` 内 → 保留
-- 做空对（sig[pair_end] == -1）: pair 至少有一个 bar 在 `short_mask` 内 → 保留
-- 不在对应 mask 内的 pair → 被过滤掉，不产生 BS 标记
-
-**数据流关系**:
-
-```
-高一级周期
-   │
-   └──→ _compute_holding_masks()
-           │
-           └──→ (long_mask, short_mask)  ──→ 作为 holding_masks 参数传入
-                                               │
-                                               ▼
-本周期 compute_bs_markers(holding_masks=(long_mask, short_mask))
-   │
-   ├── all_pairs (Schmitt 同向段)
-   │       │
-   │       ▼
-   └── _compute_own_from_masks()
-           │
-           └── 过滤: pair ∩ long_mask 或 pair ∩ short_mask
-                  │
-                  ▼
-              BS 标记（仅保留与持仓区间有交集的同向段）
-```
-
-> **结论**: BS 标记不是从 `trade_records` 生成，而是从 `all_pairs` 过滤。过滤条件来自高一级的 `holding_masks`，确保 BS 标记只出现在同向性判断确认的持仓区间内。
-
----
+- BS 的数据源是 `trade_records`（Row 6/7 的策略交易，含入场点=信号确认点 `pair_end`）
+- BS 的过滤器是 `_compute_holding_masks` 的输出（Row 8 同向性判断子图的数据）
+- 只有落在 holding mask 区间内的交易才标 BS；不在区间内的不标
 
 ## 2. 标记规则
 
-### 2.1 颜色与标签规则
+| 方向 | 入场 | 出场 | 颜色 |
+|------|------|------|------|
+| 做多 | 🟢 B | 🟢 S | 绿色 |
+| 做空 | 🔴 S | 🔴 B | 红色 |
 
-| 方向 | 入场标记 | 出场标记 | 颜色 | 逻辑 |
-|------|----------|----------|------|------|
-| 做多 | 🟢 **B** | 🟢 **S** | 绿色 | 先买后卖 |
-| 做空 | 🔴 **S** | 🔴 **B** | 红色 | 先卖后买 |
+做多：先 B 后 S（全绿）。做空：先 S 后 B（全红）。
 
-**记忆口诀**:
-- 做多: **B**uy then **S**ell — 全绿色
-- 做空: **S**ell then **B**uy — 全红色
+入场标在 K 线 low 下方，出场标在 high 上方。
 
-### 2.2 标记在 K 线图上的位置
+## 3. 各子图数据源（以日线操作周期为例）
 
-```
-         ┌─────┐
-         │     │  high ─── 🟢S (做多出场) 或 🔴B (做空出场)
-         │ K线 │
-         │     │
-         │     │  low  ─── 🟢B (做多入场) 或 🔴S (做空入场)
-         └─────┘
-```
+| Row | 子图 | 数据来源 | BS 使用？ |
+|-----|------|----------|----------|
+| 1 | 价格&滤波 | K线 OHLC + 滤波输出 | 显示位置 |
+| 2-4 | 残差/v/a±ε | 滤波梯度/加速度/Schmitt阈值 | 否 |
+| 5 | Sig_t | Schmitt 信号(-1/0/+1) | 否 |
+| 6 | PnL收益(%) | trade_records（策略交易） | **是 — BS 的标的** |
+| 7 | 实际持仓 | trade_records → 多/空/不持 | 否 |
+| 8 | 同向性判断 | Row6 被周线 holding_masks 过滤 | **是 — BS 的过滤器** |
 
-- **入场标记** 显示在 K 线 **low 下方**（靠近底部）
-- **出场标记** 显示在 K 线 **high 上方**（靠近顶部）
-- 这样入场和出场在视觉上不会重叠，便于快速识别
+## 4. 操作周期（日线）
 
-### 2.3 标记规则汇总
+### 4.1 数据流
 
 ```
-                    入场(low下)    出场(high上)
-                    ───────────    ────────────
-  做多同向段:        🟢B             🟢S
-  (sig[end]=1)
-
-  做空同向段:        🔴S             🔴B
-  (sig[end]=-1)
+日线 trade_records (Row 6 数据，入场=entry_idx)
+       ↓
+周线 trade_records → _align_pnl_to_current_tf → _compute_holding_masks
+       ↓                                                    ↓
+  周线 holding_masks (long_mask / short_mask)  ← 同向性判断过滤器
+       ↓
+日线 trade_records ──→ 过滤：entry_idx 必须落在对应方向 mask 内
+       ↓
+  ├── 在 mask 内 → 标 BS（入场=entry_idx, 出场=exit_idx）
+  └── 不在 mask 内 → 不标 BS
 ```
 
----
+### 4.2 入场
 
-## 3. 操作周期（本级）
+trade_records 中每笔交易的 `entry_idx`：
 
-操作周期（如日线）的 BS 标记从 `all_pairs` 生成，按 `holding_masks` 进行同向性过滤。
+- 检查 `entry_idx` 是否在对应方向的 mask 内（long trade → `long_mask`, short trade → `short_mask`）
+- 在 → 标入场 BS
+- 不在 → 跳过
 
-> **数据流**: `all_pairs` → `holding_masks` 过滤 → BS 标记。`holding_masks` 来自高一级周期的 `_compute_holding_masks`，由 `compute_bs_markers(holding_masks=(long_mask, short_mask))` 传入。
+### 4.3 出场
 
-### 3.1 生成算法
+trade_records 中每笔交易的 `exit_idx` + `exit_reason`：
 
-```
-主路径 — 有 holding_masks（推荐）:
-─────────────────────────────────────
-输入: all_pairs = [(start_1, end_1), (start_2, end_2), ...]
-      sig = [0, 0, 1, 1, ..., -1, -1, ...]
-      holding_masks = (long_mask, short_mask)
+- 正常出场（`take_profit` / `pair_end`）：标在 `exit_idx`
+- 偏离退出（`stop_loss`）：标在 `exit_idx`，同时级联到低一级立即标
 
-对于 all_pairs 中的每个 (pair_start, pair_end):
+## 5. 低一级周期（60分钟）
 
-  判断方向:
-    if sig[pair_end] == 1:
-      direction = LONG, 取 long_mask
-    elif sig[pair_end] == -1:
-      direction = SHORT, 取 short_mask
-
-  检查交集:
-    if 对应 mask 中 pair 区间内任何 bar 为 True:
-      → 保留该 pair，生成 BS 标记
-    else:
-      → 过滤掉，不产生 BS 标记
-
-  标记入场 (在 bar=pair_start):
-    if LONG:  标记 🟢B
-    if SHORT: 标记 🔴S
-
-  标记出场 (在 bar=pair_end):
-    if LONG:  标记 🟢S
-    if SHORT: 标记 🔴B
-
-
-回退路径 — 无 holding_masks 但有 trade_records:
-─────────────────────────────────────────────────
-  从 trade_records 生成 BS 标记（entry_idx / exit_idx）
-
-回退路径 — 无 holding_masks 且无 trade_records:
-─────────────────────────────────────────────────
-  从 all_pairs 全部生成 BS 标记（无过滤）
-```
-
-### 3.2 具体示例
-
-**主路径（有 holding_masks）**:
+### 5.1 入场级联
 
 ```
-假设日线 all_pairs = [(2, 9), (12, 19), (25, 30)]
-      sig[9] = 1, sig[19] = -1, sig[30] = 1
-      long_mask:  bars 0-15 为 True（周线做多区间）
-      short_mask: bars 16-50 为 True（周线做空区间）
-
-处理 (2, 9), sig[9]=1 → 做多同向段:
-  long_mask[2:10] 有 True → 交集存在 → 保留
-  bar=2: 标 🟢B (入场)
-  bar=9: 标 🟢S (出场)
-
-处理 (12, 19), sig[19]=-1 → 做空同向段:
-  short_mask[12:20] 有 True → 交集存在 → 保留
-  bar=12: 标 🔴S (入场)
-  bar=19: 标 🔴B (出场)
-
-处理 (25, 30), sig[30]=1 → 做多同向段:
-  long_mask[25:31] 全为 False → 无交集 → 过滤掉
-  （周线在做空区间，日线做多pair被过滤）
+日线 BS 入场标记（如 bar=81 🟢B，做多）
+  ↓ 日线 bar=81 的日期 → 在60分钟定位 start_bar
+  ↓ 遍历60分钟 all_pairs
+  ↓ 找第一个: pair_start ≥ start_bar 且 sig[pair_end] == 1（同向）
+  ↓ 找到 → 在60分钟 pair_start 标 🟢B
+  ↓ 找不到 → 不标
 ```
 
-### 3.3 K 线图上的视觉效果
+### 5.2 正常出场级联
 
 ```
-做多段                              做空段
-  🟢S                                 🔴B
-   │                                   │
- ┌─┴─┐      ┌───┐      ┌───┐        ┌─┴─┐      ┌───┐
- │   │      │   │      │   │        │   │      │   │
- │   │ ...  │   │ ...  │   │  ...   │   │ ...  │   │
- │   │      │   │      │   │        │   │      │   │
- └─┬─┘      └───┘      └─┬─┘        └─┬─┘      └───┘
-   │                     │            │
-  🟢B                   🟢S          🔴S
-  bar=2                bar=9        bar=12              bar=19
+日线 BS 出场标记 → 找60分钟对应同向 pair 的 pair_end → 标出场 BS
 ```
 
-### 3.4 代码对应
+### 5.3 异常出场级联（stop_loss）
 
-在代码中，操作周期的 BS 标记由 `compute_bs_markers()` 函数分发到对应的子函数：
+```
+日线 stop_loss 出场 → 不等60分钟确认 → 立即在对应时间标出场 BS
+```
+
+## 6. 再低一级（15分钟、5分钟…）
+
+同理：上一级 BS → 本级 all_pairs 同向确认 → 标 BS。
+
+## 7. 系统已有数据（无需重复计算）
+
+操作周期渲染时，以下数据**已经在 `_render_chart` 中计算好了**：
+
+- `trade_records`：来自 `_compute_strategy_display`（Step 8）
+- `higher_pnl`：来自 `_align_pnl_to_current_tf`（Step 3），含 `entry_markers` / `exit_markers`
+- `_align_masks`：来自 `_compute_holding_masks`（用 `higher_pnl` 算得），含 `long_mask` / `short_mask`
+
+**BS 标记只需要把 `trade_records` 和 `_align_masks` 结合，不做任何额外计算。**
+
+## 8. compute_bs_markers 接口
 
 ```python
 def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
                         tf, operating_tf, higher_bs=None,
-                        holding_masks=None):
+                        holding_masks=None):  # (long_mask, short_mask) or None
     if tf == operating_tf:
-        if holding_masks is not None:
-            # 有 holding_masks → 用 mask 过滤 all_pairs
-            return _compute_own_from_masks(t, dates, schmitt,
-                                            all_pairs, holding_masks)
+        if holding_masks is not None and trade_records:
+            return _compute_from_trades_filtered(t, dates, trade_records, holding_masks)
         elif trade_records:
-            # 回退：无 mask 但有交易记录
-            return _compute_own_from_trades(t, dates, trade_records)
+            return _compute_from_trades(t, dates, trade_records)  # 无高一级参考，回退
         else:
-            # 最后回退：无 mask 无交易记录，直接用 all_pairs
-            return _compute_own_from_pairs(t, dates, schmitt, all_pairs)
-    elif higher_bs is not None:
-        # 低一级周期：级联
-        return _compute_cascade_markers(...)
+            return _compute_from_pairs(t, dates, schmitt, all_pairs)  # 无策略，最后回退
+    elif higher_bs:
+        return _compute_cascade(t, dates, schmitt, all_pairs, trade_records, higher_bs)
     else:
-        return {"entry_markers": [], "exit_markers": []}
+        return empty
 ```
 
-`_compute_own_from_masks` 核心逻辑：
+### 8.1 `_compute_from_trades_filtered`
 
 ```python
-def _compute_own_from_masks(t, dates, schmitt, all_pairs, holding_masks):
+def _compute_from_trades_filtered(t, dates, trade_records, holding_masks):
+    """
+    遍历 trade_records，用 holding_masks 过滤。
+
+    Parameters
+    ----------
+    t : np.ndarray
+        时间戳数组
+    dates : list
+        日期列表
+    trade_records : list[dict]
+        策略交易记录，每条含 entry_idx, exit_idx, direction, exit_reason 等
+    holding_masks : tuple
+        (long_mask, short_mask)，各为 np.ndarray[bool]，长度等于 len(t)
+
+    Returns
+    -------
+    bs_markers : list[dict]
+        每个元素: {idx, label, color, is_entry, direction, from_cascade}
+    """
     long_mask, short_mask = holding_masks
-    sig = schmitt["sig"]
+    markers = []
 
-    for pair_start, pair_end in all_pairs:
-        direction = sig[pair_end]
-        mask = long_mask if direction == 1 else short_mask
+    for tr in trade_records:
+        direction = tr['direction']  # 'long' or 'short'
+        entry_idx = tr['entry_idx']
+        exit_idx = tr['exit_idx']
+        exit_reason = tr.get('exit_reason', 'take_profit')
 
-        # 检查 pair 区间内是否有任何 bar 在 mask 中
-        pair_slice = slice(pair_start, min(pair_end + 1, len(mask)))
-        if not mask[pair_slice].any():
-            continue  # 不在持仓区间 → 跳过
+        mask = long_mask if direction == 'long' else short_mask
 
-        # 生成 BS 标记（入场在 pair_start，出场在 pair_end）
-        ...
+        # 入场：entry_idx 必须在 mask 内
+        if mask[entry_idx]:
+            entry_label = 'B' if direction == 'long' else 'S'
+            markers.append({
+                'idx': entry_idx,
+                'label': entry_label,
+                'color': 'green' if direction == 'long' else 'red',
+                'is_entry': True,
+                'direction': direction,
+                'from_cascade': False,
+            })
+
+            # 出场：exit_idx 必须在 mask 内
+            if mask[exit_idx]:
+                exit_label = 'S' if direction == 'long' else 'B'
+                markers.append({
+                    'idx': exit_idx,
+                    'label': exit_label,
+                    'color': 'green' if direction == 'long' else 'red',
+                    'is_entry': False,
+                    'direction': direction,
+                    'from_cascade': False,
+                })
+
+    return markers
 ```
 
----
+### 8.2 `_compute_cascade`
 
-## 4. 低一级周期（级联）
+已有实现，保持不变。负责将上级 BS 标记级联到当前 TF：
 
-操作周期标完 BS 后，将标记向 **低一级周期** 级联（cascade）。级联的意义在于：大周期的方向判断在更精细的时间粒度上找到精确的入场和出场位置。
+- 遍历 `higher_bs` 中的每个 BS 标记
+- 用 `_find_date_index` 定位当前 TF 的起始 bar
+- 在 `all_pairs` 中找同向 pair（`sig[pair_end] == direction`）
+- 找到后标在当前 TF 对应 bar
+- `stop_loss` 出场不检查同向，直接级联
 
-### 4.1 入场级联
+### 8.3 `_compute_from_trades`（回退）
 
-**场景**: 操作周期标了入场 BS（如日线 bar=2 🟢B），需要在 60 分钟线上找到对应的精确入场点。
+当无高一级参考（`holding_masks=None`）但有 `trade_records` 时使用，不过滤直接标 BS。
 
-```
-算法流程:
+### 8.4 `_compute_from_pairs`（最后回退）
 
-  操作周期标了入场 BS（日线 bar=N 🟢B 或 🔴S）
-       │
-       ▼
-  在低一级周期(如60分钟)定位日线 bar=N 对应的日期 → start_bar
-       │
-       ▼
-  遍历低一级周期的 all_pairs，找第一个满足以下条件的 pair:
-      条件1: pair_start ≥ start_bar
-      条件2: sig[pair_end] == 期望方向 (1=做多, -1=做空)
-       │
-       ├── 找到 → 在低一级 (pair_start) 标 BS 入场
-       │         （只标同向段第一个点，不在后续 bar 重复标）
-       │
-       └── 找不到 → 不标（低一级周期不同向，放弃级联）
-```
+当策略未启用（`trade_records` 为空）时使用，从 `all_pairs` 推断 BS。
 
-**关键约束**:
-- **只在同向段的第一个点标 BS**。如果同向段有 10 根 bar，只在第 1 根标入场，不在 bar 2~10 重复标。
-- 方向必须一致：日线做多 → 60 分钟找做多同向段；日线做空 → 60 分钟找做空同向段。
+## 9. streamlit_app.py 集成
 
-**示例**:
-
-```
-日线 bar=2 标 🟢B (做多入场)
-  日线 bar=2 对应日期 2026-03-15
-       │
-       ▼
-  60分钟数据中 2026-03-15 的第一根 bar → start_bar=50
-       │
-       ▼
-  60分钟 all_pairs:
-    [(30, 35), (40, 48), (52, 60), (65, 72)]
-     sig[35]=-1     sig[48]=-1   sig[60]=1   sig[72]=1
-        ✗ (end<start_bar)  ✗ (方向不符)  ✓ (符合!)
-                                               │
-                                               ▼
-                                    在60分钟 bar=52 标 🟢B
-```
-
-### 4.2 正常出场级联（多空对结束）
-
-**场景**: 操作周期同向段自然结束（如日线 bar=9 🟢S），将出场信号级联到低一级周期。
-
-```
-算法流程:
-
-  操作周期同向段结束（日线 bar=N 🟢S 或 🔴B）
-       │
-       ▼
-  这是同向段的正常结束，等待低一级同向确认
-       │
-       ▼
-  在低一级周期找对应同向段的结束点 (pair_end)
-       │
-       ▼
-  在低一级 pair_end 标 🟢S（做多出场）或 🔴B（做空出场）
-```
-
-**与入场级联的区别**:
-- 入场级联找 `pair_start`（同向段开始）
-- 出场级联找 `pair_end`（同向段结束）
-- 正常出场 **要等** 低一级周期的同向段自然结束
-
-**示例**:
-
-```
-日线 bar=9 标 🟢S (做多出场，同向段 (2,9) 正常结束)
-       │
-       ▼
-  60分钟同向段 (52, 60) 在 bar=60 结束
-       │
-       ▼
-  在60分钟 bar=60 标 🟢S
-```
-
-### 4.3 异常出场级联（偏离退出 / stop_loss）
-
-**场景**: 策略因止损（stop_loss）在中途退出，没有等到同向段自然结束。
-
-```
-算法流程:
-
-  操作周期 stop_loss 触发，中途退出
-       │
-       ▼
-  不等低一级同向确认（因为这不是"自然结束"）
-       │
-       ▼
-  在低一级同一时间位置立即标 BS 出场
-  （时间对齐而非同向段对齐）
-```
-
-**与正常出场的关键差异**:
-
-| 特性 | 正常出场 | 异常出场（止损） |
-|------|----------|------------------|
-| 触发条件 | 同向段自然结束 | 止损触发 |
-| 等待低一级同向确认 | 是 | 否 |
-| 标记位置 | 低一级 `pair_end` | 同一时间位置 |
-| 级联时机 | 等低一级同向段走完 | 立即级联 |
-
-### 4.4 代码对应
-
-级联逻辑由 `_compute_cascade_markers()` 函数处理：
+在 `_render_chart` 的 BS markers 段：
 
 ```python
-def _compute_cascade_markers(higher_bs, lower_all_pairs, lower_sig, bar_time_map):
-    """
-    将上级 BS 标记级联到本级。
-
-    参数:
-        higher_bs: 上级周期的 BS 标记列表
-        lower_all_pairs: 本级 all_pairs
-        lower_sig: 本级 Schmitt 信号
-        bar_time_map: bar 索引到时间的映射
-    """
-    cascade_markers = []
-    for bs in higher_bs:
-        if bs["label"] == "entry":
-            # 入场级联：找本级同向段第一个点
-            start_bar = find_date_index(bs["bar"], bar_time_map)
-            for pair_start, pair_end in lower_all_pairs:
-                if pair_start >= start_bar and lower_sig[pair_end] == bs["direction"]:
-                    cascade_markers.append({...})  # 标在 pair_start
-                    break
-        elif bs["label"] == "exit":
-            # 正常出场级联：找本级同向段结束点
-            ...
-        elif bs["label"] == "stop_loss":
-            # 异常出场级联：时间对齐，立即标
-            ...
-    return cascade_markers
+# _align_masks 已提前计算（从 higher_pnl via _compute_holding_masks）
+_holding = _align_masks if (tf == _op_tf and _align_masks is not None) else None
+bs_markers = compute_bs_markers(
+    t, dates, schmitt, all_pairs, trade_records,
+    tf, _op_tf, higher_bs=_higher_bs,
+    holding_masks=_holding,
+)
 ```
 
----
+**仅此一处改动。** `_align_masks`、`trade_records`、`higher_pnl` 都是系统已有的。
 
-## 5. 再低一级及更深周期
-
-级联是一个 **递归/迭代过程**，逐级向下传递：
-
-```
-日线(操作周期)
-   │  compute_bs_markers(holding_masks=...)  → 本级 BS
-   │  _compute_cascade_markers → 存入 st.session_state["_bs_60min"]
-   ▼
-60分钟(级联)
-   │  读取 st.session_state["_bs_60min"] 作为 higher_bs
-   │  _compute_cascade_markers → 存入 st.session_state["_bs_15min"]
-   ▼
-15分钟(级联)
-   │  读取 st.session_state["_bs_15min"] 作为 higher_bs
-   │  _compute_cascade_markers → 存入 st.session_state["_bs_5min"]
-   ▼
-5分钟(级联)
-   │  ...
-   ▼
-  (继续向下，直到没有更低周期)
-```
-
-### 5.1 核心规则（适用所有级联层级）
-
-上一级标了 BS → 本级执行相同的级联逻辑：
-
-| BS 类型 | 本级处理 |
-|----------|----------|
-| 入场 (entry) | 找同向段第一个点，标入场 |
-| 正常出场 (exit) | 等同向段结束，标在 `pair_end` |
-| 异常出场 (stop_loss) | 时间对齐，立即标出场 |
-
-### 5.2 级联终止条件
-
-级联在以下情况下停止：
-
-1. **没有更低周期**: 当前已是最细粒度（如 5 分钟），无法继续向下
-2. **Schmitt 未启用**: 低一级周期的 Schmitt 触发器未配置或未计算
-3. **找不到同向 pair**: 入场级联时，低一级周期没有任何同向段满足方向和位置条件
-4. **数据不可用**: 低一级周期的数据时间窗口不覆盖上级 BS 的时间范围
-
----
-
-## 6. 数据流
-
-### 6.1 整体架构
-
-```
-                        ┌─────────────────────┐
-                        │   价格数据 (price)    │
-                        └──────────┬──────────┘
-                                   │
-                        ┌──────────▼──────────┐
-                        │  Schmitt 触发器      │
-                        │  → sig[], all_pairs │
-                        └──────────┬──────────┘
-                                   │
-                    ┌──────────────┼──────────────┐
-                    │              │              │
-                    ▼              │              │
-          ┌─────────────────┐     │              │
-          │ holding_masks    │     │              │
-          │ (long_mask,      │     │              │
-          │  short_mask)     │     │              │
-          │ 来自高一级周期    │     │              │
-          └────────┬────────┘     │              │
-                   │              │              │
-                   ▼              ▼              │
-          ┌─────────────────────────────┐        │
-          │  compute_bs_markers(        │        │
-          │    holding_masks=(l, s))    │        │
-          │                             │        │
-          │  all_pairs ∩ long_mask  →   │        │
-          │  all_pairs ∩ short_mask →   │        │
-          │  BS 标记                    │        │
-          └──────────────┬──────────────┘        │
-                         │                      │
-              ┌──────────┼──────────┐            │
-              │          │          │            │
-     ┌────────▼────┐ ┌───▼────┐ ┌───▼────┐       │
-     │ 操作周期(日线)│ │60分钟  │ │15分钟  │      │
-     │              │ │        │ │        │      │
-     │ holding_     │ │_compute│ │_compute│      │
-     │ masks +      │ │_cascade│ │_cascade│      │
-     │ all_pairs    │ │_markers│ │_markers│      │
-     │      │       │ │    │   │ │    │   │      │
-     │      ▼       │ │    ▼   │ │    ▼   │      │
-     │  BS标记 ─────┼─│→ BS标记─┼─│→ BS标记 │      │
-     │  (级联到     │ │(更高BS  │ │(更高BS │      │
-     │   下级)      │ │ 传入)  │ │ 传入)  │      │
-     └──────────────┘ └────────┘ └────────┘
-```
-
-### 6.2 状态传递
-
-BS 标记通过 Streamlit 的 `st.session_state` 在视图之间传递：
-
-```python
-# 键名约定
-st.session_state[f"_bs_{timeframe}"]  # 如 _bs_daily, _bs_60min, _bs_15min
-
-# 读取上级标记（用于级联）
-higher_bs = st.session_state.get(f"_bs_{higher_tf}", [])
-
-# 存储本级标记（供下级读取和自己显示）
-st.session_state[f"_bs_{current_tf}"] = current_markers
-```
-
-### 6.3 数据不变量
-
-在级联过程中，以下关系始终成立：
-
-```
-本级标记数量 ≤ 上级标记数量 × 2
-```
-每个上级 BS 最多在低一级产生 1~2 个标记（入场 + 出场/止损），如果找不到同向段则可能为 0。
-
-```
-级联链路方向: 操作周期 → 低一级 → 再低一级 → ... → 最细粒度
-```
-级联是单向的，不会从细粒度向粗粒度反向传递。
-
----
-
-## 7. 边界情况
-
-### 7.1 周期缺失
+## 10. 边界情况
 
 | 场景 | 行为 |
 |------|------|
-| 操作周期无低一级周期 | 仅在本级标 BS，不级联 |
-| 用户只启用日线和 15 分钟，跳过 60 分钟 | 级联链从日线直接到 15 分钟（如果有级联链路跳过逻辑），或日线的标记仅停留在日线 |
+| 操作周期无高一级 | `holding_masks=None` → 回退 `trade_records` 不过滤 |
+| 高一级无策略交易 | holding_masks 全 False → 无 BS 标记 |
+| 策略未启用 | `trade_records` 为空 → 回退 `all_pairs` |
+| 级联无同向 pair | 该 entry 不级联 |
+| `stop_loss` 退出 | 不等同向，立即级联 |
+| 不同 TF 数据时间窗不重叠 | `_find_date_index` 处理（tz 已修复） |
 
-### 7.2 Schmitt 状态
+## 11. 实现要点
 
-| 场景 | 行为 |
-|------|------|
-| 低一级 Schmitt 未启用 | 不级联，低一级周期无任何标记 |
-| 低一级 Schmitt 参数导致无 all_pairs | `_compute_cascade_markers` 收到空列表，返回空 |
-| 低一级 sig 全为 0 | 无同向段，级联不产生标记 |
-
-### 7.3 时间对齐
-
-| 场景 | 行为 |
-|------|------|
-| 低一级数据时间窗口不覆盖上级 BS 时间 | `_find_date_index` 进行日期对齐（时区归一化），若仍无法匹配则跳过该 BS |
-| 上级 BS 落在低一级的周末/假期（无数据） | 日期对齐时找最接近的下一个有效 bar |
-| 不同数据源的时区不一致 | 统一归一到 UTC 或指定时区后再比较 |
-
-### 7.4 同向段匹配
-
-| 场景 | 行为 |
-|------|------|
-| 级联找不到同向 pair（方向一致但位置不对） | 该 entry 不级联，低一级无对应标记 |
-| 级联找不到同向 pair（方向不一致） | 该 entry 不级联——低一级周期与上级"看法相反"，放弃 |
-| 低一级有多个同向段匹配 | 取第一个满足条件的（`pair_start ≥ start_bar` 且方向一致） |
-
-### 7.5 异常退出
-
-| 场景 | 行为 |
-|------|------|
-| 止损（stop_loss）触发 | 不等同向确认，立即级联到同一时间位置 |
-| 偏离退出（deviation exit） | 同上，视为异常退出 |
-| 策略信号翻转但同向段未结束 | 这属于异常退出范畴，按 stop_loss 逻辑处理 |
-
-### 7.6 空数据
-
-| 场景 | 行为 |
-|------|------|
-| 操作周期 all_pairs 为空 | 无 BS 标记产生，不级联 |
-| 低一级 all_pairs 为空但上级有 BS | 级联不产生标记 |
-| 价格数据加载失败 | 所有 BS 计算跳过，st.session_state 中对应键为空列表 |
-
----
-
-## 8. 完整示例
-
-### 8.1 示例数据
-
-```
-日线 (操作周期):
-  all_pairs = [(2, 9), (12, 19)]
-  sig[9] = 1   → 做多同向段
-  sig[19] = -1 → 做空同向段
-
-60分钟 (低一级):
-  all_pairs = [(30, 35), (40, 48), (52, 60), (65, 72)]
-  sig[35] = -1, sig[48] = -1, sig[60] = 1, sig[72] = 1
-
-时间映射:
-  日线 bar=2  →  60分钟 bar=45  (2026-03-15 09:30)
-  日线 bar=9  →  60分钟 bar=58  (2026-03-17 15:00)
-  日线 bar=12 →  60分钟 bar=63  (2026-03-18 10:00)
-  日线 bar=19 →  60分钟 bar=70  (2026-03-20 14:00)
-```
-
-### 8.2 逐步骤计算
-
-**步骤 1: 日线计算自身 BS**
-
-```
-日线 all_pairs = [(2, 9), (12, 19)]
-
-处理 (2, 9), sig[9]=1 (做多):
-  bar=2:  🟢B (入场)
-  bar=9:  🟢S (出场)
-
-处理 (12, 19), sig[19]=-1 (做空):
-  bar=12: 🔴S (入场)
-  bar=19: 🔴B (出场)
-
-日线 BS 结果:
-  [{bar: 2, type: "B", color: "green", label: "entry"},
-   {bar: 9, type: "S", color: "green", label: "exit"},
-   {bar: 12, type: "S", color: "red", label: "entry"},
-   {bar: 19, type: "B", color: "red", label: "exit"}]
-```
-
-**步骤 2: 级联到 60 分钟**
-
-```
-级联日线 bar=2 🟢B (做多入场):
-  定位 start_bar = 45
-  遍历60分钟 all_pairs:
-    (30, 35): pair_start(30) < 45  → 跳过（在此之前）
-    (40, 48): pair_start(40) < 45  → 跳过（在此之前）
-             但 sig[48]=-1         → 方向也不符
-    (52, 60): pair_start(52) ≥ 45 ✓, sig[60]=1 ✓ → 匹配!
-  → 在60分钟 bar=52 标 🟢B
-
-级联日线 bar=9 🟢S (做多出场):
-  这是正常出场，找对应同向段的 pair_end
-  (52, 60) 的 pair_end=60
-  → 在60分钟 bar=60 标 🟢S
-
-级联日线 bar=12 🔴S (做空入场):
-  定位 start_bar = 63
-  遍历60分钟 all_pairs:
-    (65, 72): pair_start(65) ≥ 63 ✓, sig[72]=1 ✗ → 方向不符!
-  60分钟目前在看多做多，与日线做空方向矛盾
-  → 找不到同向 pair，不标!
-
-级联日线 bar=19 🔴B (做空出场):
-  正常出场，但入场都没级联成功
-  → 不标（没有对应的60分钟持仓段）
-
-60分钟 BS 结果:
-  [{bar: 52, type: "B", color: "green", label: "entry"},
-   {bar: 60, type: "S", color: "green", label: "exit"}]
-```
-
-### 8.3 最终 K 线图展示
-
-```
-日线:
-  bar:  1   2   3   4   5   6   7   8   9  10  11  12  13  14  15  16  17  18  19  20
-       ────────────────────────────────────────────────────────────────────────────────
-        │ 🟢B                                   🟢S│   │ 🔴S                      🔴B│
-        │                                         │   │                            │
-        └── 做多同向段 (2,9) ─────────────────────┘   └── 做空同向段 (12,19) ──────┘
-
-60分钟:
-  bar:  ... 50  51  52  53  54  55  56  57  58  59  60  61  62  63  64  65 ...
-       ─────────────────────────────────────────────────────────────────────
-                  │ 🟢B                           🟢S│
-                  │                                  │
-                  └── 做多同向段 (52,60) ───────────┘
-                  (日线做空入场未级联: 60分钟在65之后方向已变为做多)
-```
-
----
-
-## 9. 术语表
-
-| 术语 | 英文 | 说明 |
-|------|------|------|
-| BS 标记 | BS Marker | K 线图上的买卖点标注（Buy/Sell） |
-| 同向段 | Same-Direction Segment | Schmitt 触发器产生的连续同向信号区间 |
-| Schmitt 触发器 | Schmitt Trigger | 滞回比较器，将价格转换为离散方向信号 |
-| 操作周期 | Operating Timeframe | 用户选择的主分析周期（如日线） |
-| 级联 | Cascade | 将上级周期的 BS 标记传递到低一级周期 |
-| 入场 | Entry | 同向段开始，建立仓位 |
-| 出场 | Exit | 同向段结束，平仓离场 |
-| 止损 | Stop Loss | 价格触及止损线，强制平仓 |
-| 偏离退出 | Deviation Exit | 价格偏离预期，策略提前退出 |
-| all_pairs | — | `[(start, end), ...]` 同向段列表 |
-| sig | — | Schmitt 信号数组，`1`=做多, `-1`=做空, `0`=中性 |
-| higher_bs | — | 从上级周期传递下来的 BS 标记列表 |
-| 同向性判断 | Holding Masks | 做多/做空持仓区间的布尔掩码，由 `_compute_holding_masks` 生成，用于过滤 `all_pairs` 以产生 BS 标记 |
-| holding_masks | — | `(long_mask, short_mask)` 元组，每个 mask 是与 bars 等长的布尔数组，标记持仓区间 |
-| pair_start | — | 同向段的起始 bar 索引（信号首次出现） |
-| pair_end | — | 同向段的结束 bar 索引（信号确认点） |
-
----
-
-## 附录 A: 代码层级对应
-
-```
-filter_app/
-├── bs_marker.py            # BS 标记核心逻辑 (_compute_own_from_masks, _compute_cascade_markers 等)
-├── schmitt.py              # Schmitt 触发器 (生成 sig, all_pairs)
-├── views/
-│   ├── daily_view.py       # 日线视图（操作周期）
-│   ├── hourly_view.py      # 60 分钟视图
-│   ├── min15_view.py       # 15 分钟视图
-│   └── min5_view.py        # 5 分钟视图
-└── utils/
-    └── time_utils.py        # 时间对齐工具 (_find_date_index 等)
-```
-
-## 附录 B: 常见问题
-
-**Q: BS 标记和同向性判断是什么关系？**
-
-A: BS 标记 = 本周期 `all_pairs` 过滤高一级的 `holding_masks`。`holding_masks` 由同向性判断产生（`_compute_holding_masks`），标记哪些 bar 区间是"做多持仓"、哪些是"做空持仓"。BS 标记只保留与对应 mask 有交集的 all_pairs 同向段。这保证了：BS 标记只出现在同向性判断确认的持仓区间内，不会在不持有仓位的时间段出现买卖标记。
-
-> **旧方案（已弃用）**: ~~BS 标记优先使用 `trade_records`（来自 `_compute_strategy_pnl`），通过 `aligned_markers` 参数透传同向性判断数据。`all_pairs` 仅作为回退方案。~~
-
-**Q: 级联时为什么要等低一级同向确认？**
-
-A: 为了确保精细周期的方向与大周期一致。如果低一级周期与大周期方向相反，说明短期内可能有反向波动，此时入场风险较高。
-
-**Q: 止损出场为什么不等待同向确认？**
-
-A: 止损是强制性风险控制动作，不等同向确认直接退出是为了及时止损。在低一级周期时间对齐后立即标记，反映的是风控决策而非信号决策。
+1. **`_compute_from_trades_filtered`**：遍历 `trade_records`，对每笔交易检查其 `entry_idx` / `exit_idx` 是否在对应方向的 mask 内（`mask[entry_idx] == True`）
+2. **`_compute_cascade`**：已有，保持不变
+3. **`_find_date_index`**：已有 tz 修复，保持不变
+4. **不新增系统调用**，全部复用已有数据

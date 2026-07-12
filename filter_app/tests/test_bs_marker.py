@@ -6,8 +6,8 @@ import pandas as pd
 import pytest
 
 from services.bs_marker import (
-    compute_bs_markers, _compute_own_from_trades, _compute_own_from_masks,
-    _compute_own_from_pairs, _find_date_index,
+    compute_bs_markers, _compute_from_trades_filtered, _compute_own_from_trades,
+    _find_date_index,
     _compute_cascade_markers,
     TF_LOWER, get_lower_tfs,
 )
@@ -92,143 +92,9 @@ class TestFindDateIndex:
         assert result is not None, f"Expected valid index, got None"
 
 
-# ── _compute_own_from_pairs ──────────────────────────────────────────
+# ── _compute_own_from_trades ─────────────────────────────────────────
 
-class TestComputeOwnMarkers:
-
-    def test_long_entry_and_exit(self):
-        """Long schmitt pair → green B (entry) + green S (exit)."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
-        all_pairs = [(3, 4)]
-
-        result = _compute_own_from_pairs(t, dates, schmitt, all_pairs)
-
-        assert len(result["entry_markers"]) == 1, "Long pair should produce 1 entry"
-        assert result["entry_markers"][0] == (
-            3, "B", "green", dates[3],
-        ), "Long entry → green B at pair_start bar"
-        assert len(result["exit_markers"]) == 1, "Long pair should produce 1 exit"
-        assert result["exit_markers"][0] == (
-            4, "S", "green", "pair_end", dates[4],
-        ), "Long exit → green S at pair_end bar"
-
-    def test_short_entry_and_exit(self):
-        """Short schmitt pair → red S (entry) + red B (exit)."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 0, 0, -1, -1, 0, 0, 0, 0, 0])
-        all_pairs = [(3, 4)]
-
-        result = _compute_own_from_pairs(t, dates, schmitt, all_pairs)
-
-        assert len(result["entry_markers"]) == 1
-        assert result["entry_markers"][0] == (3, "S", "red", dates[3])
-        assert len(result["exit_markers"]) == 1
-        assert result["exit_markers"][0] == (4, "B", "red", "pair_end", dates[4])
-
-    def test_multiple_pairs(self):
-        """Multiple schmitt pairs produce correct entry/exit markers."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 1, 1, 0, -1, -1, 0, 0, 0, 0])
-        all_pairs = [(1, 2), (4, 5)]      # long at 1-2, short at 4-5
-
-        result = _compute_own_from_pairs(t, dates, schmitt, all_pairs)
-
-        assert len(result["entry_markers"]) == 2
-        assert result["entry_markers"][0] == (1, "B", "green", dates[1])
-        assert result["entry_markers"][1] == (4, "S", "red", dates[4])
-        assert len(result["exit_markers"]) == 2
-        assert result["exit_markers"][0] == (2, "S", "green", "pair_end", dates[2])
-        assert result["exit_markers"][1] == (5, "B", "red", "pair_end", dates[5])
-
-    def test_no_schmitt_returns_empty(self):
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        all_pairs = [(3, 4)]
-
-        result = _compute_own_from_pairs(t, dates, None, all_pairs)
-
-        assert result["entry_markers"] == []
-        assert result["exit_markers"] == []
-
-    def test_empty_pairs_returns_empty(self):
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
-
-        result = _compute_own_from_pairs(t, dates, schmitt, [])
-
-        assert result["entry_markers"] == []
-        assert result["exit_markers"] == []
-
-    def test_short_trade_sequence_is_S_then_B(self):
-        """做空: 先S(红)入场, 后B(红)出场 — from all_pairs."""
-        dates = pd.date_range('2026-01-05', periods=20, freq='B')
-        t = np.arange(20, dtype=float)
-        schmitt = _make_schmitt([0, 0, 0, 0, 0, -1, -1, -1, -1, -1,
-                                  -1, -1, -1, -1, -1, -1, 0, 0, 0, 0])
-        all_pairs = [(5, 15)]
-        result = _compute_own_from_pairs(t, dates, schmitt, all_pairs)
-        assert result["entry_markers"][0][1] == "S"
-        assert result["entry_markers"][0][2] == "red"
-        assert result["exit_markers"][0][1] == "B"
-        assert result["exit_markers"][0][2] == "red"
-
-    def test_long_trade_sequence_is_B_then_S(self):
-        """做多: 先B(绿)入场, 后S(绿)出场 — from all_pairs."""
-        dates = pd.date_range('2026-01-05', periods=20, freq='B')
-        t = np.arange(20, dtype=float)
-        schmitt = _make_schmitt([0, 0, 0, 0, 0, 1, 1, 1, 1, 1,
-                                  1, 1, 1, 1, 1, 1, 0, 0, 0, 0])
-        all_pairs = [(5, 15)]
-        result = _compute_own_from_pairs(t, dates, schmitt, all_pairs)
-        assert result["entry_markers"][0][1] == "B"
-        assert result["entry_markers"][0][2] == "green"
-        assert result["exit_markers"][0][1] == "S"
-        assert result["exit_markers"][0][2] == "green"
-
-    def test_pair_end_out_of_bounds_skipped(self):
-        """pair_end >= len(sig) should be skipped."""
-        dates = _make_dates("2024-01-01", periods=5)
-        t = np.arange(5)
-        schmitt = _make_schmitt([1, 1, 1, 1, 1])
-        all_pairs = [(0, 99)]              # end far beyond sig
-
-        result = _compute_own_from_pairs(t, dates, schmitt, all_pairs)
-
-        assert result["entry_markers"] == []
-        assert result["exit_markers"] == []
-
-    def test_trade_records_primary_all_pairs_fallback(self):
-        """trade_records非空→从交易生成; 为空→回退all_pairs."""
-        dates = pd.date_range('2026-01-05', periods=30, freq='B')
-        sig = np.array([0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, -1, -1, -1,
-                        -1, -1, -1, -1, -1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-        schmitt = {'sig': sig}
-        all_pairs = [(2, 9), (12, 19)]
-
-        # With trade_records → from trades (1 entry + 1 exit)
-        trade_records = [
-            {"type": "long", "entry_idx": 3, "exit_idx": 8,
-             "return_pct": 2.0, "exit_reason": "take_profit"},
-        ]
-        result = _compute_own_from_trades(
-            np.arange(30, dtype=float), dates, trade_records,
-        )
-        assert len(result["entry_markers"]) == 1
-        assert result["entry_markers"][0][0] == 3   # trade entry_idx, not pair_start=2
-        assert result["exit_markers"][0][0] == 8    # trade exit_idx, not pair_end=9
-        assert result["exit_markers"][0][3] == "take_profit"
-
-        # Without trade_records → fallback to all_pairs (2 entries + 2 exits)
-        result2 = _compute_own_from_pairs(
-            np.arange(30, dtype=float), dates, schmitt, all_pairs,
-        )
-        assert len(result2["entry_markers"]) == 2
-        assert result2["entry_markers"][0][0] == 2   # pair_start
+class TestComputeOwnFromTrades:
 
     def test_trade_records_aligns_with_tongxiang_panduan(self):
         """BS标记入场点=trade_records的entry_idx(pair_end信号确认点)."""
@@ -260,93 +126,59 @@ class TestComputeOwnMarkers:
         assert result["exit_markers"][0][1] == "B"
         assert result["exit_markers"][0][2] == "red"
 
-
-# ── _compute_own_from_masks ──────────────────────────────────────────
-
-class TestComputeOwnFromMasks:
-
-    def test_long_pair_in_long_mask_kept(self):
-        """long pair within long_mask → BS markers produced."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10, dtype=float)
-        schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
-        all_pairs = [(3, 4)]
-
-        # long_mask covers bars 3-6, short_mask is all False
-        long_mask = np.zeros(10, dtype=bool)
-        long_mask[3:7] = True
-        short_mask = np.zeros(10, dtype=bool)
-
-        result = _compute_own_from_masks(
-            t, dates, schmitt, all_pairs, (long_mask, short_mask),
+    def test_long_trade_sequence_B_then_S(self):
+        """做多交易: 先B(绿)入场, 后S(绿)出场."""
+        dates = pd.date_range('2026-01-05', periods=20, freq='B')
+        trade_records = [
+            {"type": "long", "entry_idx": 5, "exit_idx": 15,
+             "return_pct": 10.0, "exit_reason": "take_profit"},
+        ]
+        result = _compute_own_from_trades(
+            np.arange(20, dtype=float), dates, trade_records,
         )
+        assert result["entry_markers"][0][1] == "B"
+        assert result["entry_markers"][0][2] == "green"
+        assert result["exit_markers"][0][1] == "S"
+        assert result["exit_markers"][0][2] == "green"
 
-        assert len(result["entry_markers"]) == 1, (
-            "Long pair fully inside long_mask should produce entry marker"
-        )
-        assert result["entry_markers"][0] == (3, "B", "green", dates[3])
-        assert len(result["exit_markers"]) == 1
-        assert result["exit_markers"][0] == (4, "S", "green", "pair_end", dates[4])
 
-    def test_short_pair_in_short_mask_kept(self):
-        """short pair within short_mask → BS markers produced."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10, dtype=float)
-        schmitt = _make_schmitt([0, 0, 0, -1, -1, 0, 0, 0, 0, 0])
-        all_pairs = [(3, 4)]
+# ── _compute_from_trades_filtered ────────────────────────────────────
 
-        long_mask = np.zeros(10, dtype=bool)
-        short_mask = np.zeros(10, dtype=bool)
-        short_mask[3:7] = True
-
-        result = _compute_own_from_masks(
-            t, dates, schmitt, all_pairs, (long_mask, short_mask),
-        )
-
+class TestComputeFromTradesFiltered:
+    def test_long_trade_in_long_mask_kept(self):
+        """Long trade entry in long_mask → BS markers."""
+        dates = pd.date_range('2026-01-05', periods=30, freq='B')
+        trade_records = [
+            {"type": "long", "entry_idx": 10, "exit_idx": 20, "return_pct": 5.0, "exit_reason": "take_profit"},
+        ]
+        long_mask = np.zeros(30, dtype=bool); long_mask[8:22] = True
+        short_mask = np.zeros(30, dtype=bool)
+        result = _compute_from_trades_filtered(np.arange(30, dtype=float), dates, trade_records, (long_mask, short_mask))
         assert len(result["entry_markers"]) == 1
-        assert result["entry_markers"][0] == (3, "S", "red", dates[3])
-        assert len(result["exit_markers"]) == 1
-        assert result["exit_markers"][0] == (4, "B", "red", "pair_end", dates[4])
+        assert result["entry_markers"][0][1] == "B"
+        assert result["exit_markers"][0][1] == "S"
 
-    def test_pair_outside_mask_filtered(self):
-        """pair outside mask → no BS markers."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10, dtype=float)
-        schmitt = _make_schmitt([0, 0, 1, 1, 0, 0, 0, 0, 0, 0])
-        all_pairs = [(2, 3)]
+    def test_trade_outside_mask_filtered_out(self):
+        """Trade entry outside mask → no markers."""
+        dates = pd.date_range('2026-01-05', periods=30, freq='B')
+        trade_records = [
+            {"type": "short", "entry_idx": 5, "exit_idx": 15, "return_pct": -2.0, "exit_reason": "stop_loss"},
+        ]
+        short_mask = np.zeros(30, dtype=bool); short_mask[16:25] = True  # entry=5 not in mask
+        long_mask = np.zeros(30, dtype=bool)
+        result = _compute_from_trades_filtered(np.arange(30, dtype=float), dates, trade_records, (long_mask, short_mask))
+        assert len(result["entry_markers"]) == 0
 
-        # masks are empty at bars 2-3
-        long_mask = np.zeros(10, dtype=bool)
-        short_mask = np.zeros(10, dtype=bool)
-
-        result = _compute_own_from_masks(
-            t, dates, schmitt, all_pairs, (long_mask, short_mask),
-        )
-
-        assert result["entry_markers"] == []
-        assert result["exit_markers"] == []
-
-    def test_pair_partially_in_mask_kept(self):
-        """pair partially overlapping mask → kept (any bar within mask suffices)."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10, dtype=float)
-        schmitt = _make_schmitt([0, 0, 1, 1, 1, 1, 0, 0, 0, 0])
-        all_pairs = [(2, 5)]
-
-        # mask covers only bar 5, not bars 2-4
-        long_mask = np.zeros(10, dtype=bool)
-        long_mask[5] = True
-        short_mask = np.zeros(10, dtype=bool)
-
-        result = _compute_own_from_masks(
-            t, dates, schmitt, all_pairs, (long_mask, short_mask),
-        )
-
-        assert len(result["entry_markers"]) == 1, (
-            "Pair partially overlapping mask should still be kept"
-        )
-        assert result["entry_markers"][0] == (2, "B", "green", dates[2])
-        assert result["exit_markers"][0] == (5, "S", "green", "pair_end", dates[5])
+    def test_short_trade_sequence_S_then_B(self):
+        """Short sequence: S(red) entry, B(red) exit."""
+        dates = pd.date_range('2026-01-05', periods=30, freq='B')
+        trade_records = [
+            {"type": "short", "entry_idx": 10, "exit_idx": 20, "return_pct": -3.0, "exit_reason": "stop_loss"},
+        ]
+        short_mask = np.ones(30, dtype=bool); long_mask = np.zeros(30, dtype=bool)
+        result = _compute_from_trades_filtered(np.arange(30, dtype=float), dates, trade_records, (long_mask, short_mask))
+        assert result["entry_markers"][0][1] == "S" and result["entry_markers"][0][2] == "red"
+        assert result["exit_markers"][0][1] == "B" and result["exit_markers"][0][2] == "red"
 
 
 # ── _compute_cascade_markers ─────────────────────────────────────────
@@ -559,39 +391,65 @@ class TestCascadeMarkers:
 
 class TestComputeBsMarkers:
 
-    def test_operating_tf_uses_own_markers(self):
-        """tf == operating_tf → delegates to _compute_own_from_pairs."""
-        dates = _make_dates("2024-01-01", periods=10)
+    def test_operating_tf_uses_own_from_trades(self):
+        """tf == operating_tf with trade_records, no masks → _compute_own_from_trades."""
+        dates = pd.date_range('2026-01-05', periods=10, freq='B')
         t = np.arange(10)
         schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
-        all_pairs = [(3, 4)]
-        trade_records = []
+        trade_records = [
+            {"type": "long", "entry_idx": 3, "exit_idx": 4,
+             "return_pct": 2.0, "exit_reason": "take_profit"},
+        ]
 
         result = compute_bs_markers(
-            t, dates, schmitt, all_pairs, trade_records,
+            t, dates, schmitt, [], trade_records,
             tf="日线", operating_tf="日线", higher_bs=None,
         )
 
         assert len(result["entry_markers"]) == 1
-        assert result["entry_markers"][0] == (3, "B", "green", dates[3])
+        assert result["entry_markers"][0][1] == "B"
+        assert result["entry_markers"][0][2] == "green"
 
-    def test_operating_tf_with_holding_masks(self):
-        """操作周期有holding_masks时使用mask过滤all_pairs."""
+    def test_operating_tf_no_trades_no_masks_returns_empty(self):
+        """tf == operating_tf, no trade_records and no masks → empty."""
         dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10, dtype=float)
+        t = np.arange(10)
         schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
-        all_pairs = [(3, 4)]
-        long_mask = np.zeros(10, dtype=bool)
-        long_mask[3:7] = True
-        short_mask = np.zeros(10, dtype=bool)
 
         result = compute_bs_markers(
-            t, dates, schmitt, all_pairs, [],
+            t, dates, schmitt, [], [],
+            tf="日线", operating_tf="日线", higher_bs=None,
+        )
+
+        assert result["entry_markers"] == []
+        assert result["exit_markers"] == []
+
+    def test_operating_tf_with_holding_masks(self):
+        """操作周期有holding_masks时，通过trade_records+mask过滤生成标记."""
+        dates = pd.date_range('2026-01-05', periods=10, freq='B')
+        t = np.arange(10, dtype=float)
+        schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
+
+        # 两个交易：long在mask内，short不在mask内
+        trade_records = [
+            {"type": "long", "entry_idx": 3, "exit_idx": 6,
+             "return_pct": 5.0, "exit_reason": "take_profit"},
+            {"type": "short", "entry_idx": 5, "exit_idx": 8,
+             "return_pct": -2.0, "exit_reason": "stop_loss"},
+        ]
+        long_mask = np.zeros(10, dtype=bool)
+        long_mask[3:7] = True       # entry_idx=3 is in mask
+        short_mask = np.zeros(10, dtype=bool)  # entry_idx=5 not in mask
+
+        result = compute_bs_markers(
+            t, dates, schmitt, [], trade_records,
             tf="日线", operating_tf="日线",
             holding_masks=(long_mask, short_mask),
         )
+        # 只有 long trade (entry in mask) 保留
         assert len(result["entry_markers"]) == 1
         assert result["entry_markers"][0][1] == "B"
+        assert result["entry_markers"][0][2] == "green"
 
     def test_lower_tf_uses_cascade(self):
         """tf < operating_tf with higher_bs → delegates to _compute_cascade_markers."""

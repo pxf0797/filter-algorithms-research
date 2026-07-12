@@ -91,68 +91,42 @@ def _compute_own_from_trades(t, dates, trade_records):
     return {"entry_markers": entry, "exit_markers": exit_}
 
 
-def _compute_own_from_pairs(t, dates, schmitt, all_pairs):
-    """从 all_pairs 生成 BS 标记（最后回退：无策略交易时使用）。"""
-    entry = []
-    exit_ = []
-    n_dates = len(dates) if dates is not None else 0
+def _compute_from_trades_filtered(t, dates, trade_records, holding_masks):
+    """从 trade_records 生成 BS 标记，经 holding_masks 过滤。
 
-    if schmitt is None or not all_pairs:
-        return {"entry_markers": entry, "exit_markers": exit_}
+    只有 entry_idx 落在对应方向 mask 内的交易才标 BS。
+    这是操作周期的主路径（同向性判断过滤后的 PnL）。
 
-    sig = schmitt["sig"]
-    for pair_start, pair_end in all_pairs:
-        if pair_end >= len(sig):
-            continue
-        direction = sig[pair_end]
-        d_entry = dates[pair_start] if pair_start < n_dates else None
-        d_exit = dates[pair_end] if pair_end < n_dates else None
-
-        if direction == 1:
-            entry.append((int(pair_start), "B", "green", d_entry))
-            exit_.append((int(pair_end), "S", "green", "pair_end", d_exit))
-        elif direction == -1:
-            entry.append((int(pair_start), "S", "red", d_entry))
-            exit_.append((int(pair_end), "B", "red", "pair_end", d_exit))
-
-    return {"entry_markers": entry, "exit_markers": exit_}
-
-
-def _compute_own_from_masks(t, dates, schmitt, all_pairs, holding_masks):
-    """从 all_pairs 过滤：只保留 holding_masks 区间内的同向段。
-
-    holding_masks: (long_mask, short_mask) from _compute_holding_masks
+    Parameters
+    ----------
+    holding_masks : (long_mask, short_mask) — np.ndarray[bool] 各长度=len(t)
     """
     entry = []
     exit_ = []
     n_dates = len(dates) if dates is not None else 0
-
-    if schmitt is None or not all_pairs:
-        return {"entry_markers": entry, "exit_markers": exit_}
-
     long_mask, short_mask = holding_masks
-    sig = schmitt["sig"]
 
-    for pair_start, pair_end in all_pairs:
-        if pair_end >= len(sig):
+    for trade in trade_records:
+        is_long = trade["type"] == "long"
+        entry_idx = trade["entry_idx"]
+        exit_idx = trade["exit_idx"]
+        exit_reason = trade.get("exit_reason", "")
+
+        mask = long_mask if is_long else short_mask
+
+        # 入场：entry_idx 必须在 mask 内
+        if entry_idx >= len(mask) or not mask[entry_idx]:
             continue
-        direction = sig[pair_end]
-        mask = long_mask if direction == 1 else short_mask
 
-        # Check if ANY bar in [pair_start, pair_end] falls within the mask
-        pair_slice = slice(pair_start, min(pair_end + 1, len(mask)))
-        if not mask[pair_slice].any():
-            continue  # 不在同向区间内，跳过
+        d_entry = dates[entry_idx] if entry_idx < n_dates else None
+        d_exit = dates[exit_idx] if exit_idx < n_dates else None
 
-        d_entry = dates[pair_start] if pair_start < n_dates else None
-        d_exit = dates[pair_end] if pair_end < n_dates else None
-
-        if direction == 1:
-            entry.append((int(pair_start), "B", "green", d_entry))
-            exit_.append((int(pair_end), "S", "green", "pair_end", d_exit))
-        elif direction == -1:
-            entry.append((int(pair_start), "S", "red", d_entry))
-            exit_.append((int(pair_end), "B", "red", "pair_end", d_exit))
+        if is_long:
+            entry.append((int(entry_idx), "B", "green", d_entry))
+            exit_.append((int(exit_idx), "S", "green", exit_reason, d_exit))
+        else:
+            entry.append((int(entry_idx), "S", "red", d_entry))
+            exit_.append((int(exit_idx), "B", "red", exit_reason, d_exit))
 
     return {"entry_markers": entry, "exit_markers": exit_}
 
@@ -239,7 +213,7 @@ def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
     all_pairs : list[(int, int)]
         Schmitt 信号对列表。
     trade_records : list[dict]
-        策略交易记录（操作周期无 holding_masks 时的回退）。
+        策略交易记录。操作周期主路径输入（有无 holding_masks 时均使用）。
     tf : str
         当前视图的周期。
     operating_tf : str
@@ -248,7 +222,7 @@ def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
         紧邻高一级周期的 BS 标记（用于级联）。操作周期本身为 None。
     holding_masks : tuple or None
         (long_mask, short_mask) from _compute_holding_masks。
-        用于过滤 all_pairs，只保留持仓区间内的同向段。
+        用于过滤 trade_records，只保留 entry_idx 落在同向 mask 内的交易。
 
     Returns
     -------
@@ -256,12 +230,13 @@ def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
         {"entry_markers": [...], "exit_markers": [...]}
     """
     if tf == operating_tf:
-        if holding_masks is not None:
-            return _compute_own_from_masks(t, dates, schmitt, all_pairs, holding_masks)
+        if holding_masks is not None and trade_records:
+            return _compute_from_trades_filtered(t, dates, trade_records, holding_masks)
         elif trade_records:
             return _compute_own_from_trades(t, dates, trade_records)
         else:
-            return _compute_own_from_pairs(t, dates, schmitt, all_pairs)
+            # No trades, no masks — nothing to mark
+            return {"entry_markers": [], "exit_markers": []}
     elif higher_bs is not None and (higher_bs.get("entry_markers") or higher_bs.get("exit_markers")):
         return _compute_cascade_markers(t, dates, schmitt, all_pairs,
                                          trade_records, higher_bs)
