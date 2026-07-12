@@ -82,11 +82,13 @@ def _compute_own_from_trades(t, dates, trade_records):
         if is_long:
             # 做多: B(绿)入场, S(绿)出场
             entry.append((int(entry_idx), "B", "green", d_entry))
-            exit_.append((int(exit_idx), "S", "green", exit_reason, d_exit))
+            if exit_reason != "eod":
+                exit_.append((int(exit_idx), "S", "green", exit_reason, d_exit))
         else:
             # 做空: S(红)入场, B(红)出场
             entry.append((int(entry_idx), "S", "red", d_entry))
-            exit_.append((int(exit_idx), "B", "red", exit_reason, d_exit))
+            if exit_reason != "eod":
+                exit_.append((int(exit_idx), "B", "red", exit_reason, d_exit))
 
     return {"entry_markers": entry, "exit_markers": exit_}
 
@@ -123,10 +125,12 @@ def _compute_from_trades_filtered(t, dates, trade_records, holding_masks):
 
         if is_long:
             entry.append((int(entry_idx), "B", "green", d_entry))
-            exit_.append((int(exit_idx), "S", "green", exit_reason, d_exit))
+            if exit_reason != "eod":
+                exit_.append((int(exit_idx), "S", "green", exit_reason, d_exit))
         else:
             entry.append((int(entry_idx), "S", "red", d_entry))
-            exit_.append((int(exit_idx), "B", "red", exit_reason, d_exit))
+            if exit_reason != "eod":
+                exit_.append((int(exit_idx), "B", "red", exit_reason, d_exit))
 
     return {"entry_markers": entry, "exit_markers": exit_}
 

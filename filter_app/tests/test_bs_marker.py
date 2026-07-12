@@ -140,6 +140,17 @@ class TestComputeOwnFromTrades:
         assert result["exit_markers"][0][1] == "S"
         assert result["exit_markers"][0][2] == "green"
 
+    def test_eod_exit_suppressed_in_own_trades(self):
+        """_compute_own_from_trades也抑制eod."""
+        dates = pd.date_range('2026-01-05', periods=30, freq='B')
+        trade_records = [
+            {"type": "short", "entry_idx": 5, "exit_idx": 29, "return_pct": -3.0, "exit_reason": "eod"},
+        ]
+        result = _compute_own_from_trades(np.arange(30, dtype=float), dates, trade_records)
+        assert len(result["entry_markers"]) == 1
+        assert result["entry_markers"][0][1] == "S"
+        assert len(result["exit_markers"]) == 0
+
     def test_empty_trade_records_returns_empty(self):
         """Empty trade_records → no markers."""
         dates = pd.date_range('2026-01-05', periods=10, freq='B')
@@ -206,6 +217,28 @@ class TestComputeFromTradesFiltered:
         result = _compute_from_trades_filtered(np.arange(30, dtype=float), dates, trade_records, (long_mask, short_mask))
         assert result["entry_markers"][0][1] == "S" and result["entry_markers"][0][2] == "red"
         assert result["exit_markers"][0][1] == "B" and result["exit_markers"][0][2] == "red"
+
+    def test_eod_exit_suppressed_in_filtered(self):
+        """eod出场不标BS, 入场仍标."""
+        dates = pd.date_range('2026-01-05', periods=30, freq='B')
+        trade_records = [
+            {"type": "long", "entry_idx": 10, "exit_idx": 29, "return_pct": 5.0, "exit_reason": "eod"},
+        ]
+        long_mask = np.ones(30, dtype=bool); short_mask = np.zeros(30, dtype=bool)
+        result = _compute_from_trades_filtered(np.arange(30, dtype=float), dates, trade_records, (long_mask, short_mask))
+        assert len(result["entry_markers"]) == 1, "eod entry should still be marked"
+        assert len(result["exit_markers"]) == 0, "eod exit should be suppressed"
+
+    def test_non_eod_exit_still_marked(self):
+        """非eod出场(take_profit/stop_loss)正常标BS."""
+        dates = pd.date_range('2026-01-05', periods=30, freq='B')
+        trade_records = [
+            {"type": "long", "entry_idx": 10, "exit_idx": 20, "return_pct": 5.0, "exit_reason": "take_profit"},
+        ]
+        long_mask = np.ones(30, dtype=bool); short_mask = np.zeros(30, dtype=bool)
+        result = _compute_from_trades_filtered(np.arange(30, dtype=float), dates, trade_records, (long_mask, short_mask))
+        assert len(result["entry_markers"]) == 1
+        assert len(result["exit_markers"]) == 1, "non-eod exit should be marked"
 
     def test_empty_trade_records_returns_empty(self):
         """Empty trade_records → no markers, regardless of masks."""

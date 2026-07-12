@@ -197,6 +197,7 @@ st.session_state["_bs_lower_tfs"] = _visible_lower_tfs
 | 本级策略未启用 | `trade_records` 为空 → 返回空 |
 | 单笔交易部分在 mask 外 | entry_idx 在 mask 内则整笔标（含出场），不在则整笔跳过 |
 | entry_idx 超出 mask 长度 | 安全跳过（`entry_idx >= len(mask)` 检查） |
+| eod 退出（数据结束） | 入场标 BS，出场不标 | 趋势未真正结束，避免虚假信号 |
 | 不同 TF 数据时间窗不重叠 | `_align_pnl_to_current_tf` 处理对齐 |
 
 ## 12. v4 → v5 变更摘要
