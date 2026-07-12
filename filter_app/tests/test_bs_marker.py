@@ -269,8 +269,8 @@ class TestComputeOwnFromAlignment:
         """同向性判断long entry → 绿B."""
         dates = pd.date_range('2026-01-05', periods=30, freq='B')
         aligned = {
-            "entry_markers": [(10, "long", 100.0, dates[10])],
-            "exit_markers": [(20, "long", 112.0, 12.0, "take_profit", dates[20])],
+            "entry_markers": [(10, "long", 100.0)],
+            "exit_markers": [(20, "long", 112.0, 12.0, "take_profit")],
         }
         result = _compute_own_from_alignment(np.arange(30, dtype=float), dates, aligned)
         assert result["entry_markers"][0][1] == "B"
@@ -282,8 +282,8 @@ class TestComputeOwnFromAlignment:
         """同向性判断short entry → 红S."""
         dates = pd.date_range('2026-01-05', periods=30, freq='B')
         aligned = {
-            "entry_markers": [(5, "short", 100.0, dates[5])],
-            "exit_markers": [(15, "short", 95.0, -5.0, "stop_loss", dates[15])],
+            "entry_markers": [(5, "short", 100.0)],
+            "exit_markers": [(15, "short", 95.0, -5.0, "stop_loss")],
         }
         result = _compute_own_from_alignment(np.arange(30, dtype=float), dates, aligned)
         assert result["entry_markers"][0][1] == "S"
@@ -522,7 +522,7 @@ class TestComputeBsMarkers:
         """操作周期有aligned_markers时优先使用同向性判断数据."""
         dates = pd.date_range('2026-01-05', periods=30, freq='B')
         aligned = {
-            "entry_markers": [(10, "long", 100.0, dates[10])],
+            "entry_markers": [(10, "long", 100.0)],
             "exit_markers": [],
         }
         result = compute_bs_markers(

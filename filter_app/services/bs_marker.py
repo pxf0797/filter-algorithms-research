@@ -122,31 +122,33 @@ def _compute_own_from_alignment(t, dates, aligned_markers):
     """从高一级周期的同向性判断数据(aligned markers)生成 BS 标记。
 
     aligned_markers 来自 _align_pnl_to_current_tf:
-      entry_markers: [(bar_idx, type, pnl_val, date), ...]
-      exit_markers: [(bar_idx, type, pnl_val, ret_pct, reason, date), ...]
+      entry_markers: [(bar_idx, type, pnl_val), ...]            (3-tuple)
+      exit_markers:  [(bar_idx, type, pnl_val, ret_pct, reason), ...]  (5-tuple)
     type: "long" or "short"
     """
     entry = []
     exit_ = []
     n_dates = len(dates) if dates is not None else 0
 
-    for bar_idx, trade_type, pnl_val, date in aligned_markers.get("entry_markers", []):
+    # entry_markers: (bar_idx, trade_type, pnl_val) — 3-tuple
+    for bar_idx, trade_type, pnl_val in aligned_markers.get("entry_markers", []):
         if bar_idx >= n_dates:
             continue
         is_long = trade_type == "long"
         label = "B" if is_long else "S"
         color = "green" if is_long else "red"
-        entry.append((int(bar_idx), label, color, dates[bar_idx] if bar_idx < n_dates else None))
+        d = dates[bar_idx] if bar_idx < n_dates else None
+        entry.append((int(bar_idx), label, color, d))
 
-    for item in aligned_markers.get("exit_markers", []):
-        bar_idx, trade_type, pnl_val = item[0], item[1], item[2]
+    # exit_markers: (bar_idx, trade_type, pnl_val, ret_pct, reason) — 5-tuple
+    for bar_idx, trade_type, pnl_val, ret_pct, reason in aligned_markers.get("exit_markers", []):
         if bar_idx >= n_dates:
             continue
         is_long = trade_type == "long"
         label = "S" if is_long else "B"
         color = "green" if is_long else "red"
-        reason = item[4] if len(item) > 4 else "pair_end"
-        exit_.append((int(bar_idx), label, color, reason, dates[bar_idx] if bar_idx < n_dates else None))
+        d = dates[bar_idx] if bar_idx < n_dates else None
+        exit_.append((int(bar_idx), label, color, reason, d))
 
     return {"entry_markers": entry, "exit_markers": exit_}
 
