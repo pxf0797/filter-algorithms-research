@@ -118,37 +118,41 @@ def _compute_own_from_pairs(t, dates, schmitt, all_pairs):
     return {"entry_markers": entry, "exit_markers": exit_}
 
 
-def _compute_own_from_alignment(t, dates, aligned_markers):
-    """从高一级周期的同向性判断数据(aligned markers)生成 BS 标记。
+def _compute_own_from_masks(t, dates, schmitt, all_pairs, holding_masks):
+    """从 all_pairs 过滤：只保留 holding_masks 区间内的同向段。
 
-    aligned_markers 来自 _align_pnl_to_current_tf:
-      entry_markers: [(bar_idx, type, pnl_val), ...]            (3-tuple)
-      exit_markers:  [(bar_idx, type, pnl_val, ret_pct, reason), ...]  (5-tuple)
-    type: "long" or "short"
+    holding_masks: (long_mask, short_mask) from _compute_holding_masks
     """
     entry = []
     exit_ = []
     n_dates = len(dates) if dates is not None else 0
 
-    # entry_markers: (bar_idx, trade_type, pnl_val) — 3-tuple
-    for bar_idx, trade_type, pnl_val in aligned_markers.get("entry_markers", []):
-        if bar_idx >= n_dates:
-            continue
-        is_long = trade_type == "long"
-        label = "B" if is_long else "S"
-        color = "green" if is_long else "red"
-        d = dates[bar_idx] if bar_idx < n_dates else None
-        entry.append((int(bar_idx), label, color, d))
+    if schmitt is None or not all_pairs:
+        return {"entry_markers": entry, "exit_markers": exit_}
 
-    # exit_markers: (bar_idx, trade_type, pnl_val, ret_pct, reason) — 5-tuple
-    for bar_idx, trade_type, pnl_val, ret_pct, reason in aligned_markers.get("exit_markers", []):
-        if bar_idx >= n_dates:
+    long_mask, short_mask = holding_masks
+    sig = schmitt["sig"]
+
+    for pair_start, pair_end in all_pairs:
+        if pair_end >= len(sig):
             continue
-        is_long = trade_type == "long"
-        label = "S" if is_long else "B"
-        color = "green" if is_long else "red"
-        d = dates[bar_idx] if bar_idx < n_dates else None
-        exit_.append((int(bar_idx), label, color, reason, d))
+        direction = sig[pair_end]
+        mask = long_mask if direction == 1 else short_mask
+
+        # Check if ANY bar in [pair_start, pair_end] falls within the mask
+        pair_slice = slice(pair_start, min(pair_end + 1, len(mask)))
+        if not mask[pair_slice].any():
+            continue  # 不在同向区间内，跳过
+
+        d_entry = dates[pair_start] if pair_start < n_dates else None
+        d_exit = dates[pair_end] if pair_end < n_dates else None
+
+        if direction == 1:
+            entry.append((int(pair_start), "B", "green", d_entry))
+            exit_.append((int(pair_end), "S", "green", "pair_end", d_exit))
+        elif direction == -1:
+            entry.append((int(pair_start), "S", "red", d_entry))
+            exit_.append((int(pair_end), "B", "red", "pair_end", d_exit))
 
     return {"entry_markers": entry, "exit_markers": exit_}
 
@@ -221,7 +225,7 @@ def _compute_cascade_markers(t, dates, schmitt, all_pairs,
 
 def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
                         tf, operating_tf, higher_bs=None,
-                        aligned_markers=None):
+                        holding_masks=None):
     """为单个视图计算 BS 标记。
 
     Parameters
@@ -235,17 +239,16 @@ def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
     all_pairs : list[(int, int)]
         Schmitt 信号对列表。
     trade_records : list[dict]
-        策略交易记录（操作周期无 aligned_markers 时的回退）。
+        策略交易记录（操作周期无 holding_masks 时的回退）。
     tf : str
         当前视图的周期。
     operating_tf : str
         用户选择的操作周期。仅此周期及更低周期显示 BS 标记。
     higher_bs : dict or None
         紧邻高一级周期的 BS 标记（用于级联）。操作周期本身为 None。
-    aligned_markers : dict or None
-        从 _align_pnl_to_current_tf 获取的高一级周期同向性判断数据。
-        Format: {"entry_markers": [(bar_idx, type, pnl_val, date), ...],
-                 "exit_markers": [(bar_idx, type, pnl_val, ret_pct, reason, date), ...]}
+    holding_masks : tuple or None
+        (long_mask, short_mask) from _compute_holding_masks。
+        用于过滤 all_pairs，只保留持仓区间内的同向段。
 
     Returns
     -------
@@ -253,8 +256,8 @@ def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
         {"entry_markers": [...], "exit_markers": [...]}
     """
     if tf == operating_tf:
-        if aligned_markers is not None:
-            return _compute_own_from_alignment(t, dates, aligned_markers)
+        if holding_masks is not None:
+            return _compute_own_from_masks(t, dates, schmitt, all_pairs, holding_masks)
         elif trade_records:
             return _compute_own_from_trades(t, dates, trade_records)
         else:

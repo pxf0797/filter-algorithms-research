@@ -779,6 +779,12 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
     show_pnl_feedback = cfg.get("show_pnl_feedback", False)
     has_feedback = has_strategy and show_pnl_feedback
 
+    # ── Compute holding masks early (needed for both BS markers and alignment subplot) ──
+    _align_masks = None
+    if higher_pnl is not None:
+        _align_masks = _compute_holding_masks(
+            len(t), higher_pnl["entry_markers"], higher_pnl["exit_markers"])
+
     # ── Step 8.5: BS markers (仓位操作标识) ──
     _op_tf = st.session_state.get("operating_tf", "日线")
     _lower_tfs = st.session_state.get("_bs_lower_tfs", [])
@@ -789,12 +795,12 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
         _higher_bs = None
         if tf != _op_tf and _higher_tf_key:
             _higher_bs = st.session_state.get(f"_bs_{_higher_tf_key}")
-        # 操作周期: 使用已有的 higher_pnl（同向性判断数据），无需重新计算
-        _aligned = higher_pnl if (tf == _op_tf and higher_pnl is not None) else None
+        # 操作周期: 使用 holding_masks 过滤同向段
+        _holding = _align_masks if (tf == _op_tf and _align_masks is not None) else None
         bs_markers = compute_bs_markers(
             t, dates, schmitt, all_pairs, trade_records,
             tf, _op_tf, higher_bs=_higher_bs,
-            aligned_markers=_aligned,
+            holding_masks=_holding,
         )
         st.session_state[f"_bs_{tf}"] = bs_markers
 
@@ -803,11 +809,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
     has_cross = (show_cross_pnl and higher_pnl is not None and
                  (len(higher_pnl.get("entry_markers", [])) > 0 or
                   len(higher_pnl.get("exit_markers", [])) > 0))
-    _align_masks = None
-    if show_alignment and has_cross and has_strategy and long_pnl is not None:
-        _align_masks = _compute_holding_masks(
-            len(t), higher_pnl["entry_markers"], higher_pnl["exit_markers"])
-    has_alignment = (_align_masks is not None and
+    has_alignment = (show_alignment and _align_masks is not None and
                      (_align_masks[0].any() or _align_masks[1].any()))
 
     rows, rh, titles, mr, rr, vr, sar, ssr, ar, pnl_row, cross_row, align_row = \

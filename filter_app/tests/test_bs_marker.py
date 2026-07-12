@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 from services.bs_marker import (
-    compute_bs_markers, _compute_own_from_trades, _compute_own_from_alignment,
+    compute_bs_markers, _compute_own_from_trades, _compute_own_from_masks,
     _compute_own_from_pairs, _find_date_index,
     _compute_cascade_markers,
     TF_LOWER, get_lower_tfs,
@@ -261,35 +261,92 @@ class TestComputeOwnMarkers:
         assert result["exit_markers"][0][2] == "red"
 
 
-# ── _compute_own_from_alignment ──────────────────────────────────────
+# ── _compute_own_from_masks ──────────────────────────────────────────
 
-class TestComputeOwnFromAlignment:
+class TestComputeOwnFromMasks:
 
-    def test_long_aligned_entry_creates_green_B(self):
-        """同向性判断long entry → 绿B."""
-        dates = pd.date_range('2026-01-05', periods=30, freq='B')
-        aligned = {
-            "entry_markers": [(10, "long", 100.0)],
-            "exit_markers": [(20, "long", 112.0, 12.0, "take_profit")],
-        }
-        result = _compute_own_from_alignment(np.arange(30, dtype=float), dates, aligned)
-        assert result["entry_markers"][0][1] == "B"
-        assert result["entry_markers"][0][2] == "green"
-        assert result["exit_markers"][0][1] == "S"
-        assert result["exit_markers"][0][2] == "green"
+    def test_long_pair_in_long_mask_kept(self):
+        """long pair within long_mask → BS markers produced."""
+        dates = _make_dates("2024-01-01", periods=10)
+        t = np.arange(10, dtype=float)
+        schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
+        all_pairs = [(3, 4)]
 
-    def test_short_aligned_entry_creates_red_S(self):
-        """同向性判断short entry → 红S."""
-        dates = pd.date_range('2026-01-05', periods=30, freq='B')
-        aligned = {
-            "entry_markers": [(5, "short", 100.0)],
-            "exit_markers": [(15, "short", 95.0, -5.0, "stop_loss")],
-        }
-        result = _compute_own_from_alignment(np.arange(30, dtype=float), dates, aligned)
-        assert result["entry_markers"][0][1] == "S"
-        assert result["entry_markers"][0][2] == "red"
-        assert result["exit_markers"][0][1] == "B"
-        assert result["exit_markers"][0][2] == "red"
+        # long_mask covers bars 3-6, short_mask is all False
+        long_mask = np.zeros(10, dtype=bool)
+        long_mask[3:7] = True
+        short_mask = np.zeros(10, dtype=bool)
+
+        result = _compute_own_from_masks(
+            t, dates, schmitt, all_pairs, (long_mask, short_mask),
+        )
+
+        assert len(result["entry_markers"]) == 1, (
+            "Long pair fully inside long_mask should produce entry marker"
+        )
+        assert result["entry_markers"][0] == (3, "B", "green", dates[3])
+        assert len(result["exit_markers"]) == 1
+        assert result["exit_markers"][0] == (4, "S", "green", "pair_end", dates[4])
+
+    def test_short_pair_in_short_mask_kept(self):
+        """short pair within short_mask → BS markers produced."""
+        dates = _make_dates("2024-01-01", periods=10)
+        t = np.arange(10, dtype=float)
+        schmitt = _make_schmitt([0, 0, 0, -1, -1, 0, 0, 0, 0, 0])
+        all_pairs = [(3, 4)]
+
+        long_mask = np.zeros(10, dtype=bool)
+        short_mask = np.zeros(10, dtype=bool)
+        short_mask[3:7] = True
+
+        result = _compute_own_from_masks(
+            t, dates, schmitt, all_pairs, (long_mask, short_mask),
+        )
+
+        assert len(result["entry_markers"]) == 1
+        assert result["entry_markers"][0] == (3, "S", "red", dates[3])
+        assert len(result["exit_markers"]) == 1
+        assert result["exit_markers"][0] == (4, "B", "red", "pair_end", dates[4])
+
+    def test_pair_outside_mask_filtered(self):
+        """pair outside mask → no BS markers."""
+        dates = _make_dates("2024-01-01", periods=10)
+        t = np.arange(10, dtype=float)
+        schmitt = _make_schmitt([0, 0, 1, 1, 0, 0, 0, 0, 0, 0])
+        all_pairs = [(2, 3)]
+
+        # masks are empty at bars 2-3
+        long_mask = np.zeros(10, dtype=bool)
+        short_mask = np.zeros(10, dtype=bool)
+
+        result = _compute_own_from_masks(
+            t, dates, schmitt, all_pairs, (long_mask, short_mask),
+        )
+
+        assert result["entry_markers"] == []
+        assert result["exit_markers"] == []
+
+    def test_pair_partially_in_mask_kept(self):
+        """pair partially overlapping mask → kept (any bar within mask suffices)."""
+        dates = _make_dates("2024-01-01", periods=10)
+        t = np.arange(10, dtype=float)
+        schmitt = _make_schmitt([0, 0, 1, 1, 1, 1, 0, 0, 0, 0])
+        all_pairs = [(2, 5)]
+
+        # mask covers only bar 5, not bars 2-4
+        long_mask = np.zeros(10, dtype=bool)
+        long_mask[5] = True
+        short_mask = np.zeros(10, dtype=bool)
+
+        result = _compute_own_from_masks(
+            t, dates, schmitt, all_pairs, (long_mask, short_mask),
+        )
+
+        assert len(result["entry_markers"]) == 1, (
+            "Pair partially overlapping mask should still be kept"
+        )
+        assert result["entry_markers"][0] == (2, "B", "green", dates[2])
+        assert result["exit_markers"][0] == (5, "S", "green", "pair_end", dates[5])
 
 
 # ── _compute_cascade_markers ─────────────────────────────────────────
@@ -518,16 +575,22 @@ class TestComputeBsMarkers:
         assert len(result["entry_markers"]) == 1
         assert result["entry_markers"][0] == (3, "B", "green", dates[3])
 
-    def test_operating_tf_uses_aligned_markers(self):
-        """操作周期有aligned_markers时优先使用同向性判断数据."""
-        dates = pd.date_range('2026-01-05', periods=30, freq='B')
-        aligned = {
-            "entry_markers": [(10, "long", 100.0)],
-            "exit_markers": [],
-        }
+    def test_operating_tf_with_holding_masks(self):
+        """操作周期有holding_masks时使用mask过滤all_pairs."""
+        dates = _make_dates("2024-01-01", periods=10)
+        t = np.arange(10, dtype=float)
+        schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
+        all_pairs = [(3, 4)]
+        long_mask = np.zeros(10, dtype=bool)
+        long_mask[3:7] = True
+        short_mask = np.zeros(10, dtype=bool)
+
         result = compute_bs_markers(
-            np.arange(30, dtype=float), dates, None, [], [],
-            '日线', '日线', aligned_markers=aligned)
+            t, dates, schmitt, all_pairs, [],
+            tf="日线", operating_tf="日线",
+            holding_masks=(long_mask, short_mask),
+        )
+        assert len(result["entry_markers"]) == 1
         assert result["entry_markers"][0][1] == "B"
 
     def test_lower_tf_uses_cascade(self):
