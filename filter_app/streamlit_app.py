@@ -1304,16 +1304,18 @@ def _render_filter_selectors() -> tuple:
     return filter_id, dual, filter_id2
 
 
-def _render_operating_tf_selector(configs) -> str:
+def _render_operating_tf_selector() -> str:
     """Render operating timeframe selector for BS markers.
-    Only shows timeframes that exist in the current 4 views."""
-    # Extract unique TFs from configs, sorted by hierarchy (high→low)
-    view_tfs = sorted(set(cfg["tf"] for cfg in configs),
-                      key=lambda x: ALL_TFS.index(x), reverse=True)
-    if not view_tfs:
-        return "日线"  # fallback
+    Positioned next to stock code. Options based on current view timeframes."""
+    # Collect TFs from the 4 views (use defaults for first load)
+    view_tfs = []
+    for i in range(4):
+        tf = st.session_state.get(f"v{i}_tf", DEFAULT_TFS[i])
+        if tf not in view_tfs:
+            view_tfs.append(tf)
+    # Sort by hierarchy (high→low)
+    view_tfs.sort(key=lambda x: ALL_TFS.index(x), reverse=True)
 
-    st.sidebar.markdown("---")
     operating_tf = st.sidebar.selectbox(
         "🎯 操作周期",
         view_tfs,
@@ -1870,6 +1872,9 @@ def main() -> None:
     # ── Market & ticker ──
     market, ticker_code = _render_market_ticker()
 
+    # ── Operating timeframe (BS markers) — next to stock code ──
+    operating_tf = _render_operating_tf_selector()
+
     # ── Initial fetch ──
     _handle_initial_fetch(market, ticker_code)
 
@@ -1893,10 +1898,7 @@ def main() -> None:
     # ── Pass 1: 2x2 parameter panels ──
     configs = _render_param_panels(filter_id, dual, filter_id2)
 
-    # ── Operating timeframe (BS markers) ──
-    operating_tf = _render_operating_tf_selector(configs)
-
-    # Compute which TFs should show BS markers (only from existing views)
+    # Compute visible lower TFs for BS marker cascade
     _view_tfs = set(cfg["tf"] for cfg in configs)
     _all_lower = get_lower_tfs(operating_tf)
     _visible_lower_tfs = [tf for tf in _all_lower if tf in _view_tfs]
