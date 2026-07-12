@@ -31,15 +31,24 @@ def _find_date_index(dates, target_date):
     Returns
     -------
     int or None
+        0 if target_date is before all dates (start from available data).
+        None if target_date is after all dates (cannot cascade, skip marker).
+        Index of first bar with date >= target_date otherwise.
     """
     if dates is None or len(dates) == 0 or target_date is None:
         return None
     try:
         target_ts = pd.Timestamp(target_date)
+        first_date = pd.Timestamp(dates[0])
+        last_date = pd.Timestamp(dates[-1])
+        if target_ts < first_date:
+            return 0
+        if target_ts > last_date:
+            return None
         for i, d in enumerate(dates):
             if pd.Timestamp(d) >= target_ts:
                 return i
-        return len(dates) - 1
+        return None
     except Exception:
         return None
 
@@ -191,7 +200,7 @@ def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
     """
     if tf == operating_tf:
         return _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
-    elif higher_bs is not None:
+    elif higher_bs is not None and (higher_bs.get("entry_markers") or higher_bs.get("exit_markers")):
         return _compute_cascade_markers(t, dates, schmitt, all_pairs,
                                          trade_records, higher_bs)
     else:

@@ -781,7 +781,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
 
     # ── Step 8.5: BS markers (仓位操作标识) ──
     _op_tf = st.session_state.get("operating_tf", "日线")
-    _lower_tfs = get_lower_tfs(_op_tf)
+    _lower_tfs = st.session_state.get("_bs_lower_tfs", [])
     _show_bs = (tf == _op_tf) or (tf in _lower_tfs)
     bs_markers = None
     if _show_bs:
@@ -1304,15 +1304,22 @@ def _render_filter_selectors() -> tuple:
     return filter_id, dual, filter_id2
 
 
-def _render_operating_tf_selector() -> str:
-    """Render operating timeframe selector for BS markers."""
+def _render_operating_tf_selector(configs) -> str:
+    """Render operating timeframe selector for BS markers.
+    Only shows timeframes that exist in the current 4 views."""
+    # Extract unique TFs from configs, sorted by hierarchy (high→low)
+    view_tfs = sorted(set(cfg["tf"] for cfg in configs),
+                      key=lambda x: ALL_TFS.index(x), reverse=True)
+    if not view_tfs:
+        return "日线"  # fallback
+
     st.sidebar.markdown("---")
     operating_tf = st.sidebar.selectbox(
         "🎯 操作周期",
-        ALL_TFS,
-        index=ALL_TFS.index("日线"),
+        view_tfs,
+        index=0,  # default to highest TF
         key="operating_tf",
-        help="仅此周期及更低周期显示 BS 买卖标记。选择周期后，该周期作为操作锚点向下级联。",
+        help="仅此周期及更低周期显示 BS 买卖标记",
     )
     return operating_tf
 
@@ -1884,7 +1891,12 @@ def main() -> None:
     filter_id, dual, filter_id2 = _render_filter_selectors()
 
     # ── Operating timeframe (BS markers) ──
-    operating_tf = _render_operating_tf_selector()
+    operating_tf = _render_operating_tf_selector(configs)
+    # Compute visible lower TFs for cascade chain truncation
+    _view_tfs = set(cfg["tf"] for cfg in configs)
+    _all_lower = get_lower_tfs(operating_tf)
+    _visible_lower_tfs = [tf for tf in _all_lower if tf in _view_tfs]
+    st.session_state["_bs_lower_tfs"] = _visible_lower_tfs
 
     # ── Pass 1: 2x2 parameter panels ──
     configs = _render_param_panels(filter_id, dual, filter_id2)
