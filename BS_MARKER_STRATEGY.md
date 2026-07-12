@@ -1,234 +1,212 @@
-# BS 仓位操作标识 — 完整设计方案 v4
+# BS 仓位操作标识 — 设计方案 v5
 
 ## 1. 核心定义
 
-**BS 标记 = 策略交易记录（PnL）经过同向性判断（holding masks）过滤后的结果。**
+**BS 标记 = 策略交易记录（trade_records）经过同向性判断（holding_masks）过滤后的结果。**
 
-- BS 的数据源是 `trade_records`（Row 6/7 的策略交易，含入场点=信号确认点 `pair_end`）
-- BS 的过滤器是 `_compute_holding_masks` 的输出（Row 8 同向性判断子图的数据）
-- 只有落在 holding mask 区间内的交易才标 BS；不在区间内的不标
+- BS 的**标的**: `trade_records`（每笔交易含 `entry_idx`, `exit_idx`, `type`, `exit_reason`）
+- BS 的**过滤器**: `holding_masks = (long_mask, short_mask)`，由 `_compute_holding_masks` 从上级 PnL 的入场/出场 markers 生成
+- 只有 `entry_idx` 落在对应方向 mask 内的交易才标 BS
+
+**关键设计决策 (v5)**: 废弃级联（cascade）机制。所有周期使用统一的过滤逻辑，每个视图独立从自己的 `trade_records + holding_masks` 计算 BS，不再将上级 BS 标记向下级联传播。
 
 ## 2. 标记规则
 
 | 方向 | 入场 | 出场 | 颜色 |
 |------|------|------|------|
-| 做多 | 🟢 B | 🟢 S | 绿色 |
-| 做空 | 🔴 S | 🔴 B | 红色 |
+| 做多 | B | S | 绿色 |
+| 做空 | S | B | 红色 |
 
-做多：先 B 后 S（全绿）。做空：先 S 后 B（全红）。
+- 做多: 绿 B 入场，绿 S出场
+- 做空: 红 S 入场，红 B 出场
+- 入场标记显示在 K 线 Low 下方，出场标记显示在 K 线 High 上方
 
-入场标在 K 线 low 下方，出场标在 high 上方。
+实现位置:
+- 标记生成: `bs_marker.py` — 返回 `{"entry_markers": [...], "exit_markers": [...]}`
+- 标记渲染: `components/charts.py:_add_bs_markers` — 将 markers 转为 Plotly annotations
 
-## 3. 各子图数据源（以日线操作周期为例）
+## 3. 各子图数据源
 
-| Row | 子图 | 数据来源 | BS 使用？ |
-|-----|------|----------|----------|
-| 1 | 价格&滤波 | K线 OHLC + 滤波输出 | 显示位置 |
-| 2-4 | 残差/v/a±ε | 滤波梯度/加速度/Schmitt阈值 | 否 |
-| 5 | Sig_t | Schmitt 信号(-1/0/+1) | 否 |
-| 6 | PnL收益(%) | trade_records（策略交易） | **是 — BS 的标的** |
-| 7 | 实际持仓 | trade_records → 多/空/不持 | 否 |
-| 8 | 同向性判断 | Row6 被周线 holding_masks 过滤 | **是 — BS 的过滤器** |
+| Row | 子图 | BS 使用？ |
+|-----|------|----------|
+| 1 | 价格 & 滤波 | 显示位置 |
+| 2-4 | 残差 / v / a+epsilon | 否 |
+| 5 | Sig_t (Schmitt 信号) | 否 |
+| 6 | PnL 收益(%) | **是 — BS 的标的** (trade_records 来源) |
+| 7 | 实际持仓 | 否 |
+| 8 | 同向性判断 | **是 — BS 的过滤器** (holding_masks 来源) |
 
-## 4. 操作周期（日线）
+Row 6 提供 `trade_records`（入场=信号确认点 `pair_end`）。
+Row 8 提供 `holding_masks`（上级 PnL 持仓区间）。
 
-### 4.1 数据流
+## 4. 统一过滤逻辑（无级联）
 
-```
-日线 trade_records (Row 6 数据，入场=entry_idx)
-       ↓
-周线 trade_records → _align_pnl_to_current_tf → _compute_holding_masks
-       ↓                                                    ↓
-  周线 holding_masks (long_mask / short_mask)  ← 同向性判断过滤器
-       ↓
-日线 trade_records ──→ 过滤：entry_idx 必须落在对应方向 mask 内
-       ↓
-  ├── 在 mask 内 → 标 BS（入场=entry_idx, 出场=exit_idx）
-  └── 不在 mask 内 → 不标 BS
-```
-
-### 4.2 入场
-
-trade_records 中每笔交易的 `entry_idx`：
-
-- 检查 `entry_idx` 是否在对应方向的 mask 内（long trade → `long_mask`, short trade → `short_mask`）
-- 在 → 标入场 BS
-- 不在 → 跳过
-
-### 4.3 出场
-
-trade_records 中每笔交易的 `exit_idx` + `exit_reason`：
-
-- 正常出场（`take_profit` / `pair_end`）：标在 `exit_idx`
-- 偏离退出（`stop_loss`）：标在 `exit_idx`，同时级联到低一级立即标
-
-## 5. 低一级周期（60分钟）
-
-### 5.1 入场级联
+所有视图（操作周期及低周期）使用完全相同的算法。`compute_bs_markers` 是唯一入口:
 
 ```
-日线 BS 入场标记（如 bar=81 🟢B，做多）
-  ↓ 日线 bar=81 的日期 → 在60分钟定位 start_bar
-  ↓ 遍历60分钟 all_pairs
-  ↓ 找第一个: pair_start ≥ start_bar 且 sig[pair_end] == 1（同向）
-  ↓ 找到 → 在60分钟 pair_start 标 🟢B
-  ↓ 找不到 → 不标
+holding_masks is not None and trade_records 非空 → _compute_from_trades_filtered
+仅 trade_records 非空（无上级时回退）          → _compute_own_from_trades
+都没有                                         → 空
 ```
 
-### 5.2 正常出场级联
+### 4.1 `_compute_from_trades_filtered` — 主路径
+
+遍历 `trade_records`，对每笔交易:
+
+1. 取 `entry_idx`，检查 `mask[entry_idx]`（long 交易查 `long_mask`，short 交易查 `short_mask`）
+2. 若 `False` 或 `entry_idx >= len(mask)` → 跳过整笔交易
+3. 若 `True` → 标入场 BS（entry_idx），并标出场 BS（exit_idx）
+
+```python
+def _compute_from_trades_filtered(t, dates, trade_records, holding_masks):
+    long_mask, short_mask = holding_masks
+    # 遍历 trade_records，只保留 entry_idx 落在同向 mask 内的交易
+```
+
+### 4.2 `_compute_own_from_trades` — 回退路径
+
+当无上级 `holding_masks` 时（如操作周期之上无更高周期），不过滤，直接从 `trade_records` 生成全部 BS 标记。
+
+## 5. 数据流
 
 ```
-日线 BS 出场标记 → 找60分钟对应同向 pair 的 pair_end → 标出场 BS
+上级视图 _render_chart
+  ↓ 计算出 trade_records → 存入 st.session_state["_pnl_{tf}"]
+  ↓
+本级视图 _render_chart
+  ↓ Step 3: 从 session_state 读取上级 PnL → _align_pnl_to_current_tf → higher_pnl
+  ↓ Step 8: _compute_strategy_display → 本层 trade_records
+  ↓ BS 段: _compute_holding_masks(higher_pnl) → _align_masks (holding_masks)
+  ↓        compute_bs_markers(..., holding_masks=_align_masks) → bs_markers
+  ↓ Step 10: _add_bs_markers(bs_markers) → Plotly annotations on K-line chart
 ```
 
-### 5.3 异常出场级联（stop_loss）
+每层独立计算: **本层 trade_records + 上层 holding_masks → 本层 BS**。低周期不复用操作周期的 BS 结果，而是用自己的 trade_records 结合自己的上级 holding_masks 独立计算。
 
-```
-日线 stop_loss 出场 → 不等60分钟确认 → 立即在对应时间标出场 BS
-```
+## 6. 系统已有数据复用
 
-## 6. 再低一级（15分钟、5分钟…）
+BS 标记**不新增任何计算**，全部复用 `_render_chart` 中已有的数据:
 
-同理：上一级 BS → 本级 all_pairs 同向确认 → 标 BS。
+| 数据 | 来源 | 计算位置 |
+|------|------|---------|
+| `trade_records` | `_compute_strategy_display` | Step 8 |
+| `higher_pnl` | `_align_pnl_to_current_tf` | Step 3 |
+| `_align_masks` | `_compute_holding_masks(higher_pnl)` | BS 段 (line ~784) |
+| `higher_pnl` 原始数据 | `st.session_state["_pnl_{higher_tf}"]` | 上级视图渲染时写入 |
 
-## 7. 系统已有数据（无需重复计算）
-
-操作周期渲染时，以下数据**已经在 `_render_chart` 中计算好了**：
-
-- `trade_records`：来自 `_compute_strategy_display`（Step 8）
-- `higher_pnl`：来自 `_align_pnl_to_current_tf`（Step 3），含 `entry_markers` / `exit_markers`
-- `_align_masks`：来自 `_compute_holding_masks`（用 `higher_pnl` 算得），含 `long_mask` / `short_mask`
-
-**BS 标记只需要把 `trade_records` 和 `_align_masks` 结合，不做任何额外计算。**
-
-## 8. compute_bs_markers 接口
+## 7. compute_bs_markers 接口
 
 ```python
 def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
                         tf, operating_tf, higher_bs=None,
-                        holding_masks=None):  # (long_mask, short_mask) or None
-    if tf == operating_tf:
-        if holding_masks is not None and trade_records:
-            return _compute_from_trades_filtered(t, dates, trade_records, holding_masks)
-        elif trade_records:
-            return _compute_from_trades(t, dates, trade_records)  # 无高一级参考，回退
-        else:
-            return _compute_from_pairs(t, dates, schmitt, all_pairs)  # 无策略，最后回退
-    elif higher_bs:
-        return _compute_cascade(t, dates, schmitt, all_pairs, trade_records, higher_bs)
-    else:
-        return empty
+                        holding_masks=None):
+    """
+    t : np.ndarray          — bar 索引
+    dates : pd.DatetimeIndex — bar 日期
+    schmitt : dict or None   — Schmitt 触发器输出（保留但 v5 未使用）
+    all_pairs : list         — Schmitt 信号对（保留但 v5 未使用）
+    trade_records : list[dict] — 策略交易记录
+    tf : str                 — 当前视图周期
+    operating_tf : str       — 用户操作周期（保留但 v5 未用于分支）
+    higher_bs : dict or None — 保留参数，不再使用
+    holding_masks : tuple or None — (long_mask, short_mask) 各为 np.ndarray[bool]
+    """
 ```
 
-### 8.1 `_compute_from_trades_filtered`
+**注意**: `schmitt`, `all_pairs`, `tf`, `operating_tf`, `higher_bs` 五个参数在 v5 中**均未使用**，仅保留以兼容旧调用方。实际决策仅依赖 `trade_records` 和 `holding_masks`。
+
+## 8. streamlit_app 集成
+
+在 `_render_chart` 的 BS markers 段 (line ~782-800):
 
 ```python
-def _compute_from_trades_filtered(t, dates, trade_records, holding_masks):
-    """
-    遍历 trade_records，用 holding_masks 过滤。
+# Step 1: 从上级 PnL 计算 holding_masks
+_align_masks = None
+if higher_pnl is not None:
+    _align_masks = _compute_holding_masks(
+        len(t), higher_pnl["entry_markers"], higher_pnl["exit_markers"])
 
-    Parameters
-    ----------
-    t : np.ndarray
-        时间戳数组
-    dates : list
-        日期列表
-    trade_records : list[dict]
-        策略交易记录，每条含 entry_idx, exit_idx, direction, exit_reason 等
-    holding_masks : tuple
-        (long_mask, short_mask)，各为 np.ndarray[bool]，长度等于 len(t)
+# Step 2: 判断是否需要显示 BS（操作周期或可见低周期）
+_op_tf = st.session_state.get("operating_tf", "日线")
+_lower_tfs = st.session_state.get("_bs_lower_tfs", [])
+_show_bs = (tf == _op_tf) or (tf in _lower_tfs)
 
-    Returns
-    -------
-    bs_markers : list[dict]
-        每个元素: {idx, label, color, is_entry, direction, from_cascade}
-    """
-    long_mask, short_mask = holding_masks
-    markers = []
+# Step 3: 统一调用
+bs_markers = None
+if _show_bs:
+    _holding = _align_masks if _align_masks is not None else None
+    bs_markers = compute_bs_markers(
+        t, dates, schmitt, all_pairs, trade_records,
+        tf, _op_tf, higher_bs=None,
+        holding_masks=_holding,
+    )
+    st.session_state[f"_bs_{tf}"] = bs_markers
 
-    for tr in trade_records:
-        direction = tr['direction']  # 'long' or 'short'
-        entry_idx = tr['entry_idx']
-        exit_idx = tr['exit_idx']
-        exit_reason = tr.get('exit_reason', 'take_profit')
-
-        mask = long_mask if direction == 'long' else short_mask
-
-        # 入场：entry_idx 必须在 mask 内
-        if mask[entry_idx]:
-            entry_label = 'B' if direction == 'long' else 'S'
-            markers.append({
-                'idx': entry_idx,
-                'label': entry_label,
-                'color': 'green' if direction == 'long' else 'red',
-                'is_entry': True,
-                'direction': direction,
-                'from_cascade': False,
-            })
-
-            # 出场：exit_idx 必须在 mask 内
-            if mask[exit_idx]:
-                exit_label = 'S' if direction == 'long' else 'B'
-                markers.append({
-                    'idx': exit_idx,
-                    'label': exit_label,
-                    'color': 'green' if direction == 'long' else 'red',
-                    'is_entry': False,
-                    'direction': direction,
-                    'from_cascade': False,
-                })
-
-    return markers
+# Step 4: 渲染
+if bs_markers is not None:
+    all_annotations += _add_bs_markers(t, ohlc, bs_markers)
 ```
 
-### 8.2 `_compute_cascade`
-
-已有实现，保持不变。负责将上级 BS 标记级联到当前 TF：
-
-- 遍历 `higher_bs` 中的每个 BS 标记
-- 用 `_find_date_index` 定位当前 TF 的起始 bar
-- 在 `all_pairs` 中找同向 pair（`sig[pair_end] == direction`）
-- 找到后标在当前 TF 对应 bar
-- `stop_loss` 出场不检查同向，直接级联
-
-### 8.3 `_compute_from_trades`（回退）
-
-当无高一级参考（`holding_masks=None`）但有 `trade_records` 时使用，不过滤直接标 BS。
-
-### 8.4 `_compute_from_pairs`（最后回退）
-
-当策略未启用（`trade_records` 为空）时使用，从 `all_pairs` 推断 BS。
-
-## 9. streamlit_app.py 集成
-
-在 `_render_chart` 的 BS markers 段：
+`_bs_lower_tfs` 在 `main()` 中预计算 (line ~1927-1931):
 
 ```python
-# _align_masks 已提前计算（从 higher_pnl via _compute_holding_masks）
-_holding = _align_masks if (tf == _op_tf and _align_masks is not None) else None
-bs_markers = compute_bs_markers(
-    t, dates, schmitt, all_pairs, trade_records,
-    tf, _op_tf, higher_bs=_higher_bs,
-    holding_masks=_holding,
-)
+_view_tfs = set(cfg["tf"] for cfg in configs)
+_all_lower = get_lower_tfs(operating_tf)
+_visible_lower_tfs = [tf for tf in _all_lower if tf in _view_tfs]
+st.session_state["_bs_lower_tfs"] = _visible_lower_tfs
 ```
 
-**仅此一处改动。** `_align_masks`、`trade_records`、`higher_pnl` 都是系统已有的。
+仅操作周期及其以下且**实际可见**的周期才显示 BS 标记。
 
-## 10. 边界情况
+## 9. `holding_masks` 构造
+
+`_compute_holding_masks(n_bars, entry_markers, exit_markers)` 位于 `services/filter_engine.py`:
+
+1. 从上级 PnL 的 `entry_markers` 中分离 long/short 的入场 bar 索引
+2. 从上级 PnL 的 `exit_markers` 中分离 long/short 的出场 bar 索引
+3. 对每个入场，找到下一个同类型出场，标记区间 `[entry, exit]` 为 `True`
+4. 返回 `(long_mask, short_mask)` — 各为 `np.ndarray[bool]`，长度 = `n_bars`
+
+```python
+# 示例: 上级在第 10 根 bar 做多入场，第 20 根出场
+# → long_mask[10:21] = True
+# 本级做多交易 entry_idx=12 → 落在 mask 内 → 标 BS
+# 本级做多交易 entry_idx=25 → 不在 mask 内 → 跳过
+```
+
+## 10. 辅助工具
+
+### `_find_date_index(dates, target_date)`
+
+在 `dates` 中查找第一个 `>= target_date` 的 bar 索引。做了时区标准化处理（兼容 tz-aware 分钟线与 tz-naive 日线/周线/月线的混合比较）。当前 v5 中未被 `compute_bs_markers` 调用，但保留作为工具函数供未来使用。
+
+### `get_lower_tfs(operating_tf)`
+
+遍历 `TF_LOWER` 映射链，返回操作周期以下所有周期，用于 `_bs_lower_tfs` 计算:
+
+```
+季线 → 月线 → 周线 → 日线 → 60分钟 → 15分钟 → 5分钟 → 1分钟 → None
+```
+
+## 11. 边界情况
 
 | 场景 | 行为 |
 |------|------|
-| 操作周期无高一级 | `holding_masks=None` → 回退 `trade_records` 不过滤 |
-| 高一级无策略交易 | holding_masks 全 False → 无 BS 标记 |
-| 策略未启用 | `trade_records` 为空 → 回退 `all_pairs` |
-| 级联无同向 pair | 该 entry 不级联 |
-| `stop_loss` 退出 | 不等同向，立即级联 |
-| 不同 TF 数据时间窗不重叠 | `_find_date_index` 处理（tz 已修复） |
+| 操作周期无更高周期上级 | `higher_pnl=None` → `_align_masks=None` → 回退 `_compute_own_from_trades`（不过滤） |
+| 上级无策略交易 | `entry_markers/exit_markers` 为空 → holding_masks 全 False → 无 BS 标记 |
+| 本级策略未启用 | `trade_records` 为空 → 返回空 |
+| 单笔交易部分在 mask 外 | entry_idx 在 mask 内则整笔标（含出场），不在则整笔跳过 |
+| entry_idx 超出 mask 长度 | 安全跳过（`entry_idx >= len(mask)` 检查） |
+| 不同 TF 数据时间窗不重叠 | `_align_pnl_to_current_tf` 处理对齐 |
 
-## 11. 实现要点
+## 12. v4 → v5 变更摘要
 
-1. **`_compute_from_trades_filtered`**：遍历 `trade_records`，对每笔交易检查其 `entry_idx` / `exit_idx` 是否在对应方向的 mask 内（`mask[entry_idx] == True`）
-2. **`_compute_cascade`**：已有，保持不变
-3. **`_find_date_index`**：已有 tz 修复，保持不变
-4. **不新增系统调用**，全部复用已有数据
+| 项目 | v4 | v5 |
+|------|----|----|
+| 级联机制 | `_compute_cascade` — 上级 BS → 下级 all_pairs 同向确认 | **已删除**，无级联 |
+| 分支逻辑 | `tf == operating_tf` 分叉，不同周期不同路径 | **统一逻辑**，所有周期同一路径 |
+| all_pairs 回退 | 无 trade_records 时从 all_pairs 推断 | **已删除**，无此路径 |
+| 数据源 | BS 从上级 BS 级联 + 本级确认 | BS 从本级 trade_records + 上级 holding_masks 独立计算 |
+| `schmitt/all_pairs` 参数 | 被 `_compute_cascade` 和 `_compute_from_pairs` 使用 | 保留但未使用 |
+| `higher_bs` 参数 | 级联的上级 BS 来源 | 保留但未使用 |
+| `_find_date_index` | 级联时定位日期索引 | 保留但未使用 |

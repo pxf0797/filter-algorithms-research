@@ -140,6 +140,34 @@ class TestComputeOwnFromTrades:
         assert result["exit_markers"][0][1] == "S"
         assert result["exit_markers"][0][2] == "green"
 
+    def test_empty_trade_records_returns_empty(self):
+        """Empty trade_records → no markers."""
+        dates = pd.date_range('2026-01-05', periods=10, freq='B')
+        result = _compute_own_from_trades(np.arange(10), dates, [])
+        assert result["entry_markers"] == []
+        assert result["exit_markers"] == []
+
+    def test_multiple_mixed_trades(self):
+        """Long + short trades in same list → both generate markers."""
+        dates = pd.date_range('2026-01-05', periods=30, freq='B')
+        trade_records = [
+            {"type": "long", "entry_idx": 3, "exit_idx": 8,
+             "return_pct": 5.0, "exit_reason": "take_profit"},
+            {"type": "short", "entry_idx": 12, "exit_idx": 20,
+             "return_pct": -2.0, "exit_reason": "stop_loss"},
+        ]
+        result = _compute_own_from_trades(
+            np.arange(30, dtype=float), dates, trade_records,
+        )
+        assert len(result["entry_markers"]) == 2
+        assert len(result["exit_markers"]) == 2
+        # long trade
+        assert result["entry_markers"][0] == (3, "B", "green", dates[3])
+        assert result["exit_markers"][0] == (8, "S", "green", "take_profit", dates[8])
+        # short trade
+        assert result["entry_markers"][1] == (12, "S", "red", dates[12])
+        assert result["exit_markers"][1] == (20, "B", "red", "stop_loss", dates[20])
+
 
 # ── _compute_from_trades_filtered ────────────────────────────────────
 
@@ -179,7 +207,53 @@ class TestComputeFromTradesFiltered:
         assert result["entry_markers"][0][1] == "S" and result["entry_markers"][0][2] == "red"
         assert result["exit_markers"][0][1] == "B" and result["exit_markers"][0][2] == "red"
 
+    def test_empty_trade_records_returns_empty(self):
+        """Empty trade_records → no markers, regardless of masks."""
+        dates = pd.date_range('2026-01-05', periods=10, freq='B')
+        long_mask = np.ones(10, dtype=bool)
+        short_mask = np.ones(10, dtype=bool)
+        result = _compute_from_trades_filtered(
+            np.arange(10, dtype=float), dates, [], (long_mask, short_mask),
+        )
+        assert result["entry_markers"] == []
+        assert result["exit_markers"] == []
 
+    def test_multiple_trades_mixed_filter(self):
+        """Only trades whose entry_idx falls in the correct mask produce markers."""
+        dates = pd.date_range('2026-01-05', periods=30, freq='B')
+        # long trade entry=5 (in long_mask), short trade entry=15 (NOT in short_mask)
+        trade_records = [
+            {"type": "long", "entry_idx": 5, "exit_idx": 10,
+             "return_pct": 3.0, "exit_reason": "take_profit"},
+            {"type": "short", "entry_idx": 15, "exit_idx": 25,
+             "return_pct": -5.0, "exit_reason": "stop_loss"},
+        ]
+        long_mask = np.zeros(30, dtype=bool); long_mask[3:12] = True    # covers entry=5
+        short_mask = np.zeros(30, dtype=bool); short_mask[18:28] = True  # does NOT cover entry=15
+        result = _compute_from_trades_filtered(
+            np.arange(30, dtype=float), dates, trade_records, (long_mask, short_mask),
+        )
+        # Only the long trade passes the filter
+        assert len(result["entry_markers"]) == 1
+        assert result["entry_markers"][0][1] == "B"
+        assert result["entry_markers"][0][2] == "green"
+
+    def test_entry_idx_beyond_mask_length_skipped(self):
+        """entry_idx >= len(mask) → trade is skipped gracefully."""
+        dates = pd.date_range('2026-01-05', periods=30, freq='B')
+        trade_records = [
+            {"type": "long", "entry_idx": 10, "exit_idx": 20,
+             "return_pct": 5.0, "exit_reason": "take_profit"},
+        ]
+        # mask shorter than entry_idx
+        long_mask = np.ones(5, dtype=bool)  # length=5, entry_idx=10 not valid
+        short_mask = np.zeros(5, dtype=bool)
+        result = _compute_from_trades_filtered(
+            np.arange(30, dtype=float), dates, trade_records, (long_mask, short_mask),
+        )
+        # Trade should be skipped — no crash, no markers
+        assert len(result["entry_markers"]) == 0
+        assert len(result["exit_markers"]) == 0
 
 
 # ── compute_bs_markers ───────────────────────────────────────────────
