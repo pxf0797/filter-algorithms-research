@@ -1861,6 +1861,21 @@ def main() -> None:
     if not AppState.get("_config_initialized"):
         import_json_files_as_presets()
         AppState.set("_config_initialized", True)
+
+    # ── Auto-apply AAPL_US preset on first load ──
+    if not AppState.get("_preset_auto_applied"):
+        presets = list_presets()
+        aapl_preset = next((p for p in presets if p['name'] == 'AAPL_US'), None)
+        if aapl_preset is None:
+            aapl_preset = next((p for p in presets if 'AAPL' in p['name'].upper()), None)
+        if aapl_preset:
+            params = apply_preset(aapl_preset["preset_id"])
+            if params:
+                for k, v in params.items():
+                    AppState.set(k, v)
+                logger.info(f"Auto-applied preset: {aapl_preset['name']}")
+        AppState.set("_preset_auto_applied", True)
+
     st.sidebar.title("多周期股票滤波分析")
 
     # ── Config import ──
