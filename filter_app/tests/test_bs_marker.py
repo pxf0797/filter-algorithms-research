@@ -8,7 +8,6 @@ import pytest
 from services.bs_marker import (
     compute_bs_markers, _compute_from_trades_filtered, _compute_own_from_trades,
     _find_date_index,
-    _compute_cascade_markers,
     TF_LOWER, get_lower_tfs,
 )
 
@@ -181,218 +180,39 @@ class TestComputeFromTradesFiltered:
         assert result["exit_markers"][0][1] == "B" and result["exit_markers"][0][2] == "red"
 
 
-# ── _compute_cascade_markers ─────────────────────────────────────────
-
-class TestCascadeMarkers:
-
-    def test_entry_cascade_same_direction(self):
-        """Higher B entry cascades to first same-direction long pair in lower TF."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
-        all_pairs = [(3, 4)]
-        trade_records = []
-        higher_bs = {
-            "entry_markers": [(0, "B", "green", pd.Timestamp("2024-01-03"))],
-            "exit_markers": [],
-        }
-
-        result = _compute_cascade_markers(
-            t, dates, schmitt, all_pairs, trade_records, higher_bs,
-        )
-
-        assert len(result["entry_markers"]) == 1, (
-            "Should cascade green B entry to the matching long pair"
-        )
-        assert result["entry_markers"][0] == (3, "B", "green", dates[3])
-
-    def test_entry_cascade_short(self):
-        """Higher S (short) entry cascades to first same-direction short pair."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 0, 0, -1, -1, 0, 0, 0, 0, 0])
-        all_pairs = [(3, 4)]
-        trade_records = []
-        higher_bs = {
-            "entry_markers": [(0, "S", "red", pd.Timestamp("2024-01-03"))],
-            "exit_markers": [],
-        }
-
-        result = _compute_cascade_markers(
-            t, dates, schmitt, all_pairs, trade_records, higher_bs,
-        )
-
-        assert len(result["entry_markers"]) == 1
-        assert result["entry_markers"][0] == (3, "S", "red", dates[3])
-
-    def test_entry_cascade_wrong_direction_skipped(self):
-        """Higher B entry, but lower TF only has short pairs — nothing cascaded."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 0, 0, -1, -1, 0, 0, 0, 0, 0])
-        all_pairs = [(3, 4)]               # short pair
-        trade_records = []
-        higher_bs = {
-            "entry_markers": [(0, "B", "green", pd.Timestamp("2024-01-03"))],
-            "exit_markers": [],
-        }
-
-        result = _compute_cascade_markers(
-            t, dates, schmitt, all_pairs, trade_records, higher_bs,
-        )
-
-        assert result["entry_markers"] == [], (
-            "Should skip cascade when no same-direction pair exists"
-        )
-
-    def test_pair_end_exit_cascade(self):
-        """Higher pair_end exit (green S) cascades to first long pair exit in lower TF."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
-        all_pairs = [(3, 4)]
-        trade_records = []
-        higher_bs = {
-            "entry_markers": [],
-            "exit_markers": [
-                (5, "S", "green", "pair_end", pd.Timestamp("2024-01-03")),
-            ],
-        }
-
-        result = _compute_cascade_markers(
-            t, dates, schmitt, all_pairs, trade_records, higher_bs,
-        )
-
-        assert len(result["exit_markers"]) == 1
-        assert result["exit_markers"][0][:4] == (4, "S", "green", "pair_end")
-
-    def test_stop_loss_exit_cascade_immediate(self):
-        """Stop-loss exit cascades immediately at the matching bar (no pair wait)."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-        all_pairs = []
-        trade_records = []
-        higher_bs = {
-            "entry_markers": [],
-            "exit_markers": [
-                (5, "S", "green", "stop_loss", pd.Timestamp("2024-01-03")),
-            ],
-        }
-
-        result = _compute_cascade_markers(
-            t, dates, schmitt, all_pairs, trade_records, higher_bs,
-        )
-
-        assert len(result["exit_markers"]) == 1
-        assert result["exit_markers"][0] == (
-            2, "S", "green", "stop_loss", dates[2],
-        ), "Stop-loss should mark immediately at the date-aligned bar"
-
-    def test_early_date_browse_mode(self):
-        """Higher TF date before lower TF range → fallback to bar 0."""
-        dates = _make_dates("2024-01-10", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([1, 1, 0, 0, 0, 0, 0, 0, 0, 0])
-        all_pairs = [(0, 1)]               # long pair at bar 0-1
-        trade_records = []
-        higher_bs = {
-            "entry_markers": [
-                (0, "B", "green", pd.Timestamp("2024-01-01")),
-            ],
-            "exit_markers": [],
-        }
-
-        result = _compute_cascade_markers(
-            t, dates, schmitt, all_pairs, trade_records, higher_bs,
-        )
-
-        assert len(result["entry_markers"]) == 1, (
-            "Should cascade from bar 0 when higher TF date precedes local data "
-            "(browse mode fallback)"
-        )
-        assert result["entry_markers"][0] == (0, "B", "green", dates[0])
-
-    def test_late_date_skipped(self):
-        """Higher TF date after lower TF range → marker skipped."""
-        dates = _make_dates("2024-01-01", periods=5)
-        t = np.arange(5)
-        schmitt = _make_schmitt([0, 0, 0, 0, 0])
-        all_pairs = []
-        trade_records = []
-        higher_bs = {
-            "entry_markers": [
-                (0, "B", "green", pd.Timestamp("2024-01-10")),
-            ],
-            "exit_markers": [],
-        }
-
-        result = _compute_cascade_markers(
-            t, dates, schmitt, all_pairs, trade_records, higher_bs,
-        )
-
-        assert result["entry_markers"] == [], (
-            "Should skip cascade when higher TF date is beyond local data range"
-        )
-
-    def test_none_higher_date_skipped(self):
-        """Higher marker with h_date=None is skipped."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-        all_pairs = []
-        trade_records = []
-        higher_bs = {
-            "entry_markers": [(0, "B", "green", None)],
-            "exit_markers": [],
-        }
-
-        result = _compute_cascade_markers(
-            t, dates, schmitt, all_pairs, trade_records, higher_bs,
-        )
-
-        assert result["entry_markers"] == []
-
-    def test_empty_higher_bs_short_circuits(self):
-        """Empty entry/exit marker lists produce empty result."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-        all_pairs = []
-        trade_records = []
-        higher_bs = {"entry_markers": [], "exit_markers": []}
-
-        result = _compute_cascade_markers(
-            t, dates, schmitt, all_pairs, trade_records, higher_bs,
-        )
-
-        assert result["entry_markers"] == []
-        assert result["exit_markers"] == []
-
-    def test_none_schmitt_returns_empty(self):
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        all_pairs = []
-        trade_records = []
-        higher_bs = {
-            "entry_markers": [(0, "B", "green", pd.Timestamp("2024-01-03"))],
-            "exit_markers": [],
-        }
-
-        result = _compute_cascade_markers(
-            t, dates, None, all_pairs, trade_records, higher_bs,
-        )
-
-        assert result["entry_markers"] == []
-        assert result["exit_markers"] == []
 
 
 # ── compute_bs_markers ───────────────────────────────────────────────
 
 class TestComputeBsMarkers:
 
-    def test_operating_tf_uses_own_from_trades(self):
-        """tf == operating_tf with trade_records, no masks → _compute_own_from_trades."""
+    def test_with_holding_masks_and_trades(self):
+        """holding_masks + trade_records → filtered path."""
+        dates = pd.date_range('2026-01-05', periods=10, freq='B')
+        t = np.arange(10, dtype=float)
+        schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
+
+        trade_records = [
+            {"type": "long", "entry_idx": 3, "exit_idx": 6,
+             "return_pct": 5.0, "exit_reason": "take_profit"},
+            {"type": "short", "entry_idx": 5, "exit_idx": 8,
+             "return_pct": -2.0, "exit_reason": "stop_loss"},
+        ]
+        long_mask = np.zeros(10, dtype=bool)
+        long_mask[3:7] = True       # entry_idx=3 in mask
+        short_mask = np.zeros(10, dtype=bool)  # entry_idx=5 not in mask
+
+        result = compute_bs_markers(
+            t, dates, schmitt, [], trade_records,
+            tf="日线", operating_tf="日线",
+            holding_masks=(long_mask, short_mask),
+        )
+        assert len(result["entry_markers"]) == 1
+        assert result["entry_markers"][0][1] == "B"
+        assert result["entry_markers"][0][2] == "green"
+
+    def test_with_trades_only_no_masks(self):
+        """trade_records, no holding_masks → unfiltered fallback."""
         dates = pd.date_range('2026-01-05', periods=10, freq='B')
         t = np.arange(10)
         schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
@@ -403,117 +223,22 @@ class TestComputeBsMarkers:
 
         result = compute_bs_markers(
             t, dates, schmitt, [], trade_records,
-            tf="日线", operating_tf="日线", higher_bs=None,
+            tf="日线", operating_tf="日线",
         )
 
         assert len(result["entry_markers"]) == 1
         assert result["entry_markers"][0][1] == "B"
         assert result["entry_markers"][0][2] == "green"
 
-    def test_operating_tf_no_trades_no_masks_returns_empty(self):
-        """tf == operating_tf, no trade_records and no masks → empty."""
+    def test_with_neither_returns_empty(self):
+        """No trade_records, no holding_masks → empty."""
         dates = _make_dates("2024-01-01", periods=10)
         t = np.arange(10)
         schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
 
         result = compute_bs_markers(
             t, dates, schmitt, [], [],
-            tf="日线", operating_tf="日线", higher_bs=None,
-        )
-
-        assert result["entry_markers"] == []
-        assert result["exit_markers"] == []
-
-    def test_operating_tf_with_holding_masks(self):
-        """操作周期有holding_masks时，通过trade_records+mask过滤生成标记."""
-        dates = pd.date_range('2026-01-05', periods=10, freq='B')
-        t = np.arange(10, dtype=float)
-        schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
-
-        # 两个交易：long在mask内，short不在mask内
-        trade_records = [
-            {"type": "long", "entry_idx": 3, "exit_idx": 6,
-             "return_pct": 5.0, "exit_reason": "take_profit"},
-            {"type": "short", "entry_idx": 5, "exit_idx": 8,
-             "return_pct": -2.0, "exit_reason": "stop_loss"},
-        ]
-        long_mask = np.zeros(10, dtype=bool)
-        long_mask[3:7] = True       # entry_idx=3 is in mask
-        short_mask = np.zeros(10, dtype=bool)  # entry_idx=5 not in mask
-
-        result = compute_bs_markers(
-            t, dates, schmitt, [], trade_records,
             tf="日线", operating_tf="日线",
-            holding_masks=(long_mask, short_mask),
-        )
-        # 只有 long trade (entry in mask) 保留
-        assert len(result["entry_markers"]) == 1
-        assert result["entry_markers"][0][1] == "B"
-        assert result["entry_markers"][0][2] == "green"
-
-    def test_lower_tf_uses_cascade(self):
-        """tf < operating_tf with higher_bs → delegates to _compute_cascade_markers."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
-        all_pairs = [(3, 4)]
-        trade_records = []
-        higher_bs = {
-            "entry_markers": [(0, "B", "green", pd.Timestamp("2024-01-03"))],
-            "exit_markers": [],
-        }
-
-        result = compute_bs_markers(
-            t, dates, schmitt, all_pairs, trade_records,
-            tf="60分钟", operating_tf="日线", higher_bs=higher_bs,
-        )
-
-        assert len(result["entry_markers"]) == 1
-
-    def test_higher_tf_returns_empty(self):
-        """tf > operating_tf → no BS markers (empty)."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
-        all_pairs = [(3, 4)]
-        trade_records = []
-
-        result = compute_bs_markers(
-            t, dates, schmitt, all_pairs, trade_records,
-            tf="周线", operating_tf="日线", higher_bs=None,
-        )
-
-        assert result["entry_markers"] == []
-        assert result["exit_markers"] == []
-
-    def test_lower_tf_no_higher_bs_returns_empty(self):
-        """tf < operating_tf but higher_bs is None → empty."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
-        all_pairs = [(3, 4)]
-        trade_records = []
-
-        result = compute_bs_markers(
-            t, dates, schmitt, all_pairs, trade_records,
-            tf="60分钟", operating_tf="日线", higher_bs=None,
-        )
-
-        assert result["entry_markers"] == []
-        assert result["exit_markers"] == []
-
-    def test_lower_tf_empty_higher_bs_returns_empty(self):
-        """tf < operating_tf but higher_bs has no markers → empty."""
-        dates = _make_dates("2024-01-01", periods=10)
-        t = np.arange(10)
-        schmitt = _make_schmitt([0, 0, 0, 1, 1, 0, 0, 0, 0, 0])
-        all_pairs = [(3, 4)]
-        trade_records = []
-        higher_bs = {"entry_markers": [], "exit_markers": []}
-
-        result = compute_bs_markers(
-            t, dates, schmitt, all_pairs, trade_records,
-            tf="60分钟", operating_tf="日线", higher_bs=higher_bs,
         )
 
         assert result["entry_markers"] == []

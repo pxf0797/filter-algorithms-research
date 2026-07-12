@@ -791,15 +791,10 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
     _show_bs = (tf == _op_tf) or (tf in _lower_tfs)
     bs_markers = None
     if _show_bs:
-        _higher_tf_key = TF_HIERARCHY.get(tf)
-        _higher_bs = None
-        if tf != _op_tf and _higher_tf_key:
-            _higher_bs = st.session_state.get(f"_bs_{_higher_tf_key}")
-        # 操作周期: 使用 holding_masks 过滤同向段
-        _holding = _align_masks if (tf == _op_tf and _align_masks is not None) else None
+        _holding = _align_masks if _align_masks is not None else None
         bs_markers = compute_bs_markers(
             t, dates, schmitt, all_pairs, trade_records,
-            tf, _op_tf, higher_bs=_higher_bs,
+            tf, _op_tf, higher_bs=None,
             holding_masks=_holding,
         )
         st.session_state[f"_bs_{tf}"] = bs_markers

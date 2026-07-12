@@ -131,76 +131,15 @@ def _compute_from_trades_filtered(t, dates, trade_records, holding_masks):
     return {"entry_markers": entry, "exit_markers": exit_}
 
 
-def _compute_cascade_markers(t, dates, schmitt, all_pairs,
-                              trade_records, higher_bs):
-    """从高一级周期的 BS 标记级联计算本级标记。
-
-    入场：等本级同向 Schmitt 信号出现后标记
-    出场（pair_end）：找本级对应 pair 结束位置标记
-    出场（stop_loss）：立即在对应时间位置标记
-    """
-    entry = []
-    exit_ = []
-
-    if schmitt is None:
-        return {"entry_markers": entry, "exit_markers": exit_}
-
-    sig = schmitt["sig"]
-    n_dates = len(dates) if dates is not None else 0
-    higher_entries = higher_bs.get("entry_markers", [])
-    higher_exits = higher_bs.get("exit_markers", [])
-
-    # ── 级联入场 ──
-    for h_idx, h_label, h_color, h_date in higher_entries:
-        if h_date is None:
-            continue
-        start_bar = _find_date_index(dates, h_date)
-        if start_bar is None:
-            continue
-
-        # h_label="B" → 做多 → expected_dir=1; h_label="S" → 做空 → expected_dir=-1
-        expected_dir = 1 if h_label == "B" else -1
-
-        for pair_start, pair_end in all_pairs:
-            if pair_start >= start_bar and pair_end < len(sig):
-                if sig[pair_end] == expected_dir:
-                    label = "B" if expected_dir == 1 else "S"
-                    color = "green" if expected_dir == 1 else "red"
-                    d = dates[pair_start] if pair_start < n_dates else None
-                    entry.append((int(pair_start), label, color, d))
-                    break
-
-    # ── 级联出场 ──
-    for h_exit in higher_exits:
-        h_idx, h_label, h_color, h_exit_type, h_date = h_exit
-        if h_date is None:
-            continue
-        start_bar = _find_date_index(dates, h_date)
-        if start_bar is None:
-            continue
-
-        if h_exit_type == "stop_loss":
-            # 偏离退出：立即在对应时间位置标记
-            if start_bar < n_dates:
-                exit_.append((int(start_bar), h_label, h_color, "stop_loss", dates[start_bar]))
-        else:
-            # 多空对结束：「S ← 平多」→ 找 long pair 结束；「B ← 平空」→ 找 short pair 结束
-            expected_dir = 1 if h_label == "S" else -1
-
-            for pair_start, pair_end in all_pairs:
-                if pair_start >= start_bar and pair_end < len(sig):
-                    if sig[pair_end] == expected_dir:
-                        d = dates[pair_end] if pair_end < n_dates else None
-                        exit_.append((int(pair_end), h_label, h_color, "pair_end", d))
-                        break
-
-    return {"entry_markers": entry, "exit_markers": exit_}
-
-
 def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
                         tf, operating_tf, higher_bs=None,
                         holding_masks=None):
     """为单个视图计算 BS 标记。
+
+    统一逻辑：所有周期使用相同的过滤逻辑。
+    有 holding_masks + trade_records → 过滤后的标记
+    仅有 trade_records → 未过滤的标记
+    都没有 → 空
 
     Parameters
     ----------
@@ -213,13 +152,13 @@ def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
     all_pairs : list[(int, int)]
         Schmitt 信号对列表。
     trade_records : list[dict]
-        策略交易记录。操作周期主路径输入（有无 holding_masks 时均使用）。
+        策略交易记录。
     tf : str
         当前视图的周期。
     operating_tf : str
-        用户选择的操作周期。仅此周期及更低周期显示 BS 标记。
+        用户选择的操作周期。
     higher_bs : dict or None
-        紧邻高一级周期的 BS 标记（用于级联）。操作周期本身为 None。
+        保留参数以兼容旧调用方（不再使用）。
     holding_masks : tuple or None
         (long_mask, short_mask) from _compute_holding_masks。
         用于过滤 trade_records，只保留 entry_idx 落在同向 mask 内的交易。
@@ -229,17 +168,11 @@ def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
     dict
         {"entry_markers": [...], "exit_markers": [...]}
     """
-    if tf == operating_tf:
-        if holding_masks is not None and trade_records:
-            return _compute_from_trades_filtered(t, dates, trade_records, holding_masks)
-        elif trade_records:
-            return _compute_own_from_trades(t, dates, trade_records)
-        else:
-            # No trades, no masks — nothing to mark
-            return {"entry_markers": [], "exit_markers": []}
-    elif higher_bs is not None and (higher_bs.get("entry_markers") or higher_bs.get("exit_markers")):
-        return _compute_cascade_markers(t, dates, schmitt, all_pairs,
-                                         trade_records, higher_bs)
+    # UNIFIED: all levels use same filtered-trades logic
+    if holding_masks is not None and trade_records:
+        return _compute_from_trades_filtered(t, dates, trade_records, holding_masks)
+    elif trade_records:
+        return _compute_own_from_trades(t, dates, trade_records)
     else:
         return {"entry_markers": [], "exit_markers": []}
 
