@@ -216,7 +216,7 @@ filter_research/
 ├── tests/                      # 测试目录（20 个文件）
 ├── config/                     # 策略配置文件（JSON）
 ├── data/                       # SQLite 数据库 + Parquet 缓存 + 快照
-├── docs/                       # 文档
+├── docs/                       # 文档（索引见 docs/README.md）
 ├── tools/                      # 工具脚本
 ├── Dockerfile                  # Docker 镜像
 ├── docker-compose.yml          # Docker Compose 编排
