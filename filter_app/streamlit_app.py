@@ -1420,6 +1420,11 @@ def _on_slider_change():
         return  # 播放中，避免 on_change 自动 rerun 干扰播放循环
     # 从 Slider Widget Key 读取当前值，同步到程序状态
     slider_val = st.session_state.get("_bt_slider_pos", 0)
+    # ★ 若 _bar_index 已匹配 slider 值，说明是导航按钮或播放停止触发的
+    # 程序化变更，跳过冗余同步和 DB 查询（_update_cutoff_and_rerun
+    # 或 _run_backtest_play 已处理 cutoff_date 更新）。
+    if slider_val == st.session_state.get("_bar_index", None):
+        return
     st.session_state._bar_index = slider_val
     ticker = AppState.get("_fetched_ticker", "")
     min_tf = AppState.get("_min_tf", "")
@@ -1519,6 +1524,8 @@ def _run_backtest_play():
     if bar_index >= total:
         logger.debug(f"回测播放停止: bar_index={bar_index} >= total={total}")
         AppState.set("_is_playing", False)
+        # ★ 同步 slider 位置，防止播放停止后 slider 显示过期值
+        st.session_state._bt_slider_pos = bar_index
         return False
 
     # 前进一个 bar（在 slider widget 渲染之前，Streamlit 允许修改 widget key）
@@ -1651,6 +1658,12 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
                 # 确保 _bar_index 在 slider 有效范围内（防止退出回测后残留 0 值）
                 if st.session_state.get("_bar_index", 0) < min_n_pts:
                     st.session_state._bar_index = total_bars
+                    bar_index = total_bars  # 同步本地变量，确保 value= 参数正确
+                # ★ 同步 widget key 到当前 bar_index。
+                # Streamlit 在 widget 有 key 时优先使用 session_state 中的值，
+                # 因此必须在渲染前将 _bt_slider_pos 同步到 _bar_index，
+                # 否则播放停止、ticker 切换等场景下 slider 会显示过期位置。
+                st.session_state._bt_slider_pos = bar_index
                 st.sidebar.slider(
                     "窗口结束位置", min_n_pts, total_bars,
                     value=bar_index,
