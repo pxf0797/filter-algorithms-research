@@ -62,175 +62,38 @@ def _find_date_index(dates, target_date):
 
 
 def _compute_own_markers(t, dates, schmitt, all_pairs, trade_records):
-    """从策略交易记录生成 BS 标记（优先），回退到 Schmitt 原始对。"""
-    entry = []
-    exit_ = []
-    n_dates = len(dates) if dates is not None else 0
+    """从 Schmitt 同向段 (all_pairs) 直接生成 BS 标记。
 
-    if trade_records:
-        # 优先：从实际策略交易记录生成标记
-        for trade in trade_records:
-            is_long = trade["type"] == "long"
-            entry_idx = trade["entry_idx"]
-            exit_idx = trade["exit_idx"]
-            exit_reason = trade.get("exit_reason", "")
-
-            d_entry = dates[entry_idx] if entry_idx < n_dates else None
-            d_exit = dates[exit_idx] if exit_idx < n_dates else None
-
-            if is_long:
-                # 做多: 先B(绿) 后S(绿)
-                entry.append((int(entry_idx), "B", "green", d_entry))
-                exit_.append((int(exit_idx), "S", "green", exit_reason, d_exit))
-            else:
-                # 做空: 先S(红) 后B(红)
-                entry.append((int(entry_idx), "S", "red", d_entry))
-                exit_.append((int(exit_idx), "B", "red", exit_reason, d_exit))
-
-    elif schmitt is not None and all_pairs:
-        # 回退：从 Schmitt 原始对生成标记（策略未启用时）
-        sig = schmitt["sig"]
-        for pair_start, pair_end in all_pairs:
-            if pair_end >= len(sig):
-                continue
-            direction = sig[pair_end]
-            d_entry = dates[pair_start] if pair_start < n_dates else None
-            d_exit = dates[pair_end] if pair_end < n_dates else None
-
-            if direction == 1:
-                entry.append((int(pair_start), "B", "green", d_entry))
-                exit_.append((int(pair_end), "S", "green", "pair_end", d_exit))
-            elif direction == -1:
-                entry.append((int(pair_start), "S", "red", d_entry))
-                exit_.append((int(pair_end), "B", "red", "pair_end", d_exit))
-
-    return {"entry_markers": entry, "exit_markers": exit_}
-
-
-def _compute_own_markers_filtered(t, dates, schmitt, all_pairs, trade_records,
-                                   lower_schmitt_data):
-    """Compute BS markers for the operating TF, filtered by lower-TF
-    same-direction confirmation.
-
-    For each trade record on the operating TF:
-      1. Extract direction D, entry_date, exit_date
-      2. Scan lower TF's Schmitt pairs
-      3. Find the first lower-TF pair where:
-         a. pair_start_date >= entry_date    (confirmation after signal)
-         b. pair_start_date <= exit_date     (confirmation within trade window)
-         c. sig[pair_end] == D               (same direction)
-      4. If confirmed → add BS entry+exit markers
-      5. If not confirmed → skip this trade (no BS marker)
-
-    Fallback: If lower_schmitt_data is None or empty → unfiltered
-              (same as _compute_own_markers).
-
-    Parameters
-    ----------
-    t : np.ndarray
-        Bar index array.
-    dates : pd.DatetimeIndex
-        Bar dates.
-    schmitt : dict or None
-        Schmitt trigger output.
-    all_pairs : list[(int, int)]
-        Schmitt signal pairs.
-    trade_records : list[dict]
-        Strategy trade records.
-    lower_schmitt_data : dict or None
-        Lower TF's Schmitt data with keys "all_pairs", "sig", "dates".
-        When None or empty, falls back to unfiltered markers.
-
-    Returns
-    -------
-    dict
-        {"entry_markers": [...], "exit_markers": [...]}
+    每个同向段的 pair_start 标入场，pair_end 标出场。
+    trade_records 参数保留但不使用（接口兼容）。
     """
     entry = []
     exit_ = []
     n_dates = len(dates) if dates is not None else 0
 
-    if not trade_records:
-        # No strategy trades → fall back to Schmitt pairs (unfiltered)
-        return _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
+    if schmitt is None or not all_pairs:
+        return {"entry_markers": entry, "exit_markers": exit_}
 
-    # ── Extract lower-TF data ──
-    if lower_schmitt_data is None:
-        return _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
+    sig = schmitt["sig"]
 
-    lower_pairs = lower_schmitt_data.get("all_pairs", [])
-    lower_sig = lower_schmitt_data.get("sig", None)
-    lower_dates = lower_schmitt_data.get("dates", None)
-
-    # ── Guard: no lower-TF Schmitt data → unfiltered ──
-    if lower_sig is None or lower_dates is None or len(lower_pairs) == 0:
-        return _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
-
-    # ── Normalize timezone (same approach as _find_date_index) ──
-    def _normalize(d):
-        ts = pd.Timestamp(d)
-        if ts.tz is not None:
-            ts = ts.tz_localize(None)
-        return ts
-
-    # Build tz-naive lower dates for safe comparison
-    lower_dates_norm = [d if isinstance(d, pd.Timestamp) else pd.Timestamp(d)
-                        for d in lower_dates]
-    lower_dates_clean = []
-    for d in lower_dates_norm:
-        if d.tz is not None:
-            lower_dates_clean.append(d.tz_localize(None))
-        else:
-            lower_dates_clean.append(d)
-
-    # ── For each trade, check lower-TF confirmation ──
-    for trade in trade_records:
-        is_long = trade["type"] == "long"
-        entry_idx = trade["entry_idx"]
-        exit_idx = trade["exit_idx"]
-        exit_reason = trade.get("exit_reason", "")
-        direction = 1 if is_long else -1
-
-        # Get trade date range (tz-naive for comparison)
-        trade_entry_date = _normalize(dates[entry_idx]) if entry_idx < n_dates else None
-        trade_exit_date = _normalize(dates[exit_idx]) if exit_idx < n_dates else None
-
-        if trade_entry_date is None:
+    for pair_start, pair_end in all_pairs:
+        if pair_end >= len(sig):
             continue
+        direction = sig[pair_end]
 
-        # ── Scan lower-TF pairs for same-direction confirmation ──
-        confirmed = False
-        for p_start, p_end in lower_pairs:
-            if p_start >= len(lower_sig) or p_end >= len(lower_sig):
-                continue
-            lower_start_date = lower_dates_clean[p_start] if p_start < len(lower_dates_clean) else None
-            if lower_start_date is None:
-                continue
+        d_entry = dates[pair_start] if pair_start < n_dates else None
+        d_exit = dates[pair_end] if pair_end < n_dates else None
 
-            # Must be at or after the trade entry (confirmation after signal)
-            if lower_start_date < trade_entry_date:
-                continue
-            # Must be within the trade window
-            if trade_exit_date is not None and lower_start_date > trade_exit_date:
-                continue
-
-            # Same-direction check
-            if lower_sig[p_end] == direction:
-                confirmed = True
-                break
-
-        if confirmed:
-            d_entry = dates[entry_idx] if entry_idx < n_dates else None
-            d_exit = dates[exit_idx] if exit_idx < n_dates else None
-
-            if is_long:
-                entry.append((int(entry_idx), "B", "green", d_entry))
-                exit_.append((int(exit_idx), "S", "green", exit_reason, d_exit))
-            else:
-                entry.append((int(entry_idx), "S", "red", d_entry))
-                exit_.append((int(exit_idx), "B", "red", exit_reason, d_exit))
+        if direction == 1:  # 做多同向段
+            entry.append((int(pair_start), "B", "green", d_entry))
+            exit_.append((int(pair_end), "S", "green", "pair_end", d_exit))
+        elif direction == -1:  # 做空同向段
+            entry.append((int(pair_start), "S", "red", d_entry))
+            exit_.append((int(pair_end), "B", "red", "pair_end", d_exit))
 
     return {"entry_markers": entry, "exit_markers": exit_}
+
+
 
 
 def _compute_cascade_markers(t, dates, schmitt, all_pairs,
@@ -300,8 +163,7 @@ def _compute_cascade_markers(t, dates, schmitt, all_pairs,
 
 
 def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
-                        tf, operating_tf, higher_bs=None,
-                        lower_schmitt=None):
+                        tf, operating_tf, higher_bs=None):
     """为单个视图计算 BS 标记。
 
     Parameters
@@ -315,17 +177,13 @@ def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
     all_pairs : list[(int, int)]
         Schmitt 信号对列表。
     trade_records : list[dict]
-        策略交易记录。
+        策略交易记录（保留参数，操作周期不从此读取）。
     tf : str
         当前视图的周期。
     operating_tf : str
         用户选择的操作周期。仅此周期及更低周期显示 BS 标记。
     higher_bs : dict or None
         紧邻高一级周期的 BS 标记（用于级联）。操作周期本身为 None。
-    lower_schmitt : dict or None
-        低一级周期的 Schmitt 数据，格式为
-        ``{"all_pairs": [...], "sig": np.ndarray, "dates": pd.DatetimeIndex}``。
-        仅用于操作周期的同向判断过滤；非操作周期忽略此参数。
 
     Returns
     -------
@@ -333,12 +191,7 @@ def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
         {"entry_markers": [...], "exit_markers": [...]}
     """
     if tf == operating_tf:
-        if lower_schmitt is not None:
-            return _compute_own_markers_filtered(
-                t, dates, schmitt, all_pairs, trade_records,
-                lower_schmitt)
-        else:
-            return _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
+        return _compute_own_markers(t, dates, schmitt, all_pairs, trade_records)
     elif higher_bs is not None and (higher_bs.get("entry_markers") or higher_bs.get("exit_markers")):
         return _compute_cascade_markers(t, dates, schmitt, all_pairs,
                                          trade_records, higher_bs)
