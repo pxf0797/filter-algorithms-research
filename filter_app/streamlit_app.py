@@ -54,6 +54,7 @@ from components.sidebar import (
     _render_params, ALL_TFS, DEFAULT_TFS, TF_HIERARCHY,
 )
 from state import AppState
+from services.pipeline_capture import PipelineCapture, PipelineStageData
 from backtest_logger import log_mode_switch, log_bar_navigation, log_data_load, log_error
 
 # ---------------------------------------------------------------------------
@@ -640,7 +641,7 @@ def _load_backtest_config(ticker_code):
 # =====================================================================
 
 @st.fragment
-def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, higher_pnl=None, window_start=None, cutoff_date=None) -> None:
+def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, higher_pnl=None, window_start=None, cutoff_date=None, capture_collector=None) -> None:
     """Fragment wrapper around ``_render_chart`` for per-view independent re-rendering.
 
     The ``@st.fragment`` decorator enables each of the four chart views
@@ -665,15 +666,17 @@ def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, higher_p
         Backtest mode — window start bar index.
     cutoff_date : str or None
         Backtest mode — cutoff date string.
+    capture_collector : dict or None
+        Pipeline capture — dict populated with PipelineStageData per view.
 
     Returns
     -------
     None
     """
-    _render_chart(market, ticker_code, cfg, key, compact=compact, higher_pnl=higher_pnl, window_start=window_start, cutoff_date=cutoff_date)
+    _render_chart(market, ticker_code, cfg, key, compact=compact, higher_pnl=higher_pnl, window_start=window_start, cutoff_date=cutoff_date, capture_collector=capture_collector)
 
 
-def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, window_start=None, cutoff_date=None) -> None:
+def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, window_start=None, cutoff_date=None, capture_collector=None) -> None:
     """Fetch data and render the multi-subplot chart figure.
 
     This is the core chart builder.  It:
@@ -704,6 +707,9 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
         Backtest mode — window start bar index for data loading.
     cutoff_date : str or None
         Backtest mode — cutoff date string for timeframe alignment.
+    capture_collector : dict or None
+        Pipeline capture — when a dict, populated with PipelineStageData
+        for this view (keyed by ``"{key}_{tf}"``).
 
     Returns
     -------
@@ -852,6 +858,27 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
             yref=f"y{ar}", line=dict(color="gray", dash="dash"), opacity=0.5))
     if bs_markers is not None:
         all_annotations += _add_bs_markers(t, ohlc, bs_markers)
+
+    # PIPELINE_CAPTURE: collect pipeline data for this view
+    if capture_collector is not None:
+        _cap_v = np.gradient(filtered, t) if schmitt is not None else None
+        _cap_a = np.gradient(_cap_v, t) if _cap_v is not None else None
+        view_name = f"{key}_{tf}"
+        capture_collector[view_name] = PipelineStageData(
+            view_name=view_name, tf=tf,
+            t=t, dates=dates, noisy=noisy, ohlc=ohlc,
+            filtered=filtered, filtered2=filtered2,
+            sig=schmitt.get("sig") if schmitt is not None else None,
+            v=_cap_v, a=_cap_a,
+            eps=schmitt.get("eps") if schmitt is not None else None,
+            all_pairs=all_pairs, prediction_pairs=pred_pairs,
+            trade_records=trade_records,
+            pnl_long=long_pnl, pnl_short=short_pnl,
+            higher_pnl=higher_pnl,
+            long_mask=_align_masks[0] if _align_masks is not None else None,
+            short_mask=_align_masks[1] if _align_masks is not None else None,
+            bs_markers=bs_markers,
+        )
 
     # 2. Get subplot layout skeleton from make_subplots (layout only, discard empty traces)
     _skeleton = make_subplots(rows=rows, cols=1, shared_xaxes=True,
@@ -2007,6 +2034,21 @@ def main() -> None:
         window_start = None
         cutoff_date = None
 
+    # PIPELINE_CAPTURE: initialise capture session for this backtest run
+    if "_pipeline_capture" not in st.session_state and cb_mode and PipelineCapture.is_enabled():
+        _cap = PipelineCapture(
+            ticker=ticker_code,
+            config={
+                "operating_tf": operating_tf,
+                "min_tf": AppState.get("_min_tf", ""),
+                "lower_tfs": _visible_lower_tfs,
+                "view_configs": configs,
+            },
+        )
+        _cap.start_session()
+        st.session_state["_pipeline_capture"] = _cap
+        st.session_state["_capture_bar_idx"] = -1
+
     # ── 回测模式: 前置级联合成（一次性写入所有TF的parquet）──
     if cb_mode and ticker_code and cutoff_date:
         tfs_in_use = sorted(set(cfg["tf"] for cfg in configs),
@@ -2024,6 +2066,9 @@ def main() -> None:
             if len(failed_tfs) == len(tfs_in_use):
                 st.sidebar.warning("回测数据加载失败，请检查数据库")
 
+    # PIPELINE_CAPTURE: per-step data collector (populated by _render_chart)
+    _capture_collector = {} if "_pipeline_capture" in st.session_state else None
+
     grid_cols = []
     for row_idx in range(2):
         c1, c2 = st.columns(2)
@@ -2035,7 +2080,17 @@ def main() -> None:
         col_idx = orig_i % 2
         with grid_cols[row_idx][col_idx]:
             _render_chart_fragment(market, ticker_code, cfg, f"v{orig_i}", compact=True,
-                                   window_start=window_start, cutoff_date=cutoff_date)
+                                   window_start=window_start, cutoff_date=cutoff_date,
+                                   capture_collector=_capture_collector)
+
+    # PIPELINE_CAPTURE: flush step data when bar_index changes
+    if _capture_collector is not None and _capture_collector:
+        _cap = st.session_state["_pipeline_capture"]
+        step_idx = st.session_state.get("_bar_index", 0)
+        _last = st.session_state.get("_capture_bar_idx", -1)
+        if step_idx != _last:
+            _cap.capture_step(step_idx, cutoff_date, _capture_collector)
+            st.session_state["_capture_bar_idx"] = step_idx
 
     # ── Export config ──
     _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code)
@@ -2054,6 +2109,16 @@ def main() -> None:
         speed = AppState.get("_play_speed", 1.0)
         time.sleep(1.0 / speed)
         st.rerun()
+
+    # PIPELINE_CAPTURE: end session when exiting backtest mode
+    if not cb_mode and "_pipeline_capture" in st.session_state:
+        _cap = st.session_state["_pipeline_capture"]
+        summary = _cap.end_session()
+        if summary:
+            st.toast(f"Pipeline capture saved: {summary.get('step_count', 0)} steps, "
+                     f"{summary.get('total_size_mb', 0):.1f} MB")
+        del st.session_state["_pipeline_capture"]
+        st.session_state.pop("_capture_bar_idx", None)
 
 
 if __name__ == "__main__":
