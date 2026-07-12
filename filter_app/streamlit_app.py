@@ -765,6 +765,14 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
     if schmitt is not None:
         all_pairs = _find_all_pairs(schmitt["sig"])
 
+    # Store Schmitt pairs in session_state for lower-TF same-direction filtering
+    if schmitt is not None and all_pairs:
+        st.session_state[f"_schmitt_{tf}"] = {
+            "all_pairs": all_pairs,
+            "sig": schmitt["sig"].copy(),
+            "dates": dates,
+        }
+
     # ── Step 7: Prediction curves ──
     pred_pairs = _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs)
 
@@ -789,9 +797,16 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
         _higher_bs = None
         if tf != _op_tf and _higher_tf_key:
             _higher_bs = st.session_state.get(f"_bs_{_higher_tf_key}")
+        # Look up lower TF's Schmitt for same-direction filtering (operating TF only)
+        _lower_schmitt = None
+        if tf == _op_tf:
+            _lower_tf = TF_LOWER.get(tf)
+            if _lower_tf:
+                _lower_schmitt = st.session_state.get(f"_schmitt_{_lower_tf}")
         bs_markers = compute_bs_markers(
             t, dates, schmitt, all_pairs, trade_records,
             tf, _op_tf, higher_bs=_higher_bs,
+            lower_schmitt=_lower_schmitt,
         )
         st.session_state[f"_bs_{tf}"] = bs_markers
 

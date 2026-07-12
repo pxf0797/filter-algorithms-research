@@ -8,6 +8,7 @@ import pytest
 from services.bs_marker import (
     _find_date_index,
     _compute_own_markers,
+    _compute_own_markers_filtered,
     _compute_cascade_markers,
     compute_bs_markers,
     TF_LOWER,
@@ -560,6 +561,107 @@ class TestComputeBsMarkers:
 
         assert result["entry_markers"] == []
         assert result["exit_markers"] == []
+
+
+# ── _compute_own_markers_filtered (via compute_bs_markers) ────────────
+
+class TestComputeOwnMarkersFiltered:
+
+    def test_operating_tf_confirmed_by_lower_schmitt(self):
+        """操作周期交易被低一级同向确认 → 应标 BS."""
+        dates = pd.date_range('2026-01-05', periods=20, freq='B')
+        schmitt = {'sig': np.zeros(20)}
+        trade_records = [
+            {"type": "long", "entry_idx": 3, "exit_idx": 10,
+             "return_pct": 3.0, "exit_reason": "pair_end"},
+        ]
+        # Lower TF has a confirming long pair within the trade window
+        lower_dates = pd.date_range('2026-01-08', periods=10, freq='B')
+        lower_sig = np.zeros(10); lower_sig[2:7] = 1  # long pair at bars 2-6
+        lower_schmitt = {
+            "all_pairs": [(2, 6)],
+            "sig": lower_sig,
+            "dates": lower_dates,
+        }
+        result = compute_bs_markers(
+            np.arange(20, dtype=float), dates, schmitt, [],
+            trade_records, '日线', '日线', lower_schmitt=lower_schmitt)
+        assert len(result["entry_markers"]) == 1, (
+            "Confirmed trade should have entry marker")
+        assert result["entry_markers"][0][1] == "B"
+
+    def test_operating_tf_not_confirmed_no_markers(self):
+        """操作周期交易未被低一级同向确认 → 不标 BS."""
+        dates = pd.date_range('2026-01-05', periods=20, freq='B')
+        trade_records = [
+            {"type": "long", "entry_idx": 3, "exit_idx": 10,
+             "return_pct": 3.0, "exit_reason": "pair_end"},
+        ]
+        # Lower TF has only SHORT pairs (opposite direction)
+        lower_dates = pd.date_range('2026-01-08', periods=10, freq='B')
+        lower_sig = np.zeros(10); lower_sig[2:7] = -1  # SHORT pair
+        lower_schmitt = {
+            "all_pairs": [(2, 6)],
+            "sig": lower_sig,
+            "dates": lower_dates,
+        }
+        result = compute_bs_markers(
+            np.arange(20, dtype=float), dates, None, [],
+            trade_records, '日线', '日线', lower_schmitt=lower_schmitt)
+        assert len(result["entry_markers"]) == 0, (
+            "Unconfirmed trade should have NO markers")
+
+    def test_operating_tf_no_lower_schmitt_unfiltered(self):
+        """无低一级 Schmitt 数据 → 回退到不过滤（全部标记）."""
+        dates = pd.date_range('2026-01-05', periods=20, freq='B')
+        trade_records = [
+            {"type": "short", "entry_idx": 5, "exit_idx": 15,
+             "return_pct": -2.0, "exit_reason": "stop_loss"},
+        ]
+        result = compute_bs_markers(
+            np.arange(20, dtype=float), dates, None, [],
+            trade_records, '日线', '日线', lower_schmitt=None)
+        assert len(result["entry_markers"]) == 1, (
+            "Without lower schmitt, all trades should be marked")
+        assert result["entry_markers"][0][1] == "S"
+
+    def test_operating_tf_lower_pair_starts_before_trade_skipped(self):
+        """低一级 pair 在交易窗口之前开始 → 不确认."""
+        dates = pd.date_range('2026-01-10', periods=20, freq='B')
+        trade_records = [
+            {"type": "long", "entry_idx": 5, "exit_idx": 15,
+             "return_pct": 3.0, "exit_reason": "pair_end"},
+        ]
+        # Lower TF pair starts BEFORE the trade entry date
+        lower_dates = pd.date_range('2026-01-01', periods=10, freq='B')
+        lower_sig = np.ones(10); lower_sig[0:5] = 1
+        lower_schmitt = {
+            "all_pairs": [(1, 4)],  # starts 2026-01-02, ends before trade
+            "sig": lower_sig,
+            "dates": lower_dates,
+        }
+        result = compute_bs_markers(
+            np.arange(20, dtype=float), dates, None, [],
+            trade_records, '日线', '日线', lower_schmitt=lower_schmitt)
+        # Lower pair dates are before trade window → not confirmed
+        assert len(result["entry_markers"]) == 0
+
+    def test_cascade_unchanged_by_lower_schmitt(self):
+        """lower_schmitt 参数不影响级联逻辑."""
+        dates = pd.date_range('2026-01-05', periods=20, freq='B')
+        sig = np.array([0,0,1,1,1,1,1,1,1,1,1,0,-1,-1,-1,-1,-1,-1,-1,-1])
+        schmitt = {'sig': sig}
+        higher_bs = {
+            "entry_markers": [(2, "B", "green", pd.Timestamp('2026-01-07'))],
+            "exit_markers": [],
+        }
+        # Pass lower_schmitt but we're NOT the operating TF → should be ignored
+        result = compute_bs_markers(
+            np.arange(20, dtype=float), dates, schmitt, [(2,9)],
+            [], '60分钟', '日线', higher_bs=higher_bs,
+            lower_schmitt={"all_pairs": [], "sig": np.array([]), "dates": None})
+        # Cascade should still find the matching pair
+        assert len(result["entry_markers"]) >= 1
 
 
 # ── get_lower_tfs ────────────────────────────────────────────────────
