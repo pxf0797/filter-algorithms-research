@@ -1890,16 +1890,17 @@ def main() -> None:
     # ── Filter selectors ──
     filter_id, dual, filter_id2 = _render_filter_selectors()
 
+    # ── Pass 1: 2x2 parameter panels ──
+    configs = _render_param_panels(filter_id, dual, filter_id2)
+
     # ── Operating timeframe (BS markers) ──
     operating_tf = _render_operating_tf_selector(configs)
-    # Compute visible lower TFs for cascade chain truncation
+
+    # Compute which TFs should show BS markers (only from existing views)
     _view_tfs = set(cfg["tf"] for cfg in configs)
     _all_lower = get_lower_tfs(operating_tf)
     _visible_lower_tfs = [tf for tf in _all_lower if tf in _view_tfs]
     st.session_state["_bs_lower_tfs"] = _visible_lower_tfs
-
-    # ── Pass 1: 2x2 parameter panels ──
-    configs = _render_param_panels(filter_id, dual, filter_id2)
 
     # ticker 切换后，若处于回测模式则刷新回测状态（需在 _render_backtest_mode 前）
     _prev_bt_ticker = AppState.get("_bt_last_ticker", "")
