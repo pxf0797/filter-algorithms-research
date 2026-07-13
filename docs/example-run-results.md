@@ -160,3 +160,113 @@ python3 -m filter_app.backtest_cli \
 - 扩大 step 范围（如 0-1000）以获取完整的交易周期和有效胜率数据
 - 使用 `--quiet` 模式减少 95KB 日志输出
 - 对 BS 变动事件按 bar 偏移模式分类，区分"新增信号"与"索引漂移"两种变动类型
+
+## 7. 测试用例
+
+### 7.1 运行测试
+
+```bash
+# 运行全部数据录制相关测试
+cd /Users/xfpan/claude/filter_research
+python -m pytest tests/test_data_recording.py -v
+
+# 仅运行 EventRecorder 单元测试
+python -m pytest tests/test_data_recording.py -v -k TestEventRecorder
+
+# 仅运行 BacktestRunner 结构校验
+python -m pytest tests/test_data_recording.py -v -k TestBacktestRunner
+
+# 仅运行追溯链测试
+python -m pytest tests/test_data_recording.py -v -k TestTraceability
+```
+
+预期输出（全部通过时）：
+
+```
+tests/test_data_recording.py::TestEventRecorder::test_bs_compare_first_step_all_added PASSED
+tests/test_data_recording.py::TestEventRecorder::test_bs_compare_removed_markers PASSED
+tests/test_data_recording.py::TestEventRecorder::test_bs_compare_stable_markers PASSED
+tests/test_data_recording.py::TestEventRecorder::test_bs_snapshot_written PASSED
+tests/test_data_recording.py::TestEventRecorder::test_filter_tail_has_cutoff_date PASSED
+tests/test_data_recording.py::TestEventRecorder::test_multiple_views_produce_independent_records PASSED
+tests/test_data_recording.py::TestEventRecorder::test_noisy_close_price_not_recorded PASSED
+tests/test_data_recording.py::TestEventRecorder::test_record_step_writes_valid_jsonl PASSED
+tests/test_data_recording.py::TestEventRecorder::test_schmitt_snapshot_has_mu_v_sigma_v PASSED
+tests/test_data_recording.py::TestEventRecorder::test_schmitt_snapshot_has_sig_counts PASSED
+tests/test_data_recording.py::TestEventRecorder::test_session_creates_directory_structure PASSED
+tests/test_data_recording.py::TestBacktestRunner::test_pipeline_output_has_close_prices PASSED
+tests/test_data_recording.py::TestBacktestRunner::test_pipeline_output_has_filtered_array PASSED
+tests/test_data_recording.py::TestBacktestRunner::test_pipeline_output_has_pnl_arrays PASSED
+tests/test_data_recording.py::TestBacktestRunner::test_pipeline_output_has_schmitt_subdict PASSED
+tests/test_data_recording.py::TestBacktestRunner::test_pipeline_output_schmitt_has_v_and_a PASSED
+tests/test_data_recording.py::TestTraceability::test_bs_event_has_corresponding_filter_tail PASSED
+tests/test_data_recording.py::TestTraceability::test_bs_event_has_corresponding_schmitt_snapshot PASSED
+tests/test_data_recording.py::TestTraceability::test_cutoff_date_consistent_across_streams PASSED
+============================== 19 passed in 0.04s ==============================
+```
+
+### 7.2 用例清单
+
+| 用例名 | 测试目标 | 覆盖的缺口 |
+|--------|----------|-----------|
+| `test_session_creates_directory_structure` | start_session 创建 session 目录和 metadata.json | 基础健全性 |
+| `test_record_step_writes_valid_jsonl` | 每个 JSONL 输出文件的每行都是合法 JSON | 基础健全性 |
+| `test_bs_compare_first_step_all_added` | 首步所有 BS marker 被标记为 bs_added | BS 事件流完整性 |
+| `test_bs_compare_stable_markers` | 不变 BS marker 产生 bs_stable 事件 | BS 事件流完整性 |
+| `test_bs_compare_removed_markers` | 消失 BS marker 产生 bs_removed 事件 | BS 事件流完整性 |
+| `test_multiple_views_produce_independent_records` | 多视图数据独立记录到同一 JSONL 流 | BS 事件流完整性 |
+| `test_schmitt_snapshot_has_sig_counts` | schmitt_snapshot 含 sig_counts（当前为 BUG 探测） | **P0-1** |
+| `test_filter_tail_has_cutoff_date` | filter_tail.jsonl 包含 cutoff_date 和 tail(5) | **P0-2**, **P1-9** |
+| `test_noisy_close_price_not_recorded` | 确认 noisy 收盘价未被记录（缺口探测） | **P0-2** |
+| `test_schmitt_snapshot_has_mu_v_sigma_v` | schmitt_snapshot 含 mu_v/sigma_v（当前为缺口探测） | **P1-1** |
+| `test_bs_snapshot_written` | BS 全量快照存在性（当前为缺口探测） | **P1-7** |
+| `test_pipeline_output_schmitt_has_v_and_a` | BacktestRunner 返回值含 v/a | **P0-4** |
+| `test_pipeline_output_has_schmitt_subdict` | pipeline output 含 schmitt 子 dict（验证 P0-1 键路径） | **P0-1** |
+| `test_pipeline_output_has_close_prices` | pipeline output 含 noisy 收盘价 | **P0-2** |
+| `test_pipeline_output_has_filtered_array` | pipeline output 含完整 filtered 数组（非仅 tail） | **P0-3** |
+| `test_pipeline_output_has_pnl_arrays` | pipeline output 含 long_pnl/short_pnl | **P1-5** |
+| `test_bs_event_has_corresponding_filter_tail` | BS 事件对应的 filter_tail 行存在 | 追溯链完整性 |
+| `test_bs_event_has_corresponding_schmitt_snapshot` | BS 事件对应的 schmitt_snapshot 行存在 | 追溯链完整性 |
+| `test_cutoff_date_consistent_across_streams` | 跨流 cutoff_date 一致性 | **P1-9** |
+
+### 7.3 数据完整性验证用例
+
+#### 7.3.1 EventRecorder 单元测试 (TestEventRecorder)
+
+11 个用例，全部基于 `tempfile` + mock `pipeline_output` dict，不需要真实数据库或数据加载器。验证内容：
+
+- **JSONL 完整性**: 每条记录都是合法 JSON，flush 到磁盘
+- **BS 事件分类**: added / removed / stable / modified 四种事件的正确触发
+- **多视图隔离**: 不同视图的记录带有独立的 `view` 标签
+- **缺口探测**: P0-1 (sig/eps 键路径) / P0-2 (noisy 缺失) / P1-1 (mu_v/sigma_v 缺失) / P1-7 (全量快照缺失) — 通过 print 输出验证当前缺口，修复后取消注释对应断言
+
+#### 7.3.2 BacktestRunner 结构校验 (TestBacktestRunner)
+
+5 个用例，验证 `_compute_pipeline_for_view` 返回 dict 的结构完整性：
+
+- schmitt 子 dict 存在且含 sig / eps（P0-1）
+- schmitt 子 dict 应含 v / a（P0-4）
+- noisy 收盘价存在（P0-2）
+- filtered 完整数组存在（P0-3）
+- long_pnl / short_pnl 存在（P1-5）
+
+#### 7.3.3 追溯链完整性 (TestTraceability)
+
+3 个用例，运行 mini pipeline (3 步) 并验证跨文件关联：
+
+- BS 事件 (events.jsonl) 的每个 (step, view) 在 filter_tail.jsonl 中有对应行
+- BS 事件的每个 (step, view) 在 schmitt_snapshot.jsonl 中有对应行
+- 跨流 cutoff_date 一致性（P1-9）
+
+#### 7.3.4 缺口 coverage vs 测试状态
+
+| 缺口 | 测试用例 | 当前状态 |
+|------|----------|----------|
+| P0-1 (sig/eps 键路径 BUG) | `test_schmitt_snapshot_has_sig_counts` | **探测中** — 打印缺口信息，断言待修复后启用 |
+| P0-2 (noisy 缺失) | `test_noisy_close_price_not_recorded` + `test_pipeline_output_has_close_prices` | **探测中** — 打印缺口信息，断言待修复后启用 |
+| P0-3 (filter tail 过短) | `test_pipeline_output_has_filtered_array` + `test_filter_tail_has_cutoff_date` | `filtered` 结构通过；tail 长度由 EventRecorder 内部逻辑决定 |
+| P0-4 (v/a 缺失) | `test_pipeline_output_schmitt_has_v_and_a` | 结构校验通过（预期结构），需 BacktestRunner 实现 |
+| P1-1 (mu_v/sigma_v 缺失) | `test_schmitt_snapshot_has_mu_v_sigma_v` | **探测中** — 打印缺口信息 |
+| P1-5 (PnL 缺失) | `test_pipeline_output_has_pnl_arrays` | 结构校验通过，EventRecorder 未记录 |
+| P1-7 (BS 全量快照) | `test_bs_snapshot_written` | **探测中** — 打印缺口信息 |
+| P1-9 (cutoff_date 缺失) | `test_cutoff_date_consistent_across_streams` | filter_tail 通过；schmitt/trade 待补充 |

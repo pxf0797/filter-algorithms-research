@@ -505,12 +505,16 @@ class BacktestRunner:
 
         v = np.gradient(filtered, t)
         a = np.gradient(v, t)
-        return _schmitt_trigger(
+        result = _schmitt_trigger(
             v, a,
             ewma_span=cfg.get("ew", 60),
             k_eps=cfg.get("ke", 0.15),
             sigma_min=cfg.get("sm", 0.05),
         )
+        if result is not None:
+            result["v"] = v
+            result["a"] = a
+        return result
 
     @staticmethod
     def _compute_prediction_pairs(

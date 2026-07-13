@@ -48,6 +48,7 @@ class EventRecorder:
         self._filter_tail_fp = None
         self._schmitt_snapshot_fp = None
         self._trade_summary_fp = None
+        self._bs_snapshot_fp = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -83,6 +84,7 @@ class EventRecorder:
         self._filter_tail_fp = _open_jsonl(self._session_dir / "filter_tail.jsonl")
         self._schmitt_snapshot_fp = _open_jsonl(self._session_dir / "schmitt_snapshot.jsonl")
         self._trade_summary_fp = _open_jsonl(self._session_dir / "trade_summary.jsonl")
+        self._bs_snapshot_fp = _open_jsonl(self._session_dir / "bs_snapshot.jsonl")
 
         # Write session_started event
         self._append_jsonl(self._events_fp, {
@@ -172,7 +174,8 @@ class EventRecorder:
 
         # Close all JSONL file handles
         for fp in (self._events_fp, self._filter_tail_fp,
-                    self._schmitt_snapshot_fp, self._trade_summary_fp):
+                    self._schmitt_snapshot_fp, self._trade_summary_fp,
+                    self._bs_snapshot_fp):
             if fp is not None:
                 try:
                     fp.close()
@@ -182,6 +185,7 @@ class EventRecorder:
         self._filter_tail_fp = None
         self._schmitt_snapshot_fp = None
         self._trade_summary_fp = None
+        self._bs_snapshot_fp = None
 
         # Update metadata.json with final stats
         meta_path = self._session_dir / "metadata.json"
@@ -305,21 +309,41 @@ class EventRecorder:
                 self._append_jsonl(self._events_fp, evt)
             self._prev_bs_by_view[view_name] = curr_bs
 
+            # --- BS full snapshot ---
+            self._append_jsonl(self._bs_snapshot_fp, {
+                "event": "bs_snapshot",
+                "step": step_index,
+                "view": view_name,
+                "entry": [
+                    {"bar_idx": int(m[0]), "label": str(m[1]), "date": _to_str(m[3])}
+                    for m in curr_bs.get("entry_markers", [])
+                ],
+                "exit": [
+                    {"bar_idx": int(m[0]), "label": str(m[1]), "date": _to_str(m[4])}
+                    for m in curr_bs.get("exit_markers", [])
+                ],
+            })
+
         # --- Filter tail ---
         filtered = view_data.get("filtered")
         if filtered is not None:
             tail = _ndarray_tail(filtered, 5)
-            self._append_jsonl(self._filter_tail_fp, {
+            record = {
                 "event": "filter_tail",
                 "step": step_index,
                 "view": view_name,
                 "cutoff_date": cutoff_date,
                 "tail": tail,
-            })
+            }
+            noisy = view_data.get("noisy")
+            if noisy is not None:
+                record["close_tail"] = _ndarray_tail(noisy, 5)
+            self._append_jsonl(self._filter_tail_fp, record)
 
         # --- Schmitt snapshot ---
-        sig = view_data.get("sig")
-        eps = view_data.get("eps")
+        schmitt = view_data.get("schmitt", {})
+        sig = schmitt.get("sig") if schmitt else None
+        eps = schmitt.get("eps") if schmitt else None
         all_pairs = view_data.get("all_pairs")
         if sig is not None or eps is not None or all_pairs is not None:
             snapshot: Dict[str, Any] = {
@@ -338,6 +362,15 @@ class EventRecorder:
                 snapshot["pair_count"] = len(all_pairs)
             if eps is not None:
                 snapshot["eps_tail"] = _ndarray_tail(eps, 3)
+            if schmitt:
+                if schmitt.get("mu_v") is not None:
+                    snapshot["mu_v_tail"] = _ndarray_tail(schmitt["mu_v"], 5)
+                if schmitt.get("sigma_v") is not None:
+                    snapshot["sigma_v_tail"] = _ndarray_tail(schmitt["sigma_v"], 5)
+                if schmitt.get("v") is not None:
+                    snapshot["v_tail"] = _ndarray_tail(schmitt["v"], 5)
+                if schmitt.get("a") is not None:
+                    snapshot["a_tail"] = _ndarray_tail(schmitt["a"], 5)
             self._append_jsonl(self._schmitt_snapshot_fp, snapshot)
 
         # --- Trade summary ---
