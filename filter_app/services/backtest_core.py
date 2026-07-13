@@ -122,13 +122,15 @@ class BacktestRunner:
         -------
         list[dict]
             每步的结果字典：
-            ``[{"step_index": N, "cutoff_date": "...",
-               "views": {"v0_日线": {...}, ...}}, ...]``
+            ``[{"step_index": N, "bar_index": N, "bar_timestamp": "...",
+               "cutoff_date": "...", "views": {"v0_日线": {...}, ...},
+               "ohlcv": {"open": ..., "high": ..., "low": ...,
+                          "close": ..., "volume": ...}}, ...]``
 
             每个 view 的输出包含管道各阶段数据：``t``, ``dates``, ``noisy``,
-            ``ohlc``, ``filtered``, ``filtered2``, ``schmitt``, ``all_pairs``,
-            ``prediction_pairs``, ``long_pnl``, ``short_pnl``, ``trade_records``,
-            ``long_mask``, ``short_mask``, ``bs_markers``。
+            ``ohlc``, ``ohlcv``, ``filtered``, ``filtered2``, ``schmitt``,
+            ``all_pairs``, ``prediction_pairs``, ``long_pnl``, ``short_pnl``,
+            ``trade_records``, ``long_mask``, ``short_mask``, ``bs_markers``。
 
         Raises
         ------
@@ -151,7 +153,8 @@ class BacktestRunner:
         results: list[dict] = []
 
         for bar_index in range(start_bar, end_bar, step_interval):
-            cutoff_date = self._get_bar_date(bar_index)
+            bar_info = self._get_bar_info(bar_index)
+            cutoff_date = bar_info["cutoff_date"]
             logger.debug(
                 "回测步骤: bar_index={}, cutoff_date={}",
                 bar_index, cutoff_date,
@@ -215,8 +218,11 @@ class BacktestRunner:
 
             results.append({
                 "step_index": bar_index,
+                "bar_index": bar_index,
+                "bar_timestamp": bar_info["bar_timestamp"],
                 "cutoff_date": cutoff_date,
                 "views": view_outputs,
+                "ohlcv": bar_info["ohlcv"],
             })
 
         logger.info(
@@ -233,10 +239,10 @@ class BacktestRunner:
     # 内部方法
     # ------------------------------------------------------------------
 
-    def _get_bar_date(self, bar_index: int) -> str:
-        """从 DB 查询 bar_index 对应的日期字符串。
+    def _get_bar_info(self, bar_index: int) -> dict:
+        """从 DB 查询 bar_index 对应的 bar 信息。
 
-        以 min_tf 为基准周期，按时间升序取第 bar_index 条记录的日期。
+        以 min_tf 为基准周期，查询第 bar_index 条记录的 ts、OHLCV。
 
         Parameters
         ----------
@@ -245,8 +251,8 @@ class BacktestRunner:
 
         Returns
         -------
-        str
-            日期字符串（DB 中存储的 ts 值）。
+        dict
+            ``{"bar_timestamp": str, "cutoff_date": str, "ohlcv": {...}}``。
 
         Raises
         ------
@@ -260,7 +266,7 @@ class BacktestRunner:
 
         with get_conn() as conn:
             row = conn.execute(
-                """SELECT ts FROM kline
+                """SELECT ts, open, high, low, close, volume FROM kline
                    WHERE ticker=? AND timeframe=?
                    ORDER BY ts ASC LIMIT 1 OFFSET ?""",
                 (self.ticker, self._min_tf, bar_index),
@@ -268,9 +274,19 @@ class BacktestRunner:
 
         if row is None:
             raise IndexError(
-                f"bar_index={bar_index} 在 DB 中无对应日期"
+                f"bar_index={bar_index} 在 DB 中无对应数据"
             )
-        return row[0]
+        return {
+            "bar_timestamp": row["ts"],
+            "cutoff_date": row["ts"],
+            "ohlcv": {
+                "open": row["open"],
+                "high": row["high"],
+                "low": row["low"],
+                "close": row["close"],
+                "volume": row["volume"],
+            },
+        }
 
     def _sync_data(self, cutoff_date: str) -> None:
         """同步数据到 display parquet（级联合成）。
@@ -380,9 +396,9 @@ class BacktestRunner:
         -------
         dict
             管道各阶段输出，键名对应阶段产物：
-            ``t``, ``dates``, ``noisy``, ``ohlc``, ``filtered``, ``filtered2``,
-            ``schmitt``, ``all_pairs``, ``prediction_pairs``, ``long_pnl``,
-            ``short_pnl``, ``trade_records``。
+            ``t``, ``dates``, ``noisy``, ``ohlc``, ``ohlcv``, ``filtered``,
+            ``filtered2``, ``schmitt``, ``all_pairs``, ``prediction_pairs``,
+            ``long_pnl``, ``short_pnl``, ``trade_records``。
         """
         t, noisy, ohlc, dates = window_data
         tf = view_cfg["tf"]
@@ -413,6 +429,13 @@ class BacktestRunner:
             "dates": dates,
             "noisy": noisy,
             "ohlc": ohlc,
+            "ohlcv": {
+                "close": float(noisy[-1]) if len(noisy) > 0 else None,
+                "open": float(ohlc["Open"].iloc[-1]),
+                "high": float(ohlc["High"].iloc[-1]),
+                "low": float(ohlc["Low"].iloc[-1]),
+                "volume": float(ohlc["Volume"].iloc[-1]) if "Volume" in ohlc.columns else 0.0,
+            },
             "filtered": filtered,
             "filtered2": filtered2,
             "schmitt": schmitt,

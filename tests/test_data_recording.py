@@ -94,6 +94,60 @@ def _make_mock_view_data(
     }
 
 
+def _make_csv_accumulate_data(bar_index: int = 0, n_views: int = 4, sparse: bool = False):
+    """构造 CSVBuilder.accumulate() 所需的 mock 数据。
+
+    Parameters
+    ----------
+    bar_index : int
+        Bar 索引，用于时间戳和 BS marker 匹配。
+    n_views : int
+        生成的视图数量。
+    sparse : bool
+        若为 True，省略 filtered/schmitt/all_pairs/trade_records，
+        模拟需要前向填充的粗周期数据。
+
+    Returns
+    -------
+    tuple: (bar_index, bar_timestamp, ohlcv, views_data)
+    """
+    bar_timestamp = f"2025-06-{10 + bar_index:02d} 09:30:00"
+    ohlcv = {
+        "close": 150.0 + bar_index,
+        "open": 149.0 + bar_index,
+        "high": 152.0 + bar_index,
+        "low": 148.0 + bar_index,
+        "volume": 1000000.0 + bar_index * 1000,
+    }
+
+    n_pts = 10
+    views_data = {}
+    for i in range(n_views):
+        view_name = f"v{i}_日线"
+        if sparse:
+            views_data[view_name] = {
+                "bs_markers": {"entry_markers": [], "exit_markers": []},
+            }
+        else:
+            entry = [(bar_index, "B")] if bar_index % 4 == 0 else []
+            exit_ = [(bar_index, "S")] if bar_index % 7 == 0 else []
+            views_data[view_name] = {
+                "filtered": np.arange(1, n_pts + 1, dtype=float) * (i + 1) + bar_index,
+                "schmitt": {
+                    "sig": np.array([0, 0, 1, -1, 1, 0, -1, 1, 0, 0]),
+                    "eps": np.ones(n_pts) * (0.1 + i * 0.05),
+                    "mu_v": np.ones(n_pts) * (0.01 + i * 0.005),
+                    "sigma_v": np.ones(n_pts) * (0.5 + i * 0.1),
+                    "dur": np.array([0, 0, 1, 2, 3, 0, 1, 2, 0, 0], dtype=int),
+                },
+                "all_pairs": [(2, 5)],
+                "trade_records": [{"type": "long", "pnl": 100.0 + bar_index}],
+                "bs_markers": {"entry_markers": entry, "exit_markers": exit_},
+            }
+
+    return bar_index, bar_timestamp, ohlcv, views_data
+
+
 def _make_mock_pipeline_output(views: Optional[Dict[str, dict]] = None) -> dict:
     """Build a pipeline_output dict matching BacktestRunner.run() step shape."""
     return {
@@ -822,6 +876,294 @@ class TestTraceability(unittest.TestCase):
                 self.assertEqual(by_step[step], date, f"cutoff_date mismatch at step={step}")
             else:
                 by_step[step] = date
+
+
+# ============================================================================
+# TestCSVBuilder — CSV 导出和 Bar 级时间序列验证
+# ============================================================================
+
+
+class TestCSVBuilder(unittest.TestCase):
+    """CSVBuilder 累积与写出的正确性验证。
+
+    所有测试使用 mock 数据，不依赖数据库。每个测试在 0.1s 内完成。
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="csvbld_test_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    # ------------------------------------------------------------------
+    # 1. 基础列存在性
+    # ------------------------------------------------------------------
+
+    def test_accumulate_creates_row_with_base_columns(self):
+        """验证基础列存在: bar_index, bar_timestamp, close, open, high, low, volume"""
+        from services.event_recorder import CSVBuilder
+
+        builder = CSVBuilder()
+        bar_idx, bar_ts, ohlcv, views_data = _make_csv_accumulate_data(
+            bar_index=0, n_views=2,
+        )
+        builder.accumulate(bar_idx, bar_ts, ohlcv, views_data)
+
+        row = builder._rows[0]
+        expected_base = {"bar_index", "bar_timestamp", "close", "open", "high", "low", "volume"}
+        for col in expected_base:
+            self.assertIn(col, row, f"缺少基础列: {col}")
+        self.assertEqual(row["bar_index"], 0)
+        self.assertEqual(row["bar_timestamp"], "2025-06-10 09:30:00")
+
+    # ------------------------------------------------------------------
+    # 2. 每视图 10 列
+    # ------------------------------------------------------------------
+
+    def test_accumulate_creates_per_view_columns(self):
+        """验证每视图 10 列存在: _filtered, _sig, _eps, _mu_v, _sigma_v,
+        _sig_dur, _pair_count, _trade_count, _bs_entry, _bs_exit"""
+        from services.event_recorder import CSVBuilder
+
+        builder = CSVBuilder()
+        bar_idx, bar_ts, ohlcv, views_data = _make_csv_accumulate_data(
+            bar_index=0, n_views=2,
+        )
+        builder.accumulate(bar_idx, bar_ts, ohlcv, views_data)
+
+        row = builder._rows[0]
+        expected_suffixes = [
+            "_filtered", "_sig", "_eps", "_mu_v", "_sigma_v",
+            "_sig_dur", "_pair_count", "_trade_count", "_bs_entry", "_bs_exit",
+        ]
+        for vi in range(2):
+            prefix = f"v{vi}"
+            for sfx in expected_suffixes:
+                col = f"{prefix}{sfx}"
+                self.assertIn(col, row, f"视图 {prefix} 缺少列: {col}")
+
+        # 总列数 = 7 基础 + 2*10 视图 = 27
+        self.assertEqual(len(row), 27, f"期望 27 列，实际 {len(row)} 列")
+
+    # ------------------------------------------------------------------
+    # 3. CSV 文件创建
+    # ------------------------------------------------------------------
+
+    def test_write_csv_file_exists(self):
+        """验证 CSV 文件被创建"""
+        from services.event_recorder import CSVBuilder
+
+        builder = CSVBuilder()
+        for bi in range(5):
+            bar_idx, bar_ts, ohlcv, views_data = _make_csv_accumulate_data(
+                bar_index=bi, n_views=1,
+            )
+            builder.accumulate(bar_idx, bar_ts, ohlcv, views_data)
+
+        csv_path = Path(self.tmpdir) / "test_output.csv"
+        builder.write(csv_path)
+
+        self.assertTrue(csv_path.exists(), f"CSV 文件应存在: {csv_path}")
+        self.assertGreater(csv_path.stat().st_size, 0, "CSV 文件不应为空")
+
+    # ------------------------------------------------------------------
+    # 4. 行数匹配
+    # ------------------------------------------------------------------
+
+    def test_csv_row_count_matches_bars(self):
+        """验证 CSV 行数 = 累积的 bar 数"""
+        from services.event_recorder import CSVBuilder
+
+        builder = CSVBuilder()
+        n_bars = 7
+        for bi in range(n_bars):
+            bar_idx, bar_ts, ohlcv, views_data = _make_csv_accumulate_data(
+                bar_index=bi, n_views=1,
+            )
+            builder.accumulate(bar_idx, bar_ts, ohlcv, views_data)
+
+        csv_path = Path(self.tmpdir) / "test_rows.csv"
+        builder.write(csv_path)
+
+        df = pd.read_csv(csv_path)
+        self.assertEqual(len(df), n_bars,
+                         f"CSV 行数应为 {n_bars}，实际 {len(df)}")
+
+    # ------------------------------------------------------------------
+    # 5. 时间戳单调性
+    # ------------------------------------------------------------------
+
+    def test_csv_bar_timestamps_are_monotonic(self):
+        """验证 bar_timestamp 列单调递增"""
+        from services.event_recorder import CSVBuilder
+
+        builder = CSVBuilder()
+        n_bars = 10
+        for bi in range(n_bars):
+            bar_idx, bar_ts, ohlcv, views_data = _make_csv_accumulate_data(
+                bar_index=bi, n_views=1,
+            )
+            builder.accumulate(bar_idx, bar_ts, ohlcv, views_data)
+
+        csv_path = Path(self.tmpdir) / "test_mono.csv"
+        builder.write(csv_path)
+
+        df = pd.read_csv(csv_path)
+        timestamps = pd.to_datetime(df["bar_timestamp"])
+        self.assertTrue(
+            timestamps.is_monotonic_increasing,
+            "bar_timestamp 应单调递增",
+        )
+
+    # ------------------------------------------------------------------
+    # 6. OHLCV 非空
+    # ------------------------------------------------------------------
+
+    def test_csv_ohlcv_not_null(self):
+        """验证 OHLCV 列有值（非 NaN）"""
+        from services.event_recorder import CSVBuilder
+
+        builder = CSVBuilder()
+        for bi in range(5):
+            bar_idx, bar_ts, ohlcv, views_data = _make_csv_accumulate_data(
+                bar_index=bi, n_views=1,
+            )
+            builder.accumulate(bar_idx, bar_ts, ohlcv, views_data)
+
+        csv_path = Path(self.tmpdir) / "test_ohlcv.csv"
+        builder.write(csv_path)
+
+        df = pd.read_csv(csv_path)
+        ohlcv_cols = ["close", "open", "high", "low", "volume"]
+        for col in ohlcv_cols:
+            self.assertIn(col, df.columns, f"缺少 OHLCV 列: {col}")
+            self.assertFalse(
+                df[col].isna().any(),
+                f"列 {col} 不应包含 NaN",
+            )
+
+    # ------------------------------------------------------------------
+    # 7. 前向填充
+    # ------------------------------------------------------------------
+
+    def test_csv_ffill_propagates_coarse_data(self):
+        """验证前向填充：粗周期数据正确传播到后续 bar。
+
+        构造 3 个 bar：bar 0 全量数据（含 BS entry="B"），bar 1 稀疏数据
+        （无 schmitt/filtered/pairs），bar 2 全量数据。写入 CSV 后，
+        bar 1 的缺失列应从 bar 0 前向填充获取值。
+        """
+        from services.event_recorder import CSVBuilder
+
+        builder = CSVBuilder()
+
+        # Bar 0: full data — BS entry = "B" (bar 0 % 4 == 0)
+        bi0, ts0, ohlcv0, views0 = _make_csv_accumulate_data(0, n_views=1)
+        builder.accumulate(bi0, ts0, ohlcv0, views0)
+
+        # Bar 1: sparse data — no schmitt columns, entry_label = "-"
+        bi1, ts1, ohlcv1, views1 = _make_csv_accumulate_data(1, n_views=1, sparse=True)
+        builder.accumulate(bi1, ts1, ohlcv1, views1)
+
+        # Bar 2: full data again
+        bi2, ts2, ohlcv2, views2 = _make_csv_accumulate_data(2, n_views=1)
+        builder.accumulate(bi2, ts2, ohlcv2, views2)
+
+        csv_path = Path(self.tmpdir) / "test_ffill.csv"
+        builder.write(csv_path)
+
+        df = pd.read_csv(csv_path)
+        self.assertEqual(len(df), 3, "应有 3 行数据")
+
+        # Bar 0 的 BS entry 是 "B"，写入后 ffill 应传播到 bar 1
+        self.assertEqual(df.loc[0, "v0_bs_entry"], "B",
+                         "bar 0 bs_entry 应为 B")
+        self.assertEqual(df.loc[1, "v0_bs_entry"], "B",
+                         "ffill 应将 bar 0 的 BS entry 传播到 bar 1")
+
+    # ------------------------------------------------------------------
+    # 8. BS 标签合法值
+    # ------------------------------------------------------------------
+
+    def test_csv_bs_labels_are_valid(self):
+        """验证 BS 列为 B/S/- 三值之一"""
+        from services.event_recorder import CSVBuilder
+
+        builder = CSVBuilder()
+        n_bars = 20
+        for bi in range(n_bars):
+            bar_idx, bar_ts, ohlcv, views_data = _make_csv_accumulate_data(
+                bar_index=bi, n_views=2,
+            )
+            builder.accumulate(bar_idx, bar_ts, ohlcv, views_data)
+
+        csv_path = Path(self.tmpdir) / "test_bs_valid.csv"
+        builder.write(csv_path)
+
+        df = pd.read_csv(csv_path)
+        valid_labels = {"B", "S", "-"}
+        bs_cols = [c for c in df.columns if c.endswith("_bs_entry") or c.endswith("_bs_exit")]
+        self.assertGreater(len(bs_cols), 0, "应至少有一个 BS 列")
+
+        for col in bs_cols:
+            unique_vals = set(df[col].dropna().unique())
+            invalid = unique_vals - valid_labels
+            self.assertEqual(
+                invalid, set(),
+                f"列 {col} 包含非法 BS 值: {invalid}，允许值: {valid_labels}",
+            )
+
+    # ------------------------------------------------------------------
+    # 9. 空 rows 时 write 不报错
+    # ------------------------------------------------------------------
+
+    def test_write_empty_does_not_raise(self):
+        """验证空 CSVBuilder 调用 write 不抛异常"""
+        from services.event_recorder import CSVBuilder
+
+        builder = CSVBuilder()
+        csv_path = Path(self.tmpdir) / "empty.csv"
+        try:
+            builder.write(csv_path)
+        except Exception as e:
+            self.fail(f"空 CSVBuilder 调用 write 不应抛异常，实际: {e}")
+
+    # ------------------------------------------------------------------
+    # 10. BS 列前导 "-" 不被 ffill 错误覆盖
+    # ------------------------------------------------------------------
+
+    def test_csv_leading_dash_preserved(self):
+        """验证首段无 marker 的 bar，BS 列保持 "-" 不被 ffill 错误覆盖。
+
+        构造 bar 1–5 的数据：bar 1-3 均无 entry marker（bs_entry = "-"），
+        bar 4 首次出现 "B"。写入后 bar 1-3 的前导 "-" 变成 NaN → ffill 无
+        前驱值 → fillna("-") 还原为 "-"，而 bar 4-5 被 "B" 前向填充。
+        """
+        from services.event_recorder import CSVBuilder
+
+        builder = CSVBuilder()
+        # 使用 bar 1–5，首段（bar 1-3）都没有 entry marker
+        for bi in range(1, 6):
+            bar_idx, bar_ts, ohlcv, views_data = _make_csv_accumulate_data(
+                bar_index=bi, n_views=1,
+            )
+            builder.accumulate(bar_idx, bar_ts, ohlcv, views_data)
+
+        csv_path = Path(self.tmpdir) / "test_leading_dash.csv"
+        builder.write(csv_path)
+
+        df = pd.read_csv(csv_path)
+        # bar 1,2,3: 无 entry marker → 前导 "-" 应保持
+        # bar 4,5: bar 4 首次出现 "B"（4 % 4 == 0），ffill 传播到 bar 5
+        for bi in [1, 2, 3]:
+            self.assertEqual(
+                df.loc[bi - 1, "v0_bs_entry"], "-",
+                f"前导 bar {bi} 应保持 \"-\"，无前驱 B/S",
+            )
+        self.assertEqual(df.loc[3, "v0_bs_entry"], "B",
+                         "bar 4 首次出现 entry，应为 B")
+        self.assertEqual(df.loc[4, "v0_bs_entry"], "B",
+                         "bar 5 应由 ffill 从 bar 4 传播得到 B")
 
 
 # ============================================================================

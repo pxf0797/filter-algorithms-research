@@ -22,7 +22,178 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
+import pandas as pd
 from loguru import logger
+
+
+class CSVBuilder:
+    """累积逐 bar 数据，end_session 时写入 CSV。
+
+    在内存 dict 中逐行累积每个 bar 的完整状态快照（基础 OHLCV 列 +
+    各视图的计算列），``end_session`` 时用 pandas 一次性写入 CSV。
+    写入时通过 ``df.ffill()`` 自动前向填充粗周期数据，确保每个
+    min_tf bar 都有完整的列值。
+    """
+
+    def __init__(self) -> None:
+        self._rows: dict[int, dict] = {}  # bar_index -> {col_name: value}
+        self._min_tf: str = ""
+
+    def accumulate(
+        self,
+        bar_index: int,
+        bar_timestamp: str,
+        ohlcv: dict,
+        views_data: dict,
+    ) -> None:
+        """累积一个 bar 的数据。
+
+        Parameters
+        ----------
+        bar_index : int
+            最小周期 bar 索引。
+        bar_timestamp : str
+            该 bar 的真实时间戳（ISO 8601 格式）。
+        ohlcv : dict
+            OHLCV 数据，包含 ``close``, ``open``, ``high``, ``low``, ``volume`` 键。
+        views_data : dict
+            各视图数据，键为视图名（如 ``"v0_日线"``），值为该视图的管道输出。
+        """
+        row: dict[str, Any] = {
+            "bar_index": bar_index,
+            "bar_timestamp": bar_timestamp,
+            "close": ohlcv.get("close", float("nan")),
+            "open": ohlcv.get("open", float("nan")),
+            "high": ohlcv.get("high", float("nan")),
+            "low": ohlcv.get("low", float("nan")),
+            "volume": ohlcv.get("volume", float("nan")),
+        }
+        for view_name, view_data in views_data.items():
+            cols = self._extract_view_columns(view_name, view_data, bar_index)
+            row.update(cols)
+        self._rows[bar_index] = row
+
+    def _extract_view_columns(
+        self, view_name: str, view_data: dict, bar_index: int
+    ) -> dict:
+        """从一个视图数据中提取 CSV 列。
+
+        提取的列：
+        - ``{prefix}_filtered``: filter 数组最后一个值
+        - ``{prefix}_sig``: sig 数组最后一个值（-1/0/1）
+        - ``{prefix}_eps``: eps 数组最后一个值
+        - ``{prefix}_mu_v``: mu_v 数组最后一个值
+        - ``{prefix}_sigma_v``: sigma_v 数组最后一个值
+        - ``{prefix}_sig_dur``: 当前 sig 持续期
+        - ``{prefix}_pair_count``: all_pairs 数量
+        - ``{prefix}_trade_count``: trade_records 数量
+        - ``{prefix}_bs_entry``: entry marker label (B/S/-)
+        - ``{prefix}_bs_exit``: exit marker label (B/S/-)
+
+        Parameters
+        ----------
+        view_name : str
+            视图名，如 ``"v0_日线"``。前缀从名称中提取。
+        view_data : dict
+            该视图的管道输出数据。
+        bar_index : int
+            当前 bar 索引，用于匹配 BS marker 的 bar_idx。
+
+        Returns
+        -------
+        dict
+            以 ``{prefix}_{col}`` 为键的列值字典。
+        """
+        prefix = view_name.split("_", 1)[0]  # "v0_日线" -> "v0"
+        result: dict[str, Any] = {}
+
+        # --- filtered ---
+        filtered = view_data.get("filtered")
+        if filtered is not None:
+            result[f"{prefix}_filtered"] = _last_value(filtered)
+
+        # --- schmitt ---
+        schmitt: dict = view_data.get("schmitt", {})
+        if schmitt:
+            sig = schmitt.get("sig")
+            if sig is not None:
+                result[f"{prefix}_sig"] = int(_last_value(sig))
+
+            eps = schmitt.get("eps")
+            if eps is not None:
+                result[f"{prefix}_eps"] = _last_value(eps)
+
+            mu_v = schmitt.get("mu_v")
+            if mu_v is not None:
+                result[f"{prefix}_mu_v"] = _last_value(mu_v)
+
+            sigma_v = schmitt.get("sigma_v")
+            if sigma_v is not None:
+                result[f"{prefix}_sigma_v"] = _last_value(sigma_v)
+
+            dur = schmitt.get("dur")
+            if dur is not None:
+                result[f"{prefix}_sig_dur"] = _last_value(dur)
+
+        # --- all_pairs ---
+        all_pairs = view_data.get("all_pairs")
+        if all_pairs is not None:
+            result[f"{prefix}_pair_count"] = len(all_pairs)
+
+        # --- trade_records ---
+        trade_records = view_data.get("trade_records")
+        if trade_records is not None:
+            result[f"{prefix}_trade_count"] = len(trade_records)
+
+        # --- BS markers ---
+        bs_markers: dict = view_data.get("bs_markers", {})
+        entry_label = "-"
+        exit_label = "-"
+        for m in bs_markers.get("entry_markers", []):
+            if int(m[0]) == bar_index:
+                entry_label = str(m[1])
+                break
+        for m in bs_markers.get("exit_markers", []):
+            if int(m[0]) == bar_index:
+                exit_label = str(m[1])
+                break
+        result[f"{prefix}_bs_entry"] = entry_label
+        result[f"{prefix}_bs_exit"] = exit_label
+
+        return result
+
+    def write(self, filepath: Union[str, Path]) -> None:
+        """用 pandas 将累积数据写入 CSV。
+
+        自动前向填充粗周期数据：BS 标记列中的 ``"-"`` 先替换为 NaN，
+        ``ffill()`` 传播最近的非 ``"-"`` 标签后，再将剩余 NaN 还原为 ``"-"``。
+        其他列（数值）中因粗周期产生的缺失值直接由 ``ffill()`` 处理。
+
+        Parameters
+        ----------
+        filepath : str or Path
+            输出 CSV 文件路径。
+        """
+        if not self._rows:
+            return
+        df = pd.DataFrame.from_dict(self._rows, orient="index")
+        df.sort_index(inplace=True)
+
+        # 将 BS 列中的 "-" 替换为 NaN 以便 ffill 传播实际标签
+        bs_cols = [
+            c for c in df.columns
+            if c.endswith("_bs_entry") or c.endswith("_bs_exit")
+        ]
+        for col in bs_cols:
+            df[col] = df[col].replace("-", np.nan)
+
+        df.ffill(inplace=True)
+
+        # 还原 BS 列中未被 ffill 覆盖的 NaN（首段无 marker 的 bar）
+        for col in bs_cols:
+            df[col] = df[col].fillna("-")
+
+        df.to_csv(filepath, index=False)
 
 
 class EventRecorder:
@@ -49,6 +220,7 @@ class EventRecorder:
         self._schmitt_snapshot_fp = None
         self._trade_summary_fp = None
         self._bs_snapshot_fp = None
+        self._csv_builder = CSVBuilder()
 
     # ------------------------------------------------------------------
     # Public API
@@ -156,6 +328,25 @@ class EventRecorder:
 
         self._step_count = step_index + 1
 
+        # --- CSV 累积（在 JSONL 写入之后，非阻断） ---
+        try:
+            bar_index: int = pipeline_output.get("bar_index", step_index)
+            bar_timestamp: str = pipeline_output.get("bar_timestamp", cutoff_date)
+            ohlcv_data = pipeline_output.get("ohlcv", {})
+            ohlcv: dict[str, float] = {
+                "close": float(ohlcv_data.get("close", float("nan"))),
+                "open": float(ohlcv_data.get("open", float("nan"))),
+                "high": float(ohlcv_data.get("high", float("nan"))),
+                "low": float(ohlcv_data.get("low", float("nan"))),
+                "volume": float(ohlcv_data.get("volume", float("nan"))),
+            }
+            self._csv_builder.accumulate(bar_index, bar_timestamp, ohlcv, views)
+        except Exception:
+            logger.warning(
+                "EventRecorder: failed to accumulate CSV data for step %d",
+                step_index, exc_info=True,
+            )
+
     def end_session(self) -> None:
         """Close session, write end_time and step_count to metadata.json."""
         if self._session_dir is None:
@@ -198,6 +389,13 @@ class EventRecorder:
         meta["end_time"] = datetime.now().isoformat()
         meta["step_count"] = self._step_count
         _write_json(meta_path, meta)
+
+        # --- CSV 写入 ---
+        try:
+            csv_path: Path = self._session_dir / "backtest_data.csv"
+            self._csv_builder.write(csv_path)
+        except Exception:
+            logger.warning("EventRecorder: failed to write CSV", exc_info=True)
 
     # ------------------------------------------------------------------
     # BS Marker Comparison
@@ -424,6 +622,20 @@ def _ndarray_tail(arr, n: int) -> list:
     if a.ndim == 1:
         return a[-n:].tolist()
     return a[-n:].tolist()
+
+
+def _last_value(arr) -> Any:
+    """Extract the last element from an array-like as a Python scalar.
+
+    Returns ``float("nan")`` for empty arrays.
+    """
+    a = np.asarray(arr)
+    if a.size == 0:
+        return float("nan")
+    val = a.flat[-1]
+    if hasattr(val, "item"):
+        return val.item()
+    return val
 
 
 def _to_str(val) -> str:

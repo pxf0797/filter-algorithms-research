@@ -1,6 +1,6 @@
 # 回测数据采集系统 -- 宏观框架设计
 
-> 版本: v1.0 | 日期: 2026-07-13 | 状态: MVP 设计阶段
+> 版本: v1.1 | 日期: 2026-07-13 | 状态: MVP 设计阶段
 
 ---
 
@@ -231,7 +231,11 @@ BS Marker (bar_index=118, type="entry")
 **新增捕获项（当前 PipelineCapture 遗漏）**：
 - `mu_v`, `sigma_v`：Schmitt 内部变量，决定自适应死区 eps 的计算，是 BS 敏感性分析的根因参数 [已确认：`_schmitt_trigger()` 返回字典中包含这些变量，当前可访问但 PipelineCapture 未记录]
 - `eps` 尾部演化序列：当前只捕获 eps 的最终快照值，需要追踪其随 step 推进的演化过程
+- `dur`：信号持续期，Schmitt 触发器输出字典中已有，用于区分稳定信号和噪声抖动
+- OHLCV（开高低收量）：min_tf 原始 bar 数据，BS 信号分析的基础价格上下文
 - `pair_split`/`pair_merge` 事件：信号对的结构性变化是 BS 跳跃的常见原因
+
+> 详见 §5（CSV 统一输出格式）和 §7（补充数据项）。
 
 ### 4.3 BS 变动追踪 -- Event Sourcing（核心创新）
 
@@ -285,9 +289,248 @@ def capture_bs_events(step_index, current_bs, prev_bs, events_file):
 
 ---
 
-## 5. CLI 化方案
+## 5. CSV 统一输出格式
 
-### 5.1 可行性结论：高
+### 5.1 定位：主要分析格式
+
+JSONL（events.jsonl 等）保留用于**事件流分析**（grep/jq 定位 BS 变动时刻），CSV 作为**主要分析格式**，提供完整的逐 bar 时间序列视图。两者的关系：
+
+| 维度 | JSONL（事件流） | CSV（时间序列） |
+|------|----------------|-----------------|
+| 用途 | 定位 BS 变动事件、级联放大事件 | 逐 bar 状态演进、跨周期对比、统计分析 |
+| 粒度 | 事件（仅变化时写入） | 逐 bar（每个 min_tf bar 一行） |
+| 分析工具 | grep, jq, tail | pandas, Excel, Plotly |
+| 内容 | 事件 + 触发原因 + 增量 delta | 每个 bar 上所有视图的完整状态快照 |
+
+### 5.2 CSV 结构
+
+每行 = 最小周期（min_tf）的 1 个 bar。每列 = 一个指标。
+
+列分组如下（视图数量由配置决定，以 4 视图为例）：
+
+```
+┌─ 基础列（7 列）──────────────────────────────────┐
+│ bar_index, bar_timestamp, close, open, high,     │
+│ low, volume                                       │
+├─ 日线视图 (v0) ──────────────────────────────────┤
+│ v0_filtered, v0_sig, v0_eps, v0_mu_v,            │
+│ v0_sigma_v, v0_pair_count, v0_trade_count,       │
+│ v0_bs_entry, v0_bs_exit                          │
+├─ 60分钟视图 (v1) ────────────────────────────────┤
+│ v1_filtered, v1_sig, v1_eps, v1_mu_v,            │
+│ v1_sigma_v, v1_pair_count, v1_trade_count,       │
+│ v1_bs_entry, v1_bs_exit                          │
+├─ 15分钟视图 (v2) ────────────────────────────────┤
+│ v2_filtered, v2_sig, v2_eps, v2_mu_v,            │
+│ v2_sigma_v, v2_pair_count, v2_trade_count,       │
+│ v2_bs_entry, v2_bs_exit                          │
+├─ 5分钟视图 (v3) ─────────────────────────────────┤
+│ v3_filtered, v3_sig, v3_eps, v3_mu_v,            │
+│ v3_sigma_v, v3_pair_count, v3_trade_count,       │
+│ v3_bs_entry, v3_bs_exit                          │
+└──────────────────────────────────────────────────┘
+```
+
+每视图 9 列。总列数：7（基础）+ 4 × 9（视图）= 43 列。
+
+**各列含义**：
+
+| 列 | 来源阶段 | 类型 | 说明 |
+|----|---------|------|------|
+| `bar_index` | min_tf data | int | min_tf 的 bar 序号，从 0 开始，CSV 主键 |
+| `bar_timestamp` | kline 表 `ts` 字段 | datetime/str | 该 bar 的真实开盘时刻（非 cutoff_date），ISO 8601 格式 |
+| `close` | min_tf OHLC | float | 该 bar 的收盘价 |
+| `open` | min_tf OHLC | float | 该 bar 的开盘价 |
+| `high` | min_tf OHLC | float | 该 bar 的最高价 |
+| `low` | min_tf OHLC | float | 该 bar 的最低价 |
+| `volume` | min_tf OHLC | float | 该 bar 的成交量 |
+| `v{i}_filtered` | S3 Filter | float | 滤波后的信号值 |
+| `v{i}_sig` | S4 Schmitt | int | Schmitt 触发器输出：-1（做空）/ 0（中性）/ +1（做多） |
+| `v{i}_eps` | S4 Schmitt | float | 自适应死区阈值，决定信号切换的灵敏度 |
+| `v{i}_mu_v` | S4 Schmitt | float | 速度均值，Schmitt 内部变量，用于计算 eps |
+| `v{i}_sigma_v` | S4 Schmitt | float | 速度标准差，Schmitt 内部变量，用于计算 eps |
+| `v{i}_pair_count` | S5 Pairs | int | 当前活跃的信号对数量 |
+| `v{i}_trade_count` | S7 Trades | int | 当前活跃的交易数量 |
+| `v{i}_bs_entry` | S10 BS | str | 入场标记：`B`（买入）/ `S`（卖空）/ `-`（无） |
+| `v{i}_bs_exit` | S10 BS | str | 离场标记：`B`（买入平仓）/ `S`（卖空平仓）/ `-`（无） |
+
+### 5.3 关键设计决策
+
+**决策 1：为什么以最小周期为行粒度？**
+
+min_tf 是回测导航的锚定周期（见 §3.1 架构图中 `min TF = 回测导航的锚定周期`）。用户要求的"逐 bar 演进"以 min_tf 步进，每一行对应一次 `run_step()` 调用。如果以粗周期（如日线）为行粒度，则无法观察日内的信号演化过程 -- BS 跳跃可能发生在两个日线 bar 之间而非 bar 边界上，导致根因只能定位到"某天之内"而无法精确到具体时刻，定位精度从分钟级退化到天级。
+
+**决策 2：粗周期数据如何填充？**
+
+采用**前向填充（forward fill）**策略。理由：
+
+- min_tf bar（如 5 分钟）推进时，粗周期（如日线）的计算结果只在粗周期 bar 结束时更新
+- 例如：日线 bar #5 在 09:30 开盘，当日所有 5 分钟 bar（09:35, 09:40, ..., 16:00）都使用同一个 v0_filtered 值（来自以 bar #5 为右边界的那次计算）。直到次日日线 bar #6 的第一个 5 分钟 bar，v0_filtered 才更新为新的值
+- 这准确反映了回测的实际计算逻辑：在每个 min_tf 步骤，粗周期视图的值就是最近一次粗周期 bar 的计算结果
+- 不采用"仅对齐行有值，其他留空"：留空的 NaN 会阻断 pandas 的 `diff()`、`rolling()`、`corr()` 等时间序列操作，分析时需要额外 `fillna(method='ffill')`，增加使用门槛
+- 不采用"只在对齐行写值，依赖下游工具填充"：CSV 作为自包含格式，不应要求使用者了解填充规则
+
+实现方式：CSVBuilder 在 `accumulate()` 时，对每个视图独立跟踪"当前有效值"。粗周期视图（v0, v1, v2）的值在对应 bar 计算完成后才更新；min_tf 视图（v3）每行都更新。写入新行时，所有视图列填入各自的当前有效值，无需事后填充。
+
+**决策 3：bar_timestamp 从哪里获取？**
+
+从 kline 表查询：`SELECT ts FROM kline WHERE ticker=? AND timeframe=? ORDER BY ts`。使用 kline 表的 `ts` 字段而非 cutoff_date 的理由：
+
+- `ts` 是 bar 的真实开盘时刻（如 `2025-06-01 09:35:00`），是一个物理事实
+- `cutoff_date` 是回测逻辑概念（"可见数据到哪天为止"），由 `date_of(bar_index - 1)` 推算得出，可能因非交易日、停牌、数据缺失等原因偏离真实时间轴
+- BS 信号需要关联到真实时间轴才能与回测图表、外部行情数据对齐
+
+**决策 4：OHLCV 为什么必须记录？**
+
+- BS 信号发生在特定价格水平上 -- 一个 B 标记在 bar 高点 $12.50 和低点 $11.80 有完全不同的含义（前者是追高，后者是抄底）
+- 分析 BS 信号质量时需要确认信号是否出现在极端价位（如顶部买入）。仅有收盘价无法判断 bar 内部的波动范围
+- 成交量异常放大常伴随 BS 标记出现（放量突破/放量反转），是判断信号可靠性的重要辅助指标
+- 原始数据虽然在 `data/display/{tf}.parquet` 中，但 CSV 作为主要分析格式，自包含的 OHLCV 避免了分析时需要跨文件关联的麻烦
+
+**决策 5：BS 状态如何编码？**
+
+采用 **`B`/`S`/`-` 三字符编码**，`bs_entry` 和 `bs_exit` 各占一列。不采用数字编码或完整 JSON。
+
+理由：
+- `B`/`S`/`-` 在任何工具（文本编辑器、Excel、pandas、Numbers）中直接可读，无需查阅编码表
+- 数字编码（+1/0/-1 或 1/0/-1）存在严重歧义：一个 `+1` 是做多入场还是做空离场？需要额外上下文判断，容易出错
+- 完整 marker JSON（如 `{"bar_idx":118,"label":"B","color":"green","date":"2025-06-15","exit_reason":"trailing_stop"}`）塞入 CSV 单元格会导致列宽爆炸、pandas 读取后每个单元格需要 `json.loads()` 解析、Excel 中完全不可读
+- `bs_entry` 和 `bs_exit` 分两列，支持独立过滤：`df[df['v0_bs_entry'] == 'B']` 筛选所有买入入场，`df[df['v0_bs_exit'] != '-']` 筛选有离场标记的行
+- 需要完整 marker 元数据（date, color, exit_reason）时，从 events.jsonl 按 (bar_index, view) 交叉引用
+
+### 5.4 CSVBuilder 接口
+
+```
+CSVBuilder(views: list[str], min_tf: str)
+
+    accumulate(bar_index: int, bar_ts: datetime, ohlcv: dict,
+               stage_data: PipelineStageData) -> None
+        # 在内存 dict 中累积一行数据
+        # 对每个 view：如果该 bar 该 view 有新计算值 → 更新该 view 的"当前有效值"
+        #             如果该 bar 该 view 无新计算值 → 使用该 view 的"当前有效值"（前向填充）
+        # 列值按固定顺序存入内存
+
+    write(filepath: str) -> None
+        # 将内存 dict 转换为 pandas DataFrame，按 bar_index 排序，一次性写 CSV
+        # 列顺序：基础列 → v0 列 → v1 列 → v2 列 → v3 列
+        # CSV 写入参数：index=False, 日期列使用 ISO 8601 格式
+```
+
+---
+
+## 6. Bar 级时间序列设计
+
+### 6.1 Bar 索引体系
+
+最小周期 `bar_index` 作为 CSV 的主键和时间序列索引。其他周期的 bar 通过日期对齐：
+
+| 周期 | bar_index 含义 | 与 min_tf 的对齐方式 |
+|------|---------------|---------------------|
+| min_tf（如 5 分钟） | 全局唯一，从 0 自增 | 自身，无需对齐 |
+| 15 分钟（v2） | 15 分钟 bar 序号 | `bar_timestamp` 的 15 分钟边界对齐 |
+| 60 分钟（v1） | 60 分钟 bar 序号 | `bar_timestamp` 的小时边界对齐 |
+| 日线（v0） | 日线 bar 序号 | `bar_timestamp.date()` 对齐 |
+
+对齐逻辑由 `_sync_all_cascading()` 中的数据同步机制保证 -- 该函数确保所有 TF 的 bar 边界一致。CSVBuilder **不重复实现对齐逻辑**，仅消费已对齐的数据：
+
+- `_sync_all_cascading()` 负责将各 TF 的 kline 数据按日期对齐到统一的 bar 轴上
+- `run_step()` 在每个 bar 上对所有视图执行计算管线，产出的 `PipelineStageData` 已经是该 bar 时刻各视图的一致状态
+- CSVBuilder 的 `accumulate()` 只需要按视图维护"当前有效值"并写入即可
+
+### 6.2 时间戳获取
+
+从 kline 表获取 bar_timestamp。kline 表是系统中持久化 bar 数据的 SQLite 表，`ts` 字段存储每个 bar 的开盘时刻。
+
+**数据获取方式**：
+
+```
+接口: _get_bar_timestamp(ticker: str, timeframe: str, bar_index: int) -> datetime
+
+查询: SELECT ts FROM kline
+       WHERE ticker=? AND timeframe=?
+       ORDER BY ts
+       LIMIT 1 OFFSET ?
+```
+
+**注意事项**：
+- 使用 `ORDER BY ts` 确保序号稳定，不依赖 rowid
+- `bar_index` 从 0 开始，`OFFSET bar_index` 直接定位
+- kline 表的 `timeframe` 字段值与系统内部命名一致（如 `"5分钟"`、`"日线"`）
+- CSV 输出时，bar_timestamp 格式化为 ISO 8601 字符串（如 `2025-06-01T09:35:00`）
+- 若 kline 表不存在该 bar_index（数据缺失），写入空字符串，非阻断性错误
+
+### 6.3 数据累积策略
+
+回测过程中按 bar_index 在内存 dict 中逐行累积，`run()` 方法结束时用 pandas 一次性写入 CSV。
+
+**为什么不采用逐行追加写入？**
+
+- CSV 追加写入不可随机访问 -- 前向填充要求粗周期视图的值可能在未来的 bar 才知道，但写入时该行已经固化为文件内容
+- 内存 dict 支持状态管理 -- CSVBuilder 内部维护每个视图的当前有效值，写入新行时直接读取即可
+- I/O 效率 -- 逐行 fsync 增加系统调用开销，1300 行 × 每个 bar 一次 fsync 显著拖慢回测速度；批量写入一次 I/O 完成
+
+**累积流程**：
+
+```
+run() 开始
+  → CSVBuilder() 初始化，创建空 dict
+  → for bar_index in range(start, end+1):
+      data = run_step(bar_index, ...)
+      csv_builder.accumulate(bar_index, bar_ts, ohlcv, data)
+        内部逻辑：
+          1. 读取 min_tf 的 OHLCV + bar_ts
+          2. 遍历 views：若该 bar 该 view 有新计算值 → 更新 current_values[view]
+          3. 将 current_values 所有视图的值扁平化为一行，存入 rows[bar_index]
+  → csv_builder.write(path)
+      → pd.DataFrame.from_dict(rows, orient='index')
+      → .sort_index()
+      → .to_csv(path, index=False)
+```
+
+### 6.4 内存估算
+
+| 场景 | bar 数 | 列数 | 单值大小 | 总内存 |
+|------|--------|------|---------|--------|
+| 典型（500 bar 窗口） | 500 | 43 | ~8 bytes（float64）+ 少量 str | ~200 KB |
+| 较大（1300 bar） | 1,300 | 43 | 同上 | ~500 KB |
+| 极端（5000 bar） | 5,000 | 43 | 同上 | ~2 MB |
+
+即使 5000 bar 的极端场景也仅 ~2 MB，完全在内存可接受范围内。**无需分块、无需数据库缓存、无需磁盘暂存**。
+
+---
+
+## 7. 补充数据项
+
+基于对现有系统管道阶段的深入分析（见附录 C 管道阶段完整清单），以下数据项在之前的设计中被遗漏，应在 CSV 中补充记录：
+
+| 数据项 | 优先级 | 来源阶段 | 理由 |
+|--------|:------:|---------|------|
+| OHLCV（开/高/低/收/量） | **P0** | S1 Raw Data | BS 信号分析的基础上下文。仅有收盘价无法判断信号是否出现在极端价位，成交量异常是信号可靠性的重要辅助指标。已在 §5.2 基础列中纳入。 |
+| `bar_timestamp`（真实时刻） | **P0** | kline 表 `ts` 字段 | 用户明确要求。替代模糊的 bar_index 作为时间轴锚点，BS 信号需要关联到真实时间才能与回测图表对齐。已在 §5.2 基础列中纳入。 |
+| `dur`（信号持续期） | **P1** | S4 Schmitt | Schmitt 触发器输出字典中的 `dur` 字段，表示当前信号方向（多/空/中性）已持续的 bar 数。长持续期（dur >= 5）的信号更稳定，短持续期（dur <= 2）的信号可能是 Schmitt 抖动噪声。过滤 `dur < 3` 的信号可有效排除假信号。 |
+| 跨周期对齐指示 | **P2** | 推导值 | 标记当前 min_tf bar 在粗周期中的位置（如"日线 bar #3 的第 12 个 5 分钟 bar"）。用于分析跨周期信号一致性 -- 如日线做多但 5 分钟做空时的信号冲突检测。 |
+
+**优先级定义**：
+
+- **P0（MVP 必须）**：缺少则 CSV 无法作为独立分析格式。OHLCV 和 bar_timestamp 已在 §5.2 的基础列中纳入。
+- **P1（强烈建议）**：对信号质量分析有显著价值，数据源已就绪（Schmitt 输出字典中已有 `dur` 字段），实现成本极低（仅需在 Schmitt 列组中增加一列）。建议 MVP 阶段一并实现。
+- **P2（按需添加）**：特定分析场景有用，但非核心功能，可在 Phase 2 或按需添加。
+
+**`dur` 的 CSV 列设计**：
+
+在每视图列组中，`v{i}_sig_dur`（int 类型）紧邻 `v{i}_sig` 放置。例如 v0 列组：
+
+```
+v0_filtered, v0_sig, v0_sig_dur, v0_eps, v0_mu_v, v0_sigma_v, ...
+```
+
+列数影响：4 视图 × 1 列 = 4 列，总列数从 43 增至 47。内存影响可忽略（+4 × 8 bytes = 32 bytes/行）。
+
+---
+
+## 8. CLI 化方案
+
+### 8.1 可行性结论：高
 
 **核心依据**（基于代码级分析）：
 
@@ -296,7 +539,7 @@ def capture_bs_events(step_index, current_bs, prev_bs, events_file):
 3. **回测播放本质是线性循环** -- 当前 `_run_backtest_play()` 通过 `st.session_state._bar_index = bar_index + 1` 推进，由 `main()` 循环驱动 `st.rerun()`，CLI 中简化为 `for bar_index in range(start_bar, end_bar+1): runner.run_step(bar_index, cutoff_date)`
 4. **PipelineStageData 定义已就绪** -- 每个 bar 的中间输出结构已在 `pipeline_capture.py` 中定义，可直接复用
 
-### 5.2 CLI 接口设计
+### 8.2 CLI 接口设计
 
 ```bash
 # 最小可用命令
@@ -338,7 +581,7 @@ python -m filter_app.backtest_cli \
 
 > **`--preset` 与 `--config-file` 都不提供时**：从 `config.db` 读取默认预设（与 Streamlit 行为一致）。两者都提供时 `--config-file` 优先。推荐使用 `argparse.add_mutually_exclusive_group()` 实现。
 
-### 5.3 与 Streamlit 的关系：并行存在，非替代
+### 8.3 与 Streamlit 的关系：并行存在，非替代
 
 ```
 Streamlit UI                     CLI
@@ -352,7 +595,7 @@ Streamlit UI                     CLI
 
 **代码共享方式**：`BacktestRunner` 作为共享计算核心，被 Streamlit 和 CLI 共同调用（而非各自重复实现）。Streamlit 保留其交互式图表渲染层，CLI 复用相同的 `services/` 计算管线 + `BacktestRunner`，仅替换数据展示方式（文件输出替代 st.* 调用）。两者共享 `services/` 目录的纯计算函数，无代码分叉风险。
 
-### 5.4 最小实现路径
+### 8.4 最小实现路径
 
 **改动量**: 3 个新文件 (~800 行) + 对现有文件 ~50 行修改
 
@@ -367,8 +610,9 @@ Streamlit UI                     CLI
 ```
 class BacktestRunner:
     def run_step(bar_index: int, cutoff_date: str) -> PipelineStageData:
-        1. _sync_all_cascading()              → 数据准备
-        2. for each view (v0-v3):
+        1. bar_ts = _get_bar_timestamp(min_tf, bar_index)  # 从 kline 表查询 ts 字段
+        2. _sync_all_cascading()              → 数据准备
+        3. for each view (v0-v3):
              a. _load_chart_data()            → 窗口数据  (streamlit_app.py, 需提取)
              b. _compute_filters()            → 滤波       (streamlit_app.py, 含 @st.cache_data)
              c. v,g = np.gradient(filtered,t)  → 速度/加速度
@@ -378,11 +622,14 @@ class BacktestRunner:
              g. _compute_strategy_pnl()       → 策略 PnL   (filter_engine.py)
              h. _compute_holding_masks()      → 持仓掩码   (filter_engine.py)
              i. compute_bs_markers()          → BS 标记    (bs_marker.py)
-        3. 收集各阶段输出 → PipelineStageData
+        4. 收集各阶段输出 → PipelineStageData（含 bar_ts）
     def run(start_bar: int, end_bar: int) -> None:
+        csv_builder = CSVBuilder(views=["v0", "v1", "v2", "v3"])
         for i in range(start_bar, end_bar+1):
             data = self.run_step(i, _get_bar_date_from_db(min_tf, i-1))
             self.recorder.record(data, i)
+            csv_builder.accumulate(i, data)              # 内存 dict 累积
+        csv_builder.write(f"{output_dir}/unified_output.csv")  # 一次性写入
 ```
 
 **风险与缓解**：
@@ -396,23 +643,23 @@ class BacktestRunner:
 
 ---
 
-## 6. 实现路径
+## 9. 实现路径
 
 ### Phase 1: MVP 🎯
 
-**目标**: 能运行 CLI 回测，产生 BS 变动事件流，能回答"BS 在哪步变了、怎么变的"
+**目标**: 能运行 CLI 回测，产生 BS 变动事件流 + CSV 统一输出，能回答"BS 在哪步变了、怎么变的"
 
 | # | 功能 | 预估工作量 | 产出 |
 |---|------|-----------|------|
-| 🎯 1 | `BacktestRunner` 类 -- 从 `_render_chart()` 抽取纯计算管线 | 1-2 天 | `filter_app/backtest_core.py` |
+| 🎯 1 | `BacktestRunner` 类 -- 从 `_render_chart()` 抽取纯计算管线；每步返回 `bar_timestamp`（从 kline 表 `ts` 字段获取） | 1-2 天 | `filter_app/backtest_core.py` |
 | 🎯 2 | `AppState` dict fallback -- CLI 中替代 `st.session_state` | 0.5 天 | `state.py` 改动 |
 | 🎯 3 | CLI 入口 -- argparse 参数解析 + 配置加载 | 0.5 天 | `filter_app/backtest_cli.py` |
-| 🎯 4 | Event Recorder -- BS 变动事件生成 + events.jsonl 写入 | 0.5 天 | `services/event_recorder.py` |
+| 🎯 4 | Event Recorder + CSVBuilder -- BS 变动事件生成 + events.jsonl 写入 + CSV 内存累积（end_session 时 pandas 一次性写入） | 1 天 | `services/event_recorder.py` |
 | 🎯 5 | Filter Tail Recorder -- filter_tail.jsonl 写入 | 0.5 天 | 同上文件 |
 | 🎯 6 | 端到端验证 -- `3690_HK_2` 预设，重现 645x 级联放大 | 1 天 | 分析脚本 |
+| 🎯 7 | CSV 测试用例 -- 列完整性验证、行数验证（与 min_tf bar 数一致）、bar_timestamp 单调递增验证、前向填充正确性验证 | 0.5 天 | `tests/test_csv_output.py` |
 
 **MVP 不包含**:
-- 多视图同时记录（只追踪 operating TF）
 - schmitt_snapshot.jsonl / trade_summary.jsonl（Phase 2）
 - 图表输出（`--output-charts` 选项）
 - 完整 steps/ 快照存储
@@ -428,9 +675,9 @@ class BacktestRunner:
 
 ---
 
-## 7. GitHub 管理策略
+## 10. GitHub 管理策略
 
-### 7.1 仓库现状
+### 10.1 仓库现状
 
 | 项目 | 详情 |
 |------|------|
@@ -439,14 +686,14 @@ class BacktestRunner:
 | 默认分支 | `master` |
 | 跟踪文件 | 172 个 |
 
-### 7.2 变更追踪
+### 10.2 变更追踪
 
 - **框架设计文档**：纳入 `docs/` 目录，作为项目架构文档的一部分
 - **新增代码**（`backtest_core.py`, `backtest_cli.py`, `event_recorder.py`）：纳入 `filter_app/` 目录，正常跟踪
 - **回测输出**（`backtest_output/`）：加入 `.gitignore`，不纳入版本控制
 - **分支策略**：功能开发在独立分支进行，合并至 `master` 前通过 PR 审查
 
-### 7.3 大文件管理
+### 10.3 大文件管理
 
 | 文件类型 | 策略 | 原因 |
 |---------|------|------|
@@ -515,7 +762,7 @@ class BacktestRunner:
 | S1 | Raw Data | `_load_chart_data()` | Parquet 文件 | t, noisy, ohlc, dates | 不记录 |
 | S2 | Date Markers | `_date_markers()` | t, dates | marker_positions, labels | 不记录 |
 | S3 | Filters | `_compute_filters()` | noisy, config | filtered, [filtered2] | Tail (10 pts) |
-| S4 | Schmitt | `_compute_schmitt_trigger()` | filtered, params | sig, v, a, eps | 增量摘要 |
+| S4 | Schmitt | `_compute_schmitt_trigger()` | filtered, params | sig, v, a, eps, dur, mu_v, sigma_v | 增量摘要（JSONL）/ 逐 bar 全量（CSV） |
 | S5 | Signal Pairs | `_find_all_pairs()` | sig | all_pairs | 含在 S4 |
 | S6 | Predictions | `_compute_prediction_pairs()` | filtered, all_pairs | prediction_pairs | 不记录 |
 | S7 | Strategy PnL | `_compute_strategy_pnl()` | t, filtered, sig, pairs, pred | pnl, trade_records | 摘要 |
