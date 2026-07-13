@@ -277,7 +277,7 @@ def _build_default_configs(ticker: str) -> list:
             "ew": 60,
             "fit_mode": "parabola",
             "n_ext": 8,
-            "show_strategy": False,
+            "show_strategy": True,
             "stop_loss_pct": 2.0,
             "show_cross_pnl": False,
             "show_alignment": False,
@@ -506,6 +506,7 @@ def main() -> None:
     print(f"\n完成! {step_count} 步已保存到 {output_path}/")
     if not args.quiet:
         print(f"  - events.jsonl")
+        print(f"  - bs_snapshot.jsonl")
         print(f"  - filter_tail.jsonl")
         print(f"  - schmitt_snapshot.jsonl")
         print(f"  - trade_summary.jsonl")
