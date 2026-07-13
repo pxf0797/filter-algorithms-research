@@ -1,0 +1,129 @@
+{
+  "ticker": "AAPL",
+  "session_id": "20260713-225638-AAPL",
+  "start_time": "2026-07-13T22:56:38.772992",
+  "config": {
+    "ticker": "AAPL",
+    "preset": null,
+    "config_file": null,
+    "start_bar": 5,
+    "end_bar": 7,
+    "step_interval": 1,
+    "configs": [
+      {
+        "_fid": "savgol",
+        "_dual": true,
+        "_fid2": "ema",
+        "tf": "日线",
+        "n_pts": 120,
+        "show_sch": true,
+        "show_pred": true,
+        "ke": 0.15,
+        "sm": 0.05,
+        "ew": 60,
+        "fit_mode": "parabola",
+        "n_ext": 8,
+        "show_strategy": false,
+        "stop_loss_pct": 2.0,
+        "show_cross_pnl": false,
+        "show_alignment": false,
+        "show_pnl_feedback": false,
+        "fc": "#00d4aa",
+        "fc2": "#ff6b6b",
+        "pv": {
+          "window": 21,
+          "order": 2
+        },
+        "pv2": {
+          "span": 10
+        }
+      },
+      {
+        "_fid": "savgol",
+        "_dual": true,
+        "_fid2": "ema",
+        "tf": "60分钟",
+        "n_pts": 120,
+        "show_sch": true,
+        "show_pred": true,
+        "ke": 0.15,
+        "sm": 0.05,
+        "ew": 60,
+        "fit_mode": "parabola",
+        "n_ext": 8,
+        "show_strategy": false,
+        "stop_loss_pct": 2.0,
+        "show_cross_pnl": false,
+        "show_alignment": false,
+        "show_pnl_feedback": false,
+        "fc": "#00d4aa",
+        "fc2": "#ff6b6b",
+        "pv": {
+          "window": 21,
+          "order": 2
+        },
+        "pv2": {
+          "span": 10
+        }
+      },
+      {
+        "_fid": "savgol",
+        "_dual": true,
+        "_fid2": "ema",
+        "tf": "15分钟",
+        "n_pts": 120,
+        "show_sch": true,
+        "show_pred": true,
+        "ke": 0.15,
+        "sm": 0.05,
+        "ew": 60,
+        "fit_mode": "parabola",
+        "n_ext": 8,
+        "show_strategy": false,
+        "stop_loss_pct": 2.0,
+        "show_cross_pnl": false,
+        "show_alignment": false,
+        "show_pnl_feedback": false,
+        "fc": "#00d4aa",
+        "fc2": "#ff6b6b",
+        "pv": {
+          "window": 21,
+          "order": 2
+        },
+        "pv2": {
+          "span": 10
+        }
+      },
+      {
+        "_fid": "savgol",
+        "_dual": true,
+        "_fid2": "ema",
+        "tf": "5分钟",
+        "n_pts": 120,
+        "show_sch": true,
+        "show_pred": true,
+        "ke": 0.15,
+        "sm": 0.05,
+        "ew": 60,
+        "fit_mode": "parabola",
+        "n_ext": 8,
+        "show_strategy": false,
+        "stop_loss_pct": 2.0,
+        "show_cross_pnl": false,
+        "show_alignment": false,
+        "show_pnl_feedback": false,
+        "fc": "#00d4aa",
+        "fc2": "#ff6b6b",
+        "pv": {
+          "window": 21,
+          "order": 2
+        },
+        "pv2": {
+          "span": 10
+        }
+      }
+    ]
+  },
+  "end_time": "2026-07-13T22:56:38.839787",
+  "step_count": 2
+}

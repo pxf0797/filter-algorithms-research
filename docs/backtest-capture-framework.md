@@ -63,7 +63,7 @@
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-**关键发现**：整个 `services/` 目录（~83KB 核心计算代码）已验证 **零 Streamlit 引用**（`grep -c 'st\.' services/*.py` 全部返回 0）。计算管线高度模块化，剥离 UI 层后可直接被 CLI 复用。
+**关键发现**：`services/` 目录下 `filter_engine.py` + `data_loader.py` + `bs_marker.py` + `pipeline_capture.py` 四个文件，已验证零 Streamlit 引用。计算管线高度模块化，剥离 UI 层后可直接被 CLI 复用。
 
 ### 2.2 核心不足（按严重性排序）
 
@@ -73,7 +73,7 @@
 | 2 | 管道关键中间量未捕获（`mu_v`, `sigma_v`, `eps` 内部演化） | **高** | 级联放大分析链断裂，无法精确计算放大倍数 |
 | 3 | 无输入数据窗口引用，复现依赖外部文件一致性 | 中 | Parquet 文件更新后历史记录失效 |
 | 4 | Snapshot 每步 120KB 全量保存，90%+ 数据重复 | 中 | 完整回测 156MB，多次运行快速占满磁盘 |
-| 5 | `_is_backtest` 变量在 `_load_chart_data()` line 183/191 存在代码异味 | 低 | 变量在条件分支中赋值但在分支外使用，可读性差 |
+| 5 | `_is_backtest` 局部变量在 `_load_chart_data()` line 183/190 两分支均赋值，line 223 在分支外引用 | 低 | 无运行时 bug，但两分支赋值分散降低了可读性 |
 
 ### 2.3 过度设计摘要
 
@@ -152,8 +152,8 @@ backtest_output/
     ├── data_manifest.json                 # 🎯 输入数据引用（不复制原始数据）
     │   {
     │     "data_sources": {
-    │       "日线":  "data/display/03690.HK_1d.parquet",
-    │       "60分钟": "data/display/03690.HK_60m.parquet"
+    │       "日线":  "data/display/日线.parquet",
+    │       "60分钟": "data/display/60分钟.parquet"
     │     },
     │     "n_pts": {"日线": 250, "60分钟": 500}
     │   }
@@ -184,10 +184,10 @@ backtest_output/
 ```
 
 **与现有 `data/display/{tf}.parquet` 的关系**：
-- `data/display/` 是**原始价格数据源**，由 DB 同步写入，已通过 `data_manifest.json` 引用
+- `data/display/` 是**原始价格数据源**，由 `_sync_all_cascading()` 及 `_sync_to_display()` 写入。文件命名为 `{tf}.parquet`（如 `日线.parquet`），不含 ticker，每次回测运行覆盖写入
 - `backtest_output/` 是**管道输出记录**，为新系统产出，完全独立于 `data/display/`
 - 两者通过 `data_manifest.json` 中的路径引用关联，不复制数据
-- Parquet 文件已加入 `.gitignore`（全局 `*.parquet` 规则），不纳入版本控制
+- Parquet 文件已被全局 `.gitignore` 中的 `*.parquet` 规则排除，不纳入版本控制
 
 ---
 
@@ -208,7 +208,7 @@ backtest_output/
 ```
 BS Marker (bar_index=118, type="entry")
   → 所在视图: v0_日线
-  → data_manifest.json 中查找该视图数据源: "data/display/03690.HK_1d.parquet"
+  → data_manifest.json 中查找该视图数据源: "data/display/日线.parquet"
   → 读取该 parquet 中 bar_index=[window_start..118] 的原始 OHLC
 ```
 
@@ -261,16 +261,26 @@ BS Marker (bar_index=118, type="entry")
 
 ```python
 def capture_bs_events(step_index, current_bs, prev_bs, events_file):
+    """当前 BS 格式: {"entry_markers": [(bar_idx, "B"/"S", "green"/"red", date), ...],
+                      "exit_markers":  [(bar_idx, "B"/"S", "green"/"red", exit_reason, date), ...]}"""
     if step_index == 0:
         emit("init", markers=current_bs)
         return
-    current_set = {(m["bar"], m["type"], m["dir"]) for m in current_bs}
-    prev_set    = {(m["bar"], m["type"], m["dir"]) for m in prev_bs}
-    for m in current_set - prev_set:
-        emit("bs_added", marker=m, step=step_index)
-    for m in prev_set - current_set:
-        emit("bs_removed", marker=m, step=step_index)
-    # moved: 检测同 trade_id 不同 bar_index 的情况
+    # 按 (bar_idx, label, color) 三元组比较，忽略 date/exit_reason 字段
+    def _key(markers, kind):
+        return {(m[0], m[1], m[2]) for m in markers.get(f"{kind}_markers", [])}
+    cur_entry = _key(current_bs, "entry")
+    prev_entry = _key(prev_bs, "entry")
+    cur_exit  = _key(current_bs, "exit")
+    prev_exit  = _key(prev_bs, "exit")
+    for m in cur_entry - prev_entry:
+        emit("bs_added", marker=m, kind="entry", step=step_index)
+    for m in prev_entry - cur_entry:
+        emit("bs_removed", marker=m, kind="entry", step=step_index)
+    for m in cur_exit - prev_exit:
+        emit("bs_added", marker=m, kind="exit", step=step_index)
+    for m in prev_exit - cur_exit:
+        emit("bs_removed", marker=m, kind="exit", step=step_index)
 ```
 
 ---
@@ -282,9 +292,9 @@ def capture_bs_events(step_index, current_bs, prev_bs, events_file):
 **核心依据**（基于代码级分析）：
 
 1. **services/ 目录 ~83KB 代码零 Streamlit 依赖** -- 已通过 `grep` 验证，10 个滤波器、Schmitt 触发器、信号对检测、抛物线预测、策略 PnL、跨周期对齐、BS 标记 -- 全部为纯 Python 函数
-2. **`_render_chart()` 计算管线高度模块化** -- 10+ 子步骤各自独立，唯一 Streamlit 耦合在结果展示层（`st.caption`, `st.warning`, `st.components.v1.html()`）
-3. **回测播放本质是线性循环** -- 当前 `_run_backtest_play()` 通过 `st.session_state._bar_index = bar_index + 1` 推进，由 `main()` 循环驱动 `st.rerun()`，CLI 中简化为 `for bar_index in range(start, end+1): compute_and_record(bar_index)`
-4. **PipelineStageData 定义已就绪** -- 每个 bar 的中间输出结构已定义，可直接序列化
+2. **`_render_chart()` 计算管线高度模块化** -- 10+ 子步骤各自独立，唯一 Streamlit 耦合在结果展示层（`st.caption`, `st.warning`）和 `@st.cache_data` 装饰器（可剥离）
+3. **回测播放本质是线性循环** -- 当前 `_run_backtest_play()` 通过 `st.session_state._bar_index = bar_index + 1` 推进，由 `main()` 循环驱动 `st.rerun()`，CLI 中简化为 `for bar_index in range(start_bar, end_bar+1): runner.run_step(bar_index, cutoff_date)`
+4. **PipelineStageData 定义已就绪** -- 每个 bar 的中间输出结构已在 `pipeline_capture.py` 中定义，可直接复用
 
 ### 5.2 CLI 接口设计
 
@@ -356,21 +366,22 @@ Streamlit UI                     CLI
 **Step 1 详情**：
 ```
 class BacktestRunner:
-    def run_single_bar(bar_index, cutoff_date) -> PipelineStageData:
-        1. _sync_all_cascading()     → 数据准备
+    def run_step(bar_index: int, cutoff_date: str) -> PipelineStageData:
+        1. _sync_all_cascading()              → 数据准备
         2. for each view (v0-v3):
-             a. _load_chart_data()   → 窗口数据
-             b. _compute_filters()   → 滤波
-             c. _compute_schmitt_trigger() → 信号
-             d. _find_all_pairs()    → 信号对
-             e. _compute_prediction_pairs() → 预测
-             f. _compute_strategy_pnl() → PnL
-             g. _compute_holding_masks()  → 持仓
-             h. compute_bs_markers() → BS 标记
-        3. 返回完整 PipelineStageData
-    def run_range(start, end) -> None:
-        for i in range(start, end+1):
-            data = self.run_single_bar(i, get_cutoff_date(i))
+             a. _load_chart_data()            → 窗口数据  (streamlit_app.py, 需提取)
+             b. _compute_filters()            → 滤波       (streamlit_app.py, 含 @st.cache_data)
+             c. v,g = np.gradient(filtered,t)  → 速度/加速度
+             d. _schmitt_trigger(v, a, ...)   → 施密特信号 (filter_engine.py)
+             e. _find_all_pairs(sig)          → 信号对     (filter_engine.py)
+             f. _fit_physics_parabola()       → 抛物线预测 (filter_engine.py)
+             g. _compute_strategy_pnl()       → 策略 PnL   (filter_engine.py)
+             h. _compute_holding_masks()      → 持仓掩码   (filter_engine.py)
+             i. compute_bs_markers()          → BS 标记    (bs_marker.py)
+        3. 收集各阶段输出 → PipelineStageData
+    def run(start_bar: int, end_bar: int) -> None:
+        for i in range(start_bar, end_bar+1):
+            data = self.run_step(i, _get_bar_date_from_db(min_tf, i-1))
             self.recorder.record(data, i)
 ```
 
@@ -378,10 +389,10 @@ class BacktestRunner:
 
 | 风险 | 缓解 |
 |------|------|
-| `_load_chart_data()` 中 `_is_backtest` 作用域 bug | Step 1 修复 |
-| `AppState` 的 `st.session_state` 依赖 | 添加内置 dict fallback（已有 `if st is None` 守卫） |
-| `@st.cache_data` 在 CLI 中失效 | 移除装饰器，每步独立计算（CLI 顺序执行不依赖缓存） |
-| Parquet 并发访问（Streamlit + CLI 同时运行） | 文档注明不支持并行 |
+| `_load_chart_data()` 中 `_is_backtest` 局部变量在两分支赋值后于分支外引用 | 无运行时 bug，但提取到 BacktestRunner 时自然消除 |
+| `AppState` 依赖 `st.session_state` | `state.py` 已有 `if st is None: return` 守卫，CLI 不导入 streamlit 时 `get()` 返回默认值、`set()` 静默跳过 |
+| `@st.cache_data` 在 CLI 中不可用 | CLI 中每步独立计算，不使用缓存装饰器 |
+| `data/display/{tf}.parquet` 每次覆盖写入 | CLI 单进程运行，无并发冲突 |
 
 ---
 
@@ -507,8 +518,8 @@ class BacktestRunner:
 | S4 | Schmitt | `_compute_schmitt_trigger()` | filtered, params | sig, v, a, eps | 增量摘要 |
 | S5 | Signal Pairs | `_find_all_pairs()` | sig | all_pairs | 含在 S4 |
 | S6 | Predictions | `_compute_prediction_pairs()` | filtered, all_pairs | prediction_pairs | 不记录 |
-| S7 | Strategy PnL | `_compute_strategy_display()` | t, filtered, sig, pairs, pred | pnl, trade_records | 摘要 |
+| S7 | Strategy PnL | `_compute_strategy_pnl()` | t, filtered, sig, pairs, pred | pnl, trade_records | 摘要 |
 | S8 | Higher TF PnL | `_align_pnl_to_current_tf()` | higher_pnl, t | aligned_pnl | 不记录 |
 | S9 | Holding Masks | `_compute_holding_masks()` | n_bars, entry, exit markers | long_mask, short_mask | 不记录 |
 | S10 | BS Markers | `compute_bs_markers()` | t, dates, schmitt, pairs, trades | entry/exit markers | **Event Sourcing** |
-| S11 | Display | `_add_bs_markers()` | markers | Plotly annotations | 不记录 |
+| S11 | Display | `_add_bs_markers()` (components/charts.py) | markers | Plotly annotations | 不记录 |
