@@ -87,8 +87,10 @@ class CSVBuilder:
         - ``{prefix}_sig_dur``: 当前 sig 持续期
         - ``{prefix}_pair_count``: all_pairs 数量
         - ``{prefix}_trade_count``: trade_records 数量
-        - ``{prefix}_bs_entry``: entry marker label (B/S/-)
-        - ``{prefix}_bs_exit``: exit marker label (B/S/-)
+        - ``{prefix}_bs_entry_count``: entry marker 数量
+        - ``{prefix}_bs_exit_count``: exit marker 数量
+        - ``{prefix}_bs_entry_label``: 首个 entry marker label (B/S/-)
+        - ``{prefix}_bs_exit_label``: 首个 exit marker label (B/S/-)
 
         Parameters
         ----------
@@ -97,7 +99,7 @@ class CSVBuilder:
         view_data : dict
             该视图的管道输出数据。
         bar_index : int
-            当前 bar 索引，用于匹配 BS marker 的 bar_idx。
+            当前 bar 索引（保留兼容，当前不再用于 BS 列匹配）。
 
         Returns
         -------
@@ -145,20 +147,16 @@ class CSVBuilder:
         if trade_records is not None:
             result[f"{prefix}_trade_count"] = len(trade_records)
 
-        # --- BS markers ---
+        # --- BS markers (Fix 2 & 3: count-based columns) ---
         bs_markers: dict = view_data.get("bs_markers", {})
-        entry_label = "-"
-        exit_label = "-"
-        for m in bs_markers.get("entry_markers", []):
-            if int(m[0]) == bar_index:
-                entry_label = str(m[1])
-                break
-        for m in bs_markers.get("exit_markers", []):
-            if int(m[0]) == bar_index:
-                exit_label = str(m[1])
-                break
-        result[f"{prefix}_bs_entry"] = entry_label
-        result[f"{prefix}_bs_exit"] = exit_label
+        entry_markers = bs_markers.get("entry_markers", [])
+        exit_markers = bs_markers.get("exit_markers", [])
+        entry_count = len(entry_markers)
+        exit_count = len(exit_markers)
+        result[f"{prefix}_bs_entry_count"] = entry_count
+        result[f"{prefix}_bs_exit_count"] = exit_count
+        result[f"{prefix}_bs_entry_label"] = str(entry_markers[0][1]) if entry_count > 0 else "-"
+        result[f"{prefix}_bs_exit_label"] = str(exit_markers[0][1]) if exit_count > 0 else "-"
 
         return result
 
@@ -179,10 +177,10 @@ class CSVBuilder:
         df = pd.DataFrame.from_dict(self._rows, orient="index")
         df.sort_index(inplace=True)
 
-        # 将 BS 列中的 "-" 替换为 NaN 以便 ffill 传播实际标签
+        # 将 BS label 列中的 "-" 替换为 NaN 以便 ffill 传播实际标签
         bs_cols = [
             c for c in df.columns
-            if c.endswith("_bs_entry") or c.endswith("_bs_exit")
+            if c.endswith("_bs_entry_label") or c.endswith("_bs_exit_label")
         ]
         for col in bs_cols:
             df[col] = df[col].replace("-", np.nan)
@@ -213,6 +211,7 @@ class EventRecorder:
         self._session_dir: Optional[Path] = None
         self._session_id: str = ""
         self._prev_bs_by_view: Dict[str, Optional[dict]] = {}
+        self._prev_snapshot_count: Dict[str, int] = {}
         self._step_count: int = 0
         # JSONL append file handles — opened in start_session, closed in end_session
         self._events_fp = None
@@ -249,6 +248,14 @@ class EventRecorder:
             "start_time": datetime.now().isoformat(),
             "config": config,
         }
+        # Fix 7: 记录视图→列映射
+        view_configs = config.get("view_configs") or config.get("configs") or []
+        view_columns: Dict[str, str] = {}
+        for i, vc in enumerate(view_configs):
+            if isinstance(vc, dict) and "tf" in vc:
+                view_columns[f"v{i}"] = vc["tf"]
+        if view_columns:
+            metadata["view_columns"] = view_columns
         _write_json(self._session_dir / "metadata.json", metadata)
 
         # Open JSONL files for append
@@ -317,14 +324,31 @@ class EventRecorder:
         if not views:
             return
 
+        step_stats: Dict[str, dict] = {}
         for view_name, view_data in views.items():
             try:
-                self._record_view_step(step_index, cutoff_date, view_name, view_data)
+                stats = self._record_view_step(step_index, cutoff_date, view_name, view_data)
+                if stats is not None:
+                    step_stats[view_name] = stats
             except Exception:
                 logger.warning(
                     "EventRecorder: failed to record step {} for view {}",
                     step_index, view_name, exc_info=True,
                 )
+
+        # Fix 6: events-vs-snapshot consistency assertion
+        for view_name, stats in step_stats.items():
+            prev_count = self._prev_snapshot_count.get(view_name, 0)
+            curr_count = stats["curr_snapshot"]
+            expected_delta = stats["added"] - stats["removed"]
+            actual_delta = curr_count - prev_count
+            if expected_delta != actual_delta:
+                logger.warning(
+                    "Step {}: events≠snapshot for {}: "
+                    "events_delta={}, snapshot_delta={}",
+                    step_index, view_name, expected_delta, actual_delta,
+                )
+            self._prev_snapshot_count[view_name] = curr_count
 
         self._step_count = step_index + 1
 
@@ -409,13 +433,21 @@ class EventRecorder:
     ) -> List[dict]:
         """Compare BS markers between two consecutive steps.
 
-        Identity is tracked by ``(bar_idx, label, date)`` triples. For the
-        first step (``prev_bs is None``), every marker is reported as
-        ``bs_added``. For subsequent steps, markers present in ``curr_bs``
-        but not in ``prev_bs`` are ``bs_added``, those present only in
-        ``prev_bs`` are ``bs_removed``, those with changed attributes are
-        ``bs_modified``, and unchanged markers are collapsed into a single
-        ``bs_stable`` count event.
+        Identity is tracked by ``(bar_idx, label, date)`` triples internally,
+        but matching for modification detection uses ``(label, date)`` pairs
+        so that a marker whose ``bar_idx`` shifts is classified as
+        ``bs_modified`` rather than as a remove+add pair.
+
+        For the first step (``prev_bs is None``), every marker is reported as
+        ``bs_added``. For subsequent steps:
+
+        - Same ``(label, date)`` with different ``bar_idx`` → ``bs_modified``
+        - ``(label, date)`` only in current → ``bs_added``
+        - ``(label, date)`` only in previous → ``bs_removed``
+        - Same ``(label, date)`` and same ``bar_idx`` → collapsed into one
+          ``bs_stable`` count event
+        - **Fix 5**: when zero add/remove/modified events, one ``bs_stable``
+          is recorded regardless of view.
 
         Parameters
         ----------
@@ -430,8 +462,7 @@ class EventRecorder:
         Returns
         -------
         list[dict]
-            BS change event dicts, each containing at minimum ``event``,
-            ``step``, ``type``, ``label``, ``bar_idx``, and ``date``.
+            BS change event dicts.
         """
         curr_map = _build_identity_map(curr_bs)
 
@@ -445,37 +476,57 @@ class EventRecorder:
             return events
 
         prev_map = _build_identity_map(prev_bs)
-        prev_keys = set(prev_map.keys())
-        curr_keys = set(curr_map.keys())
+
+        # Group keys by (label, date) for modification-aware matching
+        def _by_label_date(id_map: Dict[tuple, dict]) -> Dict[tuple, set]:
+            result: Dict[tuple, set] = {}
+            for key in id_map:
+                ld = (key[1], key[2])  # (label, date)
+                result.setdefault(ld, set()).add(key)
+            return result
+
+        prev_ld = _by_label_date(prev_map)
+        curr_ld = _by_label_date(curr_map)
+        prev_ld_keys = set(prev_ld.keys())
+        curr_ld_keys = set(curr_ld.keys())
+
         events: List[dict] = []
 
-        # Added: keys present in current but absent in previous
-        for key in curr_keys - prev_keys:
-            info = curr_map[key]
-            evt = {"event": "bs_added", "step": step_index}
-            evt.update(info)
-            events.append(evt)
+        # Modified: same (label, date) but bar_idx differs
+        for ld in prev_ld_keys & curr_ld_keys:
+            if prev_ld[ld] != curr_ld[ld]:
+                for key in curr_ld[ld]:
+                    info = curr_map[key]
+                    evt = {"event": "bs_modified", "step": step_index}
+                    evt.update(info)
+                    events.append(evt)
 
-        # Removed: keys present in previous but absent in current
-        for key in prev_keys - curr_keys:
-            info = prev_map[key]
-            evt = {"event": "bs_removed", "step": step_index}
-            evt.update(info)
-            events.append(evt)
+        # Added: (label, date) only in current
+        for ld in curr_ld_keys - prev_ld_keys:
+            for key in curr_ld[ld]:
+                info = curr_map[key]
+                evt = {"event": "bs_added", "step": step_index}
+                evt.update(info)
+                events.append(evt)
 
-        # Modified: same key but different attributes
-        modified_keys = {
-            key for key in curr_keys & prev_keys
-            if curr_map[key] != prev_map[key]
-        }
-        for key in modified_keys:
-            info = curr_map[key]
-            evt = {"event": "bs_modified", "step": step_index}
-            evt.update(info)
-            events.append(evt)
+        # Removed: (label, date) only in previous
+        for ld in prev_ld_keys - curr_ld_keys:
+            for key in prev_ld[ld]:
+                info = prev_map[key]
+                evt = {"event": "bs_removed", "step": step_index}
+                evt.update(info)
+                events.append(evt)
 
-        # Stable: unchanged markers collapsed into a single count
-        stable_count = len(curr_keys & prev_keys) - len(modified_keys)
+        # Stable: same (label, date) and same bar_idx
+        stable_count = 0
+        for ld in prev_ld_keys & curr_ld_keys:
+            if prev_ld[ld] == curr_ld[ld]:
+                stable_count += len(prev_ld[ld])
+
+        # Fix 5: when zero add/remove/modified events, record 1 bs_stable
+        if len(events) == 0:
+            stable_count = len(curr_map)
+
         if stable_count > 0:
             events.append({
                 "event": "bs_stable",
@@ -495,8 +546,15 @@ class EventRecorder:
         cutoff_date: str,
         view_name: str,
         view_data: dict,
-    ) -> None:
-        """Record one step's data for a single view into all JSONL streams."""
+    ) -> Optional[dict]:
+        """Record one step's data for a single view into all JSONL streams.
+
+        Returns a dict with ``added``, ``removed``, ``curr_snapshot`` counts
+        for events-vs-snapshot consistency checking, or ``None`` if no BS
+        data was available.
+        """
+        stats: Optional[dict] = None
+
         # --- BS marker change events ---
         curr_bs = view_data.get("bs_markers")
         prev_bs = self._prev_bs_by_view.get(view_name)
@@ -506,6 +564,19 @@ class EventRecorder:
                 evt["view"] = view_name
                 self._append_jsonl(self._events_fp, evt)
             self._prev_bs_by_view[view_name] = curr_bs
+
+            # Compute stats for consistency check (Fix 6)
+            added = sum(1 for e in bs_events if e["event"] == "bs_added")
+            removed = sum(1 for e in bs_events if e["event"] == "bs_removed")
+            curr_snapshot = (
+                len(curr_bs.get("entry_markers", []))
+                + len(curr_bs.get("exit_markers", []))
+            )
+            stats = {
+                "added": added,
+                "removed": removed,
+                "curr_snapshot": curr_snapshot,
+            }
 
             # --- BS full snapshot ---
             self._append_jsonl(self._bs_snapshot_fp, {
@@ -577,6 +648,8 @@ class EventRecorder:
             summary = _build_trade_summary(step_index, trade_records)
             summary["view"] = view_name
             self._append_jsonl(self._trade_summary_fp, summary)
+
+        return stats
 
     # ------------------------------------------------------------------
     # Internal: JSONL I/O
@@ -728,6 +801,9 @@ def _build_trade_summary(step_index: int, trade_records: list) -> dict:
     total = len(trade_records)
     win_rate = round(wins / total, 4) if total > 0 else 0.0
 
+    # Fix 8: completed trades — trades with a definitive pnl outcome
+    completed_trades = sum(1 for t in trade_records if t.get("pnl") is not None)
+
     return {
         "event": "trade_summary",
         "step": step_index,
@@ -735,4 +811,5 @@ def _build_trade_summary(step_index: int, trade_records: list) -> dict:
         "long_count": long_count,
         "short_count": short_count,
         "win_rate": win_rate,
+        "completed_trades": completed_trades,
     }

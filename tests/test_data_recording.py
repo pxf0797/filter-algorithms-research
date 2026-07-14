@@ -289,7 +289,7 @@ class TestEventRecorder(unittest.TestCase):
         session_dir = Path(self.tmpdir) / f"TEST_{recorder._session_id}"
         events = self._read_jsonl(session_dir / "events.jsonl")
 
-        bs_events = [e for e in events if e.get("event") in ("bs_added", "bs_removed", "bs_stable")]
+        bs_events = [e for e in events if e.get("event") in ("bs_added", "bs_removed", "bs_modified", "bs_stable")]
         added = [e for e in bs_events if e.get("event") == "bs_added"]
         removed = [e for e in bs_events if e.get("event") == "bs_removed"]
 
@@ -812,7 +812,7 @@ class TestTraceability(unittest.TestCase):
         # Collect (step, view) pairs from BS events
         bs_steps: set = set()
         for e in events:
-            if e.get("event") in ("bs_added", "bs_removed", "bs_stable"):
+            if e.get("event") in ("bs_added", "bs_removed", "bs_modified", "bs_stable"):
                 bs_steps.add((e.get("step"), e.get("view")))
 
         # Collect (step, view) pairs from filter_tail
@@ -840,7 +840,7 @@ class TestTraceability(unittest.TestCase):
 
         bs_steps: set = set()
         for e in events:
-            if e.get("event") in ("bs_added", "bs_removed", "bs_stable"):
+            if e.get("event") in ("bs_added", "bs_removed", "bs_modified", "bs_stable"):
                 bs_steps.add((e.get("step"), e.get("view")))
 
         snap_steps: set = set()
@@ -921,8 +921,9 @@ class TestCSVBuilder(unittest.TestCase):
     # ------------------------------------------------------------------
 
     def test_accumulate_creates_per_view_columns(self):
-        """验证每视图 10 列存在: _filtered, _sig, _eps, _mu_v, _sigma_v,
-        _sig_dur, _pair_count, _trade_count, _bs_entry, _bs_exit"""
+        """验证每视图 12 列存在: _filtered, _sig, _eps, _mu_v, _sigma_v,
+        _sig_dur, _pair_count, _trade_count, _bs_entry_count, _bs_exit_count,
+        _bs_entry_label, _bs_exit_label"""
         from services.event_recorder import CSVBuilder
 
         builder = CSVBuilder()
@@ -934,7 +935,8 @@ class TestCSVBuilder(unittest.TestCase):
         row = builder._rows[0]
         expected_suffixes = [
             "_filtered", "_sig", "_eps", "_mu_v", "_sigma_v",
-            "_sig_dur", "_pair_count", "_trade_count", "_bs_entry", "_bs_exit",
+            "_sig_dur", "_pair_count", "_trade_count",
+            "_bs_entry_count", "_bs_exit_count", "_bs_entry_label", "_bs_exit_label",
         ]
         for vi in range(2):
             prefix = f"v{vi}"
@@ -942,8 +944,8 @@ class TestCSVBuilder(unittest.TestCase):
                 col = f"{prefix}{sfx}"
                 self.assertIn(col, row, f"视图 {prefix} 缺少列: {col}")
 
-        # 总列数 = 7 基础 + 2*10 视图 = 27
-        self.assertEqual(len(row), 27, f"期望 27 列，实际 {len(row)} 列")
+        # 总列数 = 7 基础 + 2*12 视图 = 31
+        self.assertEqual(len(row), 31, f"期望 31 列，实际 {len(row)} 列")
 
     # ------------------------------------------------------------------
     # 3. CSV 文件创建
@@ -1076,10 +1078,10 @@ class TestCSVBuilder(unittest.TestCase):
         self.assertEqual(len(df), 3, "应有 3 行数据")
 
         # Bar 0 的 BS entry 是 "B"，写入后 ffill 应传播到 bar 1
-        self.assertEqual(df.loc[0, "v0_bs_entry"], "B",
-                         "bar 0 bs_entry 应为 B")
-        self.assertEqual(df.loc[1, "v0_bs_entry"], "B",
-                         "ffill 应将 bar 0 的 BS entry 传播到 bar 1")
+        self.assertEqual(df.loc[0, "v0_bs_entry_label"], "B",
+                         "bar 0 bs_entry_label 应为 B")
+        self.assertEqual(df.loc[1, "v0_bs_entry_label"], "B",
+                         "ffill 应将 bar 0 的 BS entry label 传播到 bar 1")
 
     # ------------------------------------------------------------------
     # 8. BS 标签合法值
@@ -1102,7 +1104,7 @@ class TestCSVBuilder(unittest.TestCase):
 
         df = pd.read_csv(csv_path)
         valid_labels = {"B", "S", "-"}
-        bs_cols = [c for c in df.columns if c.endswith("_bs_entry") or c.endswith("_bs_exit")]
+        bs_cols = [c for c in df.columns if c.endswith("_bs_entry_label") or c.endswith("_bs_exit_label")]
         self.assertGreater(len(bs_cols), 0, "应至少有一个 BS 列")
 
         for col in bs_cols:
@@ -1157,12 +1159,12 @@ class TestCSVBuilder(unittest.TestCase):
         # bar 4,5: bar 4 首次出现 "B"（4 % 4 == 0），ffill 传播到 bar 5
         for bi in [1, 2, 3]:
             self.assertEqual(
-                df.loc[bi - 1, "v0_bs_entry"], "-",
+                df.loc[bi - 1, "v0_bs_entry_label"], "-",
                 f"前导 bar {bi} 应保持 \"-\"，无前驱 B/S",
             )
-        self.assertEqual(df.loc[3, "v0_bs_entry"], "B",
+        self.assertEqual(df.loc[3, "v0_bs_entry_label"], "B",
                          "bar 4 首次出现 entry，应为 B")
-        self.assertEqual(df.loc[4, "v0_bs_entry"], "B",
+        self.assertEqual(df.loc[4, "v0_bs_entry_label"], "B",
                          "bar 5 应由 ffill 从 bar 4 传播得到 B")
 
 
