@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>回测分析仪表盘</title>
-<script src="plotly-2.32.0.min.js"></script>
-<script src="papaparse.min.js"></script>
+<script src="./plotly-2.32.0.min.js"></script>
+<script src="./papaparse.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#0d1117;color:#c9d1d9;display:flex;flex-direction:column;height:100vh;overflow:hidden;font-size:13px}
@@ -79,6 +79,7 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#0d111
 <!-- HEADER -->
 <div class="header">
   <h1>&#128202; 回测分析仪表盘</h1>
+  <span style="font-size:11px;color:#8b949e;background:#21262d;padding:2px 8px;border-radius:4px;white-space:nowrap" title="启动命令">&#9881; cd filter_research && python3 -m http.server 8899</span>
   <label>会话:</label>
   <select id="sessionSelect" style="max-width:320px"><option value="">-- 选择会话 --</option></select>
   <button class="primary" onclick="loadSelectedSession()" title="加载选中会话">&#9654; 加载</button>
@@ -173,7 +174,7 @@ async function init() {
 
   // Detect file:// protocol
   if (window.location.protocol === 'file:') {
-    setStatus('提示: 请通过 HTTP 访问: python3 -m http.server 8899，或使用右侧 "导入CSV+JSONL" 按钮手动加载数据', '#d29922');
+    setStatus('提示: 请通过 HTTP 访问: cd filter_research && python3 -m http.server 8899，然后打开 http://localhost:8899/tools/dashboard.html', '#d29922');
   }
 
   const sel = document.getElementById('sessionSelect');
@@ -181,7 +182,7 @@ async function init() {
   let sessions = [];
   let sessionsLoaded = false;
   try {
-    const resp = await fetch('sessions.json', {cache:'no-cache'});
+    const resp = await fetch('../data/backtest_output/sessions.json', {cache:'no-cache'});
     if (resp.ok) {
       sessions = await resp.json();
       sessionsLoaded = true;
@@ -318,7 +319,7 @@ async function loadSession(dir) {
 
   try {
     // 1. Load CSV
-    const csvResp = await fetch(`${dir}/backtest_data.csv`, {cache:'no-cache'});
+    const csvResp = await fetch(`../data/backtest_output/${dir}/backtest_data.csv`, {cache:'no-cache'});
     if (!csvResp.ok) throw new Error(`CSV not found: ${csvResp.status}`);
     const csvText = await csvResp.text();
     const parsed = Papa.parse(csvText, {header:true, dynamicTyping:true, skipEmptyLines:true});
@@ -331,13 +332,13 @@ async function loadSession(dir) {
 
     // 2. Load metadata.json (optional)
     try {
-      const metaResp = await fetch(`${dir}/metadata.json`, {cache:'no-cache'});
+      const metaResp = await fetch(`../data/backtest_output/${dir}/metadata.json`, {cache:'no-cache'});
       if (metaResp.ok) STATE.metadata = await metaResp.json();
     } catch(e) {}
 
     // 3. Load events.jsonl (optional)
     try {
-      const evtResp = await fetch(`${dir}/events.jsonl`, {cache:'no-cache'});
+      const evtResp = await fetch(`../data/backtest_output/${dir}/events.jsonl`, {cache:'no-cache'});
       if (evtResp.ok) {
         const text = await evtResp.text();
         STATE.events = text.split('\n').filter(l => l.trim()).map(l => {
@@ -350,7 +351,7 @@ async function loadSession(dir) {
 
     // 4. Load bs_snapshot.jsonl (optional)
     try {
-      const bsResp = await fetch(`${dir}/bs_snapshot.jsonl`, {cache:'no-cache'});
+      const bsResp = await fetch(`../data/backtest_output/${dir}/bs_snapshot.jsonl`, {cache:'no-cache'});
       if (bsResp.ok) {
         const text = await bsResp.text();
         text.split('\n').filter(l => l.trim()).forEach(l => {
@@ -366,7 +367,7 @@ async function loadSession(dir) {
 
     // 5. Load schmitt_snapshot.jsonl (optional)
     try {
-      const schResp = await fetch(`${dir}/schmitt_snapshot.jsonl`, {cache:'no-cache'});
+      const schResp = await fetch(`../data/backtest_output/${dir}/schmitt_snapshot.jsonl`, {cache:'no-cache'});
       if (schResp.ok) {
         const text = await schResp.text();
         text.split('\n').filter(l => l.trim()).forEach(l => {
@@ -380,7 +381,7 @@ async function loadSession(dir) {
 
     // 6. Load trade_summary.jsonl (optional)
     try {
-      const trResp = await fetch(`${dir}/trade_summary.jsonl`, {cache:'no-cache'});
+      const trResp = await fetch(`../data/backtest_output/${dir}/trade_summary.jsonl`, {cache:'no-cache'});
       if (trResp.ok) {
         const text = await trResp.text();
         text.split('\n').filter(l => l.trim()).forEach(l => {
