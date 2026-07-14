@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>回测 CSV 分析器</title>
+<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<link href="https://cdn.jsdelivr.net/npm/tabulator-tables@5.5.0/dist/css/tabulator_midnight.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/tabulator-tables@5.5.0/dist/js/tabulator.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;background:#0d1117;color:#c9d1d9;display:flex;flex-direction:column;height:100vh}
+.header{background:#161b22;padding:12px 20px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:15px;flex-shrink:0}
+.header h1{font-size:18px;color:#58a6ff}
+.drop-zone{border:2px dashed #30363d;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;color:#8b949e;transition:.2s}
+.drop-zone:hover,.drop-zone.drag{border-color:#58a6ff;color:#58a6ff}
+.drop-zone input{display:none}
+.stats{display:flex;gap:15px;font-size:12px;margin-left:auto}
+.stat-item{background:#21262d;padding:5px 12px;border-radius:4px}
+.stat-item span{color:#58a6ff;font-weight:bold}
+.main{display:flex;flex:1;overflow:hidden}
+.panel{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.panel-header{background:#161b22;padding:8px 12px;font-size:13px;font-weight:bold;border-bottom:1px solid #30363d;flex-shrink:0}
+#chart-panel{flex:0 0 45%;border-right:1px solid #30363d;display:flex;flex-direction:column}
+#table-panel{flex:1;display:flex;flex-direction:column}
+.chart-controls{display:flex;gap:10px;padding:8px 12px;background:#161b22;border-bottom:1px solid #30363d;flex-shrink:0;align-items:center;font-size:12px}
+.chart-controls select{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:4px 8px;border-radius:4px;font-size:12px}
+.chart-controls button{background:#238636;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-size:12px}
+#plot{flex:1;min-height:0}
+#stats-bar{display:flex;gap:12px;padding:6px 12px;background:#161b22;border-bottom:1px solid #30363d;font-size:11px;flex-shrink:0;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>回测 CSV 分析器</h1>
+  <label class="drop-zone" id="dropZone">
+    📂 拖放或点击导入CSV
+    <input type="file" id="fileInput" accept=".csv">
+  </label>
+  <div class="stats" id="headerStats"></div>
+</div>
+<div class="main">
+  <div class="panel" id="chart-panel">
+    <div class="panel-header">📈 交互图表</div>
+    <div class="chart-controls">
+      X轴: <select id="xCol"></select>
+      Y轴: <select id="yCol" multiple style="height:60px;width:200px"></select>
+      <button onclick="updateChart()">🔄 更新图表</button>
+      <button onclick="autoBSChart()" style="background:#1f6feb">🎯 BS信号</button>
+      <button onclick="autoPriceChart()">💰 价格+Filter</button>
+    </div>
+    <div id="stats-bar"></div>
+    <div id="plot"></div>
+  </div>
+  <div class="panel" id="table-panel">
+    <div class="panel-header">📋 数据表格</div>
+    <div id="table" style="flex:1;min-height:0"></div>
+  </div>
+</div>
+
+<script>
+let df = null, table = null, columns = [];
+
+// 文件导入
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag'));
+dropZone.addEventListener('drop', e => {
+    e.preventDefault(); dropZone.classList.remove('drag');
+    const f = e.dataTransfer.files[0];
+    if (f) loadCSV(f);
+});
+fileInput.addEventListener('change', e => {
+    const f = e.target.files[0];
+    if (f) loadCSV(f);
+});
+
+function loadCSV(file) {
+    dropZone.textContent = '⏳ 解析中...';
+    Papa.parse(file, {
+        header: true, dynamicTyping: true, skipEmptyLines: true,
+        complete: function(results) {
+            df = results.data.filter(r => Object.values(r).some(v => v !== null));
+            columns = results.meta.fields;
+            dropZone.textContent = `📂 ${file.name} (${df.length}行×${columns.length}列)`;
+            buildUI();
+        },
+        error: function(err) { alert('CSV解析失败: ' + err.message); dropZone.textContent = '📂 拖放或点击导入CSV'; }
+    });
+}
+
+function buildUI() {
+    // 表头统计
+    const priceCol = columns.find(c => c === 'close') || columns[1];
+    const prices = df.map(r => r[priceCol]).filter(v => !isNaN(v));
+    document.getElementById('headerStats').innerHTML = `
+        <div class="stat-item">行数 <span>${df.length}</span></div>
+        <div class="stat-item">列数 <span>${columns.length}</span></div>
+        <div class="stat-item">价格 <span>${prices.length>0?prices[0].toFixed(2)+'~'+prices[prices.length-1].toFixed(2):'?'}</span></div>
+        <div class="stat-item">变化 <span style="color:${prices.length>1&&prices[prices.length-1]>=prices[0]?'#3fb950':'#f85149'}">${prices.length>1?((prices[prices.length-1]/prices[0]-1)*100).toFixed(2)+'%':'?'}</span></div>
+    `;
+
+    // X/Y 列选择器
+    const xSel = document.getElementById('xCol');
+    const ySel = document.getElementById('yCol');
+    xSel.innerHTML = ySel.innerHTML = '';
+    columns.forEach((c, i) => {
+        xSel.add(new Option(c, c, i===0));
+        const opt = new Option(c, c, c.includes('close')||c.includes('filtered'));
+        ySel.add(opt);
+    });
+
+    // Tabulator 表格
+    if (table) table.destroy();
+    table = new Tabulator('#table', {
+        data: df, columns: columns.map(c => ({title: c, field: c, headerFilter: true, headerFilterPlaceholder: '筛选…'})),
+        layout: 'fitDataFill', height: '100%',
+        theme: 'midnight',
+        initialSort: [{column: 'bar_index', dir: 'asc'}],
+        rowFormatter: function(row) {
+            const data = row.getData();
+            // 高亮 BS 变动行
+            for (const k of Object.keys(data)) {
+                if (k.includes('_bs_') && (data[k] === 'B' || data[k] === 'S')) {
+                    row.getElement().style.background = 'rgba(63,185,80,0.08)';
+                    break;
+                }
+            }
+        }
+    });
+
+    updateChart();
+}
+
+function updateChart() {
+    const xCol = document.getElementById('xCol').value;
+    const yCols = Array.from(document.getElementById('yCol').selectedOptions).map(o => o.value);
+    if (!xCol || yCols.length === 0) return;
+
+    const traces = yCols.map(y => ({
+        x: df.map(r => r[xCol]), y: df.map(r => r[yCol]),
+        type: 'scatter', mode: 'lines', name: y,
+        line: {width: y.includes('close')?1:2}
+    }));
+
+    Plotly.newPlot('plot', traces, {
+        template: 'plotly_dark', margin: {l:50,r:20,t:10,b:40},
+        legend: {orientation:'h', y:1.1, font:{size:10}},
+        xaxis: {title: xCol, gridcolor: '#21262d'},
+        yaxis: {gridcolor: '#21262d'}
+    }, {responsive: true, displayModeBar: false});
+
+    // 统计条
+    updateStats(yCols);
+}
+
+function updateStats(yCols) {
+    const bar = document.getElementById('stats-bar');
+    bar.innerHTML = yCols.map(c => {
+        const vals = df.map(r => r[c]).filter(v => !isNaN(v));
+        if (vals.length === 0) return '';
+        const sum = vals.reduce((a,b) => a+b, 0);
+        const mean = sum / vals.length;
+        const std = Math.sqrt(vals.reduce((a,b) => a + (b-mean)**2, 0) / vals.length);
+        return `<span style="color:#8b949e">${c}:</span>
+                μ=<span style="color:#58a6ff">${mean.toFixed(4)}</span>
+                σ=<span style="color:#d2991d">${std.toFixed(4)}</span>
+                min=<span>${Math.min(...vals).toFixed(4)}</span>
+                max=<span>${Math.max(...vals).toFixed(4)}</span>`;
+    }).filter(s => s).join(' &nbsp;|&nbsp; ');
+}
+
+function autoBSChart() {
+    const entryCols = columns.filter(c => c.includes('bs_entry_count'));
+    const exitCols = columns.filter(c => c.includes('bs_exit_count'));
+    const xCol = columns.find(c => c.includes('bar_index')||c.includes('timestamp')) || columns[0];
+    document.getElementById('xCol').value = xCol;
+    const ySel = document.getElementById('yCol');
+    [...ySel.options].forEach(o => o.selected = entryCols.includes(o.value) || exitCols.includes(o.value));
+    updateChart();
+}
+
+function autoPriceChart() {
+    const xCol = columns.find(c => c.includes('bar_index')||c.includes('timestamp')) || columns[0];
+    document.getElementById('xCol').value = xCol;
+    const ySel = document.getElementById('yCol');
+    const picks = columns.filter(c => c === 'close' || c === 'open' || c === 'high' || c === 'low' || c.includes('_filtered'));
+    [...ySel.options].forEach(o => o.selected = picks.includes(o.value));
+    updateChart();
+}
+
+// 初始加载示例CSV
+window.addEventListener('DOMContentLoaded', () => {
+    // 尝试自动加载最新的3690 CSV
+    fetch('/Users/xfpan/claude/filter_research/data/backtest_output/')
+        .then(() => {}) // 本地文件无法fetch，依赖用户手动导入
+        .catch(() => {});
+});
+</script>
+</body>
+</html>

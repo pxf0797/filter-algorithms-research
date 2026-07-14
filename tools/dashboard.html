@@ -1,0 +1,1207 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>回测分析仪表盘</title>
+<script src="plotly-2.32.0.min.js"></script>
+<script src="papaparse.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#0d1117;color:#c9d1d9;display:flex;flex-direction:column;height:100vh;overflow:hidden;font-size:13px}
+
+/* ===== HEADER ===== */
+.header{background:#161b22;padding:8px 16px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:12px;flex-shrink:0;min-height:44px;flex-wrap:wrap}
+.header h1{font-size:16px;color:#58a6ff;white-space:nowrap}
+.header label{font-size:12px;color:#8b949e;white-space:nowrap}
+.header select,.header button,.header input{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer}
+.header select:hover,.header button:hover{border-color:#58a6ff}
+.header button.primary{background:#238636;border-color:#238636;color:#fff}
+.header button.warn{background:#d29922;border-color:#d29922;color:#000}
+.header .step-group{display:flex;align-items:center;gap:6px}
+.header .step-group input[type=range]{width:120px;accent-color:#58a6ff}
+.header .step-group span{font-size:12px;color:#58a6ff;font-weight:bold;min-width:40px;text-align:center}
+.header .spacer{flex:1}
+.header .file-btn{cursor:pointer;font-size:12px;color:#8b949e;padding:4px 10px;border:1px dashed #30363d;border-radius:4px;transition:.2s}
+.header .file-btn:hover{color:#58a6ff;border-color:#58a6ff}
+.header .file-btn input{display:none}
+
+/* ===== MAIN GRID ===== */
+.main{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;flex:1;overflow:hidden;gap:2px;background:#30363d;padding:2px}
+.panel{background:#0d1117;display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.panel-header{background:#161b22;padding:6px 12px;font-size:12px;font-weight:bold;border-bottom:1px solid #30363d;flex-shrink:0;display:flex;align-items:center;gap:8px}
+.panel-header .badge{font-size:10px;background:#21262d;padding:2px 6px;border-radius:8px;color:#8b949e}
+.panel-body{flex:1;min-height:0;overflow:hidden}
+
+/* ===== PANEL 4: EVENT LOG TABLE ===== */
+#event-log-panel .panel-body{overflow-y:auto;padding:0}
+#event-log-table{width:100%;border-collapse:collapse;font-size:11px}
+#event-log-table thead{position:sticky;top:0;z-index:1}
+#event-log-table th{background:#21262d;color:#8b949e;padding:5px 8px;text-align:left;font-weight:600;border-bottom:1px solid #30363d;font-size:11px;white-space:nowrap}
+#event-log-table td{padding:3px 8px;border-bottom:1px solid #21262d;white-space:nowrap}
+#event-log-table tbody tr{cursor:pointer;transition:background .15s}
+#event-log-table tbody tr:hover{background:#1a2233}
+#event-log-table tbody tr.selected{background:#1f3a5f}
+#event-log-table .evt-added{color:#3fb950}
+#event-log-table .evt-modified{color:#d29922}
+#event-log-table .evt-removed{color:#f85149}
+#event-log-table .evt-stable{color:#8b949e}
+
+/* ===== SUMMARY BAR ===== */
+.summary-bar{background:#161b22;padding:6px 16px;border-top:1px solid #30363d;display:flex;gap:16px;flex-shrink:0;font-size:12px;flex-wrap:wrap;min-height:32px;align-items:center}
+.summary-item{display:flex;align-items:center;gap:4px}
+.summary-item .label{color:#8b949e}
+.summary-item .value{color:#58a6ff;font-weight:bold}
+.summary-item .warn{color:#d29922;font-weight:bold}
+.summary-item .danger{color:#f85149;font-weight:bold}
+
+/* ===== TOOLTIP OVERRIDE ===== */
+.js-plotly-plot .plotly .modebar{opacity:0.3}
+.js-plotly-plot .plotly .modebar:hover{opacity:1}
+
+/* ===== LOADING ===== */
+.loading-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:1000;font-size:16px;color:#58a6ff}
+.loading-overlay .spinner{width:32px;height:32px;border:3px solid #30363d;border-top-color:#58a6ff;border-radius:50%;animation:spin .8s linear infinite;margin-right:12px}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ===== SCROLLBAR ===== */
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:#0d1117}
+::-webkit-scrollbar-thumb{background:#30363d;border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:#484f58}
+
+/* ===== RESPONSIVE ===== */
+@media(max-width:900px){.main{grid-template-columns:1fr;grid-template-rows:auto}}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <h1>&#128202; 回测分析仪表盘</h1>
+  <label>会话:</label>
+  <select id="sessionSelect" style="max-width:320px"><option value="">-- 选择会话 --</option></select>
+  <button class="primary" onclick="loadSelectedSession()" title="加载选中会话">&#9654; 加载</button>
+  <span class="file-btn">&#128194; 导入CSV+JSONL<input type="file" id="fileInput" accept=".csv" multiple></span>
+  <span id="statusMsg" style="font-size:11px;color:#8b949e;margin-left:8px"></span>
+  <span class="spacer"></span>
+  <div class="step-group" id="stepGroup" style="display:none">
+    <label>Step:</label>
+    <input type="range" id="stepSlider" min="0" max="0" value="0" oninput="onStepChange()">
+    <span id="stepLabel">0</span>
+    <button onclick="autoPlaySteps()" title="自动播放">&#9654;</button>
+  </div>
+</div>
+
+<!-- MAIN GRID -->
+<div class="main">
+  <!-- Panel 1: Price + Filter (top-left) -->
+  <div class="panel" id="panel-price">
+    <div class="panel-header">&#128200; 价格 &amp; Filter<span class="badge" id="badge-price"></span></div>
+    <div class="panel-body" id="plot-price"></div>
+  </div>
+
+  <!-- Panel 2: BS Signal Timeline (top-right) -->
+  <div class="panel" id="panel-bs">
+    <div class="panel-header">&#127919; BS 信号时间线<span class="badge" id="badge-bs"></span></div>
+    <div class="panel-body" id="plot-bs"></div>
+  </div>
+
+  <!-- Panel 3: Schmitt Heatmap (bottom-left) -->
+  <div class="panel" id="panel-heatmap">
+    <div class="panel-header">&#128293; Schmitt 信号热力图<span class="badge" id="badge-heatmap"></span></div>
+    <div class="panel-body" id="plot-heatmap"></div>
+  </div>
+
+  <!-- Panel 4: Event Log (bottom-right) -->
+  <div class="panel" id="event-log-panel">
+    <div class="panel-header">&#128203; 事件日志<span class="badge" id="badge-events"></span><span style="margin-left:auto;font-weight:normal;font-size:11px">点击行跳转</span></div>
+    <div class="panel-body">
+      <table id="event-log-table">
+        <thead><tr><th>Step</th><th>事件</th><th>视图</th><th>类型</th><th>标记</th><th>Bar</th><th>日期</th><th>原因</th></tr></thead>
+        <tbody id="event-log-body"><tr><td colspan="8" style="color:#8b949e;text-align:center;padding:40px">请先加载会话数据</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- SUMMARY BAR -->
+<div class="summary-bar" id="summaryBar">
+  <span style="color:#8b949e">请选择或导入回测会话</span>
+</div>
+
+<!-- LOADING OVERLAY -->
+<div class="loading-overlay" id="loadingOverlay" style="display:none">
+  <div class="spinner"></div><span id="loadingText">加载中...</span>
+</div>
+
+<script>
+// ============================================================
+// GLOBAL STATE
+// ============================================================
+const STATE = {
+  csvData: null,         // parsed CSV rows {bar_index, close, open, high, low, volume, ...v0-v3 cols}
+  csvColumns: [],        // CSV column names
+  events: [],            // events.jsonl entries [{event, step, type, label, bar_idx, date, view, ...}]
+  bsSnapshots: {},       // bs_snapshot.jsonl keyed by "step|view" -> {entry:[], exit:[]}
+  schmittSnapshots: {},  // schmitt_snapshot.jsonl keyed by "step|view"
+  tradeSummaries: {},    // trade_summary.jsonl keyed by "step|view"
+  metadata: null,        // metadata.json
+  sessionDir: '',        // current session directory name
+  currentStep: 0,
+  maxStep: 0,
+  stepAutoTimer: null,
+  anomalyBarIndices: new Set(), // bar_indices with anomalies
+  zoomSyncLock: false    // prevent recursive zoom sync
+};
+
+// ============================================================
+// INITIALIZATION
+// ============================================================
+async function init() {
+  // Check dependencies
+  const missing = [];
+  if (typeof Plotly === 'undefined') missing.push('Plotly.js');
+  if (typeof Papa === 'undefined') missing.push('PapaParse');
+
+  if (missing.length) {
+    const msg = `缺少依赖: ${missing.join(', ')}。请确保 plotly-2.32.0.min.js 和 papaparse.min.js 与 dashboard.html 在同目录下。`;
+    setStatus(msg, '#f85149');
+    document.getElementById('summaryBar').innerHTML = `<span style="color:#f85149">${msg}</span>`;
+    return;
+  }
+
+  // Detect file:// protocol
+  if (window.location.protocol === 'file:') {
+    setStatus('提示: 请通过 HTTP 访问: python3 -m http.server 8899，或使用右侧 "导入CSV+JSONL" 按钮手动加载数据', '#d29922');
+  }
+
+  const sel = document.getElementById('sessionSelect');
+  // Try to load sessions manifest
+  let sessions = [];
+  let sessionsLoaded = false;
+  try {
+    const resp = await fetch('sessions.json', {cache:'no-cache'});
+    if (resp.ok) {
+      sessions = await resp.json();
+      sessionsLoaded = true;
+    }
+  } catch(e) {}
+
+  // Fallback: embedded session list
+  if (!sessions.length) {
+    sessions = [
+      {dir:"600115_20260714-222958-600115",ticker:"600115",session_id:"20260714-222958-600115"},
+      {dir:"600115_20260714-222954-600115",ticker:"600115",session_id:"20260714-222954-600115"},
+      {dir:"600115_20260714-222950-600115",ticker:"600115",session_id:"20260714-222950-600115"},
+      {dir:"3690_20260714-222947-3690",ticker:"3690",session_id:"20260714-222947-3690"},
+      {dir:"3690_20260714-222943-3690",ticker:"3690",session_id:"20260714-222943-3690"},
+      {dir:"2382_20260714-222940-2382",ticker:"2382",session_id:"20260714-222940-2382"},
+      {dir:"2382_20260714-222937-2382",ticker:"2382",session_id:"20260714-222937-2382"},
+      {dir:"AAPL_20260714-222902-AAPL",ticker:"AAPL",session_id:"20260714-222902-AAPL"},
+      {dir:"3690_20260714-222853-3690",ticker:"3690",session_id:"20260714-222853-3690"},
+      {dir:"2382_20260714-222848-2382",ticker:"2382",session_id:"20260714-222848-2382"},
+      {dir:"3690_20260714-221241-3690",ticker:"3690",session_id:"20260714-221241-3690"},
+      {dir:"3690_20260714-215313-3690",ticker:"3690",session_id:"20260714-215313-3690"},
+      {dir:"AAPL_20260714-001225-AAPL",ticker:"AAPL",session_id:"20260714-001225-AAPL"}
+    ];
+  }
+
+  sel.innerHTML = '<option value="">-- 选择会话 --</option>';
+  sessions.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.dir;
+    opt.textContent = `${s.ticker} | ${s.session_id}`;
+    sel.appendChild(opt);
+  });
+
+  // Auto-load first session
+  if (sessions.length > 0) {
+    sel.value = sessions[0].dir;
+    if (sessionsLoaded) {
+      setStatus(`发现 ${sessions.length} 个会话，自动加载中...`, '#8b949e');
+      try {
+        await loadSession(sessions[0].dir);
+        setStatus(`已加载: ${sessions[0].ticker}`, '#3fb950');
+      } catch(e) {
+        setStatus(`加载失败: ${e.message}`, '#f85149');
+        document.getElementById('summaryBar').innerHTML = `<span style="color:#f85149">自动加载失败: ${e.message}。请手动选择会话或导入文件。</span>`;
+      }
+    } else {
+      setStatus(`内置 ${sessions.length} 个会话（sessions.json 不可用）。请点击"加载"按钮。`, '#d29922');
+    }
+  } else {
+    setStatus('未发现会话，请使用"导入CSV+JSONL"按钮手动加载数据。', '#d29922');
+  }
+
+  // File input handler
+  document.getElementById('fileInput').addEventListener('change', onFileImport);
+
+  // Set up cross-chart zoom sync (one-time setup)
+  setupZoomSync();
+}
+
+function setStatus(msg, color) {
+  const el = document.getElementById('statusMsg');
+  if (el) {
+    el.textContent = msg;
+    el.style.color = color || '#8b949e';
+  }
+}
+
+function showLoading(msg) {
+  document.getElementById('loadingText').textContent = msg;
+  document.getElementById('loadingOverlay').style.display = 'flex';
+}
+function hideLoading() {
+  document.getElementById('loadingOverlay').style.display = 'none';
+}
+
+// One-time zoom sync across all three Plotly charts
+function setupZoomSync() {
+  const charts = ['plot-price','plot-bs','plot-heatmap'];
+  const containers = charts.map(id => document.getElementById(id));
+
+  function syncXRange(sourceContainer) {
+    if (STATE.zoomSyncLock) return;
+    const range = sourceContainer._fullLayout?.xaxis?.range;
+    if (!range || range.length !== 2) return;
+    STATE.zoomSyncLock = true;
+    containers.forEach(c => {
+      if (c !== sourceContainer && c._fullLayout) {
+        Plotly.relayout(c, {'xaxis.range': range}).catch(()=>{});
+      }
+    });
+    setTimeout(() => { STATE.zoomSyncLock = false; }, 100);
+  }
+
+  containers.forEach(container => {
+    container.on('plotly_relayout', function(evt) {
+      if (STATE.zoomSyncLock) return;
+      if (evt['xaxis.range'] || (evt['xaxis.range[0]'] !== undefined && evt['xaxis.range[1]'] !== undefined)) {
+        const range = evt['xaxis.range'] || [evt['xaxis.range[0]'], evt['xaxis.range[1]']];
+        STATE.zoomSyncLock = true;
+        containers.forEach(c => {
+          if (c !== container && c._fullLayout) {
+            Plotly.relayout(c, {'xaxis.range': range}).catch(()=>{});
+          }
+        });
+        setTimeout(() => { STATE.zoomSyncLock = false; }, 100);
+      }
+    });
+  });
+}
+
+// ============================================================
+// SESSION LOADING
+// ============================================================
+async function loadSelectedSession() {
+  const dir = document.getElementById('sessionSelect').value;
+  if (!dir) {
+    setStatus('请选择一个会话', '#d29922');
+    return;
+  }
+  setStatus(`加载会话 ${dir} ...`, '#58a6ff');
+  try {
+    await loadSession(dir);
+    setStatus(`已加载: ${dir}`, '#3fb950');
+  } catch(err) {
+    setStatus(`加载失败: ${err.message}`, '#f85149');
+    document.getElementById('summaryBar').innerHTML = `<span style="color:#f85149">加载失败: ${err.message}</span>`;
+  }
+}
+
+async function loadSession(dir) {
+  showLoading(`加载会话 ${dir} ...`);
+  resetState();
+  STATE.sessionDir = dir;
+
+  try {
+    // 1. Load CSV
+    const csvResp = await fetch(`${dir}/backtest_data.csv`, {cache:'no-cache'});
+    if (!csvResp.ok) throw new Error(`CSV not found: ${csvResp.status}`);
+    const csvText = await csvResp.text();
+    const parsed = Papa.parse(csvText, {header:true, dynamicTyping:true, skipEmptyLines:true});
+    STATE.csvData = parsed.data.filter(r => r.bar_index != null && !isNaN(r.bar_index));
+    STATE.csvColumns = parsed.meta.fields;
+    if (!STATE.csvData.length) throw new Error('CSV 无有效数据');
+
+    // Sort by bar_index
+    STATE.csvData.sort((a,b) => a.bar_index - b.bar_index);
+
+    // 2. Load metadata.json (optional)
+    try {
+      const metaResp = await fetch(`${dir}/metadata.json`, {cache:'no-cache'});
+      if (metaResp.ok) STATE.metadata = await metaResp.json();
+    } catch(e) {}
+
+    // 3. Load events.jsonl (optional)
+    try {
+      const evtResp = await fetch(`${dir}/events.jsonl`, {cache:'no-cache'});
+      if (evtResp.ok) {
+        const text = await evtResp.text();
+        STATE.events = text.split('\n').filter(l => l.trim()).map(l => {
+          try { return JSON.parse(l); } catch(e) { return null; }
+        }).filter(e => e && e.event !== 'session_started' && e.event !== 'session_ended');
+        const steps = STATE.events.map(e => e.step).filter(s => s != null);
+        if (steps.length) STATE.maxStep = Math.max(...steps);
+      }
+    } catch(e) {}
+
+    // 4. Load bs_snapshot.jsonl (optional)
+    try {
+      const bsResp = await fetch(`${dir}/bs_snapshot.jsonl`, {cache:'no-cache'});
+      if (bsResp.ok) {
+        const text = await bsResp.text();
+        text.split('\n').filter(l => l.trim()).forEach(l => {
+          try {
+            const e = JSON.parse(l);
+            const key = `${e.step}|${e.view}`;
+            STATE.bsSnapshots[key] = {entry: e.entry||[], exit: e.exit||[], step: e.step, view: e.view};
+            if (e.step > STATE.maxStep) STATE.maxStep = e.step;
+          } catch(ex) {}
+        });
+      }
+    } catch(e) {}
+
+    // 5. Load schmitt_snapshot.jsonl (optional)
+    try {
+      const schResp = await fetch(`${dir}/schmitt_snapshot.jsonl`, {cache:'no-cache'});
+      if (schResp.ok) {
+        const text = await schResp.text();
+        text.split('\n').filter(l => l.trim()).forEach(l => {
+          try {
+            const e = JSON.parse(l);
+            STATE.schmittSnapshots[`${e.step}|${e.view}`] = e;
+          } catch(ex) {}
+        });
+      }
+    } catch(e) {}
+
+    // 6. Load trade_summary.jsonl (optional)
+    try {
+      const trResp = await fetch(`${dir}/trade_summary.jsonl`, {cache:'no-cache'});
+      if (trResp.ok) {
+        const text = await trResp.text();
+        text.split('\n').filter(l => l.trim()).forEach(l => {
+          try {
+            const e = JSON.parse(l);
+            STATE.tradeSummaries[`${e.step}|${e.view}`] = e;
+          } catch(ex) {}
+        });
+      }
+    } catch(e) {}
+
+    // Setup step slider
+    const stepGroup = document.getElementById('stepGroup');
+    const slider = document.getElementById('stepSlider');
+    if (STATE.maxStep > 0) {
+      stepGroup.style.display = 'flex';
+      slider.max = STATE.maxStep;
+      slider.value = STATE.maxStep; // default to last step
+      STATE.currentStep = STATE.maxStep;
+    } else {
+      stepGroup.style.display = 'none';
+      STATE.currentStep = 0;
+    }
+    document.getElementById('stepLabel').textContent = STATE.currentStep;
+
+    // Detect anomalies
+    detectAnomalies();
+
+    // Render all panels
+    renderAll();
+
+    // Reset zoom to auto-range for new session
+    setTimeout(() => {
+      ['plot-price','plot-bs','plot-heatmap'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el._fullLayout) {
+          Plotly.relayout(el, {'xaxis.autorange': true, 'yaxis.autorange': true});
+        }
+      });
+    }, 150);
+
+    hideLoading();
+
+  } catch(err) {
+    hideLoading();
+    console.error(err);
+    throw new Error(err.message || '加载失败。请确保通过 HTTP 服务器访问此页面（非 file:// 协议），或使用"导入CSV+JSONL"按钮。');
+  }
+}
+
+function resetState() {
+  STATE.csvData = null;
+  STATE.csvColumns = [];
+  STATE.events = [];
+  STATE.bsSnapshots = {};
+  STATE.schmittSnapshots = {};
+  STATE.tradeSummaries = {};
+  STATE.metadata = null;
+  STATE.sessionDir = '';
+  STATE.currentStep = 0;
+  STATE.maxStep = 0;
+  STATE.anomalyBarIndices = new Set();
+  if (STATE.stepAutoTimer) { clearInterval(STATE.stepAutoTimer); STATE.stepAutoTimer = null; }
+}
+
+// ============================================================
+// FILE IMPORT (fallback for file:// or manual load)
+// ============================================================
+async function onFileImport(e) {
+  const files = Array.from(e.target.files);
+  if (!files.length) return;
+
+  showLoading('解析导入文件...');
+  resetState();
+
+  // Separate CSV and JSONL files
+  const csvFile = files.find(f => f.name.endsWith('.csv'));
+  const jsonlFiles = files.filter(f => f.name.endsWith('.jsonl'));
+  const jsonFiles = files.filter(f => f.name.endsWith('.json') && !f.name.endsWith('.jsonl'));
+
+  try {
+    // Parse CSV
+    if (csvFile) {
+      const csvText = await csvFile.text();
+      const parsed = Papa.parse(csvText, {header:true, dynamicTyping:true, skipEmptyLines:true});
+      STATE.csvData = parsed.data.filter(r => r.bar_index != null && !isNaN(r.bar_index));
+      STATE.csvColumns = parsed.meta.fields;
+      STATE.csvData.sort((a,b) => a.bar_index - b.bar_index);
+    }
+
+    // Parse JSONL files
+    for (const f of jsonlFiles) {
+      const text = await f.text();
+      const lines = text.split('\n').filter(l => l.trim());
+      if (f.name === 'events.jsonl' || f.name.includes('events')) {
+        STATE.events = lines.map(l => { try { return JSON.parse(l); } catch(e) { return null; } })
+          .filter(e => e && e.event !== 'session_started' && e.event !== 'session_ended');
+        const steps = STATE.events.map(e => e.step).filter(s => s != null);
+        if (steps.length) STATE.maxStep = Math.max(...steps);
+      } else if (f.name.includes('bs_snapshot')) {
+        lines.forEach(l => {
+          try {
+            const e = JSON.parse(l);
+            STATE.bsSnapshots[`${e.step}|${e.view}`] = {entry: e.entry||[], exit: e.exit||[], step: e.step, view: e.view};
+            if (e.step > STATE.maxStep) STATE.maxStep = e.step;
+          } catch(ex) {}
+        });
+      } else if (f.name.includes('schmitt_snapshot')) {
+        lines.forEach(l => {
+          try { const e = JSON.parse(l); STATE.schmittSnapshots[`${e.step}|${e.view}`] = e; } catch(ex) {}
+        });
+      } else if (f.name.includes('trade_summary')) {
+        lines.forEach(l => {
+          try { const e = JSON.parse(l); STATE.tradeSummaries[`${e.step}|${e.view}`] = e; } catch(ex) {}
+        });
+      }
+    }
+
+    // Parse metadata.json
+    for (const f of jsonFiles) {
+      if (f.name === 'metadata.json') {
+        try { STATE.metadata = JSON.parse(await f.text()); } catch(e) {}
+      }
+    }
+
+    if (!STATE.csvData || !STATE.csvData.length) throw new Error('未找到有效的CSV数据');
+
+    // Setup step slider
+    const stepGroup = document.getElementById('stepGroup');
+    const slider = document.getElementById('stepSlider');
+    if (STATE.maxStep > 0) {
+      stepGroup.style.display = 'flex';
+      slider.max = STATE.maxStep;
+      slider.value = STATE.maxStep;
+      STATE.currentStep = STATE.maxStep;
+    } else {
+      stepGroup.style.display = 'none';
+    }
+    document.getElementById('stepLabel').textContent = STATE.currentStep;
+
+    detectAnomalies();
+    renderAll();
+    hideLoading();
+
+  } catch(err) {
+    hideLoading();
+    console.error(err);
+    setStatus(`导入失败: ${err.message}`, '#f85149');
+    document.getElementById('summaryBar').innerHTML = `<span style="color:#f85149">导入失败: ${err.message}</span>`;
+  }
+}
+
+// ============================================================
+// ANOMALY DETECTION
+// ============================================================
+function detectAnomalies() {
+  STATE.anomalyBarIndices = new Set();
+  const data = STATE.csvData;
+  if (!data || data.length < 2) return;
+
+  // 1. Price gap > 2%
+  for (let i = 1; i < data.length; i++) {
+    const prevClose = data[i-1].close;
+    const currClose = data[i].close;
+    if (prevClose && currClose && Math.abs((currClose - prevClose) / prevClose) > 0.02) {
+      STATE.anomalyBarIndices.add(data[i].bar_index);
+    }
+  }
+
+  // 2. Sig flip: consecutive sig changes from -1 to 1 or 1 to -1
+  ['v0','v1','v2','v3'].forEach(view => {
+    const sigCol = `${view}_sig`;
+    if (!(sigCol in data[0])) return;
+    for (let i = 1; i < data.length; i++) {
+      const prev = data[i-1][sigCol];
+      const curr = data[i][sigCol];
+      if (prev != null && curr != null && Math.abs(prev - curr) >= 2) {
+        STATE.anomalyBarIndices.add(data[i].bar_index);
+      }
+    }
+  });
+
+  // 3. BS count mutation across steps (from bs_snapshots)
+  // Group bs_snapshots by view, compare consecutive steps
+  const viewSnapshots = {};
+  Object.values(STATE.bsSnapshots).forEach(s => {
+    const v = s.view;
+    if (!viewSnapshots[v]) viewSnapshots[v] = [];
+    viewSnapshots[v].push(s);
+  });
+  Object.values(viewSnapshots).forEach(snaps => {
+    snaps.sort((a,b) => a.step - b.step);
+    for (let i = 1; i < snaps.length; i++) {
+      const prevCount = (snaps[i-1].entry||[]).length + (snaps[i-1].exit||[]).length;
+      const currCount = (snaps[i].entry||[]).length + (snaps[i].exit||[]).length;
+      if (prevCount > 0 && Math.abs(currCount - prevCount) / prevCount > 0.5) {
+        // Mark all bars in current snapshot's entry/exit
+        (snaps[i].entry||[]).forEach(e => STATE.anomalyBarIndices.add(e.bar_idx));
+        (snaps[i].exit||[]).forEach(e => STATE.anomalyBarIndices.add(e.bar_idx));
+      }
+    }
+  });
+}
+
+// ============================================================
+// RENDER ALL PANELS
+// ============================================================
+function renderAll() {
+  if (!STATE.csvData) return;
+
+  renderPriceFilter();
+  renderBSSignals();
+  renderHeatmap();
+  renderEventLog();
+  renderSummary();
+  document.getElementById('badge-price').textContent = `${STATE.csvData.length} bars`;
+  document.getElementById('badge-bs').textContent = `step ${STATE.currentStep}`;
+  document.getElementById('badge-heatmap').textContent = `v0-v3`;
+  document.getElementById('badge-events').textContent = `${STATE.events.length} 事件`;
+}
+
+// ============================================================
+// PANEL 1+3: PRICE + FILTER & SCHMITT HEATMAP (subplot, shared x)
+// ============================================================
+function renderPriceFilter() {
+  const data = STATE.csvData;
+  const barIdx = data.map(r => r.bar_index);
+  const container = document.getElementById('plot-price');
+
+  // ---- Candlestick trace ----
+  const candleTrace = {
+    type: 'candlestick',
+    x: barIdx,
+    open: data.map(r => r.open),
+    high: data.map(r => r.high),
+    low: data.map(r => r.low),
+    close: data.map(r => r.close),
+    name: '价格',
+    increasing: {line: {color: '#3fb950'}, fillcolor: '#3fb950'},
+    decreasing: {line: {color: '#f85149'}, fillcolor: '#f85149'},
+    xaxis: 'x',
+    yaxis: 'y',
+    showlegend: true,
+    legendgroup: 'price',
+    hoverinfo: 'x+y+name'
+  };
+
+  // ---- Filter line traces ----
+  const filterColors = {'v0':'#00d4aa','v1':'#58a6ff','v2':'#d29922','v3':'#bc8cff'};
+  const filterTraces = [];
+  ['v0','v1','v2','v3'].forEach(view => {
+    const colName = `${view}_filtered`;
+    if (!(colName in data[0])) return;
+    const vals = data.map(r => {
+      const v = r[colName];
+      return (v != null && !isNaN(v)) ? v : null;
+    });
+    const label = getViewLabel(view);
+    filterTraces.push({
+      type: 'scatter',
+      mode: 'lines',
+      x: barIdx,
+      y: vals,
+      name: `${label} filter`,
+      line: {color: filterColors[view], width: 1.2, dash: 'solid'},
+      opacity: 0.7,
+      xaxis: 'x',
+      yaxis: 'y',
+      showlegend: true,
+      legendgroup: view,
+      hoverinfo: 'x+y+name',
+      connectgaps: false
+    });
+  });
+
+  // ---- BS event vertical lines (shapes) ----
+  const shapes = [];
+  const annotations = [];
+  // Collect all BS bar_indices from events at current step
+  const bsBars = new Map(); // bar_idx -> Set of labels
+  STATE.events.filter(e => e.step === STATE.currentStep && (e.event==='bs_added'||e.event==='bs_modified')).forEach(e => {
+    if (e.bar_idx != null) {
+      if (!bsBars.has(e.bar_idx)) bsBars.set(e.bar_idx, new Set());
+      bsBars.get(e.bar_idx).add(`${e.view}:${e.type}:${e.label}`);
+    }
+  });
+  // Also from bs_snapshots for current step
+  Object.values(STATE.bsSnapshots).forEach(s => {
+    if (s.step !== STATE.currentStep) return;
+    [...(s.entry||[]), ...(s.exit||[])].forEach(e => {
+      if (!bsBars.has(e.bar_idx)) bsBars.set(e.bar_idx, new Set());
+      bsBars.get(e.bar_idx).add(`${s.view}:${e.label}`);
+    });
+  });
+
+  bsBars.forEach((labels, barIdx) => {
+    const isAnomaly = STATE.anomalyBarIndices.has(barIdx);
+    shapes.push({
+      type: 'line',
+      name: 'bs-line',
+      x0: barIdx, x1: barIdx,
+      y0: 0, y1: 1,
+      yref: 'paper',
+      line: {color: isAnomaly ? '#f85149' : '#d29922', width: isAnomaly ? 1.5 : 0.8, dash: 'dot'},
+      opacity: 0.6
+    });
+  });
+
+  // ---- Anomaly highlight shapes ----
+  STATE.anomalyBarIndices.forEach(barIdx => {
+    if (!bsBars.has(barIdx)) {
+      shapes.push({
+        type: 'rect',
+        name: 'anomaly-rect',
+        x0: barIdx - 0.4, x1: barIdx + 0.4,
+        y0: 0, y1: 1,
+        yref: 'paper',
+        fillcolor: 'rgba(248,81,73,0.08)',
+        line: {width: 0}
+      });
+    }
+  });
+
+  // ---- Layout ----
+  const layout = {
+    template: 'plotly_dark',
+    paper_bgcolor: '#0d1117',
+    plot_bgcolor: '#0d1117',
+    font: {color: '#c9d1d9', size: 11},
+    margin: {l: 50, r: 30, t: 5, b: 30},
+    xaxis: {
+      title: 'Bar Index',
+      gridcolor: '#21262d',
+      zeroline: false,
+      rangeslider: {visible: false}
+    },
+    yaxis: {
+      title: '价格',
+      gridcolor: '#21262d',
+      zeroline: false,
+      autorange: true
+    },
+    legend: {
+      x: 1.02, y: 1,
+      bgcolor: 'rgba(22,27,34,0.9)',
+      bordercolor: '#30363d',
+      font: {size: 10},
+      orientation: 'v'
+    },
+    shapes: shapes,
+    dragmode: 'pan',
+    hovermode: 'x unified'
+  };
+
+  Plotly.react(container, [candleTrace, ...filterTraces], layout);
+}
+
+// ============================================================
+// PANEL 3: SCHMITT HEATMAP (separate plot, synced x with price panel)
+// ============================================================
+function renderHeatmap() {
+  const data = STATE.csvData;
+  const barIdx = data.map(r => r.bar_index);
+  const container = document.getElementById('plot-heatmap');
+
+  // Build heatmap z-matrix: rows = views, cols = bar_indices
+  const views = ['v0','v1','v2','v3'].filter(v => `${v}_sig` in data[0]);
+  const z = views.map(view => {
+    const col = `${view}_sig`;
+    return data.map(r => {
+      const v = r[col];
+      return (v != null && !isNaN(v)) ? v : null;
+    });
+  });
+  const yLabels = views.map(v => getViewLabel(v));
+
+  const trace = {
+    type: 'heatmap',
+    x: barIdx,
+    y: yLabels,
+    z: z,
+    colorscale: [
+      [0, '#f85149'],     // -1 = red
+      [0.5, '#30363d'],   //  0 = dark gray
+      [1, '#3fb950']      //  1 = green
+    ],
+    zmin: -1,
+    zmax: 1,
+    showscale: true,
+    colorbar: {
+      title: 'Sig',
+      tickvals: [-1, 0, 1],
+      ticktext: ['-1 空','0 中性','1 多'],
+      len: 0.5,
+      thickness: 12,
+      outlinewidth: 0
+    },
+    xgap: 1,
+    ygap: 1,
+    hoverongaps: false,
+    hovertemplate: 'Bar: %{x}<br>View: %{y}<br>Sig: %{z}<extra></extra>'
+  };
+
+  const layout = {
+    template: 'plotly_dark',
+    paper_bgcolor: '#0d1117',
+    plot_bgcolor: '#0d1117',
+    font: {color: '#c9d1d9', size: 11},
+    margin: {l: 60, r: 40, t: 5, b: 30},
+    xaxis: {
+      title: 'Bar Index',
+      gridcolor: '#21262d',
+      zeroline: false
+    },
+    yaxis: {
+      title: '',
+      gridcolor: '#21262d',
+      zeroline: false,
+      autorange: 'reversed'  // v0 on top
+    },
+    dragmode: 'pan'
+  };
+
+  Plotly.react(container, [trace], layout);
+}
+
+// ============================================================
+// PANEL 2: BS SIGNAL TIMELINE
+// ============================================================
+function renderBSSignals() {
+  const container = document.getElementById('plot-bs');
+  const currentStep = STATE.currentStep;
+
+  // Collect BS events at current step, organized by view
+  const viewOrder = ['v0','v1','v2','v3'];
+  const viewData = {}; // view -> {entry_labels: [], entry_bars: [], exit_labels: [], exit_bars: []}
+  viewOrder.forEach(v => { viewData[v] = {entry_labels:[], entry_bars:[], exit_labels:[], exit_bars:[]}; });
+
+  // From bs_snapshots
+  Object.values(STATE.bsSnapshots).forEach(s => {
+    if (s.step !== currentStep) return;
+    const vn = s.view.split('_')[0]; // "v0_日线" -> "v0"
+    if (!viewData[vn]) return;
+    (s.entry||[]).forEach(e => {
+      viewData[vn].entry_bars.push(e.bar_idx);
+      viewData[vn].entry_labels.push(e.label);
+    });
+    (s.exit||[]).forEach(e => {
+      viewData[vn].exit_bars.push(e.bar_idx);
+      viewData[vn].exit_labels.push(e.label);
+    });
+  });
+
+  // If no bs_snapshots, fall back to events
+  const hasBsData = Object.values(viewData).some(d => d.entry_bars.length + d.exit_bars.length > 0);
+  if (!hasBsData && STATE.events.length) {
+    STATE.events.filter(e => e.step === currentStep && (e.event==='bs_added'||e.event==='bs_modified')).forEach(e => {
+      const vn = (e.view||'').split('_')[0];
+      if (!viewData[vn]) return;
+      if (e.type === 'entry') {
+        viewData[vn].entry_bars.push(e.bar_idx);
+        viewData[vn].entry_labels.push(e.label);
+      } else {
+        viewData[vn].exit_bars.push(e.bar_idx);
+        viewData[vn].exit_labels.push(e.label);
+      }
+    });
+  }
+
+  const traces = [];
+  const entryColor = '#3fb950'; // green
+  const exitColor = '#f85149';  // red
+  const yPositions = {v0:4, v1:3, v2:2, v3:1};
+  const yLabels = viewOrder.map(v => getViewLabel(v));
+
+  viewOrder.forEach(view => {
+    const d = viewData[view];
+    const yv = yPositions[view];
+
+    // Entry markers
+    if (d.entry_bars.length) {
+      traces.push({
+        type: 'scatter',
+        mode: 'markers',
+        x: d.entry_bars,
+        y: d.entry_bars.map(() => yv),
+        name: `${getViewLabel(view)} 入场`,
+        marker: {
+          symbol: 'triangle-up',
+          size: 8,
+          color: entryColor,
+          line: {width: 1, color: '#fff'}
+        },
+        text: d.entry_labels.map(l => `入场: ${l}`),
+        hoverinfo: 'x+text+name',
+        showlegend: true,
+        legendgroup: view,
+        xaxis: 'x',
+        yaxis: 'y'
+      });
+    }
+
+    // Exit markers
+    if (d.exit_bars.length) {
+      traces.push({
+        type: 'scatter',
+        mode: 'markers',
+        x: d.exit_bars,
+        y: d.exit_bars.map(() => yv),
+        name: `${getViewLabel(view)} 出场`,
+        marker: {
+          symbol: 'triangle-down',
+          size: 8,
+          color: exitColor,
+          line: {width: 1, color: '#fff'}
+        },
+        text: d.exit_labels.map(l => `出场: ${l}`),
+        hoverinfo: 'x+text+name',
+        showlegend: true,
+        legendgroup: view,
+        xaxis: 'x',
+        yaxis: 'y'
+      });
+    }
+  });
+
+  // If no data, add empty trace
+  if (!traces.length) {
+    traces.push({
+      type: 'scatter', mode: 'markers',
+      x: [null], y: [null],
+      name: '暂无信号',
+      showlegend: false
+    });
+  }
+
+  const layout = {
+    template: 'plotly_dark',
+    paper_bgcolor: '#0d1117',
+    plot_bgcolor: '#0d1117',
+    font: {color: '#c9d1d9', size: 11},
+    margin: {l: 60, r: 30, t: 5, b: 30},
+    xaxis: {
+      title: 'Bar Index',
+      gridcolor: '#21262d',
+      zeroline: false
+    },
+    yaxis: {
+      title: '',
+      tickvals: [4, 3, 2, 1],
+      ticktext: yLabels,
+      gridcolor: '#21262d',
+      zeroline: false,
+      range: [0.5, 4.5]
+    },
+    legend: {
+      x: 1.02, y: 1,
+      bgcolor: 'rgba(22,27,34,0.9)',
+      bordercolor: '#30363d',
+      font: {size: 10},
+      orientation: 'v'
+    },
+    dragmode: 'pan',
+    hovermode: 'closest'
+  };
+
+  Plotly.react(container, traces, layout);
+}
+
+// ============================================================
+// PANEL 4: EVENT LOG TABLE
+// ============================================================
+function renderEventLog() {
+  const tbody = document.getElementById('event-log-body');
+  const currentStep = STATE.currentStep;
+
+  // Filter events by current step, or show all if no steps
+  let events = STATE.events;
+  if (STATE.maxStep > 0) {
+    events = events.filter(e => e.step === currentStep);
+  }
+
+  // Sort by step then bar_idx
+  events.sort((a,b) => (a.step-b.step) || ((a.bar_idx||0)-(b.bar_idx||0)));
+
+  // Limit display
+  const MAX_ROWS = 500;
+  const displayEvents = events.slice(0, MAX_ROWS);
+
+  if (!displayEvents.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="color:#8b949e;text-align:center;padding:40px">当前 step 无事件</td></tr>';
+    return;
+  }
+
+  const evtClass = {
+    'bs_added': 'evt-added',
+    'bs_modified': 'evt-modified',
+    'bs_removed': 'evt-removed',
+    'bs_stable': 'evt-stable'
+  };
+
+  tbody.innerHTML = displayEvents.map((e, i) => {
+    const viewShort = (e.view||'').split('_')[0];
+    const cls = evtClass[e.event] || '';
+    const dateShort = (e.date||'').substring(0, 16);
+    return `<tr class="${cls}" data-bar="${e.bar_idx||''}" data-idx="${i}"
+      onclick="highlightBar(${e.bar_idx||0})" title="点击跳转到 Bar ${e.bar_idx}">
+      <td>${e.step!=null?e.step:'-'}</td>
+      <td>${e.event}</td>
+      <td>${e.view||'-'}</td>
+      <td>${e.type||'-'}</td>
+      <td>${e.label||'-'}</td>
+      <td>${e.bar_idx!=null?e.bar_idx:'-'}</td>
+      <td>${dateShort||'-'}</td>
+      <td>${e.exit_reason||''}</td>
+    </tr>`;
+  }).join('');
+
+  if (events.length > MAX_ROWS) {
+    tbody.innerHTML += `<tr><td colspan="8" style="color:#d29922;text-align:center;padding:8px">仅显示前 ${MAX_ROWS} 条，共 ${events.length} 条事件</td></tr>`;
+  }
+
+  document.getElementById('badge-events').textContent = `${displayEvents.length}/${STATE.events.length} 事件`;
+}
+
+// ============================================================
+// HIGHLIGHT BAR (when clicking event log row)
+// ============================================================
+function highlightBar(barIdx) {
+  if (!barIdx) return;
+
+  // Highlight rows in event log
+  document.querySelectorAll('#event-log-body tr').forEach(tr => tr.classList.remove('selected'));
+  const targetRow = document.querySelector(`#event-log-body tr[data-bar="${barIdx}"]`);
+  if (targetRow) targetRow.classList.add('selected');
+
+  // Draw a vertical annotation on the price chart
+  const priceContainer = document.getElementById('plot-price');
+  if (!priceContainer._fullLayout) return;
+
+  const existingShapes = priceContainer._fullLayout.shapes || [];
+  // Remove previous highlight shapes (those starting with 'highlight-')
+  const filteredShapes = existingShapes.filter(s => !(s.name||'').startsWith('highlight-'));
+  // Add new highlight
+  filteredShapes.push({
+    type: 'line',
+    name: 'highlight-bar',
+    x0: barIdx, x1: barIdx,
+    y0: 0, y1: 1,
+    yref: 'paper',
+    line: {color: '#58a6ff', width: 2, dash: 'solid'},
+    opacity: 0.9
+  });
+  // Add annotation
+  const existingAnns = priceContainer._fullLayout.annotations || [];
+  const filteredAnns = existingAnns.filter(a => !(a.name||'').startsWith('highlight-'));
+  filteredAnns.push({
+    name: 'highlight-ann',
+    x: barIdx, y: 1,
+    yref: 'paper',
+    text: `Bar ${barIdx}`,
+    showarrow: true,
+    arrowhead: 2,
+    arrowcolor: '#58a6ff',
+    font: {color: '#58a6ff', size: 10},
+    bgcolor: 'rgba(13,17,23,0.8)',
+    borderpad: 3
+  });
+
+  Plotly.relayout(priceContainer, {shapes: filteredShapes, annotations: filteredAnns});
+
+  // Scroll price chart x-range to center on barIdx
+  const pad = 20;
+  Plotly.relayout(priceContainer, {'xaxis.range': [barIdx - pad, barIdx + pad]});
+}
+
+// ============================================================
+// SUMMARY BAR
+// ============================================================
+function renderSummary() {
+  const data = STATE.csvData;
+  if (!data) return;
+
+  const ticker = STATE.metadata?.ticker || STATE.sessionDir.split('_')[0] || '?';
+  const steps = STATE.maxStep + 1;
+  const barRange = `${data[0].bar_index} - ${data[data.length-1].bar_index}`;
+  const priceFirst = data[0].close?.toFixed(2);
+  const priceLast = data[data.length-1].close?.toFixed(2);
+  const priceChange = priceFirst && priceLast ? ((priceLast - priceFirst) / priceFirst * 100).toFixed(2) + '%' : 'N/A';
+  const bsEventCount = STATE.events.filter(e =>
+    e.event === 'bs_added' || e.event === 'bs_modified' || e.event === 'bs_removed'
+  ).length;
+  const anomalyCount = STATE.anomalyBarIndices.size;
+
+  // Count trade summaries
+  let totalTrades = 0;
+  Object.values(STATE.tradeSummaries).forEach(t => { totalTrades += (t.trade_count||0); });
+
+  document.getElementById('summaryBar').innerHTML = `
+    <div class="summary-item"><span class="label">Ticker:</span><span class="value">${ticker}</span></div>
+    <div class="summary-item"><span class="label">步数:</span><span class="value">${steps}</span></div>
+    <div class="summary-item"><span class="label">Bar范围:</span><span class="value">${barRange}</span></div>
+    <div class="summary-item"><span class="label">数据行:</span><span class="value">${data.length}</span></div>
+    <div class="summary-item"><span class="label">价格:</span><span class="value">${priceFirst} → ${priceLast} (${priceChange})</span></div>
+    <div class="summary-item"><span class="label">BS事件:</span><span class="value">${bsEventCount}</span></div>
+    <div class="summary-item"><span class="label">交易对:</span><span class="value">${totalTrades}</span></div>
+    <div class="summary-item"><span class="label">异常:</span><span class="${anomalyCount > 0 ? 'danger' : 'value'}">${anomalyCount}</span></div>
+  `;
+}
+
+// ============================================================
+// STEP CONTROLS
+// ============================================================
+function onStepChange() {
+  const slider = document.getElementById('stepSlider');
+  STATE.currentStep = parseInt(slider.value);
+  document.getElementById('stepLabel').textContent = STATE.currentStep;
+  renderPriceFilter();
+  renderBSSignals();
+  renderEventLog();
+  document.getElementById('badge-bs').textContent = `step ${STATE.currentStep}`;
+}
+
+function autoPlaySteps() {
+  if (STATE.stepAutoTimer) {
+    clearInterval(STATE.stepAutoTimer);
+    STATE.stepAutoTimer = null;
+    return;
+  }
+  if (STATE.maxStep < 1) return;
+
+  const slider = document.getElementById('stepSlider');
+  // Reset to 0 and play forward
+  slider.value = 0;
+  STATE.currentStep = 0;
+  document.getElementById('stepLabel').textContent = '0';
+  renderPriceFilter();
+  renderBSSignals();
+  renderEventLog();
+
+  STATE.stepAutoTimer = setInterval(() => {
+    if (STATE.currentStep >= STATE.maxStep) {
+      clearInterval(STATE.stepAutoTimer);
+      STATE.stepAutoTimer = null;
+      return;
+    }
+    STATE.currentStep++;
+    slider.value = STATE.currentStep;
+    document.getElementById('stepLabel').textContent = STATE.currentStep;
+    renderPriceFilter();
+    renderBSSignals();
+    renderEventLog();
+    document.getElementById('badge-bs').textContent = `step ${STATE.currentStep}`;
+  }, 500);
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+function getViewLabel(viewPrefix) {
+  if (!STATE.metadata || !STATE.metadata.config || !STATE.metadata.config.configs) {
+    return viewPrefix;
+  }
+  const idx = parseInt(viewPrefix.replace('v',''));
+  if (idx >= 0 && idx < STATE.metadata.config.configs.length) {
+    const cfg = STATE.metadata.config.configs[idx];
+    return `${viewPrefix} (${cfg.tf||'?'})`;
+  }
+  return viewPrefix;
+}
+
+// ============================================================
+// STARTUP
+// ============================================================
+window.addEventListener('DOMContentLoaded', init);
+window.addEventListener('resize', () => {
+  // Trigger Plotly resize on all containers
+  ['plot-price','plot-bs','plot-heatmap'].forEach(id => {
+    Plotly.Plots.resize(document.getElementById(id));
+  });
+});
+
+// Keyboard shortcuts
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT') return;
+  switch(e.key) {
+    case 'ArrowLeft':
+      if (STATE.maxStep > 0 && STATE.currentStep > 0) {
+        STATE.currentStep--;
+        document.getElementById('stepSlider').value = STATE.currentStep;
+        document.getElementById('stepLabel').textContent = STATE.currentStep;
+        renderPriceFilter();
+        renderBSSignals();
+        renderEventLog();
+        document.getElementById('badge-bs').textContent = `step ${STATE.currentStep}`;
+      }
+      break;
+    case 'ArrowRight':
+      if (STATE.maxStep > 0 && STATE.currentStep < STATE.maxStep) {
+        STATE.currentStep++;
+        document.getElementById('stepSlider').value = STATE.currentStep;
+        document.getElementById('stepLabel').textContent = STATE.currentStep;
+        renderBSSignals();
+        renderEventLog();
+        document.getElementById('badge-bs').textContent = `step ${STATE.currentStep}`;
+      }
+      break;
+    case ' ':
+      e.preventDefault();
+      autoPlaySteps();
+      break;
+    case 'r':
+      if (!e.ctrlKey && !e.metaKey) {
+        // Reset zoom on all charts
+        ['plot-price','plot-bs','plot-heatmap'].forEach(id => {
+          Plotly.relayout(document.getElementById(id), {'xaxis.autorange': true, 'yaxis.autorange': true});
+        });
+      }
+      break;
+  }
+});
+</script>
+</body>
+</html>
