@@ -13,18 +13,14 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#0d111
 /* ===== HEADER ===== */
 .header{background:#161b22;padding:8px 16px;border-bottom:1px solid #30363d;display:flex;align-items:center;gap:12px;flex-shrink:0;min-height:44px;flex-wrap:wrap}
 .header h1{font-size:16px;color:#58a6ff;white-space:nowrap}
-.header label{font-size:12px;color:#8b949e;white-space:nowrap}
-.header select,.header button,.header input{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer}
-.header select:hover,.header button:hover{border-color:#58a6ff}
+.header .hint{font-size:11px;color:#8b949e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.header button{background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:4px 10px;border-radius:4px;font-size:12px;cursor:pointer}
+.header button:hover{border-color:#58a6ff}
 .header button.primary{background:#238636;border-color:#238636;color:#fff}
-.header button.warn{background:#d29922;border-color:#d29922;color:#000}
 .header .step-group{display:flex;align-items:center;gap:6px}
 .header .step-group input[type=range]{width:120px;accent-color:#58a6ff}
 .header .step-group span{font-size:12px;color:#58a6ff;font-weight:bold;min-width:40px;text-align:center}
 .header .spacer{flex:1}
-.header .file-btn{cursor:pointer;font-size:12px;color:#8b949e;padding:4px 10px;border:1px dashed #30363d;border-radius:4px;transition:.2s}
-.header .file-btn:hover{color:#58a6ff;border-color:#58a6ff}
-.header .file-btn input{display:none}
 
 /* ===== MAIN GRID ===== */
 .main{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;flex:1;overflow:hidden;gap:2px;background:#30363d;padding:2px}
@@ -64,6 +60,20 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#0d111
 .loading-overlay .spinner{width:32px;height:32px;border:3px solid #30363d;border-top-color:#58a6ff;border-radius:50%;animation:spin .8s linear infinite;margin-right:12px}
 @keyframes spin{to{transform:rotate(360deg)}}
 
+/* ===== FILE PICKER ===== */
+.file-picker{flex:1;display:flex;align-items:center;justify-content:center;overflow:auto}
+.file-picker-inner{text-align:center;padding:60px 80px;border:3px dashed #30363d;border-radius:16px;transition:border-color .3s,background .3s;max-width:600px;width:90%}
+.file-picker-inner.dragover{border-color:#58a6ff;background:rgba(88,166,255,0.06)}
+.file-picker-inner .icon{font-size:56px;margin-bottom:16px;display:block}
+.file-picker-inner h2{font-size:20px;color:#c9d1d9;margin-bottom:8px;font-weight:600}
+.file-picker-inner .sub{font-size:13px;color:#8b949e;margin-bottom:6px;line-height:1.6}
+.file-picker-inner .file-picker-buttons{display:flex;gap:12px;justify-content:center;margin-top:24px;flex-wrap:wrap}
+.file-picker-inner .picker-btn{display:inline-block;background:#21262d;color:#c9d1d9;border:1px solid #30363d;padding:10px 24px;border-radius:8px;font-size:14px;cursor:pointer;transition:all .2s;white-space:nowrap}
+.file-picker-inner .picker-btn:hover{border-color:#58a6ff;color:#58a6ff}
+.file-picker-inner .picker-btn.picker-btn-primary{background:#238636;border-color:#238636;color:#fff}
+.file-picker-inner .picker-btn.picker-btn-primary:hover{background:#2ea043;border-color:#2ea043}
+.file-picker-inner .picker-btn input{display:none}
+
 /* ===== SCROLLBAR ===== */
 ::-webkit-scrollbar{width:6px;height:6px}
 ::-webkit-scrollbar-track{background:#0d1117}
@@ -72,6 +82,7 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#0d111
 
 /* ===== RESPONSIVE ===== */
 @media(max-width:900px){.main{grid-template-columns:1fr;grid-template-rows:auto}}
+@media(max-width:600px){.file-picker-inner{padding:40px 24px}.file-picker-inner h2{font-size:17px}.file-picker-inner .file-picker-buttons{flex-direction:column;align-items:stretch}}
 </style>
 </head>
 <body>
@@ -79,13 +90,9 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#0d111
 <!-- HEADER -->
 <div class="header">
   <h1>&#128202; 回测分析仪表盘</h1>
-  <span style="font-size:11px;color:#8b949e;background:#21262d;padding:2px 8px;border-radius:4px;white-space:nowrap" title="启动命令">&#9881; cd filter_research && python3 -m http.server 8899</span>
-  <label>会话:</label>
-  <select id="sessionSelect" style="max-width:320px"><option value="">-- 选择会话 --</option></select>
-  <button class="primary" onclick="loadSelectedSession()" title="加载选中会话">&#9654; 加载</button>
-  <span class="file-btn">&#128194; 导入CSV+JSONL<input type="file" id="fileInput" accept=".csv" multiple></span>
-  <span id="statusMsg" style="font-size:11px;color:#8b949e;margin-left:8px"></span>
+  <span class="hint">&#128161; 示例数据在 data/backtest_output/ 目录下，选择一个 backtest_data.csv 即可开始分析</span>
   <span class="spacer"></span>
+  <button class="primary" id="btnReload" onclick="reloadData()" style="display:none">&#128260; 重新加载</button>
   <div class="step-group" id="stepGroup" style="display:none">
     <label>Step:</label>
     <input type="range" id="stepSlider" min="0" max="0" value="0" oninput="onStepChange()">
@@ -94,8 +101,22 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#0d111
   </div>
 </div>
 
-<!-- MAIN GRID -->
-<div class="main">
+<!-- FILE PICKER (shown initially) -->
+<div class="file-picker" id="filePicker">
+  <div class="file-picker-inner" id="dropZone">
+    <span class="icon">&#128451;</span>
+    <h2>选择回测 CSV 文件</h2>
+    <p class="sub">拖放 CSV 到这里 或 点击选择</p>
+    <p class="sub">可选: 同时选择 events.jsonl 以获得 BS 事件标注</p>
+    <div class="file-picker-buttons">
+      <label class="picker-btn picker-btn-primary">选择 CSV<input type="file" id="csvInput" accept=".csv"></label>
+      <label class="picker-btn">选择 CSV+JSONL<input type="file" id="csvJsonlInput" accept=".csv,.jsonl,.json" multiple></label>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN GRID (hidden initially) -->
+<div class="main" id="mainGrid" style="display:none">
   <!-- Panel 1: Price + Filter (top-left) -->
   <div class="panel" id="panel-price">
     <div class="panel-header">&#128200; 价格 &amp; Filter<span class="badge" id="badge-price"></span></div>
@@ -120,7 +141,7 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#0d111
     <div class="panel-body">
       <table id="event-log-table">
         <thead><tr><th>Step</th><th>事件</th><th>视图</th><th>类型</th><th>标记</th><th>Bar</th><th>日期</th><th>原因</th></tr></thead>
-        <tbody id="event-log-body"><tr><td colspan="8" style="color:#8b949e;text-align:center;padding:40px">请先加载会话数据</td></tr></tbody>
+        <tbody id="event-log-body"><tr><td colspan="8" style="color:#8b949e;text-align:center;padding:40px">请先加载数据</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -128,7 +149,7 @@ body{font-family:'Segoe UI',system-ui,-apple-system,sans-serif;background:#0d111
 
 <!-- SUMMARY BAR -->
 <div class="summary-bar" id="summaryBar">
-  <span style="color:#8b949e">请选择或导入回测会话</span>
+  <span style="color:#8b949e">请选择或拖放回测数据文件</span>
 </div>
 
 <!-- LOADING OVERLAY -->
@@ -148,7 +169,7 @@ const STATE = {
   schmittSnapshots: {},  // schmitt_snapshot.jsonl keyed by "step|view"
   tradeSummaries: {},    // trade_summary.jsonl keyed by "step|view"
   metadata: null,        // metadata.json
-  sessionDir: '',        // current session directory name
+  sessionDir: '',        // used for ticker extraction
   currentStep: 0,
   maxStep: 0,
   stepAutoTimer: null,
@@ -159,7 +180,7 @@ const STATE = {
 // ============================================================
 // INITIALIZATION
 // ============================================================
-async function init() {
+function init() {
   // Check dependencies
   const missing = [];
   if (typeof Plotly === 'undefined') missing.push('Plotly.js');
@@ -167,297 +188,90 @@ async function init() {
 
   if (missing.length) {
     const msg = `缺少依赖: ${missing.join(', ')}。请确保 plotly-2.32.0.min.js 和 papaparse.min.js 与 dashboard.html 在同目录下。`;
-    setStatus(msg, '#f85149');
     document.getElementById('summaryBar').innerHTML = `<span style="color:#f85149">${msg}</span>`;
     return;
   }
 
-  // Detect file:// protocol
-  if (window.location.protocol === 'file:') {
-    setStatus('提示: 请通过 HTTP 访问: cd filter_research && python3 -m http.server 8899，然后打开 http://localhost:8899/tools/dashboard.html', '#d29922');
-  }
-
-  const sel = document.getElementById('sessionSelect');
-  // Try to load sessions manifest
-  let sessions = [];
-  let sessionsLoaded = false;
-  try {
-    const resp = await fetch('../data/backtest_output/sessions.json', {cache:'no-cache'});
-    if (resp.ok) {
-      sessions = await resp.json();
-      sessionsLoaded = true;
-    }
-  } catch(e) {}
-
-  // Fallback: embedded session list
-  if (!sessions.length) {
-    sessions = [
-      {dir:"600115_20260714-222958-600115",ticker:"600115",session_id:"20260714-222958-600115"},
-      {dir:"600115_20260714-222954-600115",ticker:"600115",session_id:"20260714-222954-600115"},
-      {dir:"600115_20260714-222950-600115",ticker:"600115",session_id:"20260714-222950-600115"},
-      {dir:"3690_20260714-222947-3690",ticker:"3690",session_id:"20260714-222947-3690"},
-      {dir:"3690_20260714-222943-3690",ticker:"3690",session_id:"20260714-222943-3690"},
-      {dir:"2382_20260714-222940-2382",ticker:"2382",session_id:"20260714-222940-2382"},
-      {dir:"2382_20260714-222937-2382",ticker:"2382",session_id:"20260714-222937-2382"},
-      {dir:"AAPL_20260714-222902-AAPL",ticker:"AAPL",session_id:"20260714-222902-AAPL"},
-      {dir:"3690_20260714-222853-3690",ticker:"3690",session_id:"20260714-222853-3690"},
-      {dir:"2382_20260714-222848-2382",ticker:"2382",session_id:"20260714-222848-2382"},
-      {dir:"3690_20260714-221241-3690",ticker:"3690",session_id:"20260714-221241-3690"},
-      {dir:"3690_20260714-215313-3690",ticker:"3690",session_id:"20260714-215313-3690"},
-      {dir:"AAPL_20260714-001225-AAPL",ticker:"AAPL",session_id:"20260714-001225-AAPL"}
-    ];
-  }
-
-  sel.innerHTML = '<option value="">-- 选择会话 --</option>';
-  sessions.forEach(s => {
-    const opt = document.createElement('option');
-    opt.value = s.dir;
-    opt.textContent = `${s.ticker} | ${s.session_id}`;
-    sel.appendChild(opt);
+  // Set up file inputs
+  document.getElementById('csvInput').addEventListener('change', function(e) {
+    if (e.target.files.length) processFiles(e.target.files);
+  });
+  document.getElementById('csvJsonlInput').addEventListener('change', function(e) {
+    if (e.target.files.length) processFiles(e.target.files);
   });
 
-  // Auto-load first session
-  if (sessions.length > 0) {
-    sel.value = sessions[0].dir;
-    if (sessionsLoaded) {
-      setStatus(`发现 ${sessions.length} 个会话，自动加载中...`, '#8b949e');
-      try {
-        await loadSession(sessions[0].dir);
-        setStatus(`已加载: ${sessions[0].ticker}`, '#3fb950');
-      } catch(e) {
-        setStatus(`加载失败: ${e.message}`, '#f85149');
-        document.getElementById('summaryBar').innerHTML = `<span style="color:#f85149">自动加载失败: ${e.message}。请手动选择会话或导入文件。</span>`;
-      }
-    } else {
-      setStatus(`内置 ${sessions.length} 个会话（sessions.json 不可用）。请点击"加载"按钮。`, '#d29922');
-    }
-  } else {
-    setStatus('未发现会话，请使用"导入CSV+JSONL"按钮手动加载数据。', '#d29922');
-  }
-
-  // File input handler
-  document.getElementById('fileInput').addEventListener('change', onFileImport);
+  // Set up drag-and-drop on the drop zone
+  const dropZone = document.getElementById('dropZone');
+  dropZone.addEventListener('dragover', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dropZone.classList.add('dragover');
+  });
+  dropZone.addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dropZone.classList.remove('dragover');
+  });
+  dropZone.addEventListener('drop', function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    dropZone.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    if (files.length) processFiles(files);
+  });
 
   // Set up cross-chart zoom sync (one-time setup)
   setupZoomSync();
-}
 
-function setStatus(msg, color) {
-  const el = document.getElementById('statusMsg');
-  if (el) {
-    el.textContent = msg;
-    el.style.color = color || '#8b949e';
-  }
-}
-
-function showLoading(msg) {
-  document.getElementById('loadingText').textContent = msg;
-  document.getElementById('loadingOverlay').style.display = 'flex';
-}
-function hideLoading() {
-  document.getElementById('loadingOverlay').style.display = 'none';
-}
-
-// One-time zoom sync across all three Plotly charts
-function setupZoomSync() {
-  const charts = ['plot-price','plot-bs','plot-heatmap'];
-  const containers = charts.map(id => document.getElementById(id));
-
-  function syncXRange(sourceContainer) {
-    if (STATE.zoomSyncLock) return;
-    const range = sourceContainer._fullLayout?.xaxis?.range;
-    if (!range || range.length !== 2) return;
-    STATE.zoomSyncLock = true;
-    containers.forEach(c => {
-      if (c !== sourceContainer && c._fullLayout) {
-        Plotly.relayout(c, {'xaxis.range': range}).catch(()=>{});
-      }
-    });
-    setTimeout(() => { STATE.zoomSyncLock = false; }, 100);
-  }
-
-  containers.forEach(container => {
-    container.on('plotly_relayout', function(evt) {
-      if (STATE.zoomSyncLock) return;
-      if (evt['xaxis.range'] || (evt['xaxis.range[0]'] !== undefined && evt['xaxis.range[1]'] !== undefined)) {
-        const range = evt['xaxis.range'] || [evt['xaxis.range[0]'], evt['xaxis.range[1]']];
-        STATE.zoomSyncLock = true;
-        containers.forEach(c => {
-          if (c !== container && c._fullLayout) {
-            Plotly.relayout(c, {'xaxis.range': range}).catch(()=>{});
-          }
-        });
-        setTimeout(() => { STATE.zoomSyncLock = false; }, 100);
-      }
-    });
-  });
+  // Show file picker initially
+  showFilePicker();
 }
 
 // ============================================================
-// SESSION LOADING
+// FILE PICKER / DASHBOARD VISIBILITY
 // ============================================================
-async function loadSelectedSession() {
-  const dir = document.getElementById('sessionSelect').value;
-  if (!dir) {
-    setStatus('请选择一个会话', '#d29922');
-    return;
-  }
-  setStatus(`加载会话 ${dir} ...`, '#58a6ff');
-  try {
-    await loadSession(dir);
-    setStatus(`已加载: ${dir}`, '#3fb950');
-  } catch(err) {
-    setStatus(`加载失败: ${err.message}`, '#f85149');
-    document.getElementById('summaryBar').innerHTML = `<span style="color:#f85149">加载失败: ${err.message}</span>`;
-  }
+function showFilePicker() {
+  document.getElementById('filePicker').style.display = 'flex';
+  document.getElementById('mainGrid').style.display = 'none';
+  document.getElementById('btnReload').style.display = 'none';
+  document.getElementById('stepGroup').style.display = 'none';
 }
 
-async function loadSession(dir) {
-  showLoading(`加载会话 ${dir} ...`);
+function showDashboard() {
+  document.getElementById('filePicker').style.display = 'none';
+  document.getElementById('mainGrid').style.display = 'grid';
+  document.getElementById('btnReload').style.display = '';
+}
+
+function reloadData() {
   resetState();
-  STATE.sessionDir = dir;
-
-  try {
-    // 1. Load CSV
-    const csvResp = await fetch(`../data/backtest_output/${dir}/backtest_data.csv`, {cache:'no-cache'});
-    if (!csvResp.ok) throw new Error(`CSV not found: ${csvResp.status}`);
-    const csvText = await csvResp.text();
-    const parsed = Papa.parse(csvText, {header:true, dynamicTyping:true, skipEmptyLines:true});
-    STATE.csvData = parsed.data.filter(r => r.bar_index != null && !isNaN(r.bar_index));
-    STATE.csvColumns = parsed.meta.fields;
-    if (!STATE.csvData.length) throw new Error('CSV 无有效数据');
-
-    // Sort by bar_index
-    STATE.csvData.sort((a,b) => a.bar_index - b.bar_index);
-
-    // 2. Load metadata.json (optional)
-    try {
-      const metaResp = await fetch(`../data/backtest_output/${dir}/metadata.json`, {cache:'no-cache'});
-      if (metaResp.ok) STATE.metadata = await metaResp.json();
-    } catch(e) {}
-
-    // 3. Load events.jsonl (optional)
-    try {
-      const evtResp = await fetch(`../data/backtest_output/${dir}/events.jsonl`, {cache:'no-cache'});
-      if (evtResp.ok) {
-        const text = await evtResp.text();
-        STATE.events = text.split('\n').filter(l => l.trim()).map(l => {
-          try { return JSON.parse(l); } catch(e) { return null; }
-        }).filter(e => e && e.event !== 'session_started' && e.event !== 'session_ended');
-        const steps = STATE.events.map(e => e.step).filter(s => s != null);
-        if (steps.length) STATE.maxStep = Math.max(...steps);
-      }
-    } catch(e) {}
-
-    // 4. Load bs_snapshot.jsonl (optional)
-    try {
-      const bsResp = await fetch(`../data/backtest_output/${dir}/bs_snapshot.jsonl`, {cache:'no-cache'});
-      if (bsResp.ok) {
-        const text = await bsResp.text();
-        text.split('\n').filter(l => l.trim()).forEach(l => {
-          try {
-            const e = JSON.parse(l);
-            const key = `${e.step}|${e.view}`;
-            STATE.bsSnapshots[key] = {entry: e.entry||[], exit: e.exit||[], step: e.step, view: e.view};
-            if (e.step > STATE.maxStep) STATE.maxStep = e.step;
-          } catch(ex) {}
-        });
-      }
-    } catch(e) {}
-
-    // 5. Load schmitt_snapshot.jsonl (optional)
-    try {
-      const schResp = await fetch(`../data/backtest_output/${dir}/schmitt_snapshot.jsonl`, {cache:'no-cache'});
-      if (schResp.ok) {
-        const text = await schResp.text();
-        text.split('\n').filter(l => l.trim()).forEach(l => {
-          try {
-            const e = JSON.parse(l);
-            STATE.schmittSnapshots[`${e.step}|${e.view}`] = e;
-          } catch(ex) {}
-        });
-      }
-    } catch(e) {}
-
-    // 6. Load trade_summary.jsonl (optional)
-    try {
-      const trResp = await fetch(`../data/backtest_output/${dir}/trade_summary.jsonl`, {cache:'no-cache'});
-      if (trResp.ok) {
-        const text = await trResp.text();
-        text.split('\n').filter(l => l.trim()).forEach(l => {
-          try {
-            const e = JSON.parse(l);
-            STATE.tradeSummaries[`${e.step}|${e.view}`] = e;
-          } catch(ex) {}
-        });
-      }
-    } catch(e) {}
-
-    // Setup step slider
-    const stepGroup = document.getElementById('stepGroup');
-    const slider = document.getElementById('stepSlider');
-    if (STATE.maxStep > 0) {
-      stepGroup.style.display = 'flex';
-      slider.max = STATE.maxStep;
-      slider.value = STATE.maxStep; // default to last step
-      STATE.currentStep = STATE.maxStep;
-    } else {
-      stepGroup.style.display = 'none';
-      STATE.currentStep = 0;
-    }
-    document.getElementById('stepLabel').textContent = STATE.currentStep;
-
-    // Detect anomalies
-    detectAnomalies();
-
-    // Render all panels
-    renderAll();
-
-    // Reset zoom to auto-range for new session
-    setTimeout(() => {
-      ['plot-price','plot-bs','plot-heatmap'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el._fullLayout) {
-          Plotly.relayout(el, {'xaxis.autorange': true, 'yaxis.autorange': true});
-        }
-      });
-    }, 150);
-
-    hideLoading();
-
-  } catch(err) {
-    hideLoading();
-    console.error(err);
-    throw new Error(err.message || '加载失败。请确保通过 HTTP 服务器访问此页面（非 file:// 协议），或使用"导入CSV+JSONL"按钮。');
-  }
-}
-
-function resetState() {
-  STATE.csvData = null;
-  STATE.csvColumns = [];
-  STATE.events = [];
-  STATE.bsSnapshots = {};
-  STATE.schmittSnapshots = {};
-  STATE.tradeSummaries = {};
-  STATE.metadata = null;
-  STATE.sessionDir = '';
-  STATE.currentStep = 0;
-  STATE.maxStep = 0;
-  STATE.anomalyBarIndices = new Set();
-  if (STATE.stepAutoTimer) { clearInterval(STATE.stepAutoTimer); STATE.stepAutoTimer = null; }
+  // Clear chart containers
+  ['plot-price','plot-bs','plot-heatmap'].forEach(id => {
+    Plotly.purge(document.getElementById(id));
+  });
+  document.getElementById('summaryBar').innerHTML = '<span style="color:#8b949e">请选择或拖放回测数据文件</span>';
+  document.getElementById('badge-price').textContent = '';
+  document.getElementById('badge-bs').textContent = '';
+  document.getElementById('badge-heatmap').textContent = '';
+  document.getElementById('badge-events').textContent = '';
+  document.getElementById('event-log-body').innerHTML = '<tr><td colspan="8" style="color:#8b949e;text-align:center;padding:40px">请先加载数据</td></tr>';
+  // Reset file inputs so the same file can be re-selected
+  document.getElementById('csvInput').value = '';
+  document.getElementById('csvJsonlInput').value = '';
+  showFilePicker();
 }
 
 // ============================================================
-// FILE IMPORT (fallback for file:// or manual load)
+// FILE PROCESSING (unified handler for file inputs and drag-drop)
 // ============================================================
-async function onFileImport(e) {
-  const files = Array.from(e.target.files);
+async function processFiles(fileList) {
+  const files = Array.from(fileList);
   if (!files.length) return;
 
-  showLoading('解析导入文件...');
+  showLoading('解析文件中...');
   resetState();
 
-  // Separate CSV and JSONL files
+  // Separate CSV, JSONL, and JSON files by extension
   const csvFile = files.find(f => f.name.endsWith('.csv'));
   const jsonlFiles = files.filter(f => f.name.endsWith('.jsonl'));
   const jsonFiles = files.filter(f => f.name.endsWith('.json') && !f.name.endsWith('.jsonl'));
@@ -469,7 +283,10 @@ async function onFileImport(e) {
       const parsed = Papa.parse(csvText, {header:true, dynamicTyping:true, skipEmptyLines:true});
       STATE.csvData = parsed.data.filter(r => r.bar_index != null && !isNaN(r.bar_index));
       STATE.csvColumns = parsed.meta.fields;
+      if (!STATE.csvData.length) throw new Error('CSV 无有效 bar_index 数据');
       STATE.csvData.sort((a,b) => a.bar_index - b.bar_index);
+      // Derive a ticker-like name from the filename
+      STATE.sessionDir = csvFile.name.replace(/\.csv$/i, '');
     }
 
     // Parse JSONL files
@@ -507,7 +324,7 @@ async function onFileImport(e) {
       }
     }
 
-    if (!STATE.csvData || !STATE.csvData.length) throw new Error('未找到有效的CSV数据');
+    if (!STATE.csvData || !STATE.csvData.length) throw new Error('未找到有效的CSV文件。请确保选择了包含 bar_index 列的 CSV 文件。');
 
     // Setup step slider
     const stepGroup = document.getElementById('stepGroup');
@@ -522,16 +339,76 @@ async function onFileImport(e) {
     }
     document.getElementById('stepLabel').textContent = STATE.currentStep;
 
+    // Detect anomalies
     detectAnomalies();
+
+    // Show dashboard before rendering (Plotly needs visible containers for size calc)
+    showDashboard();
+
+    // Render all panels
     renderAll();
+
+    // Trigger Plotly resize after layout settles
+    setTimeout(() => {
+      ['plot-price','plot-bs','plot-heatmap'].forEach(id => {
+        Plotly.Plots.resize(document.getElementById(id));
+      });
+    }, 100);
+
     hideLoading();
 
   } catch(err) {
     hideLoading();
     console.error(err);
-    setStatus(`导入失败: ${err.message}`, '#f85149');
     document.getElementById('summaryBar').innerHTML = `<span style="color:#f85149">导入失败: ${err.message}</span>`;
   }
+}
+
+function showLoading(msg) {
+  document.getElementById('loadingText').textContent = msg;
+  document.getElementById('loadingOverlay').style.display = 'flex';
+}
+function hideLoading() {
+  document.getElementById('loadingOverlay').style.display = 'none';
+}
+
+function resetState() {
+  STATE.csvData = null;
+  STATE.csvColumns = [];
+  STATE.events = [];
+  STATE.bsSnapshots = {};
+  STATE.schmittSnapshots = {};
+  STATE.tradeSummaries = {};
+  STATE.metadata = null;
+  STATE.sessionDir = '';
+  STATE.currentStep = 0;
+  STATE.maxStep = 0;
+  STATE.anomalyBarIndices = new Set();
+  if (STATE.stepAutoTimer) { clearInterval(STATE.stepAutoTimer); STATE.stepAutoTimer = null; }
+}
+
+// ============================================================
+// ZOOM SYNC
+// ============================================================
+function setupZoomSync() {
+  const charts = ['plot-price','plot-bs','plot-heatmap'];
+  const containers = charts.map(id => document.getElementById(id));
+
+  containers.forEach(container => {
+    container.on('plotly_relayout', function(evt) {
+      if (STATE.zoomSyncLock) return;
+      if (evt['xaxis.range'] || (evt['xaxis.range[0]'] !== undefined && evt['xaxis.range[1]'] !== undefined)) {
+        const range = evt['xaxis.range'] || [evt['xaxis.range[0]'], evt['xaxis.range[1]']];
+        STATE.zoomSyncLock = true;
+        containers.forEach(c => {
+          if (c !== container && c._fullLayout) {
+            Plotly.relayout(c, {'xaxis.range': range}).catch(()=>{});
+          }
+        });
+        setTimeout(() => { STATE.zoomSyncLock = false; }, 100);
+      }
+    });
+  });
 }
 
 // ============================================================
@@ -565,7 +442,6 @@ function detectAnomalies() {
   });
 
   // 3. BS count mutation across steps (from bs_snapshots)
-  // Group bs_snapshots by view, compare consecutive steps
   const viewSnapshots = {};
   Object.values(STATE.bsSnapshots).forEach(s => {
     const v = s.view;
@@ -578,7 +454,6 @@ function detectAnomalies() {
       const prevCount = (snaps[i-1].entry||[]).length + (snaps[i-1].exit||[]).length;
       const currCount = (snaps[i].entry||[]).length + (snaps[i].exit||[]).length;
       if (prevCount > 0 && Math.abs(currCount - prevCount) / prevCount > 0.5) {
-        // Mark all bars in current snapshot's entry/exit
         (snaps[i].entry||[]).forEach(e => STATE.anomalyBarIndices.add(e.bar_idx));
         (snaps[i].exit||[]).forEach(e => STATE.anomalyBarIndices.add(e.bar_idx));
       }
@@ -604,7 +479,7 @@ function renderAll() {
 }
 
 // ============================================================
-// PANEL 1+3: PRICE + FILTER & SCHMITT HEATMAP (subplot, shared x)
+// PANEL 1: PRICE + FILTER (top-left)
 // ============================================================
 function renderPriceFilter() {
   const data = STATE.csvData;
@@ -659,8 +534,6 @@ function renderPriceFilter() {
 
   // ---- BS event vertical lines (shapes) ----
   const shapes = [];
-  const annotations = [];
-  // Collect all BS bar_indices from events at current step
   const bsBars = new Map(); // bar_idx -> Set of labels
   STATE.events.filter(e => e.step === STATE.currentStep && (e.event==='bs_added'||e.event==='bs_modified')).forEach(e => {
     if (e.bar_idx != null) {
@@ -668,7 +541,6 @@ function renderPriceFilter() {
       bsBars.get(e.bar_idx).add(`${e.view}:${e.type}:${e.label}`);
     }
   });
-  // Also from bs_snapshots for current step
   Object.values(STATE.bsSnapshots).forEach(s => {
     if (s.step !== STATE.currentStep) return;
     [...(s.entry||[]), ...(s.exit||[])].forEach(e => {
@@ -740,14 +612,13 @@ function renderPriceFilter() {
 }
 
 // ============================================================
-// PANEL 3: SCHMITT HEATMAP (separate plot, synced x with price panel)
+// PANEL 3: SCHMITT HEATMAP (bottom-left)
 // ============================================================
 function renderHeatmap() {
   const data = STATE.csvData;
   const barIdx = data.map(r => r.bar_index);
   const container = document.getElementById('plot-heatmap');
 
-  // Build heatmap z-matrix: rows = views, cols = bar_indices
   const views = ['v0','v1','v2','v3'].filter(v => `${v}_sig` in data[0]);
   const z = views.map(view => {
     const col = `${view}_sig`;
@@ -764,9 +635,9 @@ function renderHeatmap() {
     y: yLabels,
     z: z,
     colorscale: [
-      [0, '#f85149'],     // -1 = red
-      [0.5, '#30363d'],   //  0 = dark gray
-      [1, '#3fb950']      //  1 = green
+      [0, '#f85149'],
+      [0.5, '#30363d'],
+      [1, '#3fb950']
     ],
     zmin: -1,
     zmax: 1,
@@ -800,7 +671,7 @@ function renderHeatmap() {
       title: '',
       gridcolor: '#21262d',
       zeroline: false,
-      autorange: 'reversed'  // v0 on top
+      autorange: 'reversed'
     },
     dragmode: 'pan'
   };
@@ -809,21 +680,20 @@ function renderHeatmap() {
 }
 
 // ============================================================
-// PANEL 2: BS SIGNAL TIMELINE
+// PANEL 2: BS SIGNAL TIMELINE (top-right)
 // ============================================================
 function renderBSSignals() {
   const container = document.getElementById('plot-bs');
   const currentStep = STATE.currentStep;
 
-  // Collect BS events at current step, organized by view
   const viewOrder = ['v0','v1','v2','v3'];
-  const viewData = {}; // view -> {entry_labels: [], entry_bars: [], exit_labels: [], exit_bars: []}
+  const viewData = {};
   viewOrder.forEach(v => { viewData[v] = {entry_labels:[], entry_bars:[], exit_labels:[], exit_bars:[]}; });
 
   // From bs_snapshots
   Object.values(STATE.bsSnapshots).forEach(s => {
     if (s.step !== currentStep) return;
-    const vn = s.view.split('_')[0]; // "v0_日线" -> "v0"
+    const vn = s.view.split('_')[0];
     if (!viewData[vn]) return;
     (s.entry||[]).forEach(e => {
       viewData[vn].entry_bars.push(e.bar_idx);
@@ -835,7 +705,7 @@ function renderBSSignals() {
     });
   });
 
-  // If no bs_snapshots, fall back to events
+  // Fall back to events
   const hasBsData = Object.values(viewData).some(d => d.entry_bars.length + d.exit_bars.length > 0);
   if (!hasBsData && STATE.events.length) {
     STATE.events.filter(e => e.step === currentStep && (e.event==='bs_added'||e.event==='bs_modified')).forEach(e => {
@@ -852,8 +722,8 @@ function renderBSSignals() {
   }
 
   const traces = [];
-  const entryColor = '#3fb950'; // green
-  const exitColor = '#f85149';  // red
+  const entryColor = '#3fb950';
+  const exitColor = '#f85149';
   const yPositions = {v0:4, v1:3, v2:2, v3:1};
   const yLabels = viewOrder.map(v => getViewLabel(v));
 
@@ -861,7 +731,6 @@ function renderBSSignals() {
     const d = viewData[view];
     const yv = yPositions[view];
 
-    // Entry markers
     if (d.entry_bars.length) {
       traces.push({
         type: 'scatter',
@@ -884,7 +753,6 @@ function renderBSSignals() {
       });
     }
 
-    // Exit markers
     if (d.exit_bars.length) {
       traces.push({
         type: 'scatter',
@@ -908,7 +776,6 @@ function renderBSSignals() {
     }
   });
 
-  // If no data, add empty trace
   if (!traces.length) {
     traces.push({
       type: 'scatter', mode: 'markers',
@@ -952,22 +819,19 @@ function renderBSSignals() {
 }
 
 // ============================================================
-// PANEL 4: EVENT LOG TABLE
+// PANEL 4: EVENT LOG TABLE (bottom-right)
 // ============================================================
 function renderEventLog() {
   const tbody = document.getElementById('event-log-body');
   const currentStep = STATE.currentStep;
 
-  // Filter events by current step, or show all if no steps
   let events = STATE.events;
   if (STATE.maxStep > 0) {
     events = events.filter(e => e.step === currentStep);
   }
 
-  // Sort by step then bar_idx
   events.sort((a,b) => (a.step-b.step) || ((a.bar_idx||0)-(b.bar_idx||0)));
 
-  // Limit display
   const MAX_ROWS = 500;
   const displayEvents = events.slice(0, MAX_ROWS);
 
@@ -1013,19 +877,15 @@ function renderEventLog() {
 function highlightBar(barIdx) {
   if (!barIdx) return;
 
-  // Highlight rows in event log
   document.querySelectorAll('#event-log-body tr').forEach(tr => tr.classList.remove('selected'));
   const targetRow = document.querySelector(`#event-log-body tr[data-bar="${barIdx}"]`);
   if (targetRow) targetRow.classList.add('selected');
 
-  // Draw a vertical annotation on the price chart
   const priceContainer = document.getElementById('plot-price');
   if (!priceContainer._fullLayout) return;
 
   const existingShapes = priceContainer._fullLayout.shapes || [];
-  // Remove previous highlight shapes (those starting with 'highlight-')
   const filteredShapes = existingShapes.filter(s => !(s.name||'').startsWith('highlight-'));
-  // Add new highlight
   filteredShapes.push({
     type: 'line',
     name: 'highlight-bar',
@@ -1035,7 +895,6 @@ function highlightBar(barIdx) {
     line: {color: '#58a6ff', width: 2, dash: 'solid'},
     opacity: 0.9
   });
-  // Add annotation
   const existingAnns = priceContainer._fullLayout.annotations || [];
   const filteredAnns = existingAnns.filter(a => !(a.name||'').startsWith('highlight-'));
   filteredAnns.push({
@@ -1053,7 +912,6 @@ function highlightBar(barIdx) {
 
   Plotly.relayout(priceContainer, {shapes: filteredShapes, annotations: filteredAnns});
 
-  // Scroll price chart x-range to center on barIdx
   const pad = 20;
   Plotly.relayout(priceContainer, {'xaxis.range': [barIdx - pad, barIdx + pad]});
 }
@@ -1065,7 +923,7 @@ function renderSummary() {
   const data = STATE.csvData;
   if (!data) return;
 
-  const ticker = STATE.metadata?.ticker || STATE.sessionDir.split('_')[0] || '?';
+  const ticker = STATE.metadata?.ticker || STATE.sessionDir || '?';
   const steps = STATE.maxStep + 1;
   const barRange = `${data[0].bar_index} - ${data[data.length-1].bar_index}`;
   const priceFirst = data[0].close?.toFixed(2);
@@ -1076,7 +934,6 @@ function renderSummary() {
   ).length;
   const anomalyCount = STATE.anomalyBarIndices.size;
 
-  // Count trade summaries
   let totalTrades = 0;
   Object.values(STATE.tradeSummaries).forEach(t => { totalTrades += (t.trade_count||0); });
 
@@ -1114,7 +971,6 @@ function autoPlaySteps() {
   if (STATE.maxStep < 1) return;
 
   const slider = document.getElementById('stepSlider');
-  // Reset to 0 and play forward
   slider.value = 0;
   STATE.currentStep = 0;
   document.getElementById('stepLabel').textContent = '0';
@@ -1158,7 +1014,6 @@ function getViewLabel(viewPrefix) {
 // ============================================================
 window.addEventListener('DOMContentLoaded', init);
 window.addEventListener('resize', () => {
-  // Trigger Plotly resize on all containers
   ['plot-price','plot-bs','plot-heatmap'].forEach(id => {
     Plotly.Plots.resize(document.getElementById(id));
   });
@@ -1195,7 +1050,6 @@ window.addEventListener('keydown', e => {
       break;
     case 'r':
       if (!e.ctrlKey && !e.metaKey) {
-        // Reset zoom on all charts
         ['plot-price','plot-bs','plot-heatmap'].forEach(id => {
           Plotly.relayout(document.getElementById(id), {'xaxis.autorange': true, 'yaxis.autorange': true});
         });
