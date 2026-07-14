@@ -1,0 +1,4 @@
+
+# 外部JS依赖 (本地运行需要，不从CDN加载)
+tools/plotly-*.min.js
+tools/papaparse.min.js
