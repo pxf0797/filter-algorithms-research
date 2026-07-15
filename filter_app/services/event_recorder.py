@@ -421,6 +421,14 @@ class EventRecorder:
         except Exception:
             logger.warning("EventRecorder: failed to write CSV", exc_info=True)
 
+        # --- 生成分析报告 ---
+        try:
+            from .report_generator import ReportGenerator
+            report_path = ReportGenerator.generate(str(self._session_dir))
+            logger.info(f"分析报告已生成: {report_path}")
+        except Exception as e:
+            logger.warning(f"报告生成失败(不影响回测): {e}")
+
     # ------------------------------------------------------------------
     # BS Marker Comparison
     # ------------------------------------------------------------------
