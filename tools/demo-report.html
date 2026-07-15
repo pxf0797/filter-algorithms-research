@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3690 回测报告</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, "SF Mono", "Menlo", "Consolas", monospace;
+    background: #0d1117;
+    color: #c9d1d9;
+    padding: 24px;
+    line-height: 1.5;
+}
+h1 { font-size: 24px; color: #f0f6fc; margin-bottom: 4px; }
+h2 { font-size: 18px; color: #e6edf3; margin: 32px 0 12px; padding-bottom: 6px; border-bottom: 1px solid #30363d; }
+.subtitle { color: #8b949e; font-size: 13px; margin-bottom: 24px; }
+
+/* 概览卡片 */
+.card-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+}
+.card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 14px 16px;
+}
+.card .label { color: #8b949e; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+.card .value { color: #f0f6fc; font-size: 22px; font-weight: 600; margin-top: 4px; }
+.card .detail { color: #7d8590; font-size: 12px; margin-top: 2px; }
+
+/* 视图概览表 */
+.view-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+}
+.view-card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 14px;
+    border-top: 3px solid var(--vc);
+}
+.view-card .vname { color: #f0f6fc; font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+.view-card .vrow { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
+.view-card .vrow .vk { color: #8b949e; }
+.view-card .vrow .vv { color: #c9d1d9; text-align: right; }
+
+/* 图表容器 */
+.chart-wrap {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 20px;
+}
+.chart-wrap canvas { max-height: 360px; }
+
+/* 双列布局 */
+.two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+/* 事件统计 */
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+}
+.stat-item {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 10px 14px;
+    text-align: center;
+}
+.stat-item .sn { color: #8b949e; font-size: 11px; }
+.stat-item .sv { color: #f0f6fc; font-size: 20px; font-weight: 600; }
+
+/* 事件标签颜色 */
+.ev-added { color: #3fb950; }
+.ev-modified { color: #d29922; }
+.ev-removed { color: #f85149; }
+.ev-stable { color: #8b949e; }
+
+/* 响应式 */
+@media (max-width: 900px) {
+    .view-grid { grid-template-columns: repeat(2, 1fr); }
+    .two-col { grid-template-columns: 1fr; }
+    .stat-grid { grid-template-columns: repeat(3, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<h1>3690 回测报告</h1>
+<p class="subtitle">
+    CSV数据: 2026-06-17 11:10 ~ 2026-06-17 11:53 &nbsp;|&nbsp;
+    BS数据跨度: 2026-06-05 ~ 2026-06-17 &nbsp;|&nbsp;
+    44 bars (100 - 143) &nbsp;|&nbsp;
+    4 视图 &nbsp;|&nbsp;
+    55 列
+</p>
+
+<!-- ── 板块一：概览仪表盘 ── -->
+<h2>概览仪表盘</h2>
+
+<div class="card-row">
+    <div class="card">
+        <div class="label">BS 总事件</div>
+        <div class="value">289</div>
+        <div class="detail">added / modified / removed / stable</div>
+    </div>
+    <div class="card">
+        <div class="label">交易对</div>
+        <div class="value">9-11</div>
+        <div class="detail">pair_count 范围</div>
+    </div>
+    <div class="card">
+        <div class="label">数据行数</div>
+        <div class="value">44</div>
+        <div class="detail">1分钟 bar</div>
+    </div>
+    <div class="card">
+        <div class="label">JSONL 事件</div>
+        <div class="value">291</div>
+        <div class="detail">含 session 事件</div>
+    </div>
+</div>
+
+<div class="stat-grid" style="margin-bottom: 24px;">
+    <div class="stat-item">
+        <div class="sn">bs_added</div>
+        <div class="sv ev-added">59</div>
+    </div>
+    <div class="stat-item">
+        <div class="sn">bs_modified</div>
+        <div class="sv ev-modified">75</div>
+    </div>
+    <div class="stat-item">
+        <div class="sn">bs_removed</div>
+        <div class="sv ev-removed">38</div>
+    </div>
+    <div class="stat-item">
+        <div class="sn">bs_stable</div>
+        <div class="sv ev-stable">117</div>
+    </div>
+    <div class="stat-item">
+        <div class="sn">总计</div>
+        <div class="sv">289</div>
+    </div>
+</div>
+
+<!-- ── 视图对比卡片 ── -->
+<div class="view-grid">
+
+    <div class="view-card" style="--vc: #f59e0b;">
+        <div class="vname" style="color: #f59e0b;">v0 1分钟</div>
+        <div class="vrow"><span class="vk">sig 分布</span><span class="vv">-1:13, 0:10, 1:21</span></div>
+        <div class="vrow"><span class="vk">filter 范围</span><span class="vv">74.1512 ~ 75.5072</span></div>
+        <div class="vrow"><span class="vk">filter 变动</span><span class="vv">44/44</span></div>
+        <div class="vrow"><span class="vk">BS entry</span><span class="vv">{'B': 29, 'S': 15}</span></div>
+        <div class="vrow"><span class="vk">BS exit</span><span class="vv">{'B': 29, 'S': 15}</span></div>
+        <div class="vrow"><span class="vk">sig 持续(均值)</span><span class="vv">3.45 bars</span></div>
+        <div class="vrow"><span class="vk">交易/配对</span><span class="vv">2.2 / 2.3</span></div>
+    </div>
+    <div class="view-card" style="--vc: #10b981;">
+        <div class="vname" style="color: #10b981;">v1 5分钟</div>
+        <div class="vrow"><span class="vk">sig 分布</span><span class="vv">-1:5, 0:16, 1:23</span></div>
+        <div class="vrow"><span class="vk">filter 范围</span><span class="vv">74.1944 ~ 75.473</span></div>
+        <div class="vrow"><span class="vk">filter 变动</span><span class="vv">34/44</span></div>
+        <div class="vrow"><span class="vk">BS entry</span><span class="vv">{'S': 44}</span></div>
+        <div class="vrow"><span class="vk">BS exit</span><span class="vv">{'B': 44}</span></div>
+        <div class="vrow"><span class="vk">sig 持续(均值)</span><span class="vv">3.64 bars</span></div>
+        <div class="vrow"><span class="vk">交易/配对</span><span class="vv">4.9 / 5.0</span></div>
+    </div>
+    <div class="view-card" style="--vc: #3b82f6;">
+        <div class="vname" style="color: #3b82f6;">v2 15分钟</div>
+        <div class="vrow"><span class="vk">sig 分布</span><span class="vv">0:5, 1:39</span></div>
+        <div class="vrow"><span class="vk">filter 范围</span><span class="vv">74.0025 ~ 75.648</span></div>
+        <div class="vrow"><span class="vk">filter 变动</span><span class="vv">33/44</span></div>
+        <div class="vrow"><span class="vk">BS entry</span><span class="vv">{'S': 44}</span></div>
+        <div class="vrow"><span class="vk">BS exit</span><span class="vv">{'B': 44}</span></div>
+        <div class="vrow"><span class="vk">sig 持续(均值)</span><span class="vv">2.55 bars</span></div>
+        <div class="vrow"><span class="vk">交易/配对</span><span class="vv">5.9 / 5.9</span></div>
+    </div>
+    <div class="view-card" style="--vc: #ef4444;">
+        <div class="vname" style="color: #ef4444;">v3 60分钟</div>
+        <div class="vrow"><span class="vk">sig 分布</span><span class="vv">-1:44</span></div>
+        <div class="vrow"><span class="vk">filter 范围</span><span class="vv">74.0578 ~ 75.1095</span></div>
+        <div class="vrow"><span class="vk">filter 变动</span><span class="vv">33/44</span></div>
+        <div class="vrow"><span class="vk">BS entry</span><span class="vv">{'S': 44}</span></div>
+        <div class="vrow"><span class="vk">BS exit</span><span class="vv">{'B': 44}</span></div>
+        <div class="vrow"><span class="vk">sig 持续(均值)</span><span class="vv">2.11 bars</span></div>
+        <div class="vrow"><span class="vk">交易/配对</span><span class="vv">10.1 / 10.1</span></div>
+    </div>
+</div>
+
+<!-- ── 板块二：多视图过滤趋势 ── -->
+<h2>多视图过滤趋势</h2>
+<div class="chart-wrap">
+    <canvas id="filterChart"></canvas>
+</div>
+
+<!-- ── 板块三：信号分布 ── -->
+<h2>信号(sig)分布</h2>
+<div class="two-col">
+    <div class="chart-wrap">
+        <canvas id="sigBarChart"></canvas>
+    </div>
+    <div class="chart-wrap">
+        <canvas id="sigTimeline"></canvas>
+    </div>
+</div>
+
+<!-- ── 板块四：BS 事件分析 ── -->
+<h2>BS 事件时间线</h2>
+<div class="chart-wrap">
+    <canvas id="bsTimelineChart"></canvas>
+</div>
+
+<div class="two-col">
+    <div class="chart-wrap">
+        <canvas id="bsEventPieChart"></canvas>
+    </div>
+    <div class="chart-wrap">
+        <canvas id="bsViewChart"></canvas>
+    </div>
+</div>
+
+<!-- ── 板块五：交易摘要 ── -->
+<h2>交易摘要趋势</h2>
+<div class="chart-wrap">
+    <canvas id="tradeChart"></canvas>
+</div>
+
+<script>
+// ── 内嵌数据 ──
+const filterData = [{"bar_index": 100, "timestamp": "2026-06-17T11:10:00+08:00", "v0": 74.16746550339913, "v1": 74.2379740596049, "v2": 74.04610374070938, "v3": 74.10135361635055}, {"bar_index": 101, "timestamp": "2026-06-17T11:11:00+08:00", "v0": 74.19084981216788, "v1": 74.2379740596049, "v2": 74.04610374070938, "v3": 74.10135361635055}, {"bar_index": 102, "timestamp": "2026-06-17T11:12:00+08:00", "v0": 74.15118065447514, "v1": 74.19437753422149, "v2": 74.00250721532603, "v3": 74.05775709096724}, {"bar_index": 103, "timestamp": "2026-06-17T11:13:00+08:00", "v0": 74.1976226727732, "v1": 74.2379740596049, "v2": 74.04610374070938, "v3": 74.10135361635055}, {"bar_index": 104, "timestamp": "2026-06-17T11:14:00+08:00", "v0": 74.21879154247242, "v1": 74.2379740596049, "v2": 74.04610374070938, "v3": 74.10135361635055}, {"bar_index": 105, "timestamp": "2026-06-17T11:15:00+08:00", "v0": 74.29641456825928, "v1": 74.33361557490139, "v2": 74.31834365016192, "v3": 74.18855997293932}, {"bar_index": 106, "timestamp": "2026-06-17T11:16:00+08:00", "v0": 74.35235909361494, "v1": 74.37721210028477, "v2": 74.36194017554534, "v3": 74.23215649832247}, {"bar_index": 107, "timestamp": "2026-06-17T11:17:00+08:00", "v0": 74.31643720650247, "v1": 74.33361557490139, "v2": 74.31834365016192, "v3": 74.18855997293932}, {"bar_index": 108, "timestamp": "2026-06-17T11:18:00+08:00", "v0": 74.30052022064737, "v1": 74.33361557490139, "v2": 74.31834365016192, "v3": 74.18855997293932}, {"bar_index": 109, "timestamp": "2026-06-17T11:19:00+08:00", "v0": 74.29195560881911, "v1": 74.33361557490139, "v2": 74.31834365016192, "v3": 74.18855997293932}, {"bar_index": 110, "timestamp": "2026-06-17T11:20:00+08:00", "v0": 74.37134949746405, "v1": 74.42214212990912, "v2": 74.40554335383959, "v3": 74.27575967661697}, {"bar_index": 111, "timestamp": "2026-06-17T11:21:00+08:00", "v0": 74.40234437879622, "v1": 74.42214212990912, "v2": 74.40554335383959, "v3": 74.27575967661697}, {"bar_index": 112, "timestamp": "2026-06-17T11:22:00+08:00", "v0": 74.54904885714326, "v1": 74.55294501188106, "v2": 74.53634623581152, "v3": 74.40656255858893}, {"bar_index": 113, "timestamp": "2026-06-17T11:23:00+08:00", "v0": 74.58465076833672, "v1": 74.55294501188106, "v2": 74.53634623581152, "v3": 74.40656255858893}, {"bar_index": 114, "timestamp": "2026-06-17T11:24:00+08:00", "v0": 74.52189832760114, "v1": 74.50934183358684, "v2": 74.49274305751729, "v3": 74.36295938029453}, {"bar_index": 115, "timestamp": "2026-06-17T11:25:00+08:00", "v0": 74.57163712465147, "v1": 74.62000538999212, "v2": 74.579942761195, "v3": 74.45015908397215}, {"bar_index": 116, "timestamp": "2026-06-17T11:26:00+08:00", "v0": 74.58210834288644, "v1": 74.62000538999212, "v2": 74.579942761195, "v3": 74.45015908397215}, {"bar_index": 117, "timestamp": "2026-06-17T11:27:00+08:00", "v0": 74.68209144725436, "v1": 74.70720509366977, "v2": 74.66714246487257, "v3": 74.53735878764984}, {"bar_index": 118, "timestamp": "2026-06-17T11:28:00+08:00", "v0": 74.71966365081849, "v1": 74.70720509366977, "v2": 74.66714246487257, "v3": 74.53735878764984}, {"bar_index": 119, "timestamp": "2026-06-17T11:29:00+08:00", "v0": 74.76095647879698, "v1": 74.75080827196412, "v2": 74.71074564316694, "v3": 74.58096196594403}, {"bar_index": 120, "timestamp": "2026-06-17T11:30:00+08:00", "v0": 74.84843194538644, "v1": 74.86150471811222, "v2": 75.08118745967816, "v3": 74.54264562763387}, {"bar_index": 121, "timestamp": "2026-06-17T11:31:00+08:00", "v0": 74.90334679838446, "v1": 74.90510789640652, "v2": 75.12479063797245, "v3": 74.58624880592816}, {"bar_index": 122, "timestamp": "2026-06-17T11:32:00+08:00", "v0": 74.86467261582547, "v1": 74.86150471811222, "v2": 75.08118745967816, "v3": 74.54264562763387}, {"bar_index": 123, "timestamp": "2026-06-17T11:33:00+08:00", "v0": 74.96582011029875, "v1": 74.99230760008419, "v2": 75.21199034165006, "v3": 74.67344850960586}, {"bar_index": 124, "timestamp": "2026-06-17T11:34:00+08:00", "v0": 75.00985732568633, "v1": 74.99230760008419, "v2": 75.21199034165006, "v3": 74.67344850960586}, {"bar_index": 125, "timestamp": "2026-06-17T11:35:00+08:00", "v0": 75.01069806819585, "v1": 75.00612458892994, "v2": 75.21199034165006, "v3": 74.67344850960586}, {"bar_index": 126, "timestamp": "2026-06-17T11:36:00+08:00", "v0": 74.90916429308815, "v1": 74.91892488525232, "v2": 75.12479063797245, "v3": 74.58624880592816}, {"bar_index": 127, "timestamp": "2026-06-17T11:37:00+08:00", "v0": 74.96926367722095, "v1": 75.00612458892994, "v2": 75.21199034165006, "v3": 74.67344850960586}, {"bar_index": 128, "timestamp": "2026-06-17T11:38:00+08:00", "v0": 74.95230847231089, "v1": 74.96252141063563, "v2": 75.16838716335573, "v3": 74.6298453313116}, {"bar_index": 129, "timestamp": "2026-06-17T11:39:00+08:00", "v0": 75.17383281508022, "v1": 75.1805239962853, "v2": 75.38638974900545, "v3": 74.84784791696119}, {"bar_index": 130, "timestamp": "2026-06-17T11:40:00+08:00", "v0": 75.28185094427732, "v1": 75.2549602875959, "v2": 75.42999292729974, "v3": 74.89145109525546}, {"bar_index": 131, "timestamp": "2026-06-17T11:41:00+08:00", "v0": 75.50715941741684, "v1": 75.47296287324549, "v2": 75.64799551294944, "v3": 75.10945368090516}, {"bar_index": 132, "timestamp": "2026-06-17T11:42:00+08:00", "v0": 75.32960626889438, "v1": 75.2549602875959, "v2": 75.42999292729974, "v3": 74.89145109525546}, {"bar_index": 133, "timestamp": "2026-06-17T11:43:00+08:00", "v0": 75.26899162445363, "v1": 75.29856346589018, "v2": 75.473596105594, "v3": 74.93505427354977}, {"bar_index": 134, "timestamp": "2026-06-17T11:44:00+08:00", "v0": 75.19597680721265, "v1": 75.2549602875959, "v2": 75.42999292729974, "v3": 74.89145109525546}, {"bar_index": 135, "timestamp": "2026-06-17T11:45:00+08:00", "v0": 75.2517475431475, "v1": 75.2985800389867, "v2": 75.57723297730678, "v3": 74.93505427354977}, {"bar_index": 136, "timestamp": "2026-06-17T11:46:00+08:00", "v0": 75.25733679220919, "v1": 75.25497686069242, "v2": 75.53362979901242, "v3": 74.89145109525546}, {"bar_index": 137, "timestamp": "2026-06-17T11:47:00+08:00", "v0": 75.32034790739365, "v1": 75.2985800389867, "v2": 75.57723297730678, "v3": 74.93505427354977}, {"bar_index": 138, "timestamp": "2026-06-17T11:48:00+08:00", "v0": 75.33263101066089, "v1": 75.2985800389867, "v2": 75.57723297730678, "v3": 74.93505427354977}, {"bar_index": 139, "timestamp": "2026-06-17T11:49:00+08:00", "v0": 75.19426540382145, "v1": 75.16777715701477, "v2": 75.44643009533476, "v3": 74.80425139157785}, {"bar_index": 140, "timestamp": "2026-06-17T11:50:00+08:00", "v0": 75.29321152700012, "v1": 75.28905892449175, "v2": 75.62082950269013, "v3": 74.97865079893322}, {"bar_index": 141, "timestamp": "2026-06-17T11:51:00+08:00", "v0": 75.30071280244557, "v1": 75.24546239910846, "v2": 75.57723297730678, "v3": 74.93505427354977}, {"bar_index": 142, "timestamp": "2026-06-17T11:52:00+08:00", "v0": 75.34185445300976, "v1": 75.28905892449175, "v2": 75.62082950269013, "v3": 74.97865079893322}, {"bar_index": 143, "timestamp": "2026-06-17T11:53:00+08:00", "v0": 75.28734610569263, "v1": 75.20185922081416, "v2": 75.53362979901242, "v3": 74.89145109525546}];
+const sigData = [{"bar_index": 100, "v0": 0, "v1": 1, "v2": 0, "v3": -1}, {"bar_index": 101, "v0": 0, "v1": 1, "v2": 0, "v3": -1}, {"bar_index": 102, "v0": -1, "v1": 1, "v2": 0, "v3": -1}, {"bar_index": 103, "v0": 1, "v1": 1, "v2": 0, "v3": -1}, {"bar_index": 104, "v0": 1, "v1": 1, "v2": 0, "v3": -1}, {"bar_index": 105, "v0": 1, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 106, "v0": 1, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 107, "v0": 0, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 108, "v0": -1, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 109, "v0": -1, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 110, "v0": 0, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 111, "v0": 1, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 112, "v0": 1, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 113, "v0": 1, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 114, "v0": -1, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 115, "v0": 0, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 116, "v0": -1, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 117, "v0": 1, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 118, "v0": 1, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 119, "v0": 1, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 120, "v0": 1, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 121, "v0": 1, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 122, "v0": -1, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 123, "v0": 0, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 124, "v0": 1, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 125, "v0": 0, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 126, "v0": -1, "v1": -1, "v2": 1, "v3": -1}, {"bar_index": 127, "v0": 0, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 128, "v0": -1, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 129, "v0": 1, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 130, "v0": 1, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 131, "v0": 1, "v1": 1, "v2": 1, "v3": -1}, {"bar_index": 132, "v0": -1, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 133, "v0": -1, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 134, "v0": -1, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 135, "v0": -1, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 136, "v0": 1, "v1": -1, "v2": 1, "v3": -1}, {"bar_index": 137, "v0": 1, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 138, "v0": 1, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 139, "v0": -1, "v1": -1, "v2": 1, "v3": -1}, {"bar_index": 140, "v0": 1, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 141, "v0": 0, "v1": -1, "v2": 1, "v3": -1}, {"bar_index": 142, "v0": 1, "v1": 0, "v2": 1, "v3": -1}, {"bar_index": 143, "v0": 0, "v1": -1, "v2": 1, "v3": -1}];
+const bsTimeline = {"6": {"bs_added": 3, "bs_modified": 1, "bs_removed": 1, "bs_stable": 0}, "13": {"bs_added": 3, "bs_modified": 1, "bs_removed": 1, "bs_stable": 0}, "27": {"bs_added": 2, "bs_modified": 1, "bs_removed": 0, "bs_stable": 0}, "39": {"bs_added": 3, "bs_modified": 2, "bs_removed": 2, "bs_stable": 0}, "42": {"bs_added": 3, "bs_modified": 3, "bs_removed": 0, "bs_stable": 0}, "45": {"bs_added": 5, "bs_modified": 1, "bs_removed": 3, "bs_stable": 0}, "48": {"bs_added": 7, "bs_modified": 1, "bs_removed": 5, "bs_stable": 0}, "55": {"bs_added": 1, "bs_modified": 0, "bs_removed": 0, "bs_stable": 0}, "57": {"bs_added": 1, "bs_modified": 0, "bs_removed": 1, "bs_stable": 0}, "20": {"bs_added": 2, "bs_modified": 0, "bs_removed": 1, "bs_stable": 0}, "17": {"bs_added": 2, "bs_modified": 0, "bs_removed": 0, "bs_stable": 0}, "31": {"bs_added": 1, "bs_modified": 2, "bs_removed": 1, "bs_stable": 0}, "44": {"bs_added": 4, "bs_modified": 3, "bs_removed": 3, "bs_stable": 0}, "24": {"bs_added": 2, "bs_modified": 0, "bs_removed": 1, "bs_stable": 0}, "9": {"bs_added": 1, "bs_modified": 1, "bs_removed": 0, "bs_stable": 0}, "15": {"bs_added": 1, "bs_modified": 1, "bs_removed": 0, "bs_stable": 0}, "34": {"bs_added": 1, "bs_modified": 1, "bs_removed": 0, "bs_stable": 0}, "0": {"bs_added": 0, "bs_modified": 0, "bs_removed": 0, "bs_stable": 117}, "5": {"bs_added": 2, "bs_modified": 3, "bs_removed": 4, "bs_stable": 0}, "41": {"bs_added": 0, "bs_modified": 6, "bs_removed": 1, "bs_stable": 0}, "58": {"bs_added": 2, "bs_modified": 0, "bs_removed": 1, "bs_stable": 0}, "43": {"bs_added": 0, "bs_modified": 3, "bs_removed": 0, "bs_stable": 0}, "30": {"bs_added": 0, "bs_modified": 2, "bs_removed": 0, "bs_stable": 0}, "16": {"bs_added": 0, "bs_modified": 2, "bs_removed": 1, "bs_stable": 0}, "38": {"bs_added": 0, "bs_modified": 3, "bs_removed": 0, "bs_stable": 0}, "23": {"bs_added": 1, "bs_modified": 1, "bs_removed": 0, "bs_stable": 0}, "33": {"bs_added": 1, "bs_modified": 2, "bs_removed": 0, "bs_stable": 0}, "14": {"bs_added": 1, "bs_modified": 2, "bs_removed": 1, "bs_stable": 0}, "8": {"bs_added": 0, "bs_modified": 2, "bs_removed": 1, "bs_stable": 0}, "12": {"bs_added": 0, "bs_modified": 3, "bs_removed": 1, "bs_stable": 0}, "47": {"bs_added": 1, "bs_modified": 3, "bs_removed": 2, "bs_stable": 0}, "7": {"bs_added": 0, "bs_modified": 1, "bs_removed": 0, "bs_stable": 0}, "32": {"bs_added": 1, "bs_modified": 2, "bs_removed": 0, "bs_stable": 0}, "46": {"bs_added": 2, "bs_modified": 1, "bs_removed": 2, "bs_stable": 0}, "10": {"bs_added": 1, "bs_modified": 2, "bs_removed": 2, "bs_stable": 0}, "26": {"bs_added": 0, "bs_modified": 3, "bs_removed": 1, "bs_stable": 0}, "49": {"bs_added": 2, "bs_modified": 0, "bs_removed": 1, "bs_stable": 0}, "54": {"bs_added": 0, "bs_modified": 1, "bs_removed": 0, "bs_stable": 0}, "18": {"bs_added": 1, "bs_modified": 0, "bs_removed": 0, "bs_stable": 0}, "29": {"bs_added": 0, "bs_modified": 2, "bs_removed": 0, "bs_stable": 0}, "37": {"bs_added": 1, "bs_modified": 1, "bs_removed": 0, "bs_stable": 0}, "22": {"bs_added": 0, "bs_modified": 2, "bs_removed": 1, "bs_stable": 0}, "11": {"bs_added": 1, "bs_modified": 1, "bs_removed": 0, "bs_stable": 0}, "28": {"bs_added": 0, "bs_modified": 2, "bs_removed": 0, "bs_stable": 0}, "36": {"bs_added": 0, "bs_modified": 2, "bs_removed": 0, "bs_stable": 0}, "21": {"bs_added": 0, "bs_modified": 1, "bs_removed": 0, "bs_stable": 0}, "40": {"bs_added": 0, "bs_modified": 3, "bs_removed": 0, "bs_stable": 0}, "35": {"bs_added": 0, "bs_modified": 1, "bs_removed": 0, "bs_stable": 0}};
+const tradeData = [{"step": 0, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 0, "view": "v2 15\u5206\u949f", "trade_count": 5, "long_count": 2, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 0, "view": "v1 5\u5206\u949f", "trade_count": 7, "long_count": 4, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 0, "view": "v0 1\u5206\u949f", "trade_count": 2, "long_count": 1, "short_count": 1, "win_rate": 0.0, "completed_trades": 0}, {"step": 1, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 1, "view": "v2 15\u5206\u949f", "trade_count": 5, "long_count": 2, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 1, "view": "v1 5\u5206\u949f", "trade_count": 7, "long_count": 4, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 1, "view": "v0 1\u5206\u949f", "trade_count": 2, "long_count": 1, "short_count": 1, "win_rate": 0.0, "completed_trades": 0}, {"step": 2, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 2, "view": "v2 15\u5206\u949f", "trade_count": 5, "long_count": 2, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 2, "view": "v1 5\u5206\u949f", "trade_count": 7, "long_count": 4, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 2, "view": "v0 1\u5206\u949f", "trade_count": 2, "long_count": 1, "short_count": 1, "win_rate": 0.0, "completed_trades": 0}, {"step": 3, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 3, "view": "v2 15\u5206\u949f", "trade_count": 5, "long_count": 2, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 3, "view": "v1 5\u5206\u949f", "trade_count": 7, "long_count": 4, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 3, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 4, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 4, "view": "v2 15\u5206\u949f", "trade_count": 5, "long_count": 2, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 4, "view": "v1 5\u5206\u949f", "trade_count": 7, "long_count": 4, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 4, "view": "v0 1\u5206\u949f", "trade_count": 3, "long_count": 2, "short_count": 1, "win_rate": 0.0, "completed_trades": 0}, {"step": 5, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 5, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 5, "view": "v1 5\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 5, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 6, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 6, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 6, "view": "v1 5\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 6, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 7, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 7, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 7, "view": "v1 5\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 7, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 8, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 8, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 8, "view": "v1 5\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 8, "view": "v0 1\u5206\u949f", "trade_count": 2, "long_count": 1, "short_count": 1, "win_rate": 0.0, "completed_trades": 0}, {"step": 9, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 9, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 9, "view": "v1 5\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 9, "view": "v0 1\u5206\u949f", "trade_count": 2, "long_count": 1, "short_count": 1, "win_rate": 0.0, "completed_trades": 0}, {"step": 10, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 10, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 10, "view": "v1 5\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 10, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 11, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 11, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 11, "view": "v1 5\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 11, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 12, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 12, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 12, "view": "v1 5\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 12, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 13, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 13, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 13, "view": "v1 5\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 13, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 14, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 14, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 14, "view": "v1 5\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 14, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 15, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 15, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 15, "view": "v1 5\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 15, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 16, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 16, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 16, "view": "v1 5\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 16, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 17, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 17, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 17, "view": "v1 5\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 17, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 18, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 18, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 18, "view": "v1 5\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 18, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 19, "view": "v3 60\u5206\u949f", "trade_count": 9, "long_count": 4, "short_count": 5, "win_rate": 0.0, "completed_trades": 0}, {"step": 19, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 19, "view": "v1 5\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 19, "view": "v0 1\u5206\u949f", "trade_count": 2, "long_count": 1, "short_count": 1, "win_rate": 0.0, "completed_trades": 0}, {"step": 20, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 20, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 20, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 20, "view": "v0 1\u5206\u949f", "trade_count": 2, "long_count": 1, "short_count": 1, "win_rate": 0.0, "completed_trades": 0}, {"step": 21, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 21, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 21, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 21, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 22, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 22, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 22, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 22, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 23, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 23, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 23, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 23, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 24, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 24, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 24, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 24, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 25, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 25, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 25, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 25, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 26, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 26, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 26, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 26, "view": "v0 1\u5206\u949f", "trade_count": 2, "long_count": 1, "short_count": 1, "win_rate": 0.0, "completed_trades": 0}, {"step": 27, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 27, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 27, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 27, "view": "v0 1\u5206\u949f", "trade_count": 1, "long_count": 1, "short_count": 0, "win_rate": 0.0, "completed_trades": 0}, {"step": 28, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 28, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 28, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 28, "view": "v0 1\u5206\u949f", "trade_count": 3, "long_count": 1, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 29, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 29, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 29, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 29, "view": "v0 1\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 30, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 30, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 30, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 30, "view": "v0 1\u5206\u949f", "trade_count": 3, "long_count": 2, "short_count": 1, "win_rate": 0.0, "completed_trades": 0}, {"step": 31, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 31, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 31, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 31, "view": "v0 1\u5206\u949f", "trade_count": 3, "long_count": 2, "short_count": 1, "win_rate": 0.0, "completed_trades": 0}, {"step": 32, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 32, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 32, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 32, "view": "v0 1\u5206\u949f", "trade_count": 3, "long_count": 2, "short_count": 1, "win_rate": 0.0, "completed_trades": 0}, {"step": 33, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 33, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 33, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 33, "view": "v0 1\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 34, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 34, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 34, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 34, "view": "v0 1\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 35, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 35, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 35, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 35, "view": "v0 1\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 36, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 36, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 36, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 36, "view": "v0 1\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 37, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 37, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 37, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 37, "view": "v0 1\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 38, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 38, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 38, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 38, "view": "v0 1\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 39, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 39, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 39, "view": "v1 5\u5206\u949f", "trade_count": 5, "long_count": 3, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 39, "view": "v0 1\u5206\u949f", "trade_count": 3, "long_count": 1, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 40, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 40, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 40, "view": "v1 5\u5206\u949f", "trade_count": 2, "long_count": 1, "short_count": 1, "win_rate": 0.0, "completed_trades": 0}, {"step": 40, "view": "v0 1\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 41, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 41, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 41, "view": "v1 5\u5206\u949f", "trade_count": 2, "long_count": 1, "short_count": 1, "win_rate": 0.0, "completed_trades": 0}, {"step": 41, "view": "v0 1\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 42, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 42, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 42, "view": "v1 5\u5206\u949f", "trade_count": 2, "long_count": 1, "short_count": 1, "win_rate": 0.0, "completed_trades": 0}, {"step": 42, "view": "v0 1\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 43, "view": "v3 60\u5206\u949f", "trade_count": 11, "long_count": 5, "short_count": 6, "win_rate": 0.0, "completed_trades": 0}, {"step": 43, "view": "v2 15\u5206\u949f", "trade_count": 6, "long_count": 3, "short_count": 3, "win_rate": 0.0, "completed_trades": 0}, {"step": 43, "view": "v1 5\u5206\u949f", "trade_count": 3, "long_count": 1, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}, {"step": 43, "view": "v0 1\u5206\u949f", "trade_count": 4, "long_count": 2, "short_count": 2, "win_rate": 0.0, "completed_trades": 0}];
+const eventByView = {"v3_60\u5206\u949f": {"bs_added": 15, "bs_stable": 42, "bs_removed": 3, "bs_modified": 8}, "v2_15\u5206\u949f": {"bs_added": 6, "bs_stable": 40, "bs_modified": 15, "bs_removed": 1}, "v1_5\u5206\u949f": {"bs_added": 14, "bs_stable": 35, "bs_modified": 26, "bs_removed": 12}, "v0_1\u5206\u949f": {"bs_added": 24, "bs_modified": 26, "bs_removed": 22}};
+const eventCounts = {"bs_added": 59, "bs_stable": 117, "bs_modified": 75, "bs_removed": 38};
+
+// ── 公共配置 ──
+Chart.defaults.color = '#8b949e';
+Chart.defaults.borderColor = '#30363d';
+Chart.defaults.font.family = '-apple-system, "SF Mono", Menlo, Consolas, monospace';
+Chart.defaults.font.size = 11;
+
+const barIndices = filterData.map(d => d.bar_index);
+const colors = { v0: '#f59e0b', v1: '#10b981', v2: '#3b82f6', v3: '#ef4444' };
+const views = ['v0', 'v1', 'v2', 'v3'];
+
+// ── 板块二：过滤趋势 ──
+new Chart(document.getElementById('filterChart'), {
+    type: 'line',
+    data: {
+        labels: barIndices,
+        datasets: views.map(v => ({
+            label: v + ' (1m/5m/15m/60m)'.split('/')[views.indexOf(v)],
+            data: filterData.map(d => d[v]),
+            borderColor: colors[v],
+            backgroundColor: 'transparent',
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: 0.1,
+        }))
+    },
+    options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+            title: { display: true, text: '各视图过滤值随时间变化', color: '#e6edf3', font: { size: 14 } },
+            tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(4) } }
+        },
+        scales: {
+            x: { title: { display: true, text: 'bar_index', color: '#8b949e' } },
+            y: { title: { display: true, text: 'filtered 值', color: '#8b949e' }, ticks: { callback: v => v.toFixed(2) } }
+        }
+    }
+});
+
+// ── 板块三：Sig 分布柱状图 ──
+const sigAgg = { '-1': [], '0': [], '1': [] };
+views.forEach(v => {
+    const dist = {};
+    sigData.forEach(d => { dist[d[v]] = (dist[d[v]] || 0) + 1; });
+    [-1, 0, 1].forEach(s => sigAgg[String(s)].push(dist[s] || 0));
+});
+
+new Chart(document.getElementById('sigBarChart'), {
+    type: 'bar',
+    data: {
+        labels: views.map(v => v + ' (' + '1m/5m/15m/60m'.split('/')[views.indexOf(v)] + ')'),
+        datasets: [
+            { label: 'sig = -1', data: sigAgg['-1'], backgroundColor: '#f85149' },
+            { label: 'sig = 0', data: sigAgg['0'], backgroundColor: '#8b949e' },
+            { label: 'sig = 1', data: sigAgg['1'], backgroundColor: '#3fb950' },
+        ]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            title: { display: true, text: '各视图 sig 分布', color: '#e6edf3', font: { size: 14 } },
+        },
+        scales: {
+            x: { stacked: true },
+            y: { stacked: true, title: { display: true, text: 'bar 计数' } }
+        }
+    }
+});
+
+// ── Sig 时间线（每视图独立折线） ──
+new Chart(document.getElementById('sigTimeline'), {
+    type: 'line',
+    data: {
+        labels: barIndices,
+        datasets: views.map((v, vi) => ({
+            label: v,
+            data: sigData.map(d => d[v] + vi * 3),
+            borderColor: colors[v],
+            backgroundColor: 'transparent',
+            borderWidth: 1.5,
+            pointRadius: 0,
+            stepped: true,
+        }))
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            title: { display: true, text: 'sig 状态时间线（垂直偏移便于对比）', color: '#e6edf3', font: { size: 14 } },
+            tooltip: {
+                callbacks: {
+                    label: ctx => {
+                        const vi = views.indexOf(ctx.dataset.label);
+                        const raw = ctx.parsed.y - vi * 3;
+                        return ctx.dataset.label + ': sig=' + raw;
+                    }
+                }
+            }
+        },
+        scales: {
+            x: { title: { display: true, text: 'bar_index', color: '#8b949e' } },
+            y: {
+                ticks: {
+                    callback: v => {
+                        const vi = Math.round(v / 3);
+                        return views[vi] || '';
+                    },
+                    stepSize: 3,
+                },
+                title: { display: true, text: '视图 (sig: -1/0/1)', color: '#8b949e' }
+            }
+        }
+    }
+});
+
+// ── 板块四：BS 事件时间线 ──
+const bsBarIndices = Object.keys(bsTimeline).map(Number).sort((a,b) => a - b);
+const evTypes = ['bs_added', 'bs_modified', 'bs_removed', 'bs_stable'];
+const evColors = { bs_added: '#3fb950', bs_modified: '#d29922', bs_removed: '#f85149', bs_stable: '#8b949e' };
+
+new Chart(document.getElementById('bsTimelineChart'), {
+    type: 'bar',
+    data: {
+        labels: bsBarIndices,
+        datasets: evTypes.map(et => ({
+            label: et.replace('bs_', ''),
+            data: bsBarIndices.map(bi => bsTimeline[bi] ? (bsTimeline[bi][et] || 0) : 0),
+            backgroundColor: evColors[et],
+        }))
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            title: { display: true, text: 'BS 事件按 bar_index 分布（所有视图合计）', color: '#e6edf3', font: { size: 14 } },
+        },
+        scales: {
+            x: { stacked: true, title: { display: true, text: 'bar_index' } },
+            y: { stacked: true, title: { display: true, text: '事件数' } }
+        }
+    }
+});
+
+// ── BS 事件饼图 ──
+new Chart(document.getElementById('bsEventPieChart'), {
+    type: 'doughnut',
+    data: {
+        labels: ['bs_added', 'bs_modified', 'bs_removed', 'bs_stable'],
+        datasets: [{
+            data: evTypes.map(et => eventCounts[et] || 0),
+            backgroundColor: evTypes.map(et => evColors[et]),
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            title: { display: true, text: 'BS 事件类型分布', color: '#e6edf3', font: { size: 14 } },
+        }
+    }
+});
+
+// ── 按视图 BS 事件 ──
+const evViewLabels = Object.keys(eventByView).sort();
+const evViewDatasets = evTypes.map(et => ({
+    label: et.replace('bs_', ''),
+    data: evViewLabels.map(v => (eventByView[v] && eventByView[v][et]) ? eventByView[v][et] : 0),
+    backgroundColor: evColors[et],
+}));
+
+new Chart(document.getElementById('bsViewChart'), {
+    type: 'bar',
+    data: {
+        labels: evViewLabels.map(v => v.replace('_', ' ')),
+        datasets: evViewDatasets,
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            title: { display: true, text: 'BS 事件按视图分布', color: '#e6edf3', font: { size: 14 } },
+        },
+        scales: {
+            x: { stacked: true },
+            y: { stacked: true, title: { display: true, text: '事件数' } }
+        }
+    }
+});
+
+// ── 板块五：交易摘要（取 v3 的数据作为示例） ──
+const v3Trades = tradeData.filter(t => t.view === 'v3 60分钟');
+new Chart(document.getElementById('tradeChart'), {
+    type: 'line',
+    data: {
+        labels: v3Trades.map(t => t.step),
+        datasets: [
+            {
+                label: 'trade_count',
+                data: v3Trades.map(t => t.trade_count),
+                borderColor: '#3b82f6',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                pointRadius: 3,
+                yAxisID: 'y',
+            },
+            {
+                label: 'long_count',
+                data: v3Trades.map(t => t.long_count),
+                borderColor: '#3fb950',
+                backgroundColor: 'transparent',
+                borderWidth: 1.5,
+                pointRadius: 2,
+                borderDash: [5, 5],
+                yAxisID: 'y',
+            },
+            {
+                label: 'short_count',
+                data: v3Trades.map(t => t.short_count),
+                borderColor: '#f85149',
+                backgroundColor: 'transparent',
+                borderWidth: 1.5,
+                pointRadius: 2,
+                borderDash: [5, 5],
+                yAxisID: 'y',
+            },
+            {
+                label: 'win_rate',
+                data: v3Trades.map(t => t.win_rate * 100),
+                borderColor: '#d29922',
+                backgroundColor: 'transparent',
+                borderWidth: 2,
+                pointRadius: 3,
+                yAxisID: 'y1',
+            },
+        ]
+    },
+    options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+            title: { display: true, text: '交易摘要趋势 (v3 60分钟)', color: '#e6edf3', font: { size: 14 } },
+        },
+        scales: {
+            x: { title: { display: true, text: 'step' } },
+            y: {
+                type: 'linear',
+                position: 'left',
+                title: { display: true, text: '交易笔数' },
+                min: 0,
+            },
+            y1: {
+                type: 'linear',
+                position: 'right',
+                title: { display: true, text: '胜率 %' },
+                min: 0,
+                max: 100,
+                grid: { drawOnChartArea: false },
+            }
+        }
+    }
+});
+
+</script>
+
+</body>
+</html>
