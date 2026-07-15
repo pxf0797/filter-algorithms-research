@@ -1,0 +1,1040 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BS 变动分析器</title>
+<script src="./plotly-2.32.0.min.js"></script>
+<script>
+if (typeof Plotly === 'undefined') {
+    document.write('<script src="https://cdn.plot.ly/plotly-2.32.0.min.js"><\/script>');
+}
+</script>
+<script src="./papaparse.min.js"></script>
+<script>
+if (typeof Papa === 'undefined') {
+    document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"><\/script>');
+}
+</script>
+<style>
+:root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2129;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text2: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --orange: #d29922;
+    --purple: #a371f7;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+}
+#topbar {
+    flex-shrink: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    z-index: 10;
+}
+#topbar .title { font-size: 16px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+#topbar label { font-size: 12px; color: var(--text2); white-space: nowrap; }
+#topbar select, #topbar input[type="number"], #topbar button {
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 10px; font-size: 13px; font-family: var(--font);
+}
+#topbar button {
+    cursor: pointer; background: var(--accent); color: #fff;
+    border-color: var(--accent); font-weight: 600;
+}
+#topbar button:hover { opacity: 0.85; }
+#topbar button:disabled { opacity: 0.4; cursor: not-allowed; }
+#topbar .spacer { flex: 1; }
+#topbar .stats { font-size: 12px; color: var(--text2); display: flex; gap: 16px; }
+#topbar .stats span { white-space: nowrap; }
+#topbar .stats .val { color: var(--text); font-weight: 600; }
+#topbar .stats .jump { color: var(--orange); }
+#main { flex: 1; display: flex; overflow: hidden; }
+#left { flex: 1 1 55%; display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow: hidden; }
+#right { flex: 0 0 45%; display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; }
+#bottom { flex-shrink: 0; height: 220px; border-top: 1px solid var(--border); overflow: hidden; }
+.panel-header {
+    padding: 8px 14px; font-size: 13px; font-weight: 600; color: var(--text);
+    background: var(--surface2); border-bottom: 1px solid var(--border); flex-shrink: 0;
+    display: flex; align-items: center; gap: 8px;
+}
+.panel-body { flex: 1; overflow: hidden; position: relative; }
+.panel-body .plot-container { width: 100%; height: 100%; }
+#cascade-detail { padding: 12px 16px; font-size: 13px; line-height: 1.6; }
+#cascade-detail .empty-state { color: var(--text2); text-align: center; padding: 40px 20px; font-size: 14px; }
+#cascade-detail .event-header {
+    font-size: 15px; font-weight: 700; margin-bottom: 12px;
+    padding: 8px 12px; border-radius: 6px; background: var(--surface2);
+    border-left: 3px solid var(--accent);
+}
+#cascade-detail .event-header.added { border-left-color: var(--green); }
+#cascade-detail .event-header.removed { border-left-color: var(--red); }
+#cascade-detail .event-header.modified { border-left-color: var(--orange); }
+#cascade-detail .chain { display: flex; flex-direction: column; gap: 0; margin: 12px 0; }
+#cascade-detail .chain-node {
+    display: flex; align-items: center; padding: 8px 12px;
+    border-radius: 4px; background: var(--surface); border: 1px solid var(--border); gap: 12px;
+}
+#cascade-detail .chain-arrow {
+    text-align: center; color: var(--text2); font-size: 18px;
+    padding: 2px 0; padding-left: 28px;
+}
+#cascade-detail .chain-arrow .multiplier { font-size: 11px; color: var(--orange); margin-left: 6px; }
+#cascade-detail .chain-node .node-icon { font-size: 16px; width: 24px; text-align: center; }
+#cascade-detail .chain-node .node-label { flex: 0 0 110px; font-weight: 600; font-size: 12px; color: var(--text2); }
+#cascade-detail .chain-node .node-value { flex: 1; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; }
+#cascade-detail .chain-node .node-delta {
+    font-weight: 700; font-size: 11px; padding: 2px 6px; border-radius: 3px;
+}
+#cascade-detail .chain-node .node-delta.pos { color: var(--green); }
+#cascade-detail .chain-node .node-delta.neg { color: var(--red); }
+#cascade-detail .chain-node .node-delta.neut { color: var(--text2); }
+#cascade-detail .summary-bar {
+    margin-top: 12px; padding: 10px 14px; background: var(--surface2);
+    border-radius: 6px; font-size: 14px; font-weight: 700; text-align: center;
+}
+#cascade-detail .summary-bar .amp { color: var(--orange); font-size: 18px; }
+#loading {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(13,17,23,0.85); display: none;
+    align-items: center; justify-content: center; z-index: 100;
+    flex-direction: column; gap: 12px;
+}
+#loading.show { display: flex; }
+#loading .spinner {
+    width: 36px; height: 36px; border: 3px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading .msg { color: var(--text2); font-size: 13px; }
+.tooltip-hint { font-size: 11px; color: var(--text2); font-style: italic; }
+#step-range-info {
+    font-size: 11px; color: var(--text2);
+    padding: 4px 14px; background: var(--surface2);
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+
+<div id="topbar">
+    <span class="title">BS 变动分析器</span>
+    <button id="btn-load-dir" onclick="BSA.loadDirectory()">选择数据目录</button>
+    <span id="dir-label" style="font-size:11px;color:var(--text2);max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">未加载</span>
+    <label style="margin-left:8px;">视图:</label>
+    <select id="view-select" onchange="BSA.onViewChange()">
+        <option value="v3">v3 (60分钟)</option>
+        <option value="v2">v2 (15分钟)</option>
+        <option value="v1">v1 (5分钟)</option>
+        <option value="v0">v0 (1分钟)</option>
+    </select>
+    <label>Step:</label>
+    <input type="number" id="step-from" value="0" min="0" style="width:60px;" onchange="BSA.onStepFilter()">
+    <span style="color:var(--text2);">~</span>
+    <input type="number" id="step-to" value="44" min="1" style="width:60px;" onchange="BSA.onStepFilter()">
+    <span class="spacer"></span>
+    <span class="stats">
+        <span>总Steps: <span class="val" id="stat-steps">-</span></span>
+        <span>跳跃点: <span class="val jump" id="stat-jumps">-</span></span>
+        <span>BS Markers: <span class="val" id="stat-markers">-</span></span>
+    </span>
+</div>
+
+<div id="main">
+    <div id="left">
+        <div class="panel-header">BS 演化图 (甘特图风格) <span class="tooltip-hint">点击 marker 查看级联分析</span></div>
+        <div id="step-range-info" style="display:none;"></div>
+        <div class="panel-body"><div id="gantt-plot" class="plot-container"></div></div>
+    </div>
+    <div id="right">
+        <div class="panel-header">级联放大分析</div>
+        <div id="cascade-detail"><div class="empty-state">选择数据目录后，点击左侧 BS marker 或变动标记查看级联分析</div></div>
+    </div>
+</div>
+
+<div id="bottom">
+    <div class="panel-header">跨视图 BS 变动对比 (热力图: 红=变动多 / 绿=无变动)</div>
+    <div class="panel-body"><div id="cross-view-plot" class="plot-container"></div></div>
+</div>
+
+<div id="loading"><div class="spinner"></div><div class="msg">加载数据中...</div></div>
+
+<script>
+// ============================================================
+// BS Analyzer - Main Application Module
+// ============================================================
+const BSA = (function() {
+    'use strict';
+
+    // ---- State ----
+    const state = {
+        dirHandle: null,
+        bsSnapshots: [],
+        events: [],
+        filterTails: [],
+        schmittSnaps: [],
+        tradeSummaries: [],
+        csvRows: [],
+        csvHeaders: [],
+        metadata: null,
+        // Short view names (v0, v1, v2, v3)
+        views: ['v3','v2','v1','v0'],
+        viewLabelMap: {'v3':'60分钟','v2':'15分钟','v1':'5分钟','v0':'1分钟'},
+        maxStep: 0,
+        currentView: 'v3',
+        stepFrom: 0,
+        stepTo: 999,
+        // Computed
+        bsMarkers: {},    // view_short -> [{id,type,label,firstStep,lastStep,appearances}]
+        bsChanges: {},    // view_short -> {step: {added:[],removed:[],modified:[]}}
+        cascadeData: {},  // view_short -> {step: cascadeInfo}
+    };
+
+    // ---- View Name Utilities ----
+    // Data uses "v3_60分钟", "v2_15分钟", etc. Normalize to short form.
+    function normView(raw) {
+        if (!raw) return raw;
+        // Extract "v0", "v1", "v2", "v3" prefix
+        const m = raw.match(/^(v\d+)/);
+        return m ? m[1] : raw;
+    }
+
+    // ---- File I/O ----
+    async function readFileIfExists(dirHandle, fileName) {
+        try {
+            const fh = await dirHandle.getFileHandle(fileName);
+            const f = await fh.getFile();
+            return await f.text();
+        } catch { return null; }
+    }
+
+    function parseJSONL(text) {
+        if (!text || !text.trim()) return [];
+        return text.trim().split('\n').map(line => {
+            try { return JSON.parse(line); } catch { return null; }
+        }).filter(Boolean);
+    }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    // ---- Data Loading ----
+    async function loadDirectory() {
+        try {
+            showLoading('选择数据目录...');
+            if (!('showDirectoryPicker' in window)) {
+                alert('此浏览器不支持 File System Access API，请使用 Chrome/Edge 打开。');
+                hideLoading();
+                return;
+            }
+            const dirHandle = await window.showDirectoryPicker({mode: 'readonly'});
+            state.dirHandle = dirHandle;
+            document.getElementById('dir-label').textContent = dirHandle.name;
+            document.getElementById('dir-label').title = dirHandle.name;
+
+            showLoading('读取数据文件...');
+            const fns = ['bs_snapshot.jsonl','events.jsonl','filter_tail.jsonl',
+                         'schmitt_snapshot.jsonl','trade_summary.jsonl','metadata.json'];
+            const [bsR, evR, ftR, ssR, tsR, metaR] = await Promise.all(fns.map(fn => readFileIfExists(dirHandle, fn)));
+
+            state.bsSnapshots = parseJSONL(bsR || '').map(r => { r.view = normView(r.view); return r; });
+            state.events = parseJSONL(evR || '').map(r => { r.view = normView(r.view); return r; });
+            state.filterTails = parseJSONL(ftR || '').map(r => { r.view = normView(r.view); return r; });
+            state.schmittSnaps = parseJSONL(ssR || '').map(r => { r.view = normView(r.view); return r; });
+            state.tradeSummaries = parseJSONL(tsR || '').map(r => { r.view = normView(r.view); return r; });
+            state.metadata = metaR ? JSON.parse(metaR) : null;
+
+            // CSV
+            const csvR = await readFileIfExists(dirHandle, 'backtest_data.csv');
+            if (csvR) {
+                const p = Papa.parse(csvR, {header: true, skipEmptyLines: true, dynamicTyping: true});
+                state.csvHeaders = p.meta.fields || [];
+                state.csvRows = p.data || [];
+            }
+
+            // Determine max step
+            let mx = 0;
+            for (const s of state.bsSnapshots) { if (s.step > mx) mx = s.step; }
+            if (mx === 0 && state.metadata) mx = state.metadata.step_count || 44;
+            state.maxStep = mx;
+            state.stepTo = mx;
+            document.getElementById('step-to').value = mx;
+            document.getElementById('step-from').value = 0;
+
+            // Determine views from data
+            const vs = new Set();
+            for (const s of state.bsSnapshots) { if (s.view) vs.add(s.view); }
+            if (vs.size > 0) {
+                state.views = Array.from(vs).sort().reverse();
+                const sel = document.getElementById('view-select');
+                sel.innerHTML = '';
+                for (const v of state.views) {
+                    const o = document.createElement('option');
+                    o.value = v;
+                    o.textContent = v + ' (' + (state.viewLabelMap[v] || '?') + ')';
+                    sel.appendChild(o);
+                }
+                state.currentView = state.views[0];
+            }
+
+            showLoading('计算 BS 变动...');
+            await sleep(30);
+
+            buildBSMarkers();
+            computeBSChanges();
+            buildCascadeData();
+            renderAll();
+            hideLoading();
+        } catch (err) {
+            console.error(err);
+            hideLoading();
+            if (err.name !== 'AbortError') alert('加载失败: ' + err.message);
+        }
+    }
+
+    function showLoading(msg) {
+        const el = document.getElementById('loading');
+        el.querySelector('.msg').textContent = msg;
+        el.classList.add('show');
+    }
+    function hideLoading() { document.getElementById('loading').classList.remove('show'); }
+
+    // ---- BS Marker Tracking ----
+    function buildBSMarkers() {
+        state.bsMarkers = {};
+        for (const view of state.views) {
+            const snaps = state.bsSnapshots
+                .filter(s => s.view === view)
+                .sort((a,b) => a.step - b.step);
+            if (snaps.length === 0) { state.bsMarkers[view] = []; continue; }
+
+            // Collect markers per step: {step -> [{type,label,bar_idx,date}]}
+            const stepMk = {};
+            for (const snap of snaps) {
+                const markers = [];
+                for (const e of (snap.entry || []))
+                    markers.push({type:'entry', label:e.label, bar_idx:e.bar_idx, date:e.date});
+                for (const e of (snap.exit || []))
+                    markers.push({type:'exit', label:e.label, bar_idx:e.bar_idx, date:e.date});
+                stepMk[snap.step] = markers;
+            }
+            const allSteps = Object.keys(stepMk).map(Number).sort((a,b)=>a-b);
+
+            const registry = []; // persistent marker objects
+            let nextId = 0;
+
+            // For each step, build a map from previous-step marker index -> registry entry
+            let prevRegMap = new Map(); // stepIndex_in_prev -> registryEntry
+
+            for (let si = 0; si < allSteps.length; si++) {
+                const step = allSteps[si];
+                const current = stepMk[step] || [];
+                const prev = si > 0 ? (stepMk[allSteps[si-1]] || []) : [];
+                const prevStep = si > 0 ? allSteps[si-1] : null;
+
+                // Match current -> previous
+                const matchedPrev = new Set();
+                const matchedCurr = new Set();
+
+                // Pass 1: exact (type, label, bar_idx)
+                for (let ci = 0; ci < current.length; ci++) {
+                    for (let pi = 0; pi < prev.length; pi++) {
+                        if (matchedPrev.has(pi) || matchedCurr.has(ci)) continue;
+                        if (prev[pi].type === current[ci].type &&
+                            prev[pi].label === current[ci].label &&
+                            prev[pi].bar_idx === current[ci].bar_idx) {
+                            matchedPrev.add(pi); matchedCurr.add(ci);
+                        }
+                    }
+                }
+                // Pass 2: fuzzy (type, label) match, bar_idx within 5
+                for (let ci = 0; ci < current.length; ci++) {
+                    if (matchedCurr.has(ci)) continue;
+                    for (let pi = 0; pi < prev.length; pi++) {
+                        if (matchedPrev.has(pi)) continue;
+                        if (prev[pi].type === current[ci].type &&
+                            prev[pi].label === current[ci].label &&
+                            Math.abs(prev[pi].bar_idx - current[ci].bar_idx) <= 5) {
+                            matchedPrev.add(pi); matchedCurr.add(ci);
+                        }
+                    }
+                }
+
+                // Build new prevRegMap
+                const newPrevRegMap = new Map();
+
+                // Extend matched markers
+                for (let pi = 0; pi < prev.length; pi++) {
+                    if (!matchedPrev.has(pi)) continue;
+                    let ci = -1;
+                    for (let i = 0; i < current.length; i++) {
+                        if (matchedCurr.has(i) &&
+                            prev[pi].type === current[i].type &&
+                            prev[pi].label === current[i].label) {
+                            ci = i; break;
+                        }
+                    }
+                    if (ci < 0) continue;
+                    const regEntry = prevRegMap.get(pi);
+                    if (regEntry) {
+                        regEntry.lastStep = step;
+                        regEntry.appearances.push({
+                            step, bar_idx: current[ci].bar_idx, date: current[ci].date
+                        });
+                        newPrevRegMap.set(ci, regEntry);
+                    }
+                }
+
+                // Create new entries for unmatched current markers
+                for (let ci = 0; ci < current.length; ci++) {
+                    if (matchedCurr.has(ci)) continue;
+                    const m = current[ci];
+                    const entry = {
+                        id: nextId++,
+                        type: m.type, label: m.label,
+                        firstStep: step, lastStep: step,
+                        appearances: [{step, bar_idx: m.bar_idx, date: m.date}]
+                    };
+                    registry.push(entry);
+                    newPrevRegMap.set(ci, entry);
+                }
+
+                prevRegMap = newPrevRegMap;
+            }
+
+            state.bsMarkers[view] = registry;
+        }
+    }
+
+    // ---- BS Change Detection ----
+    function computeBSChanges() {
+        state.bsChanges = {};
+        for (const view of state.views) {
+            const changes = {}; // step -> {added:[],removed:[],modified:[]}
+
+            // Prefer events.jsonl data
+            const vev = state.events.filter(e =>
+                e.view === view && ['bs_added','bs_removed','bs_modified'].includes(e.event)
+            );
+            if (vev.length > 0) {
+                for (const ev of vev) {
+                    const step = ev.step;
+                    if (!changes[step]) changes[step] = {added:[],removed:[],modified:[]};
+                    const item = {type:ev.type, label:ev.label, bar_idx:ev.bar_idx, date:ev.date, exit_reason:ev.exit_reason};
+                    if (ev.event === 'bs_added') changes[step].added.push(item);
+                    else if (ev.event === 'bs_removed') changes[step].removed.push(item);
+                    else changes[step].modified.push(item);
+                }
+            } else {
+                // Fallback: diff bs_snapshot
+                const snaps = state.bsSnapshots
+                    .filter(s => s.view === view)
+                    .sort((a,b)=>a.step-b.step);
+                for (let i = 1; i < snaps.length; i++) {
+                    const pv = snaps[i-1], cur = snaps[i], step = cur.step;
+                    const pSet = new Set();
+                    for (const e of (pv.entry||[])) pSet.add('entry_'+e.label+'_'+e.bar_idx);
+                    for (const e of (pv.exit||[])) pSet.add('exit_'+e.label+'_'+e.bar_idx);
+                    const cSet = new Set();
+                    for (const e of (cur.entry||[])) cSet.add('entry_'+e.label+'_'+e.bar_idx);
+                    for (const e of (cur.exit||[])) cSet.add('exit_'+e.label+'_'+e.bar_idx);
+
+                    if (!changes[step]) changes[step] = {added:[],removed:[],modified:[]};
+                    for (const e of (cur.entry||[])) {
+                        if (!pSet.has('entry_'+e.label+'_'+e.bar_idx))
+                            changes[step].added.push({type:'entry',label:e.label,bar_idx:e.bar_idx,date:e.date});
+                    }
+                    for (const e of (cur.exit||[])) {
+                        if (!pSet.has('exit_'+e.label+'_'+e.bar_idx))
+                            changes[step].added.push({type:'exit',label:e.label,bar_idx:e.bar_idx,date:e.date});
+                    }
+                    for (const e of (pv.entry||[])) {
+                        if (!cSet.has('entry_'+e.label+'_'+e.bar_idx))
+                            changes[step].removed.push({type:'entry',label:e.label,bar_idx:e.bar_idx,date:e.date});
+                    }
+                    for (const e of (pv.exit||[])) {
+                        if (!cSet.has('exit_'+e.label+'_'+e.bar_idx))
+                            changes[step].removed.push({type:'exit',label:e.label,bar_idx:e.bar_idx,date:e.date});
+                    }
+                }
+            }
+            state.bsChanges[view] = changes;
+        }
+    }
+
+    // ---- Cascade Data ----
+    function buildCascadeData() {
+        state.cascadeData = {};
+        for (const view of state.views) {
+            state.cascadeData[view] = {};
+
+            const ftBy = {}, ssBy = {}, tsBy = {};
+            for (const ft of state.filterTails) { if (ft.view === view) ftBy[ft.step] = ft; }
+            for (const ss of state.schmittSnaps) { if (ss.view === view) ssBy[ss.step] = ss; }
+            for (const ts of state.tradeSummaries) { if (ts.view === view) tsBy[ts.step] = ts; }
+
+            const chg = state.bsChanges[view] || {};
+            for (const [stepS, change] of Object.entries(chg)) {
+                const step = parseInt(stepS);
+                const total = change.added.length + change.removed.length + change.modified.length;
+                if (total === 0) continue;
+                const cas = {step, totalChanges:total};
+
+                const ftC = ftBy[step], ftP = ftBy[step-1];
+                if (ftC && ftP && ftC.tail && ftP.tail && ftC.tail.length>0 && ftP.tail.length>0) {
+                    const ct = ftC.tail[ftC.tail.length-1], pt = ftP.tail[ftP.tail.length-1];
+                    if (typeof ct==='number' && typeof pt==='number' && !isNaN(ct) && !isNaN(pt)) {
+                        cas.filterDelta = ct - pt;
+                        cas.filterPrev = pt; cas.filterCurr = ct;
+                    }
+                }
+
+                const ssC = ssBy[step], ssP = ssBy[step-1];
+                if (ssC && ssP) {
+                    if (ssC.eps_tail && ssP.eps_tail && ssC.eps_tail.length>0 && ssP.eps_tail.length>0) {
+                        const ce = ssC.eps_tail[ssC.eps_tail.length-1];
+                        const pe = ssP.eps_tail[ssP.eps_tail.length-1];
+                        if (typeof ce==='number' && typeof pe==='number') {
+                            cas.epsDelta = ce - pe; cas.epsPrev = pe; cas.epsCurr = ce;
+                            if (cas.filterDelta && Math.abs(cas.filterDelta)>1e-12)
+                                cas.epsAmp = cas.epsDelta / cas.filterDelta;
+                        }
+                    }
+                    if (typeof ssC.pair_count==='number' && typeof ssP.pair_count==='number') {
+                        cas.pairDelta = ssC.pair_count - ssP.pair_count;
+                        cas.pairPrev = ssP.pair_count; cas.pairCurr = ssC.pair_count;
+                    }
+                    if (ssC.sig_counts && ssP.sig_counts) {
+                        const d = {};
+                        for (const k of ['-1','0','1']) {
+                            const cv = ssC.sig_counts[k]||0, pv = ssP.sig_counts[k]||0;
+                            if (cv !== pv) d[k] = cv - pv;
+                        }
+                        if (Object.keys(d).length>0) cas.sigDelta = d;
+                    }
+                }
+
+                const tsC = tsBy[step], tsP = tsBy[step-1];
+                if (tsC && tsP &&
+                    typeof tsC.trade_count==='number' && typeof tsP.trade_count==='number') {
+                    cas.tradeDelta = tsC.trade_count - tsP.trade_count;
+                    cas.tradePrev = tsP.trade_count; cas.tradeCurr = tsC.trade_count;
+                }
+
+                if (cas.filterDelta && Math.abs(cas.filterDelta)>1e-12)
+                    cas.totalAmp = total / Math.abs(cas.filterDelta);
+
+                state.cascadeData[view][step] = cas;
+            }
+        }
+    }
+
+    // ---- Render: Gantt Chart ----
+    function renderGantt() {
+        const view = state.currentView;
+        const markers = state.bsMarkers[view] || [];
+        const changes = state.bsChanges[view] || {};
+        const sf = state.stepFrom, st = state.stepTo;
+
+        if (markers.length === 0) {
+            emptyPlot('gantt-plot', '无数据');
+            return;
+        }
+
+        // Filter to visible range
+        let visMk = markers.filter(m => m.lastStep >= sf && m.firstStep <= st);
+        visMk.sort((a,b) => {
+            if (a.type !== b.type) return a.type==='entry' ? -1 : 1;
+            if (a.firstStep !== b.firstStep) return a.firstStep - b.firstStep;
+            return a.appearances[0].bar_idx - b.appearances[0].bar_idx;
+        });
+
+        if (visMk.length === 0) {
+            emptyPlot('gantt-plot', '该step范围无数据');
+            return;
+        }
+
+        const traces = [];
+        const yLabels = [];
+
+        for (let i = 0; i < visMk.length; i++) {
+            const m = visMk[i];
+            const xS = Math.max(m.firstStep, sf);
+            const xE = Math.min(m.lastStep + 1, st + 1);
+            const barW = xE - xS;
+
+            if (barW > 0) {
+                const barC = m.label==='B' ? 'rgba(63,185,80,0.45)' : 'rgba(248,81,73,0.35)';
+                const borderC = m.label==='B' ? '#3fb950' : '#f85149';
+                const dirLabel = m.label==='B' ? '做多' : '做空';
+                traces.push({
+                    type: 'bar', orientation: 'h',
+                    x: [barW], y: [i], base: xS, width: 0.7,
+                    marker: {color:barC, line:{color:borderC, width:0.5}},
+                    text: [m.label+'@'+m.appearances[0].bar_idx],
+                    textposition: 'inside', textfont: {color:'#c9d1d9', size:10},
+                    insidetextanchor: 'start',
+                    hoverinfo: 'text',
+                    hovertext: (m.type==='entry'?'入场':'出场')+' '+dirLabel+' @bar'+m.appearances[0].bar_idx+' | Steps '+m.firstStep+'-'+m.lastStep,
+                    showlegend: false,
+                    customdata: [JSON.stringify({mkIdx:i, view:view})],
+                });
+            }
+
+            // Event overlays
+            for (const app of m.appearances) {
+                if (app.step < sf || app.step > st) continue;
+                const sc = changes[app.step];
+                if (!sc) continue;
+
+                const wasAdded = sc.added.some(a => a.type===m.type && a.label===m.label && a.bar_idx===app.bar_idx);
+                if (wasAdded) {
+                    traces.push({
+                        type: 'scatter', mode: 'markers',
+                        x: [app.step+0.5], y: [i],
+                        marker: {symbol:'circle', size:9, color:'#3fb950', line:{color:'#fff',width:1}},
+                        hoverinfo: 'text',
+                        hovertext: '出现 @step'+app.step+': '+m.type+' '+m.label+'@'+app.bar_idx,
+                        showlegend: false,
+                        customdata: [JSON.stringify({mkIdx:i, step:app.step, changeType:'added', view:view})],
+                    });
+                }
+
+                const wasRemoved = m.lastStep===app.step && sc.removed.some(a => a.type===m.type && a.label===m.label && a.bar_idx===app.bar_idx);
+                if (wasRemoved) {
+                    traces.push({
+                        type: 'scatter', mode: 'markers',
+                        x: [app.step+0.5], y: [i],
+                        marker: {symbol:'x', size:9, color:'#f85149', line:{width:2}},
+                        hoverinfo: 'text',
+                        hovertext: '消失 @step'+app.step+': '+m.type+' '+m.label+'@'+app.bar_idx,
+                        showlegend: false,
+                        customdata: [JSON.stringify({mkIdx:i, step:app.step, changeType:'removed', view:view})],
+                    });
+                }
+            }
+
+            // Drift indicators
+            for (let j=1; j<m.appearances.length; j++) {
+                if (m.appearances[j].bar_idx !== m.appearances[j-1].bar_idx) {
+                    const app = m.appearances[j];
+                    if (app.step >= sf && app.step <= st) {
+                        traces.push({
+                            type: 'scatter', mode: 'markers',
+                            x: [app.step+0.5], y: [i],
+                            marker: {symbol:'arrow-right', size:9, color:'#d29922', line:{width:1}},
+                            hoverinfo: 'text',
+                            hovertext: '漂移 @step'+app.step+': '+m.appearances[j-1].bar_idx+'→'+app.bar_idx,
+                            showlegend: false,
+                            customdata: [JSON.stringify({mkIdx:i, step:app.step, changeType:'modified', view:view})],
+                        });
+                    }
+                }
+            }
+
+            const fapp = m.appearances[0];
+            yLabels.push((m.type==='entry'?'入':'出')+m.label+'@'+fapp.bar_idx);
+        }
+
+        // Legend traces (decorative)
+        traces.push({
+            type:'scatter', mode:'markers', x:[null],y:[null],
+            marker:{symbol:'circle',size:9,color:'#3fb950'},
+            name:'出现 (added)', showlegend:true,
+        });
+        traces.push({
+            type:'scatter', mode:'markers', x:[null],y:[null],
+            marker:{symbol:'x',size:9,color:'#f85149'},
+            name:'消失 (removed)', showlegend:true,
+        });
+        traces.push({
+            type:'scatter', mode:'markers', x:[null],y:[null],
+            marker:{symbol:'arrow-right',size:9,color:'#d29922'},
+            name:'漂移 (modified)', showlegend:true,
+        });
+
+        const layout = {
+            paper_bgcolor: '#0d1117', plot_bgcolor: '#0d1117',
+            font: {color:'#c9d1d9', size:11},
+            margin: {l:120, r:20, t:10, b:40},
+            showlegend: true,
+            legend: {x:0.98, y:1, xanchor:'right', font:{size:10,color:'#8b949e'},
+                     bgcolor:'rgba(22,27,34,0.9)', bordercolor:'#30363d', borderwidth:1},
+            xaxis: {
+                title: {text:'Step', font:{size:12}},
+                range: [sf-0.5, st+1.5],
+                dtick: 1,
+                gridcolor: '#21262d', zeroline: false,
+                tickfont: {size:10},
+            },
+            yaxis: {
+                tickvals: visMk.map((_,i)=>i),
+                ticktext: yLabels,
+                tickfont: {size:10},
+                gridcolor: '#21262d', zeroline: false,
+                autorange: 'reversed',
+            },
+            barmode: 'overlay',
+            hovermode: 'closest',
+        };
+
+        const config = {
+            displayModeBar: true,
+            modeBarButtonsToRemove: ['lasso2d','select2d','autoScale2d'],
+            responsive: true,
+        };
+
+        Plotly.newPlot('gantt-plot', traces, layout, config);
+
+        // Click handler - Plotly.newPlot replaces old listeners automatically
+        const plotEl = document.getElementById('gantt-plot');
+        plotEl.on('plotly_click', function(data) {
+            if (!data.points || data.points.length===0) return;
+            const pt = data.points[0];
+            if (!pt.customdata) return;
+            try {
+                const cd = typeof pt.customdata==='string' ? JSON.parse(pt.customdata) : pt.customdata;
+                if (cd.mkIdx !== undefined) {
+                    const marker = visMk[cd.mkIdx];
+                    if (cd.changeType) {
+                        renderCascade(view, cd.step, marker);
+                    } else {
+                        renderCascade(view, null, marker, true);
+                    }
+                }
+            } catch(e) { console.error(e); }
+        });
+
+        plotEl.on('plotly_hover', function(data) {
+            const infoEl = document.getElementById('step-range-info');
+            if (!data.points || data.points.length===0) { infoEl.style.display='none'; return; }
+            const pt = data.points[0];
+            if (!pt.customdata) { infoEl.style.display='none'; return; }
+            try {
+                const cd = typeof pt.customdata==='string' ? JSON.parse(pt.customdata) : pt.customdata;
+                if (cd.step !== undefined && cd.changeType) {
+                    const tm = {added:'出现',removed:'消失',modified:'漂移'};
+                    infoEl.textContent = '选中: step '+cd.step+' | '+ (tm[cd.changeType]||cd.changeType) +' | 点击查看级联分析';
+                    infoEl.style.display = 'block';
+                } else if (cd.mkIdx !== undefined) {
+                    const m = visMk[cd.mkIdx];
+                    infoEl.textContent = '选中: '+m.type+' '+m.label+'@'+m.appearances[0].bar_idx+' | Steps '+m.firstStep+'-'+m.lastStep+' | 点击查看详情';
+                    infoEl.style.display = 'block';
+                }
+            } catch(e) { infoEl.style.display='none'; }
+        });
+    }
+
+    function emptyPlot(divId, msg) {
+        Plotly.newPlot(divId, [{
+            type:'scatter', x:[0], y:[0], text:[msg],
+            mode:'text', textfont:{color:'#8b949e', size:16}
+        }], {
+            paper_bgcolor:'#0d1117', plot_bgcolor:'#0d1117',
+            xaxis:{visible:false}, yaxis:{visible:false},
+            showlegend:false, margin:{l:0,r:0,t:0,b:0}
+        }, {displayModeBar:false, responsive:true});
+    }
+
+    // ---- Render: Cascade Detail ----
+    function renderCascade(view, step, marker, isBarClick) {
+        const el = document.getElementById('cascade-detail');
+        const cascade = (step !== null) ? (state.cascadeData[view]?.[step]) : null;
+        const changes = state.bsChanges[view] || {};
+        const sc = step !== null ? (changes[step] || {added:[],removed:[],modified:[]}) : null;
+        let h = '';
+
+        if (isBarClick && marker) {
+            const fa = marker.appearances[0], la = marker.appearances[marker.appearances.length-1];
+            const tl = marker.type==='entry'?'入场':'出场';
+            h += '<div class="event-header">'+tl+' '+marker.label+'@'+fa.bar_idx+' ('+(fa.date||'')+')</div>';
+            h += '<div style="padding:8px 0;font-size:13px;line-height:1.8;">';
+            h += '<div>类型: <b>'+tl+'</b> | 方向: <b style="color:'+(marker.label==='B'?'#3fb950':'#f85149')+'">'+(marker.label==='B'?'做多':'做空')+'</b></div>';
+            h += '<div>生命周期: step <b>'+marker.firstStep+'</b> → <b>'+marker.lastStep+'</b> (共 '+(marker.lastStep-marker.firstStep+1)+' 步)</div>';
+            h += '<div>初始 bar_idx: <b>'+fa.bar_idx+'</b> | 最终 bar_idx: <b>'+la.bar_idx+'</b></div>';
+            const drifts = [];
+            for (let i=1; i<marker.appearances.length; i++) {
+                if (marker.appearances[i].bar_idx !== marker.appearances[i-1].bar_idx) {
+                    drifts.push('step'+marker.appearances[i].step+': '+marker.appearances[i-1].bar_idx+'→'+marker.appearances[i].bar_idx);
+                }
+            }
+            if (drifts.length>0) {
+                h += '<div style="margin-top:6px;color:#d29922;">漂移记录:</div>';
+                for (const d of drifts) h += '<div style="font-size:11px;color:#d29922;padding-left:12px;">→ '+d+'</div>';
+            }
+            h += '</div>';
+            // Show cascade at first step if available
+            const fc = state.cascadeData[view]?.[marker.firstStep];
+            if (fc) {
+                h += '<div style="margin-top:12px;font-size:12px;color:var(--text2);">此 marker 出现时的级联数据:</div>';
+                h += buildCascadeHTML(fc);
+            }
+        } else if (sc && step !== null) {
+            const total = sc.added.length + sc.removed.length + sc.modified.length;
+            let hc = '', ht = 'Step '+(step-1)+' → '+step+': ';
+            const parts = [];
+            if (sc.added.length>0) { parts.push(sc.added.length+' 新增'); hc='added'; }
+            if (sc.removed.length>0) { parts.push(sc.removed.length+' 消失'); hc=hc||'removed'; }
+            if (sc.modified.length>0) { parts.push(sc.modified.length+' 漂移'); hc=hc||'modified'; }
+            ht += parts.join(', ');
+            h += '<div class="event-header '+hc+'">'+ht+'</div>';
+
+            if (sc.added.length>0) {
+                h += '<div style="margin-bottom:6px;font-size:11px;color:#3fb950;">新增 (+):</div>';
+                for (const a of sc.added)
+                    h += '<div style="font-size:11px;padding-left:12px;color:#c9d1d9;">'+a.type+' '+a.label+'@'+a.bar_idx+' ('+(a.date||'')+')'+(a.exit_reason?' ['+a.exit_reason+']':'')+'</div>';
+            }
+            if (sc.removed.length>0) {
+                h += '<div style="margin-bottom:6px;font-size:11px;color:#f85149;">消失 (-):</div>';
+                for (const a of sc.removed)
+                    h += '<div style="font-size:11px;padding-left:12px;color:#c9d1d9;">'+a.type+' '+a.label+'@'+a.bar_idx+' ('+(a.date||'')+')'+(a.exit_reason?' ['+a.exit_reason+']':'')+'</div>';
+            }
+            if (sc.modified.length>0) {
+                h += '<div style="margin-bottom:6px;font-size:11px;color:#d29922;">漂移 (~):</div>';
+                for (const a of sc.modified)
+                    h += '<div style="font-size:11px;padding-left:12px;color:#c9d1d9;">'+a.type+' '+a.label+'@'+a.bar_idx+' ('+(a.date||'')+')'+(a.exit_reason?' ['+a.exit_reason+']':'')+'</div>';
+            }
+
+            if (cascade) {
+                h += '<div style="margin-top:14px;font-size:13px;font-weight:600;color:var(--accent);">级联放大链路</div>';
+                h += buildCascadeHTML(cascade);
+            } else {
+                h += '<div style="margin-top:14px;color:var(--text2);font-size:12px;">无级联数据（缺少 filter_tail.jsonl / schmitt_snapshot.jsonl）</div>';
+            }
+        } else {
+            h += '<div class="empty-state">点击左侧甘特图上的 BS marker 或变动标记查看级联分析</div>';
+        }
+
+        el.innerHTML = h;
+    }
+
+    function buildCascadeHTML(cas) {
+        if (cas.filterDelta === undefined)
+            return '<div style="color:var(--text2);font-size:12px;padding:8px;">filter tail 数据不可用</div>';
+
+        let h = '<div class="chain">';
+
+        // 1. Filter tail
+        const fdStr = (cas.filterDelta>=0?'+':'') + cas.filterDelta.toFixed(6);
+        const fdCls = Math.abs(cas.filterDelta)<1e-9 ? 'neut' : (cas.filterDelta>0?'pos':'neg');
+        h += '<div class="chain-node">';
+        h += '<span class="node-icon">&#128202;</span>';
+        h += '<span class="node-label">filter tail[-1]</span>';
+        h += '<span class="node-value">'+cas.filterPrev.toFixed(4)+' → <b>'+cas.filterCurr.toFixed(4)+'</b></span>';
+        h += '<span class="node-delta '+fdCls+'">'+fdStr+'</span>';
+        h += '</div>';
+
+        // 2. EPS tail
+        if (cas.epsDelta !== undefined) {
+            const edStr = (cas.epsDelta>=0?'+':'') + cas.epsDelta.toFixed(6);
+            const edCls = Math.abs(cas.epsDelta)<1e-9 ? 'neut' : (cas.epsDelta>0?'pos':'neg');
+            const ampS = cas.epsAmp!==undefined ? 'x'+Math.abs(cas.epsAmp).toFixed(1) : '';
+            h += '<div class="chain-arrow">↓ <span class="multiplier">'+ampS+'</span></div>';
+            h += '<div class="chain-node">';
+            h += '<span class="node-icon">ε</span>';
+            h += '<span class="node-label">eps tail[-1]</span>';
+            h += '<span class="node-value">'+cas.epsPrev.toFixed(4)+' → <b>'+cas.epsCurr.toFixed(4)+'</b></span>';
+            h += '<span class="node-delta '+edCls+'">'+edStr+'</span>';
+            h += '</div>';
+        }
+
+        // 3. Sig changes
+        if (cas.sigDelta) {
+            const sp = [];
+            for (const [k,v] of Object.entries(cas.sigDelta))
+                sp.push('sig['+k+']: '+(v>0?'+':'')+v);
+            h += '<div class="chain-arrow">↓</div>';
+            h += '<div class="chain-node">';
+            h += '<span class="node-icon">&#128246;</span>';
+            h += '<span class="node-label">Sig 信号计数</span>';
+            h += '<span class="node-value">'+sp.join(', ')+'</span>';
+            h += '<span class="node-delta" style="color:#a371f7;">flipped</span>';
+            h += '</div>';
+        }
+
+        // 4. Pair count
+        if (cas.pairDelta !== undefined) {
+            const pdStr = (cas.pairDelta>=0?'+':'') + cas.pairDelta;
+            const pdCls = cas.pairDelta===0 ? 'neut' : (cas.pairDelta>0?'pos':'neg');
+            h += '<div class="chain-arrow">↓</div>';
+            h += '<div class="chain-node">';
+            h += '<span class="node-icon">&#128279;</span>';
+            h += '<span class="node-label">Pairs</span>';
+            h += '<span class="node-value">'+cas.pairPrev+' → <b>'+cas.pairCurr+'</b></span>';
+            h += '<span class="node-delta '+pdCls+'">'+pdStr+'</span>';
+            h += '</div>';
+        }
+
+        // 5. Trade count
+        if (cas.tradeDelta !== undefined) {
+            const tdStr = (cas.tradeDelta>=0?'+':'') + cas.tradeDelta;
+            const tdCls = cas.tradeDelta===0 ? 'neut' : (cas.tradeDelta>0?'pos':'neg');
+            h += '<div class="chain-arrow">↓</div>';
+            h += '<div class="chain-node">';
+            h += '<span class="node-icon">&#128185;</span>';
+            h += '<span class="node-label">Trades</span>';
+            h += '<span class="node-value">'+cas.tradePrev+' → <b>'+cas.tradeCurr+'</b></span>';
+            h += '<span class="node-delta '+tdCls+'">'+tdStr+'</span>';
+            h += '</div>';
+        }
+
+        // 6. BS changes
+        h += '<div class="chain-arrow">↓</div>';
+        h += '<div class="chain-node">';
+        h += '<span class="node-icon">&#127919;</span>';
+        h += '<span class="node-label">BS变动</span>';
+        h += '<span class="node-value"><b>'+cas.totalChanges+' 个 marker 变动</b></span>';
+        h += '<span class="node-delta" style="color:var(--orange);">'+cas.totalChanges+' events</span>';
+        h += '</div>';
+
+        h += '</div>';
+
+        // Total amplification
+        if (cas.totalAmp !== undefined) {
+            h += '<div class="summary-bar">';
+            h += '总放大因子: <span class="amp">'+cas.totalAmp.toFixed(0)+'x</span>';
+            h += '<span style="font-weight:400;font-size:11px;color:var(--text2);display:block;">';
+            h += cas.totalChanges+' BS变动 / |Δfilter| '+Math.abs(cas.filterDelta).toFixed(6);
+            h += '</span></div>';
+        }
+
+        return h;
+    }
+
+    // ---- Render: Cross-View Heatmap ----
+    function renderCrossView() {
+        const allSteps = new Set();
+        const vd = {}; // view -> {step -> count}
+        for (const view of state.views) {
+            vd[view] = {};
+            const ch = state.bsChanges[view] || {};
+            for (const [ss,c] of Object.entries(ch)) {
+                const step = parseInt(ss);
+                allSteps.add(step);
+                vd[view][step] = c.added.length + c.removed.length + c.modified.length;
+            }
+        }
+        const sorted = Array.from(allSteps).sort((a,b)=>a-b);
+
+        if (sorted.length === 0) {
+            emptyPlot('cross-view-plot', '无 BS 变动数据');
+            return;
+        }
+
+        const z = [], yL = [], xL = state.views.map(v => v+' ('+(state.viewLabelMap[v]||'?')+')');
+        const hov = [];
+        for (const step of sorted) {
+            const row = [];
+            const hr = [];
+            for (const view of state.views) {
+                const cnt = vd[view][step] || 0;
+                row.push(cnt);
+                if (cnt>0) {
+                    const ch = state.bsChanges[view]?.[step];
+                    const p = [];
+                    if (ch) {
+                        if (ch.added.length>0) p.push(ch.added.length+'新增');
+                        if (ch.removed.length>0) p.push(ch.removed.length+'消失');
+                        if (ch.modified.length>0) p.push(ch.modified.length+'漂移');
+                    }
+                    hr.push(view+': '+cnt+'变动 ('+p.join(',')+')');
+                } else {
+                    hr.push(view+': 无变动');
+                }
+            }
+            z.push(row);
+            hov.push(hr);
+            yL.push('step '+step);
+        }
+
+        const trace = {
+            type: 'heatmap',
+            z: z, x: xL, y: yL,
+            colorscale: [
+                [0,'#0d1117'],[0.01,'#161b22'],[0.15,'#1b3a1b'],
+                [0.4,'#3fb950'],[0.7,'#d29922'],[1.0,'#f85149'],
+            ],
+            zmin: 0, zmax: Math.max(1, ...z.flat()),
+            text: hov, hoverinfo: 'text', showscale: true,
+            colorbar: {
+                title:{text:'变动数',font:{color:'#8b949e',size:10}},
+                tickfont:{color:'#8b949e',size:9},
+                outlinecolor:'#30363d', thickness:12, len:0.8,
+            },
+            xgap: 2, ygap: 2,
+        };
+
+        Plotly.newPlot('cross-view-plot', [trace], {
+            paper_bgcolor:'#0d1117', plot_bgcolor:'#0d1117',
+            font:{color:'#c9d1d9',size:10},
+            margin:{l:80,r:10,t:5,b:40},
+            xaxis:{side:'top',tickfont:{size:10},gridcolor:'#21262d'},
+            yaxis:{tickfont:{size:9},gridcolor:'#21262d',autorange:'reversed'},
+        }, {displayModeBar:false,responsive:true});
+    }
+
+    // ---- Render All ----
+    function renderAll() {
+        document.getElementById('stat-steps').textContent = state.maxStep;
+        const view = state.currentView;
+        const ch = state.bsChanges[view] || {};
+        const jumps = Object.values(ch).filter(c => {
+            return (c.added.length+c.removed.length+c.modified.length) > 0;
+        }).length;
+        document.getElementById('stat-jumps').textContent = jumps;
+        document.getElementById('stat-markers').textContent = (state.bsMarkers[view]||[]).length;
+        renderGantt();
+        renderCrossView();
+        document.getElementById('cascade-detail').innerHTML =
+            '<div class="empty-state">点击左侧甘特图上的 BS marker 或变动标记查看级联分析</div>';
+    }
+
+    // ---- Event Handlers ----
+    function onViewChange() {
+        state.currentView = document.getElementById('view-select').value;
+        renderAll();
+    }
+    function onStepFilter() {
+        state.stepFrom = parseInt(document.getElementById('step-from').value) || 0;
+        state.stepTo = parseInt(document.getElementById('step-to').value) || state.maxStep;
+        renderAll();
+    }
+
+    // ---- Init ----
+    function init() {
+        emptyPlot('gantt-plot', '点击"选择数据目录"加载回测数据');
+        emptyPlot('cross-view-plot', '请先加载数据');
+    }
+
+    // ---- Public API ----
+    return {
+        loadDirectory, onViewChange, onStepFilter, init,
+        // exposed for debug
+        _state: state,
+    };
+})();
+
+window.addEventListener('DOMContentLoaded', BSA.init);
+</script>
+</body>
+</html>
