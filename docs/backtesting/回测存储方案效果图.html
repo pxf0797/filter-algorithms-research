@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>回测数据存储方案 — 可视化效果图</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --border: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent-blue: #58a6ff;
+            --accent-green: #3fb950;
+            --accent-red: #f85149;
+            --accent-yellow: #d2991d;
+            --accent-purple: #a371f7;
+            --accent-cyan: #39d2c0;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', 'Monaco', monospace;
+            line-height: 1.6;
+            padding: 40px 60px;
+            min-width: 1200px;
+        }
+
+        /* ---- Header ---- */
+        .header {
+            text-align: center;
+            padding: 40px 0 50px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 50px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 600;
+            color: var(--accent-cyan);
+            letter-spacing: 1px;
+            margin-bottom: 10px;
+        }
+        .header .subtitle {
+            font-size: 14px;
+            color: var(--text-secondary);
+        }
+        .header .badge {
+            display: inline-block;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 4px 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin: 0 4px;
+        }
+
+        /* ---- Section ---- */
+        .section {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 40px;
+            overflow: hidden;
+        }
+        .section-header {
+            background: var(--bg-tertiary);
+            padding: 16px 28px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .section-header .num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            background: var(--accent-blue);
+            color: #fff;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+        .section-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .section-body {
+            padding: 28px;
+        }
+
+        /* ---- Panel 1: Mermaid ---- */
+        .mermaid-wrapper {
+            display: flex;
+            justify-content: center;
+            padding: 20px 0;
+        }
+        .mermaid-wrapper .mermaid {
+            font-size: 13px;
+        }
+
+        /* ---- Panel 2: Folder Tree ---- */
+        .folder-tree {
+            font-size: 14px;
+            line-height: 2;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 20px 28px;
+            overflow-x: auto;
+            white-space: pre;
+        }
+        .folder-tree .ft-folder { color: var(--accent-blue); font-weight: 600; }
+        .folder-tree .ft-file-parquet { color: var(--accent-green); }
+        .folder-tree .ft-file-jsonl { color: var(--accent-yellow); }
+        .folder-tree .ft-file-json { color: var(--accent-purple); }
+        .folder-tree .ft-comment { color: var(--text-secondary); font-style: italic; }
+        .folder-tree .ft-dots { color: var(--text-secondary); }
+
+        /* ---- Panel 3: Plotly Chart ---- */
+        #chart-container {
+            width: 100%;
+            min-height: 960px;
+        }
+        .chart-legend-note {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-top: 16px;
+            padding: 12px 16px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 12px;
+        }
+        .chart-legend-note .col-tag {
+            display: inline-block;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 3px;
+            padding: 2px 8px;
+            font-family: 'SF Mono', monospace;
+            color: var(--accent-cyan);
+        }
+
+        /* ---- Panel 4: Comparison Table ---- */
+        .comp-table-wrap {
+            overflow-x: auto;
+        }
+        .comp-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+        .comp-table thead th {
+            background: var(--bg-tertiary);
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--accent-cyan);
+            border-bottom: 2px solid var(--border);
+            white-space: nowrap;
+        }
+        .comp-table tbody td {
+            padding: 11px 16px;
+            border-bottom: 1px solid var(--border);
+            vertical-align: top;
+        }
+        .comp-table tbody tr:hover {
+            background: rgba(88, 166, 255, 0.04);
+        }
+        .comp-table .col-old {
+            color: var(--accent-red);
+            font-size: 13px;
+        }
+        .comp-table .col-new {
+            color: var(--accent-green);
+            font-size: 13px;
+        }
+        .comp-table .col-improve {
+            text-align: center;
+            font-weight: 600;
+        }
+        .badge-new {
+            display: inline-block;
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--accent-green);
+            border: 1px solid rgba(63, 185, 80, 0.3);
+            border-radius: 3px;
+            padding: 1px 6px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .badge-up {
+            display: inline-block;
+            background: rgba(88, 166, 255, 0.15);
+            color: var(--accent-blue);
+            border: 1px solid rgba(88, 166, 255, 0.3);
+            border-radius: 3px;
+            padding: 1px 6px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .badge-warn {
+            display: inline-block;
+            background: rgba(248, 81, 73, 0.10);
+            color: var(--accent-red);
+            border: 1px solid rgba(248, 81, 73, 0.2);
+            border-radius: 3px;
+            padding: 1px 6px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        /* ---- Footer ---- */
+        .footer {
+            text-align: center;
+            padding: 30px 0;
+            color: var(--text-secondary);
+            font-size: 12px;
+            border-top: 1px solid var(--border);
+            margin-top: 20px;
+        }
+
+        /* ---- Responsive minor ---- */
+        @media (max-width: 1400px) {
+            body { padding: 20px 24px; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ======== HEADER ======== -->
+<div class="header">
+    <h1>回测数据 CLI 存储方案</h1>
+    <p class="subtitle">Parquet 全量存储 + DuckDB/Polars 离线分析 &nbsp;|&nbsp; 方案可视化概览</p>
+    <div style="margin-top:14px;">
+        <span class="badge">Schema v1.0</span>
+        <span class="badge">Parquet ZSTD</span>
+        <span class="badge">JSONL 事件流</span>
+        <span class="badge">DuckDB/Polars</span>
+    </div>
+</div>
+
+<!-- ======== Panel 1: Architecture ======== -->
+<div class="section">
+    <div class="section-header">
+        <span class="num">1</span>
+        <h2>方案总览 &mdash; 数据流架构</h2>
+    </div>
+    <div class="section-body">
+        <div class="mermaid-wrapper">
+            <div class="mermaid">
+flowchart TD
+    CLI["🔧 CLI<br/>backtest_cli.py<br/>--save-data"]
+    BR["⚙️ BacktestRunner<br/>逐 bar 循环产出全量数据"]
+    PS["📦 ParquetStore<br/>（新增模块）"]
+    BP["📄 bars.parquet<br/>每 bar 全量 22 列<br/>ZSTD level=3"]
+    TP["📄 trades.parquet<br/>逐笔交易 14 字段<br/>ZSTD level=3"]
+    ER["📋 EventRecorder<br/>（已有，不变）"]
+    EV["📄 events.jsonl<br/>合并 BS/Schmitt/Signal/<br/>Trade/Pair 事件流"]
+    MT["📄 metadata.json<br/>运行参数 + Schema 版本"]
+    ANALYZE["🔬 DuckDB / Polars 分析层<br/>列裁剪 · 谓词下推 · 跨 Session 聚合"]
+    CHART["📈 图表回放<br/>6 子图重建"]
+    TRADE["💹 交易分析<br/>胜率 · 盈亏比 · 回撤"]
+    COMPARE["📊 批量对比<br/>跨标的 · 跨周期 · 跨参数"]
+
+    CLI --> BR
+    BR --> PS
+    PS --> BP
+    PS --> TP
+    PS --> MT
+    BR --> ER
+    ER --> EV
+    BP --> ANALYZE
+    TP --> ANALYZE
+    EV --> ANALYZE
+    MT --> ANALYZE
+    ANALYZE --> CHART
+    ANALYZE --> TRADE
+    ANALYZE --> COMPARE
+
+    style CLI fill:#1a3a5c,stroke:#58a6ff,color:#e6edf3
+    style BR fill:#1a3a5c,stroke:#58a6ff,color:#e6edf3
+    style PS fill:#1a4a2a,stroke:#3fb950,color:#e6edf3
+    style BP fill:#1a4a2a,stroke:#3fb950,color:#e6edf3
+    style TP fill:#1a4a2a,stroke:#3fb950,color:#e6edf3
+    style MT fill:#2a1a4a,stroke:#a371f7,color:#e6edf3
+    style ER fill:#3a3a1a,stroke:#d2991d,color:#e6edf3
+    style EV fill:#3a3a1a,stroke:#d2991d,color:#e6edf3
+    style ANALYZE fill:#1a3a5c,stroke:#39d2c0,color:#e6edf3
+    style CHART fill:#1a2a3a,stroke:#8b949e,color:#e6edf3
+    style TRADE fill:#1a2a3a,stroke:#8b949e,color:#e6edf3
+    style COMPARE fill:#1a2a3a,stroke:#8b949e,color:#e6edf3
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ======== Panel 2: Directory Structure ======== -->
+<div class="section">
+    <div class="section-header">
+        <span class="num">2</span>
+        <h2>存储目录结构</h2>
+    </div>
+    <div class="section-body">
+        <div class="folder-tree">
+<span class="ft-folder">backtest_output/</span>                          <span class="ft-comment">← 可配置根目录 (--output-root)</span>
+<span class="ft-folder">├── AAPL/</span>                                  <span class="ft-comment">← 按 ticker 分组</span>
+<span class="ft-folder">│   ├── 20260716_143052_d1/</span>               <span class="ft-comment">← {date}_{time}_{preset}</span>
+<span class="ft-file-parquet">│   │   ├── bars.parquet</span>                   <span class="ft-comment">← ★ 每 bar 全量 22 列 (约 15 MB)</span>
+<span class="ft-file-parquet">│   │   ├── trades.parquet</span>                 <span class="ft-comment">← ★ 逐笔交易 14 字段 (约 50 KB)</span>
+<span class="ft-file-jsonl">│   │   ├── events.jsonl</span>                   <span class="ft-comment">← 合并事件流 (BS/Schmitt/Signal/Trade/Pair)</span>
+<span class="ft-file-json">│   │   └── metadata.json</span>                  <span class="ft-comment">← 运行参数 + Schema 版本 + 统计摘要</span>
+<span class="ft-folder">│   └── 20260715_090000_h4/</span>
+<span class="ft-dots">│       └── ...</span>
+<span class="ft-folder">├── TSLA/</span>
+<span class="ft-folder">│   └── 20260716_160000_d1/</span>
+<span class="ft-dots">│       └── ...</span>
+<span class="ft-file-json">└── _batch_index.json</span>                       <span class="ft-comment">← 批量运行索引 (可选)</span>
+        </div>
+    </div>
+</div>
+
+<!-- ======== Panel 3: Chart Replay ======== -->
+<div class="section">
+    <div class="section-header">
+        <span class="num">3</span>
+        <h2>回测图表回放 &mdash; 从 Parquet 重建多子图</h2>
+    </div>
+    <div class="section-body">
+        <div id="chart-container"></div>
+        <div class="chart-legend-note">
+            <span style="color:var(--text-secondary);">Parquet 列名映射：</span>
+            <span>子图1 → <span class="col-tag">open, high, low, close, v0_filtered</span></span>
+            <span>子图2 → <span class="col-tag">v0_residual</span> (close - filtered)</span>
+            <span>子图3 → <span class="col-tag">schmitt_v</span> (滤波速度)</span>
+            <span>子图4 → <span class="col-tag">schmitt_a</span> (加速度)  + <span class="col-tag">schmitt_sigma_v</span> (阈值)</span>
+            <span>子图5 → <span class="col-tag">schmitt_sig</span> (+1/-1/0)</span>
+            <span>子图6 → <span class="col-tag">v0_pnl_long, v0_pnl_short</span></span>
+        </div>
+    </div>
+</div>
+
+<!-- ======== Panel 4: Before/After Comparison ======== -->
+<div class="section">
+    <div class="section-header">
+        <span class="num">4</span>
+        <h2>数据存储前后对比 &mdash; EventRecorder 摘要 vs Parquet 全量</h2>
+    </div>
+    <div class="section-body">
+        <div class="comp-table-wrap">
+            <table class="comp-table">
+                <thead>
+                    <tr>
+                        <th style="width:14%;">数据项</th>
+                        <th style="width:18%;">Parquet 列名</th>
+                        <th style="width:22%;">现在存储<br><span style="font-weight:400;font-size:12px;color:var(--accent-red);">(EventRecorder 摘要)</span></th>
+                        <th style="width:26%;">方案后存储<br><span style="font-weight:400;font-size:12px;color:var(--accent-green);">(Parquet 全量)</span></th>
+                        <th style="width:8%;text-align:center;">提升</th>
+                        <th style="width:12%;">分析场景</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>收盘价序列</strong></td>
+                        <td><code style="color:var(--accent-cyan);">close</code> / <code style="color:var(--accent-cyan);">open, high, low</code></td>
+                        <td class="col-old">仅尾部 3~5 个值</td>
+                        <td class="col-new">全量 OHLCV 数组 (120+ bar × 8 view)</td>
+                        <td class="col-improve"><span class="badge-up">✅ 改进</span></td>
+                        <td>K 线图回放、价格形态识别</td>
+                    </tr>
+                    <tr>
+                        <td><strong>滤波值</strong></td>
+                        <td><code style="color:var(--accent-cyan);">v0_filtered</code> / <code style="color:var(--accent-cyan);">filtered2</code></td>
+                        <td class="col-old">仅最后 1 个值</td>
+                        <td class="col-new">全量数组 (每 bar 一个 float32)</td>
+                        <td class="col-improve"><span class="badge-up">✅ 改进</span></td>
+                        <td>滤波器效果验证、参数调优</td>
+                    </tr>
+                    <tr>
+                        <td><strong>施密特触发器中间状态</strong></td>
+                        <td><code style="color:var(--accent-cyan);">schmitt_eps, schmitt_v, schmitt_a</code></td>
+                        <td class="col-old">仅尾部 3~5 个值</td>
+                        <td class="col-new">全量数组 (eps / v / a / sigma_v)</td>
+                        <td class="col-improve"><span class="badge-up">✅ 改进</span></td>
+                        <td>信号翻转过程回溯、阈值敏感性分析</td>
+                    </tr>
+                    <tr>
+                        <td><strong>信号序列</strong></td>
+                        <td><code style="color:var(--accent-cyan);">schmitt_sig</code></td>
+                        <td class="col-old">仅尾部 3~5 个值</td>
+                        <td class="col-new">全量数组 (+1/0/-1 每 bar)</td>
+                        <td class="col-improve"><span class="badge-up">✅ 改进</span></td>
+                        <td>信号一致性分析、多周期矛盾检测</td>
+                    </tr>
+                    <tr>
+                        <td><strong>PnL 曲线</strong></td>
+                        <td><code style="color:var(--accent-cyan);">v0_pnl_long, v0_pnl_short</code></td>
+                        <td class="col-old"><span class="badge-warn">不存储</span></td>
+                        <td class="col-new">全量累积收益数组 (每 bar float32)</td>
+                        <td class="col-improve"><span class="badge-new">🆕 新增</span></td>
+                        <td>资金曲线回放、回撤分析、Sharpe 计算</td>
+                    </tr>
+                    <tr>
+                        <td><strong>交易明细</strong></td>
+                        <td><code style="color:var(--accent-cyan);">trades.parquet</code> (14 字段)</td>
+                        <td class="col-old">仅统计 (数量 / 胜率)</td>
+                        <td class="col-new">逐笔完整明细 (entry/exit bar/price/pnl 等)</td>
+                        <td class="col-improve"><span class="badge-new">🆕 新增</span></td>
+                        <td>逐笔审查、亏损归因、持仓时长分布</td>
+                    </tr>
+                    <tr>
+                        <td><strong>持仓掩码</strong></td>
+                        <td><code style="color:var(--accent-cyan);">long_mask, short_mask</code></td>
+                        <td class="col-old"><span class="badge-warn">不存储</span></td>
+                        <td class="col-new">布尔数组 (每 bar 是否持仓)</td>
+                        <td class="col-improve"><span class="badge-new">🆕 新增</span></td>
+                        <td>持仓状态时序、仓位管理分析</td>
+                    </tr>
+                    <tr>
+                        <td><strong>预测抛物线数据</strong></td>
+                        <td><code style="color:var(--accent-cyan);">pair_id</code> (关联 prediction_pairs)</td>
+                        <td class="col-old"><span class="badge-warn">不存储</span></td>
+                        <td class="col-new">每 pair 起止 bar / 参数记录</td>
+                        <td class="col-improve"><span class="badge-new">🆕 新增</span></td>
+                        <td>预测准确率评估、pair 盈亏统计</td>
+                    </tr>
+                    <tr>
+                        <td><strong>高周期对齐 PnL</strong></td>
+                        <td><code style="color:var(--accent-cyan);">higher_pnl</code></td>
+                        <td class="col-old"><span class="badge-warn">不存储</span></td>
+                        <td class="col-new">全量数组 (每 bar float32)</td>
+                        <td class="col-improve"><span class="badge-new">🆕 新增</span></td>
+                        <td>多周期 PnL 对齐分析</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Schema 版本</strong></td>
+                        <td><code style="color:var(--accent-cyan);">metadata.json</code></td>
+                        <td class="col-old"><span class="badge-warn">无</span></td>
+                        <td class="col-new">schema_version 字段 + Parquet 内嵌版本号</td>
+                        <td class="col-improve"><span class="badge-new">🆕 新增</span></td>
+                        <td>版本迁移、兼容性检查</td>
+                    </tr>
+                    <tr>
+                        <td><strong>时间轴</strong></td>
+                        <td><code style="color:var(--accent-cyan);">timestamp</code> (datetime64[ns])</td>
+                        <td class="col-old"><span class="badge-warn">不存储</span></td>
+                        <td class="col-new">每 bar 精确时间戳</td>
+                        <td class="col-improve"><span class="badge-new">🆕 新增</span></td>
+                        <td>按时间范围过滤、跨 session 对齐</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ======== FOOTER ======== -->
+<div class="footer">
+    回测数据 CLI 存储方案 &middot; Parquet ZSTD + JSONL + JSON &middot; DuckDB/Polars 分析层 &middot; 2026-07-16
+</div>
+
+<!-- ======== SCRIPTS ======== -->
+<script>
+// ============================================================
+// 1. Mermaid initialization
+// ============================================================
+(function() {
+    mermaid.initialize({
+        startOnLoad: true,
+        theme: 'dark',
+        themeVariables: {
+            darkMode: true,
+            background: '#161b22',
+            primaryColor: '#1a3a5c',
+            primaryTextColor: '#e6edf3',
+            primaryBorderColor: '#30363d',
+            lineColor: '#58a6ff',
+            secondaryColor: '#21262d',
+            tertiaryColor: '#161b22',
+        },
+        flowchart: {
+            useMaxWidth: true,
+            htmlLabels: true,
+            curve: 'basis',
+            padding: 20,
+            nodeSpacing: 50,
+            rankSpacing: 70,
+        },
+    });
+})();
+
+// ============================================================
+// 2. Simulated data generation (120 bars)
+// ============================================================
+function generateSimulatedData(n) {
+    n = n || 120;
+    var dates = [];
+    var close = [];
+    var open = [];
+    var high = [];
+    var low = [];
+    var volume = [];
+
+    var now = new Date();
+    var price = 100.0;
+    var seed = 42;
+
+    // Simple seeded random (mulberry32)
+    function rand() {
+        seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+        var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    }
+
+    for (var i = 0; i < n; i++) {
+        var d = new Date(now.getTime() - (n - 1 - i) * 3600000); // hourly
+        dates.push(d.toISOString());
+
+        var drift = (rand() - 0.48) * 2.5; // slight upward bias
+        price += drift;
+        price = Math.max(price, 85);
+        price = Math.min(price, 115);
+
+        var body = Math.abs(drift) * (0.6 + rand() * 0.8);
+        var wickUp = rand() * body * 0.8;
+        var wickDown = rand() * body * 0.8;
+
+        var o = price - drift * 0.4;
+        var c = price;
+        var h = c + wickUp;
+        var l = o - wickDown;
+        if (o > c) { var tmpH = o + wickUp; var tmpL = c - wickDown; h = tmpH; l = tmpL; }
+
+        close.push(c);
+        open.push(o);
+        high.push(Math.max(o, c) + wickUp);
+        low.push(Math.min(o, c) - wickDown);
+        volume.push(50000 + rand() * 200000);
+    }
+
+    // filtered: SMA(15) of close
+    var period = 15;
+    var filtered = new Array(n);
+    for (var i = 0; i < n; i++) {
+        var start = Math.max(0, i - period + 1);
+        var sum = 0, cnt = 0;
+        for (var j = start; j <= i; j++) { sum += close[j]; cnt++; }
+        filtered[i] = sum / cnt;
+    }
+
+    // residual = close - filtered
+    var residual = new Array(n);
+    for (var i = 0; i < n; i++) { residual[i] = close[i] - filtered[i]; }
+
+    // v = diff(filtered), smoothed
+    var v = new Array(n);
+    v[0] = 0;
+    for (var i = 1; i < n; i++) { v[i] = filtered[i] - filtered[i - 1]; }
+    // smooth v with SMA(3)
+    var vSmooth = new Array(n);
+    for (var i = 0; i < n; i++) {
+        var s = Math.max(0, i - 2), sum = 0, cnt = 0;
+        for (var j = s; j <= i; j++) { sum += v[j]; cnt++; }
+        vSmooth[i] = sum / cnt;
+    }
+
+    // a = diff(vSmooth)
+    var a = new Array(n);
+    a[0] = 0;
+    for (var i = 1; i < n; i++) { a[i] = vSmooth[i] - vSmooth[i - 1]; }
+
+    // threshold for a
+    var aSqSum = 0;
+    for (var i = 10; i < n; i++) { aSqSum += a[i] * a[i]; }
+    var aStd = Math.sqrt(aSqSum / (n - 10));
+    var aThreshold = aStd * 2.5;
+
+    // signal: based on v crossing threshold
+    var vThreshold = 0.08;
+    var signal = new Array(n);
+    for (var i = 0; i < n; i++) {
+        if (vSmooth[i] > vThreshold) signal[i] = 1;
+        else if (vSmooth[i] < -vThreshold) signal[i] = -1;
+        else signal[i] = 0;
+    }
+
+    // PnL: cumulative based on signal
+    var pnlLong = new Array(n);
+    var pnlShort = new Array(n);
+    pnlLong[0] = 100.0;
+    pnlShort[0] = 100.0;
+    for (var i = 1; i < n; i++) {
+        var ret = (close[i] - close[i - 1]) / close[i - 1];
+        pnlLong[i] = pnlLong[i - 1] * (1 + signal[i - 1] * ret);
+        pnlShort[i] = pnlShort[i - 1] * (1 - signal[i - 1] * ret);
+    }
+
+    return {
+        dates: dates,
+        open: open,
+        high: high,
+        low: low,
+        close: close,
+        volume: volume,
+        filtered: filtered,
+        residual: residual,
+        v: vSmooth,
+        a: a,
+        aThreshold: aThreshold,
+        signal: signal,
+        pnlLong: pnlLong,
+        pnlShort: pnlShort,
+    };
+}
+
+var data = generateSimulatedData(120);
+
+// ============================================================
+// 3. Plotly chart — 6-row subplot
+// ============================================================
+(function() {
+    // Y-axis domain allocation
+    var row1 = [0.70, 1.00];   // K-line + filtered
+    var row2 = [0.57, 0.68];   // Residual
+    var row3 = [0.43, 0.55];   // v
+    var row4 = [0.27, 0.41];   // a + threshold
+    var row5 = [0.13, 0.25];   // Signal
+    var row6 = [0.00, 0.11];   // PnL
+
+    var chartColors = {
+        candleUp: '#26a69a',
+        candleDown: '#ef5350',
+        filtered: '#58a6ff',
+        residual: '#d2991d',
+        residualZero: 'rgba(255,255,255,0.2)',
+        v: '#a371f7',
+        vZero: 'rgba(255,255,255,0.15)',
+        a: '#3fb950',
+        aPosThreshold: 'rgba(248,81,73,0.5)',
+        aNegThreshold: 'rgba(248,81,73,0.5)',
+        signal: '#39d2c0',
+        pnlLong: '#3fb950',
+        pnlShort: '#f85149',
+        pnlBase: 'rgba(255,255,255,0.2)',
+        gridColor: 'rgba(255,255,255,0.06)',
+        textColor: '#8b949e',
+        titleColor: '#e6edf3',
+    };
+
+    // Build traces
+    var traces = [];
+
+    // --- Subplot 1: Candlestick + Filtered ---
+    traces.push({
+        type: 'candlestick',
+        x: data.dates,
+        open: data.open,
+        high: data.high,
+        low: data.low,
+        close: data.close,
+        name: 'K线',
+        increasing: { line: { color: chartColors.candleUp, width: 1 }, fillcolor: chartColors.candleUp },
+        decreasing: { line: { color: chartColors.candleDown, width: 1 }, fillcolor: chartColors.candleDown },
+        xaxis: 'x',
+        yaxis: 'y',
+        showlegend: true,
+        legendgroup: 'price',
+        hoverinfo: 'x+open+high+low+close',
+    });
+    traces.push({
+        type: 'scatter',
+        x: data.dates,
+        y: data.filtered,
+        name: 'v0_filtered',
+        mode: 'lines',
+        line: { color: chartColors.filtered, width: 2 },
+        xaxis: 'x',
+        yaxis: 'y',
+        showlegend: true,
+        legendgroup: 'filtered',
+        hovertemplate: '%{y:.2f}<extra>v0_filtered</extra>',
+    });
+
+    // --- Subplot 2: Residual ---
+    traces.push({
+        type: 'scatter',
+        x: data.dates,
+        y: data.residual,
+        name: 'v0_residual',
+        mode: 'lines',
+        line: { color: chartColors.residual, width: 1.2 },
+        fill: 'tozeroy',
+        fillcolor: 'rgba(210,153,29,0.10)',
+        xaxis: 'x',
+        yaxis: 'y2',
+        showlegend: true,
+        legendgroup: 'residual',
+        hovertemplate: '%{y:.3f}<extra>residual</extra>',
+    });
+
+    // --- Subplot 3: v (velocity) ---
+    traces.push({
+        type: 'scatter',
+        x: data.dates,
+        y: data.v,
+        name: 'schmitt_v',
+        mode: 'lines',
+        line: { color: chartColors.v, width: 1.8 },
+        fill: 'tozeroy',
+        fillcolor: 'rgba(163,113,247,0.08)',
+        xaxis: 'x',
+        yaxis: 'y3',
+        showlegend: true,
+        legendgroup: 'v',
+        hovertemplate: '%{y:.4f}<extra>schmitt_v</extra>',
+    });
+
+    // --- Subplot 4: a (acceleration) + thresholds ---
+    traces.push({
+        type: 'scatter',
+        x: data.dates,
+        y: data.a,
+        name: 'schmitt_a',
+        mode: 'lines',
+        line: { color: chartColors.a, width: 1.8 },
+        xaxis: 'x',
+        yaxis: 'y4',
+        showlegend: true,
+        legendgroup: 'a',
+        hovertemplate: '%{y:.5f}<extra>schmitt_a</extra>',
+    });
+    // Positive threshold line
+    traces.push({
+        type: 'scatter',
+        x: [data.dates[0], data.dates[data.dates.length - 1]],
+        y: [data.aThreshold, data.aThreshold],
+        name: '+阈值 (σᵥ)',
+        mode: 'lines',
+        line: { color: chartColors.aPosThreshold, width: 1, dash: 'dash' },
+        xaxis: 'x',
+        yaxis: 'y4',
+        showlegend: true,
+        legendgroup: 'thresh',
+        hoverinfo: 'skip',
+    });
+    // Negative threshold line
+    traces.push({
+        type: 'scatter',
+        x: [data.dates[0], data.dates[data.dates.length - 1]],
+        y: [-data.aThreshold, -data.aThreshold],
+        name: '−阈值 (σᵥ)',
+        mode: 'lines',
+        line: { color: chartColors.aNegThreshold, width: 1, dash: 'dash' },
+        xaxis: 'x',
+        yaxis: 'y4',
+        showlegend: false,
+        legendgroup: 'thresh',
+        hoverinfo: 'skip',
+    });
+
+    // --- Subplot 5: Signal ---
+    traces.push({
+        type: 'scatter',
+        x: data.dates,
+        y: data.signal,
+        name: 'schmitt_sig',
+        mode: 'lines',
+        line: { color: chartColors.signal, width: 2, shape: 'hv' },
+        fill: 'tozeroy',
+        fillcolor: 'rgba(57,210,192,0.08)',
+        xaxis: 'x',
+        yaxis: 'y5',
+        showlegend: true,
+        legendgroup: 'signal',
+        hovertemplate: '%{y}<extra>schmitt_sig</extra>',
+    });
+
+    // --- Subplot 6: PnL curves ---
+    traces.push({
+        type: 'scatter',
+        x: data.dates,
+        y: data.pnlLong,
+        name: 'v0_pnl (做多)',
+        mode: 'lines',
+        line: { color: chartColors.pnlLong, width: 1.8 },
+        xaxis: 'x',
+        yaxis: 'y6',
+        showlegend: true,
+        legendgroup: 'pnl',
+        hovertemplate: '%{y:.2f}<extra>做多 PnL</extra>',
+    });
+    traces.push({
+        type: 'scatter',
+        x: data.dates,
+        y: data.pnlShort,
+        name: 'v0_pnl (做空)',
+        mode: 'lines',
+        line: { color: chartColors.pnlShort, width: 1.8 },
+        xaxis: 'x',
+        yaxis: 'y6',
+        showlegend: true,
+        legendgroup: 'pnl',
+        hovertemplate: '%{y:.2f}<extra>做空 PnL</extra>',
+    });
+
+    // Layout
+    var layout = {
+        // X-axis (shared, bottom)
+        xaxis: {
+            domain: [0, 1],
+            anchor: 'y6',
+            showgrid: true,
+            gridcolor: chartColors.gridColor,
+            zeroline: false,
+            tickfont: { color: chartColors.textColor, size: 10 },
+            type: 'date',
+            rangeslider: { visible: false },
+            showspikes: true,
+            spikemode: 'across',
+            spikethickness: 1,
+            spikecolor: 'rgba(255,255,255,0.15)',
+        },
+
+        // Y-axis 1: Price (K-line + filtered)
+        yaxis: {
+            domain: row1,
+            title: { text: 'Price', font: { color: chartColors.titleColor, size: 12 } },
+            showgrid: true,
+            gridcolor: chartColors.gridColor,
+            zeroline: false,
+            tickfont: { color: chartColors.textColor, size: 10 },
+            tickformat: '.1f',
+            anchor: 'x',
+        },
+        // Y-axis 2: Residual
+        yaxis2: {
+            domain: row2,
+            title: { text: '残差', font: { color: chartColors.titleColor, size: 11 } },
+            showgrid: true,
+            gridcolor: chartColors.gridColor,
+            zeroline: true,
+            zerolinecolor: chartColors.residualZero,
+            zerolinewidth: 1,
+            tickfont: { color: chartColors.textColor, size: 10 },
+            tickformat: '.2f',
+            anchor: 'x',
+        },
+        // Y-axis 3: v
+        yaxis3: {
+            domain: row3,
+            title: { text: '速度 v', font: { color: chartColors.titleColor, size: 11 } },
+            showgrid: true,
+            gridcolor: chartColors.gridColor,
+            zeroline: true,
+            zerolinecolor: chartColors.vZero,
+            zerolinewidth: 1,
+            tickfont: { color: chartColors.textColor, size: 10 },
+            tickformat: '.3f',
+            anchor: 'x',
+        },
+        // Y-axis 4: a
+        yaxis4: {
+            domain: row4,
+            title: { text: '加速度 a', font: { color: chartColors.titleColor, size: 11 } },
+            showgrid: true,
+            gridcolor: chartColors.gridColor,
+            zeroline: true,
+            zerolinecolor: 'rgba(255,255,255,0.15)',
+            zerolinewidth: 1,
+            tickfont: { color: chartColors.textColor, size: 10 },
+            tickformat: '.4f',
+            anchor: 'x',
+        },
+        // Y-axis 5: Signal
+        yaxis5: {
+            domain: row5,
+            title: { text: '信号 Sig', font: { color: chartColors.titleColor, size: 11 } },
+            showgrid: true,
+            gridcolor: chartColors.gridColor,
+            zeroline: true,
+            zerolinecolor: 'rgba(255,255,255,0.15)',
+            zerolinewidth: 1,
+            tickfont: { color: chartColors.textColor, size: 10 },
+            tickvals: [-1, 0, 1],
+            range: [-1.3, 1.3],
+            anchor: 'x',
+        },
+        // Y-axis 6: PnL
+        yaxis6: {
+            domain: row6,
+            title: { text: 'PnL', font: { color: chartColors.titleColor, size: 11 } },
+            showgrid: true,
+            gridcolor: chartColors.gridColor,
+            zeroline: true,
+            zerolinecolor: chartColors.pnlBase,
+            zerolinewidth: 1,
+            tickfont: { color: chartColors.textColor, size: 10 },
+            tickformat: '.1f',
+            anchor: 'x',
+        },
+
+        // Global layout
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: '#0d1117',
+        font: { color: chartColors.textColor, size: 12 },
+        legend: {
+            orientation: 'h',
+            x: 0.5,
+            y: -0.06,
+            xanchor: 'center',
+            font: { color: chartColors.textColor, size: 11 },
+            bgcolor: 'rgba(0,0,0,0.3)',
+            bordercolor: 'rgba(255,255,255,0.1)',
+            borderwidth: 1,
+        },
+        margin: { l: 60, r: 40, t: 10, b: 60 },
+        height: 980,
+        hovermode: 'x unified',
+        dragmode: 'pan',
+
+        // Shapes: zero-lines and subplot separators in plot area
+        shapes: [
+            // Subplot separators (horizontal lines between subplots)
+            { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'paper', y0: row2[1], y1: row2[1],
+              line: { color: 'rgba(255,255,255,0.06)', width: 1 } },
+            { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'paper', y0: row3[1], y1: row3[1],
+              line: { color: 'rgba(255,255,255,0.06)', width: 1 } },
+            { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'paper', y0: row4[1], y1: row4[1],
+              line: { color: 'rgba(255,255,255,0.06)', width: 1 } },
+            { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'paper', y0: row5[1], y1: row5[1],
+              line: { color: 'rgba(255,255,255,0.06)', width: 1 } },
+        ],
+    };
+
+    var config = {
+        displayModeBar: false,
+        responsive: true,
+        scrollZoom: true,
+    };
+
+    Plotly.newPlot('chart-container', traces, layout, config);
+})();
+</script>
+
+</body>
+</html>
