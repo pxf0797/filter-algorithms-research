@@ -20,6 +20,7 @@
             --accent-yellow: #d2991d;
             --accent-purple: #a371f7;
             --accent-cyan: #39d2c0;
+            --accent-orange: #f0883e;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -125,13 +126,14 @@
         .folder-tree .ft-file-parquet { color: var(--accent-green); }
         .folder-tree .ft-file-jsonl { color: var(--accent-yellow); }
         .folder-tree .ft-file-json { color: var(--accent-purple); }
+        .folder-tree .ft-file-csv { color: var(--text-secondary); }
         .folder-tree .ft-comment { color: var(--text-secondary); font-style: italic; }
         .folder-tree .ft-dots { color: var(--text-secondary); }
 
         /* ---- Panel 3: Plotly Chart ---- */
         #chart-container {
             width: 100%;
-            min-height: 960px;
+            min-height: 800px;
         }
         .chart-legend-note {
             display: flex;
@@ -222,6 +224,50 @@
             font-size: 11px;
             font-weight: 700;
         }
+        .design-note {
+            display: inline-block;
+            background: rgba(210, 153, 29, 0.12);
+            color: var(--accent-yellow);
+            border: 1px solid rgba(210, 153, 29, 0.3);
+            border-radius: 3px;
+            padding: 1px 6px;
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        /* ---- Panel 5: Callout Box ---- */
+        .callout-box {
+            background: linear-gradient(135deg, rgba(248, 81, 73, 0.06) 0%, rgba(210, 153, 29, 0.06) 100%);
+            border: 1px solid rgba(248, 81, 73, 0.25);
+            border-left: 4px solid var(--accent-red);
+            border-radius: 6px;
+            padding: 24px 28px;
+            margin-top: 8px;
+        }
+        .callout-box .callout-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--accent-orange);
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .callout-box .callout-body {
+            font-size: 14px;
+            color: var(--text-primary);
+            line-height: 1.8;
+        }
+        .callout-box .callout-body strong {
+            color: var(--accent-yellow);
+        }
+        .callout-box .callout-body .highlight {
+            background: rgba(210, 153, 29, 0.12);
+            padding: 1px 6px;
+            border-radius: 3px;
+            font-family: 'SF Mono', monospace;
+            font-size: 13px;
+        }
 
         /* ---- Footer ---- */
         .footer {
@@ -244,12 +290,13 @@
 <!-- ======== HEADER ======== -->
 <div class="header">
     <h1>回测数据 CLI 存储方案</h1>
-    <p class="subtitle">Parquet 全量存储 + DuckDB/Polars 离线分析 &nbsp;|&nbsp; 方案可视化概览</p>
+    <p class="subtitle">信号→交易链路存储 &middot; 多周期独立 &middot; Parquet ZSTD + JSONL + CSV</p>
     <div style="margin-top:14px;">
-        <span class="badge">Schema v1.0</span>
+        <span class="badge">Schema v2.0</span>
         <span class="badge">Parquet ZSTD</span>
         <span class="badge">JSONL 事件流</span>
         <span class="badge">DuckDB/Polars</span>
+        <span class="badge">多周期独立</span>
     </div>
 </div>
 
@@ -257,34 +304,39 @@
 <div class="section">
     <div class="section-header">
         <span class="num">1</span>
-        <h2>方案总览 &mdash; 数据流架构</h2>
+        <h2>方案总览 &mdash; 数据流架构（修正后 scope）</h2>
     </div>
     <div class="section-body">
         <div class="mermaid-wrapper">
             <div class="mermaid">
 flowchart TD
     CLI["🔧 CLI<br/>backtest_cli.py<br/>--save-data"]
-    BR["⚙️ BacktestRunner<br/>逐 bar 循环产出全量数据"]
+    BR["⚙️ BacktestRunner<br/>多周期逐 bar 循环"]
     PS["📦 ParquetStore<br/>（新增模块）"]
-    BP["📄 bars.parquet<br/>每 bar 全量 22 列<br/>ZSTD level=3"]
-    TP["📄 trades.parquet<br/>逐笔交易 14 字段<br/>ZSTD level=3"]
+    SP["📄 signals/{tf}.parquet<br/>Schmitt 信号状态<br/>每周期独立文件"]
+    TP["📄 trades.parquet<br/>逐笔交易明细<br/>14 字段"]
+    BM["📄 bs_markers.parquet<br/>BS 买卖标记<br/>timestamp + type + price"]
     ER["📋 EventRecorder<br/>（已有，不变）"]
-    EV["📄 events.jsonl<br/>合并 BS/Schmitt/Signal/<br/>Trade/Pair 事件流"]
+    EV["📄 events.jsonl<br/>BS 变更事件流"]
     MT["📄 metadata.json<br/>运行参数 + Schema 版本"]
+    CSV["📄 *.csv<br/>同步输出<br/>⚠️ 仅人工观察用"]
     ANALYZE["🔬 DuckDB / Polars 分析层<br/>列裁剪 · 谓词下推 · 跨 Session 聚合"]
-    CHART["📈 图表回放<br/>6 子图重建"]
+    CHART["📈 图表回放<br/>信号 + PnL 重建"]
     TRADE["💹 交易分析<br/>胜率 · 盈亏比 · 回撤"]
     COMPARE["📊 批量对比<br/>跨标的 · 跨周期 · 跨参数"]
 
     CLI --> BR
     BR --> PS
-    PS --> BP
+    PS --> SP
     PS --> TP
+    PS --> BM
     PS --> MT
+    PS -.-> CSV
     BR --> ER
     ER --> EV
-    BP --> ANALYZE
+    SP --> ANALYZE
     TP --> ANALYZE
+    BM --> ANALYZE
     EV --> ANALYZE
     MT --> ANALYZE
     ANALYZE --> CHART
@@ -294,11 +346,13 @@ flowchart TD
     style CLI fill:#1a3a5c,stroke:#58a6ff,color:#e6edf3
     style BR fill:#1a3a5c,stroke:#58a6ff,color:#e6edf3
     style PS fill:#1a4a2a,stroke:#3fb950,color:#e6edf3
-    style BP fill:#1a4a2a,stroke:#3fb950,color:#e6edf3
+    style SP fill:#1a4a2a,stroke:#3fb950,color:#e6edf3
     style TP fill:#1a4a2a,stroke:#3fb950,color:#e6edf3
+    style BM fill:#1a4a2a,stroke:#3fb950,color:#e6edf3
     style MT fill:#2a1a4a,stroke:#a371f7,color:#e6edf3
     style ER fill:#3a3a1a,stroke:#d2991d,color:#e6edf3
     style EV fill:#3a3a1a,stroke:#d2991d,color:#e6edf3
+    style CSV fill:#2a2a2a,stroke:#8b949e,color:#8b949e,stroke-dasharray:5 5
     style ANALYZE fill:#1a3a5c,stroke:#39d2c0,color:#e6edf3
     style CHART fill:#1a2a3a,stroke:#8b949e,color:#e6edf3
     style TRADE fill:#1a2a3a,stroke:#8b949e,color:#e6edf3
@@ -318,15 +372,19 @@ flowchart TD
         <div class="folder-tree">
 <span class="ft-folder">backtest_output/</span>                          <span class="ft-comment">← 可配置根目录 (--output-root)</span>
 <span class="ft-folder">├── AAPL/</span>                                  <span class="ft-comment">← 按 ticker 分组</span>
-<span class="ft-folder">│   ├── 20260716_143052_d1/</span>               <span class="ft-comment">← {date}_{time}_{preset}</span>
-<span class="ft-file-parquet">│   │   ├── bars.parquet</span>                   <span class="ft-comment">← ★ 每 bar 全量 22 列 (约 15 MB)</span>
-<span class="ft-file-parquet">│   │   ├── trades.parquet</span>                 <span class="ft-comment">← ★ 逐笔交易 14 字段 (约 50 KB)</span>
-<span class="ft-file-jsonl">│   │   ├── events.jsonl</span>                   <span class="ft-comment">← 合并事件流 (BS/Schmitt/Signal/Trade/Pair)</span>
-<span class="ft-file-json">│   │   └── metadata.json</span>                  <span class="ft-comment">← 运行参数 + Schema 版本 + 统计摘要</span>
-<span class="ft-folder">│   └── 20260715_090000_h4/</span>
-<span class="ft-dots">│       └── ...</span>
+<span class="ft-folder">│   └── 20260716_143052/</span>                   <span class="ft-comment">← {date}_{time} 运行批次</span>
+<span class="ft-folder">│       ├── signals/</span>                        <span class="ft-comment">← ★ 多周期信号 (每周期独立 parquet)</span>
+<span class="ft-file-parquet">│       │   ├── 日线.parquet</span>                 <span class="ft-comment">← 列: timestamp, v0_sig, v0_v, v0_a, v0_pnl_long, v0_pnl_short …</span>
+<span class="ft-file-parquet">│       │   └── 60分钟.parquet</span>               <span class="ft-comment">← 同上 schema，独立时间轴</span>
+<span class="ft-file-parquet">│       ├── trades.parquet</span>                   <span class="ft-comment">← ★ 逐笔交易明细 14 字段 (约 50 KB)</span>
+<span class="ft-file-parquet">│       ├── bs_markers.parquet</span>               <span class="ft-comment">← ★ BS 买卖标记 (timestamp, type, price, sig)</span>
+<span class="ft-file-jsonl">│       ├── events.jsonl</span>                     <span class="ft-comment">← BS 变更事件流</span>
+<span class="ft-file-json">│       ├── metadata.json</span>                    <span class="ft-comment">← 运行参数 + Schema 版本 + 统计摘要</span>
+<span class="ft-file-csv">│       ├── signals_日线.csv</span>                  <span class="ft-comment">← ⚠️ CSV 旁路 (仅人工观察用)</span>
+<span class="ft-file-csv">│       ├── signals_60分钟.csv</span>                <span class="ft-comment">← ⚠️ CSV 旁路 (仅人工观察用)</span>
+<span class="ft-file-csv">│       └── trades.csv</span>                       <span class="ft-comment">← ⚠️ CSV 旁路 (仅人工观察用)</span>
 <span class="ft-folder">├── TSLA/</span>
-<span class="ft-folder">│   └── 20260716_160000_d1/</span>
+<span class="ft-folder">│   └── 20260716_160000/</span>
 <span class="ft-dots">│       └── ...</span>
 <span class="ft-file-json">└── _batch_index.json</span>                       <span class="ft-comment">← 批量运行索引 (可选)</span>
         </div>
@@ -337,18 +395,17 @@ flowchart TD
 <div class="section">
     <div class="section-header">
         <span class="num">3</span>
-        <h2>回测图表回放 &mdash; 从 Parquet 重建多子图</h2>
+        <h2>回测图表回放 &mdash; 信号 + PnL 重建（无 K 线 / 滤波）</h2>
     </div>
     <div class="section-body">
         <div id="chart-container"></div>
         <div class="chart-legend-note">
-            <span style="color:var(--text-secondary);">Parquet 列名映射：</span>
-            <span>子图1 → <span class="col-tag">open, high, low, close, v0_filtered</span></span>
-            <span>子图2 → <span class="col-tag">v0_residual</span> (close - filtered)</span>
-            <span>子图3 → <span class="col-tag">schmitt_v</span> (滤波速度)</span>
-            <span>子图4 → <span class="col-tag">schmitt_a</span> (加速度)  + <span class="col-tag">schmitt_sigma_v</span> (阈值)</span>
-            <span>子图5 → <span class="col-tag">schmitt_sig</span> (+1/-1/0)</span>
-            <span>子图6 → <span class="col-tag">v0_pnl_long, v0_pnl_short</span></span>
+            <span style="color:var(--text-secondary);">Parquet 列名映射（以日线为例）：</span>
+            <span>子图1 信号 → <span class="col-tag">v0_日线_sig</span> (+1/0/-1)</span>
+            <span>子图2 速度 → <span class="col-tag">v0_日线_v</span></span>
+            <span>子图3 加速度 → <span class="col-tag">v0_日线_a</span> + <span class="col-tag">v0_日线_sigma_v</span> (阈值)</span>
+            <span>子图4 PnL → <span class="col-tag">v0_日线_pnl_long</span> / <span class="col-tag">v0_日线_pnl_short</span></span>
+            <span style="margin-left:auto;color:var(--accent-yellow);">BS 标记来源: <span class="col-tag">bs_markers.parquet</span> (type=B/S, timestamp, price)</span>
         </div>
     </div>
 </div>
@@ -357,7 +414,7 @@ flowchart TD
 <div class="section">
     <div class="section-header">
         <span class="num">4</span>
-        <h2>数据存储前后对比 &mdash; EventRecorder 摘要 vs Parquet 全量</h2>
+        <h2>数据存储前后对比 &mdash; EventRecorder 摘要 vs Parquet 全量（修正 scope）</h2>
     </div>
     <div class="section-body">
         <div class="comp-table-wrap">
@@ -365,7 +422,7 @@ flowchart TD
                 <thead>
                     <tr>
                         <th style="width:14%;">数据项</th>
-                        <th style="width:18%;">Parquet 列名</th>
+                        <th style="width:18%;">存储文件 / 列名</th>
                         <th style="width:22%;">现在存储<br><span style="font-weight:400;font-size:12px;color:var(--accent-red);">(EventRecorder 摘要)</span></th>
                         <th style="width:26%;">方案后存储<br><span style="font-weight:400;font-size:12px;color:var(--accent-green);">(Parquet 全量)</span></th>
                         <th style="width:8%;text-align:center;">提升</th>
@@ -374,44 +431,36 @@ flowchart TD
                 </thead>
                 <tbody>
                     <tr>
-                        <td><strong>收盘价序列</strong></td>
-                        <td><code style="color:var(--accent-cyan);">close</code> / <code style="color:var(--accent-cyan);">open, high, low</code></td>
-                        <td class="col-old">仅尾部 3~5 个值</td>
-                        <td class="col-new">全量 OHLCV 数组 (120+ bar × 8 view)</td>
-                        <td class="col-improve"><span class="badge-up">✅ 改进</span></td>
-                        <td>K 线图回放、价格形态识别</td>
-                    </tr>
-                    <tr>
-                        <td><strong>滤波值</strong></td>
-                        <td><code style="color:var(--accent-cyan);">v0_filtered</code> / <code style="color:var(--accent-cyan);">filtered2</code></td>
-                        <td class="col-old">仅最后 1 个值</td>
-                        <td class="col-new">全量数组 (每 bar 一个 float32)</td>
-                        <td class="col-improve"><span class="badge-up">✅ 改进</span></td>
-                        <td>滤波器效果验证、参数调优</td>
-                    </tr>
-                    <tr>
-                        <td><strong>施密特触发器中间状态</strong></td>
-                        <td><code style="color:var(--accent-cyan);">schmitt_eps, schmitt_v, schmitt_a</code></td>
-                        <td class="col-old">仅尾部 3~5 个值</td>
-                        <td class="col-new">全量数组 (eps / v / a / sigma_v)</td>
-                        <td class="col-improve"><span class="badge-up">✅ 改进</span></td>
-                        <td>信号翻转过程回溯、阈值敏感性分析</td>
-                    </tr>
-                    <tr>
                         <td><strong>信号序列</strong></td>
-                        <td><code style="color:var(--accent-cyan);">schmitt_sig</code></td>
+                        <td><code style="color:var(--accent-cyan);">signals/{tf}.parquet</code> → <code style="color:var(--accent-cyan);">v0_{tf}_sig</code></td>
                         <td class="col-old">仅尾部 3~5 个值</td>
-                        <td class="col-new">全量数组 (+1/0/-1 每 bar)</td>
+                        <td class="col-new">全量数组 (+1/0/-1 每 bar)，<strong>每周期独立文件</strong></td>
                         <td class="col-improve"><span class="badge-up">✅ 改进</span></td>
                         <td>信号一致性分析、多周期矛盾检测</td>
                     </tr>
                     <tr>
+                        <td><strong>施密特触发器中间状态</strong></td>
+                        <td><code style="color:var(--accent-cyan);">signals/{tf}.parquet</code> → <code style="color:var(--accent-cyan);">v0_{tf}_v, v0_{tf}_a</code></td>
+                        <td class="col-old">仅尾部 3~5 个值</td>
+                        <td class="col-new">全量数组 (v / a / sigma_v)，<strong>每周期独立</strong></td>
+                        <td class="col-improve"><span class="badge-up">✅ 改进</span></td>
+                        <td>信号翻转过程回溯、阈值敏感性分析</td>
+                    </tr>
+                    <tr>
                         <td><strong>PnL 曲线</strong></td>
-                        <td><code style="color:var(--accent-cyan);">v0_pnl_long, v0_pnl_short</code></td>
+                        <td><code style="color:var(--accent-cyan);">signals/{tf}.parquet</code> → <code style="color:var(--accent-cyan);">v0_{tf}_pnl_long, v0_{tf}_pnl_short</code></td>
                         <td class="col-old"><span class="badge-warn">不存储</span></td>
-                        <td class="col-new">全量累积收益数组 (每 bar float32)</td>
+                        <td class="col-new">全量累积收益数组 (每 bar float32)，<strong>每周期独立</strong></td>
                         <td class="col-improve"><span class="badge-new">🆕 新增</span></td>
                         <td>资金曲线回放、回撤分析、Sharpe 计算</td>
+                    </tr>
+                    <tr>
+                        <td><strong>BS 买卖标记</strong></td>
+                        <td><code style="color:var(--accent-cyan);">bs_markers.parquet</code> (timestamp, type, price, sig)</td>
+                        <td class="col-old"><span class="badge-warn">不存储</span></td>
+                        <td class="col-new">每笔 BS 标记独立行 (type=B/S)，精确时间戳</td>
+                        <td class="col-improve"><span class="badge-new">🆕 新增</span></td>
+                        <td>买卖点回溯、信号与执行对齐验证</td>
                     </tr>
                     <tr>
                         <td><strong>交易明细</strong></td>
@@ -422,44 +471,28 @@ flowchart TD
                         <td>逐笔审查、亏损归因、持仓时长分布</td>
                     </tr>
                     <tr>
-                        <td><strong>持仓掩码</strong></td>
-                        <td><code style="color:var(--accent-cyan);">long_mask, short_mask</code></td>
-                        <td class="col-old"><span class="badge-warn">不存储</span></td>
-                        <td class="col-new">布尔数组 (每 bar 是否持仓)</td>
-                        <td class="col-improve"><span class="badge-new">🆕 新增</span></td>
-                        <td>持仓状态时序、仓位管理分析</td>
-                    </tr>
-                    <tr>
-                        <td><strong>预测抛物线数据</strong></td>
-                        <td><code style="color:var(--accent-cyan);">pair_id</code> (关联 prediction_pairs)</td>
-                        <td class="col-old"><span class="badge-warn">不存储</span></td>
-                        <td class="col-new">每 pair 起止 bar / 参数记录</td>
-                        <td class="col-improve"><span class="badge-new">🆕 新增</span></td>
-                        <td>预测准确率评估、pair 盈亏统计</td>
-                    </tr>
-                    <tr>
-                        <td><strong>高周期对齐 PnL</strong></td>
-                        <td><code style="color:var(--accent-cyan);">higher_pnl</code></td>
-                        <td class="col-old"><span class="badge-warn">不存储</span></td>
-                        <td class="col-new">全量数组 (每 bar float32)</td>
-                        <td class="col-improve"><span class="badge-new">🆕 新增</span></td>
-                        <td>多周期 PnL 对齐分析</td>
+                        <td><strong>BS 变更事件流</strong></td>
+                        <td><code style="color:var(--accent-cyan);">events.jsonl</code></td>
+                        <td class="col-old">已有 (合并事件流)</td>
+                        <td class="col-new">聚焦 BS 变更事件，精简为仅买卖相关</td>
+                        <td class="col-improve"><span class="badge-up">✅ 精简</span></td>
+                        <td>事件回放、时序审计</td>
                     </tr>
                     <tr>
                         <td><strong>Schema 版本</strong></td>
                         <td><code style="color:var(--accent-cyan);">metadata.json</code></td>
                         <td class="col-old"><span class="badge-warn">无</span></td>
-                        <td class="col-new">schema_version 字段 + Parquet 内嵌版本号</td>
+                        <td class="col-new">schema_version 字段 + 每周期信号列名前缀</td>
                         <td class="col-improve"><span class="badge-new">🆕 新增</span></td>
                         <td>版本迁移、兼容性检查</td>
                     </tr>
-                    <tr>
-                        <td><strong>时间轴</strong></td>
-                        <td><code style="color:var(--accent-cyan);">timestamp</code> (datetime64[ns])</td>
-                        <td class="col-old"><span class="badge-warn">不存储</span></td>
-                        <td class="col-new">每 bar 精确时间戳</td>
-                        <td class="col-improve"><span class="badge-new">🆕 新增</span></td>
-                        <td>按时间范围过滤、跨 session 对齐</td>
+                    <tr style="background:rgba(210,153,29,0.04);">
+                        <td colspan="6" style="padding:14px 16px; text-align:center;">
+                            <span class="design-note">⚡ 关键设计决策</span>
+                            <span style="color:var(--accent-yellow); margin-left:10px; font-size:13px;">
+                                <strong>多周期独立存储，不做 ffill</strong> — 日线与60分钟线时间轴不同，各自独立 parquet，避免虚假对齐
+                            </span>
+                        </td>
                     </tr>
                 </tbody>
             </table>
@@ -467,9 +500,48 @@ flowchart TD
     </div>
 </div>
 
+<!-- ======== Panel 5: Why Only Signals ======== -->
+<div class="section">
+    <div class="section-header">
+        <span class="num">5</span>
+        <h2>为什么只存信号，不存 K 线？</h2>
+    </div>
+    <div class="section-body">
+        <div class="callout-box">
+            <div class="callout-title">
+                <span style="font-size:20px;">&#9888;</span> 多周期时间轴不对齐问题
+            </div>
+            <div class="callout-body">
+                <p>
+                    多周期回测中，<strong>日线</strong>的 bar 与 <strong>60分钟</strong>的 bar <strong>时间戳不重合</strong>。
+                    日线每天一根 bar（如 <span class="highlight">2026-07-15 15:00</span>），60分钟线每60分钟一根 bar（如
+                    <span class="highlight">2026-07-15 10:30</span>, <span class="highlight">2026-07-15 11:30</span> …）。
+                    只有 <strong>cutoff_date</strong>（最新时刻）是对齐的。
+                </p>
+                <p style="margin-top:12px;">
+                    K线和滤波数据在不同周期有<strong>不同的时间轴</strong>和<strong>不同的 bar 数量</strong>，
+                    合并存储到同一个 Parquet/DataFrame 中会造成<strong>虚假对齐</strong>（某周期的第 i 行并非另一周期的同一时刻）。
+                    这会让后续分析产生错误的时间关联。
+                </p>
+                <p style="margin-top:12px;">
+                    因此，方案只存储各周期的<strong>决策数据</strong>（信号 → 交易链）：
+                </p>
+                <ul style="margin-top:8px; padding-left:24px;">
+                    <li><code style="color:var(--accent-green);">signals/{timeframe}.parquet</code> — 每周期独立的信号状态，各自的时间轴</li>
+                    <li><code style="color:var(--accent-green);">bs_markers.parquet</code> — BS 标记，跨周期统一的时间戳</li>
+                    <li><code style="color:var(--accent-green);">trades.parquet</code> — 逐笔交易，精确 entry/exit 时间</li>
+                </ul>
+                <p style="margin-top:12px; color: var(--text-secondary); font-size:13px;">
+                    K线原始数据由数据源（如 AKShare / Tushare）提供，需要时从源头重新拉取即可，无需在回测输出中冗余存储。
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- ======== FOOTER ======== -->
 <div class="footer">
-    回测数据 CLI 存储方案 &middot; Parquet ZSTD + JSONL + JSON &middot; DuckDB/Polars 分析层 &middot; 2026-07-16
+    回测数据 CLI 存储方案 &middot; 信号→交易链路 &middot; 多周期独立 Parquet + JSONL + CSV &middot; DuckDB/Polars 分析层 &middot; 2026-07-16
 </div>
 
 <!-- ======== SCRIPTS ======== -->
@@ -503,22 +575,14 @@ flowchart TD
 })();
 
 // ============================================================
-// 2. Simulated data generation (120 bars)
+// 2. Simulated data generation (120 bars, 日线为例)
 // ============================================================
 function generateSimulatedData(n) {
     n = n || 120;
     var dates = [];
-    var close = [];
-    var open = [];
-    var high = [];
-    var low = [];
-    var volume = [];
+    var close = [];   // internal, not displayed
 
-    var now = new Date();
-    var price = 100.0;
     var seed = 42;
-
-    // Simple seeded random (mulberry32)
     function rand() {
         seed |= 0; seed = seed + 0x6D2B79F5 | 0;
         var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
@@ -526,34 +590,21 @@ function generateSimulatedData(n) {
         return ((t ^ t >>> 14) >>> 0) / 4294967296;
     }
 
+    var now = new Date();
+    var price = 100.0;
     for (var i = 0; i < n; i++) {
-        var d = new Date(now.getTime() - (n - 1 - i) * 3600000); // hourly
-        dates.push(d.toISOString());
+        var d = new Date(now.getTime() - (n - 1 - i) * 86400000); // daily bars
+        dates.push(d.toISOString().split('T')[0]);
 
-        var drift = (rand() - 0.48) * 2.5; // slight upward bias
+        var drift = (rand() - 0.48) * 2.5;
         price += drift;
         price = Math.max(price, 85);
         price = Math.min(price, 115);
-
-        var body = Math.abs(drift) * (0.6 + rand() * 0.8);
-        var wickUp = rand() * body * 0.8;
-        var wickDown = rand() * body * 0.8;
-
-        var o = price - drift * 0.4;
-        var c = price;
-        var h = c + wickUp;
-        var l = o - wickDown;
-        if (o > c) { var tmpH = o + wickUp; var tmpL = c - wickDown; h = tmpH; l = tmpL; }
-
-        close.push(c);
-        open.push(o);
-        high.push(Math.max(o, c) + wickUp);
-        low.push(Math.min(o, c) - wickDown);
-        volume.push(50000 + rand() * 200000);
+        close.push(price);
     }
 
-    // filtered: SMA(15) of close
-    var period = 15;
+    // --- filtered: SMA(20) of close ---
+    var period = 20;
     var filtered = new Array(n);
     for (var i = 0; i < n; i++) {
         var start = Math.max(0, i - period + 1);
@@ -562,243 +613,278 @@ function generateSimulatedData(n) {
         filtered[i] = sum / cnt;
     }
 
-    // residual = close - filtered
-    var residual = new Array(n);
-    for (var i = 0; i < n; i++) { residual[i] = close[i] - filtered[i]; }
-
-    // v = diff(filtered), smoothed
+    // --- v = diff(filtered), smoothed with SMA(5) ---
+    var rawV = new Array(n);
+    rawV[0] = 0;
+    for (var i = 1; i < n; i++) { rawV[i] = filtered[i] - filtered[i - 1]; }
     var v = new Array(n);
-    v[0] = 0;
-    for (var i = 1; i < n; i++) { v[i] = filtered[i] - filtered[i - 1]; }
-    // smooth v with SMA(3)
-    var vSmooth = new Array(n);
     for (var i = 0; i < n; i++) {
-        var s = Math.max(0, i - 2), sum = 0, cnt = 0;
-        for (var j = s; j <= i; j++) { sum += v[j]; cnt++; }
-        vSmooth[i] = sum / cnt;
+        var s = Math.max(0, i - 4), sum = 0, cnt = 0;
+        for (var j = s; j <= i; j++) { sum += rawV[j]; cnt++; }
+        v[i] = sum / cnt;
     }
 
-    // a = diff(vSmooth)
+    // --- a = diff(v) ---
     var a = new Array(n);
     a[0] = 0;
-    for (var i = 1; i < n; i++) { a[i] = vSmooth[i] - vSmooth[i - 1]; }
+    for (var i = 1; i < n; i++) { a[i] = v[i] - v[i - 1]; }
 
-    // threshold for a
+    // --- a threshold (sigma_v) ---
     var aSqSum = 0;
     for (var i = 10; i < n; i++) { aSqSum += a[i] * a[i]; }
     var aStd = Math.sqrt(aSqSum / (n - 10));
     var aThreshold = aStd * 2.5;
 
-    // signal: based on v crossing threshold
-    var vThreshold = 0.08;
+    // --- signal: based on v crossing threshold ---
+    var vThreshold = 0.06;
     var signal = new Array(n);
     for (var i = 0; i < n; i++) {
-        if (vSmooth[i] > vThreshold) signal[i] = 1;
-        else if (vSmooth[i] < -vThreshold) signal[i] = -1;
+        if (v[i] > vThreshold) signal[i] = 1;
+        else if (v[i] < -vThreshold) signal[i] = -1;
         else signal[i] = 0;
     }
+    // Apply Schmitt hysteresis: once in +1, need v to drop below +vThreshold*0.3 to go to 0
+    for (var i = 1; i < n; i++) {
+        if (signal[i-1] === 1 && v[i] > vThreshold * 0.2) signal[i] = 1;
+        else if (signal[i-1] === -1 && v[i] < -vThreshold * 0.2) signal[i] = -1;
+    }
 
-    // PnL: cumulative based on signal
+    // --- BS markers: detect signal transitions ---
+    var bsBuy = [];   // {date, sigVal: 1}
+    var bsSell = [];  // {date, sigVal: -1}
+    for (var i = 1; i < n; i++) {
+        if (signal[i-1] !== 1 && signal[i] === 1) {
+            bsBuy.push({ date: dates[i], value: 1.15 }); // offset above +1 for visibility
+        }
+        if (signal[i-1] !== -1 && signal[i] === -1) {
+            bsSell.push({ date: dates[i], value: -1.15 }); // offset below -1 for visibility
+        }
+    }
+
+    // --- PnL: cumulative based on signal * returns ---
     var pnlLong = new Array(n);
     var pnlShort = new Array(n);
     pnlLong[0] = 100.0;
     pnlShort[0] = 100.0;
     for (var i = 1; i < n; i++) {
         var ret = (close[i] - close[i - 1]) / close[i - 1];
-        pnlLong[i] = pnlLong[i - 1] * (1 + signal[i - 1] * ret);
-        pnlShort[i] = pnlShort[i - 1] * (1 - signal[i - 1] * ret);
+        pnlLong[i] = pnlLong[i - 1] * (1 + signal[i - 1] * ret * 0.8);
+        pnlShort[i] = pnlShort[i - 1] * (1 - signal[i - 1] * ret * 0.8);
+    }
+
+    // --- trade segments: regions where signal != 0 ---
+    var tradeSegments = [];
+    var inTrade = false;
+    var segStart = null;
+    var segDir = 0;
+    for (var i = 0; i < n; i++) {
+        var dir = signal[i];
+        if (!inTrade && dir !== 0) {
+            inTrade = true;
+            segStart = i;
+            segDir = dir;
+        } else if (inTrade && (dir === 0 || dir !== segDir)) {
+            tradeSegments.push({ start: segStart, end: i, dir: segDir });
+            if (dir !== 0) {
+                segStart = i;
+                segDir = dir;
+            } else {
+                inTrade = false;
+            }
+        }
+    }
+    if (inTrade) {
+        tradeSegments.push({ start: segStart, end: n - 1, dir: segDir });
     }
 
     return {
         dates: dates,
-        open: open,
-        high: high,
-        low: low,
-        close: close,
-        volume: volume,
-        filtered: filtered,
-        residual: residual,
-        v: vSmooth,
+        close: close,       // internal
+        v: v,
         a: a,
         aThreshold: aThreshold,
         signal: signal,
         pnlLong: pnlLong,
         pnlShort: pnlShort,
+        bsBuy: bsBuy,
+        bsSell: bsSell,
+        tradeSegments: tradeSegments,
     };
 }
 
 var data = generateSimulatedData(120);
 
 // ============================================================
-// 3. Plotly chart — 6-row subplot
+// 3. Plotly chart — 4-row subplot (signal + v + a + PnL)
 // ============================================================
 (function() {
     // Y-axis domain allocation
-    var row1 = [0.70, 1.00];   // K-line + filtered
-    var row2 = [0.57, 0.68];   // Residual
-    var row3 = [0.43, 0.55];   // v
-    var row4 = [0.27, 0.41];   // a + threshold
-    var row5 = [0.13, 0.25];   // Signal
-    var row6 = [0.00, 0.11];   // PnL
+    var row1 = [0.67, 1.00];   // Signal + BS markers
+    var row2 = [0.47, 0.65];   // v (velocity)
+    var row3 = [0.25, 0.45];   // a (acceleration) + thresholds
+    var row4 = [0.00, 0.23];   // PnL curves with trade segments
 
-    var chartColors = {
-        candleUp: '#26a69a',
-        candleDown: '#ef5350',
-        filtered: '#58a6ff',
-        residual: '#d2991d',
-        residualZero: 'rgba(255,255,255,0.2)',
-        v: '#a371f7',
-        vZero: 'rgba(255,255,255,0.15)',
-        a: '#3fb950',
-        aPosThreshold: 'rgba(248,81,73,0.5)',
-        aNegThreshold: 'rgba(248,81,73,0.5)',
+    var C = {
         signal: '#39d2c0',
+        signalFill: 'rgba(57,210,192,0.08)',
+        bsBuy: '#3fb950',
+        bsSell: '#f85149',
+        v: '#a371f7',
+        vFill: 'rgba(163,113,247,0.08)',
+        a: '#58a6ff',
+        threshold: 'rgba(248,81,73,0.5)',
         pnlLong: '#3fb950',
         pnlShort: '#f85149',
         pnlBase: 'rgba(255,255,255,0.2)',
-        gridColor: 'rgba(255,255,255,0.06)',
-        textColor: '#8b949e',
-        titleColor: '#e6edf3',
+        grid: 'rgba(255,255,255,0.06)',
+        text: '#8b949e',
+        title: '#e6edf3',
+        longShade: 'rgba(63,185,80,0.06)',
+        shortShade: 'rgba(248,81,73,0.06)',
     };
 
-    // Build traces
     var traces = [];
+    var shapes = [];
 
-    // --- Subplot 1: Candlestick + Filtered ---
-    traces.push({
-        type: 'candlestick',
-        x: data.dates,
-        open: data.open,
-        high: data.high,
-        low: data.low,
-        close: data.close,
-        name: 'K线',
-        increasing: { line: { color: chartColors.candleUp, width: 1 }, fillcolor: chartColors.candleUp },
-        decreasing: { line: { color: chartColors.candleDown, width: 1 }, fillcolor: chartColors.candleDown },
-        xaxis: 'x',
-        yaxis: 'y',
-        showlegend: true,
-        legendgroup: 'price',
-        hoverinfo: 'x+open+high+low+close',
-    });
+    // ============================================================
+    // Subplot 1: Signal (step) + BS markers
+    // ============================================================
     traces.push({
         type: 'scatter',
         x: data.dates,
-        y: data.filtered,
-        name: 'v0_filtered',
+        y: data.signal,
+        name: 'v0_日线_sig',
         mode: 'lines',
-        line: { color: chartColors.filtered, width: 2 },
-        xaxis: 'x',
-        yaxis: 'y',
-        showlegend: true,
-        legendgroup: 'filtered',
-        hovertemplate: '%{y:.2f}<extra>v0_filtered</extra>',
-    });
-
-    // --- Subplot 2: Residual ---
-    traces.push({
-        type: 'scatter',
-        x: data.dates,
-        y: data.residual,
-        name: 'v0_residual',
-        mode: 'lines',
-        line: { color: chartColors.residual, width: 1.2 },
+        line: { color: C.signal, width: 2.2, shape: 'hv' },
         fill: 'tozeroy',
-        fillcolor: 'rgba(210,153,29,0.10)',
+        fillcolor: C.signalFill,
         xaxis: 'x',
-        yaxis: 'y2',
+        yaxis: 'y',
         showlegend: true,
-        legendgroup: 'residual',
-        hovertemplate: '%{y:.3f}<extra>residual</extra>',
+        legendgroup: 'sig',
+        hovertemplate: '%{y}<extra>v0_日线_sig</extra>',
     });
 
-    // --- Subplot 3: v (velocity) ---
+    // BS Buy markers (green triangles)
+    if (data.bsBuy.length > 0) {
+        traces.push({
+            type: 'scatter',
+            x: data.bsBuy.map(function(m) { return m.date; }),
+            y: data.bsBuy.map(function(m) { return m.value; }),
+            name: 'B (买入)',
+            mode: 'markers',
+            marker: {
+                symbol: 'triangle-up',
+                size: 11,
+                color: C.bsBuy,
+                line: { width: 1, color: 'rgba(0,0,0,0.4)' },
+            },
+            xaxis: 'x',
+            yaxis: 'y',
+            showlegend: true,
+            legendgroup: 'bs',
+            hovertemplate: 'B 买入<extra>bs_markers</extra>',
+        });
+    }
+
+    // BS Sell markers (red triangles)
+    if (data.bsSell.length > 0) {
+        traces.push({
+            type: 'scatter',
+            x: data.bsSell.map(function(m) { return m.date; }),
+            y: data.bsSell.map(function(m) { return m.value; }),
+            name: 'S (卖出)',
+            mode: 'markers',
+            marker: {
+                symbol: 'triangle-down',
+                size: 11,
+                color: C.bsSell,
+                line: { width: 1, color: 'rgba(0,0,0,0.4)' },
+            },
+            xaxis: 'x',
+            yaxis: 'y',
+            showlegend: true,
+            legendgroup: 'bs',
+            hovertemplate: 'S 卖出<extra>bs_markers</extra>',
+        });
+    }
+
+    // ============================================================
+    // Subplot 2: v (velocity)
+    // ============================================================
     traces.push({
         type: 'scatter',
         x: data.dates,
         y: data.v,
-        name: 'schmitt_v',
+        name: 'v0_日线_v',
         mode: 'lines',
-        line: { color: chartColors.v, width: 1.8 },
+        line: { color: C.v, width: 1.8 },
         fill: 'tozeroy',
-        fillcolor: 'rgba(163,113,247,0.08)',
+        fillcolor: C.vFill,
         xaxis: 'x',
-        yaxis: 'y3',
+        yaxis: 'y2',
         showlegend: true,
         legendgroup: 'v',
-        hovertemplate: '%{y:.4f}<extra>schmitt_v</extra>',
+        hovertemplate: '%{y:.4f}<extra>v0_日线_v</extra>',
     });
 
-    // --- Subplot 4: a (acceleration) + thresholds ---
+    // ============================================================
+    // Subplot 3: a (acceleration) + thresholds
+    // ============================================================
     traces.push({
         type: 'scatter',
         x: data.dates,
         y: data.a,
-        name: 'schmitt_a',
+        name: 'v0_日线_a',
         mode: 'lines',
-        line: { color: chartColors.a, width: 1.8 },
+        line: { color: C.a, width: 1.8 },
         xaxis: 'x',
-        yaxis: 'y4',
+        yaxis: 'y3',
         showlegend: true,
         legendgroup: 'a',
-        hovertemplate: '%{y:.5f}<extra>schmitt_a</extra>',
+        hovertemplate: '%{y:.5f}<extra>v0_日线_a</extra>',
     });
-    // Positive threshold line
+    // +threshold line
+    var lastIdx = data.dates.length - 1;
     traces.push({
         type: 'scatter',
-        x: [data.dates[0], data.dates[data.dates.length - 1]],
+        x: [data.dates[0], data.dates[lastIdx]],
         y: [data.aThreshold, data.aThreshold],
-        name: '+阈值 (σᵥ)',
+        name: '+σᵥ 阈值',
         mode: 'lines',
-        line: { color: chartColors.aPosThreshold, width: 1, dash: 'dash' },
+        line: { color: C.threshold, width: 1, dash: 'dash' },
         xaxis: 'x',
-        yaxis: 'y4',
+        yaxis: 'y3',
         showlegend: true,
         legendgroup: 'thresh',
         hoverinfo: 'skip',
     });
-    // Negative threshold line
     traces.push({
         type: 'scatter',
-        x: [data.dates[0], data.dates[data.dates.length - 1]],
+        x: [data.dates[0], data.dates[lastIdx]],
         y: [-data.aThreshold, -data.aThreshold],
-        name: '−阈值 (σᵥ)',
+        name: '−σᵥ 阈值',
         mode: 'lines',
-        line: { color: chartColors.aNegThreshold, width: 1, dash: 'dash' },
+        line: { color: C.threshold, width: 1, dash: 'dash' },
         xaxis: 'x',
-        yaxis: 'y4',
+        yaxis: 'y3',
         showlegend: false,
         legendgroup: 'thresh',
         hoverinfo: 'skip',
     });
 
-    // --- Subplot 5: Signal ---
-    traces.push({
-        type: 'scatter',
-        x: data.dates,
-        y: data.signal,
-        name: 'schmitt_sig',
-        mode: 'lines',
-        line: { color: chartColors.signal, width: 2, shape: 'hv' },
-        fill: 'tozeroy',
-        fillcolor: 'rgba(57,210,192,0.08)',
-        xaxis: 'x',
-        yaxis: 'y5',
-        showlegend: true,
-        legendgroup: 'signal',
-        hovertemplate: '%{y}<extra>schmitt_sig</extra>',
-    });
-
-    // --- Subplot 6: PnL curves ---
+    // ============================================================
+    // Subplot 4: PnL curves with trade segment shading
+    // ============================================================
     traces.push({
         type: 'scatter',
         x: data.dates,
         y: data.pnlLong,
-        name: 'v0_pnl (做多)',
+        name: 'v0_日线_pnl_long',
         mode: 'lines',
-        line: { color: chartColors.pnlLong, width: 1.8 },
+        line: { color: C.pnlLong, width: 2 },
         xaxis: 'x',
-        yaxis: 'y6',
+        yaxis: 'y4',
         showlegend: true,
         legendgroup: 'pnl',
         hovertemplate: '%{y:.2f}<extra>做多 PnL</extra>',
@@ -807,143 +893,133 @@ var data = generateSimulatedData(120);
         type: 'scatter',
         x: data.dates,
         y: data.pnlShort,
-        name: 'v0_pnl (做空)',
+        name: 'v0_日线_pnl_short',
         mode: 'lines',
-        line: { color: chartColors.pnlShort, width: 1.8 },
+        line: { color: C.pnlShort, width: 1.5, dash: 'dot' },
         xaxis: 'x',
-        yaxis: 'y6',
+        yaxis: 'y4',
         showlegend: true,
         legendgroup: 'pnl',
         hovertemplate: '%{y:.2f}<extra>做空 PnL</extra>',
     });
 
+    // Trade segment background shapes on PnL subplot (paper coords for full height)
+    var pnlY0 = row4[0], pnlY1 = row4[1];
+    for (var s = 0; s < data.tradeSegments.length; s++) {
+        var seg = data.tradeSegments[s];
+        shapes.push({
+            type: 'rect',
+            xref: 'x',
+            yref: 'paper',
+            x0: data.dates[seg.start],
+            x1: data.dates[seg.end],
+            y0: pnlY0,
+            y1: pnlY1,
+            fillcolor: seg.dir === 1 ? C.longShade : C.shortShade,
+            line: { width: 0 },
+            layer: 'below',
+        });
+    }
+
+    // Subplot separators
+    shapes.push(
+        { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'paper', y0: row2[1], y1: row2[1],
+          line: { color: 'rgba(255,255,255,0.06)', width: 1 } },
+        { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'paper', y0: row3[1], y1: row3[1],
+          line: { color: 'rgba(255,255,255,0.06)', width: 1 } },
+        { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'paper', y0: row4[1], y1: row4[1],
+          line: { color: 'rgba(255,255,255,0.06)', width: 1 } },
+    );
+
+    // ============================================================
     // Layout
+    // ============================================================
     var layout = {
-        // X-axis (shared, bottom)
         xaxis: {
             domain: [0, 1],
-            anchor: 'y6',
+            anchor: 'y4',
             showgrid: true,
-            gridcolor: chartColors.gridColor,
+            gridcolor: C.grid,
             zeroline: false,
-            tickfont: { color: chartColors.textColor, size: 10 },
+            tickfont: { color: C.text, size: 10 },
             type: 'date',
             rangeslider: { visible: false },
             showspikes: true,
             spikemode: 'across',
             spikethickness: 1,
-            spikecolor: 'rgba(255,255,255,0.15)',
+            spikecolor: 'rgba(255,255,255,0.12)',
         },
 
-        // Y-axis 1: Price (K-line + filtered)
+        // Row 1: Signal
         yaxis: {
             domain: row1,
-            title: { text: 'Price', font: { color: chartColors.titleColor, size: 12 } },
+            title: { text: '信号 Sig', font: { color: C.title, size: 12 } },
             showgrid: true,
-            gridcolor: chartColors.gridColor,
-            zeroline: false,
-            tickfont: { color: chartColors.textColor, size: 10 },
-            tickformat: '.1f',
+            gridcolor: C.grid,
+            zeroline: true,
+            zerolinecolor: 'rgba(255,255,255,0.15)',
+            zerolinewidth: 1,
+            tickfont: { color: C.text, size: 10 },
+            tickvals: [-1, 0, 1],
+            range: [-1.45, 1.45],
             anchor: 'x',
         },
-        // Y-axis 2: Residual
+        // Row 2: Velocity
         yaxis2: {
             domain: row2,
-            title: { text: '残差', font: { color: chartColors.titleColor, size: 11 } },
+            title: { text: '速度 v', font: { color: C.title, size: 11 } },
             showgrid: true,
-            gridcolor: chartColors.gridColor,
+            gridcolor: C.grid,
             zeroline: true,
-            zerolinecolor: chartColors.residualZero,
+            zerolinecolor: 'rgba(255,255,255,0.12)',
             zerolinewidth: 1,
-            tickfont: { color: chartColors.textColor, size: 10 },
-            tickformat: '.2f',
-            anchor: 'x',
-        },
-        // Y-axis 3: v
-        yaxis3: {
-            domain: row3,
-            title: { text: '速度 v', font: { color: chartColors.titleColor, size: 11 } },
-            showgrid: true,
-            gridcolor: chartColors.gridColor,
-            zeroline: true,
-            zerolinecolor: chartColors.vZero,
-            zerolinewidth: 1,
-            tickfont: { color: chartColors.textColor, size: 10 },
+            tickfont: { color: C.text, size: 10 },
             tickformat: '.3f',
             anchor: 'x',
         },
-        // Y-axis 4: a
-        yaxis4: {
-            domain: row4,
-            title: { text: '加速度 a', font: { color: chartColors.titleColor, size: 11 } },
+        // Row 3: Acceleration
+        yaxis3: {
+            domain: row3,
+            title: { text: '加速度 a', font: { color: C.title, size: 11 } },
             showgrid: true,
-            gridcolor: chartColors.gridColor,
+            gridcolor: C.grid,
             zeroline: true,
-            zerolinecolor: 'rgba(255,255,255,0.15)',
+            zerolinecolor: 'rgba(255,255,255,0.12)',
             zerolinewidth: 1,
-            tickfont: { color: chartColors.textColor, size: 10 },
+            tickfont: { color: C.text, size: 10 },
             tickformat: '.4f',
             anchor: 'x',
         },
-        // Y-axis 5: Signal
-        yaxis5: {
-            domain: row5,
-            title: { text: '信号 Sig', font: { color: chartColors.titleColor, size: 11 } },
+        // Row 4: PnL
+        yaxis4: {
+            domain: row4,
+            title: { text: 'PnL 曲线', font: { color: C.title, size: 11 } },
             showgrid: true,
-            gridcolor: chartColors.gridColor,
-            zeroline: true,
-            zerolinecolor: 'rgba(255,255,255,0.15)',
-            zerolinewidth: 1,
-            tickfont: { color: chartColors.textColor, size: 10 },
-            tickvals: [-1, 0, 1],
-            range: [-1.3, 1.3],
-            anchor: 'x',
-        },
-        // Y-axis 6: PnL
-        yaxis6: {
-            domain: row6,
-            title: { text: 'PnL', font: { color: chartColors.titleColor, size: 11 } },
-            showgrid: true,
-            gridcolor: chartColors.gridColor,
-            zeroline: true,
-            zerolinecolor: chartColors.pnlBase,
-            zerolinewidth: 1,
-            tickfont: { color: chartColors.textColor, size: 10 },
+            gridcolor: C.grid,
+            zeroline: false,
+            tickfont: { color: C.text, size: 10 },
             tickformat: '.1f',
             anchor: 'x',
         },
 
-        // Global layout
         paper_bgcolor: 'rgba(0,0,0,0)',
         plot_bgcolor: '#0d1117',
-        font: { color: chartColors.textColor, size: 12 },
+        font: { color: C.text, size: 12 },
         legend: {
             orientation: 'h',
             x: 0.5,
-            y: -0.06,
+            y: -0.08,
             xanchor: 'center',
-            font: { color: chartColors.textColor, size: 11 },
+            font: { color: C.text, size: 11 },
             bgcolor: 'rgba(0,0,0,0.3)',
             bordercolor: 'rgba(255,255,255,0.1)',
             borderwidth: 1,
         },
         margin: { l: 60, r: 40, t: 10, b: 60 },
-        height: 980,
+        height: 820,
         hovermode: 'x unified',
         dragmode: 'pan',
-
-        // Shapes: zero-lines and subplot separators in plot area
-        shapes: [
-            // Subplot separators (horizontal lines between subplots)
-            { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'paper', y0: row2[1], y1: row2[1],
-              line: { color: 'rgba(255,255,255,0.06)', width: 1 } },
-            { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'paper', y0: row3[1], y1: row3[1],
-              line: { color: 'rgba(255,255,255,0.06)', width: 1 } },
-            { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'paper', y0: row4[1], y1: row4[1],
-              line: { color: 'rgba(255,255,255,0.06)', width: 1 } },
-            { type: 'line', xref: 'paper', x0: 0, x1: 1, yref: 'paper', y0: row5[1], y1: row5[1],
-              line: { color: 'rgba(255,255,255,0.06)', width: 1 } },
-        ],
+        shapes: shapes,
     };
 
     var config = {
