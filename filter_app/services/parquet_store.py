@@ -138,6 +138,11 @@ class ParquetStore:
 
     # ── Public API ──────────────────────────────────────────────────
 
+    @property
+    def output_dir(self) -> Path:
+        """Public read-only access to the output directory (session dir if started, else root)."""
+        return self._session_dir or self._output_dir
+
     def start_session(self) -> str:
         """Create the session directory and write an initial metadata file.
 
