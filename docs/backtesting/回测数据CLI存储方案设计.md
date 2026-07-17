@@ -1,4 +1,4 @@
-# 回测数据 CLI 存储方案设计
+# 回测数据 CLI 存储方案设计 v3.1
 
 ## 1. 现状分析
 
@@ -51,16 +51,20 @@ bar_index | bar_timestamp        | v0_日线_sig | v1_60min_sig | v2_15min_sig |
 | `bar_index` | int32 | min_tf 上的 bar 索引，从 0 开始 |
 | `bar_timestamp` | str | bar 的 ISO 8601 时间戳（如 `2024-01-02T09:35:00`） |
 
-**每视图列（4 个视图 v0-v3，每视图 8 列，共 32 列）**：
+**每视图列（4 个视图 v0-v3，每视图 12 列，共 48 列）**：
 
 | 列名格式 | 类型 | 说明 |
 |----------|------|------|
 | `{view}_sig` | int8 | 施密特信号（-1=空头, 0=中性, 1=多头） |
+| `{view}_filtered` | float32 | P0: 滤波价格，图表复现必需 |
+| `{view}_eps` | float32 | P0: 自适应阈值，判断信号质量 |
 | `{view}_pnl_long` | float32 | 做多累计 PnL（从 100 起始，100±盈亏） |
 | `{view}_pnl_short` | float32 | 做空累计 PnL（从 100 起始，100±盈亏） |
 | `{view}_long_pos` | bool | 是否在做多持仓中 |
 | `{view}_short_pos` | bool | 是否在做空持仓中 |
 | `{view}_trade` | str | 交易事件：`"entry_long"` / `"exit_long"` / `"entry_short"` / `"exit_short"` / `null` |
+| `{view}_trade_return` | float32 | P1: 交易盈亏百分比 |
+| `{view}_trade_reason` | str | P1: 离场原因(stop_loss/take_profit/signal_reverse) |
 | `{view}_bs_entry` | str | BS 入场标记：`"B"` / `"S"` / `null` |
 | `{view}_bs_exit` | str | BS 离场标记：`"B"` / `"S"` / `null` |
 
@@ -73,7 +77,7 @@ bar_index | bar_timestamp        | v0_日线_sig | v1_60min_sig | v2_15min_sig |
 | v2 | 15分钟 | `v2_15min` | `v2_15min_sig`, `v2_15min_trade` |
 | v3 | 5分钟（min_tf） | `v3_5min` | `v3_5min_sig`, `v3_5min_bs_entry` |
 
-总计：2 + 4 x 8 = **34 列**。
+总计：2 + 4 x 12 = **50 列**。
 
 ### 4.3 目录结构
 
@@ -101,7 +105,12 @@ bar_index | bar_timestamp        | v0_日线_sig | v1_60min_sig | v2_15min_sig |
 1. `BacktestRunner` 每步将各视图计算结果收集为 dict
 2. 调用 `ParquetStore.write_row(row_dict)` 追加一行
 3. `ParquetStore` 内部维护一个行缓冲区（如 1000 行），满后批量写入（避免每行触发一次 I/O）
-4. `run()` 结束后调用 `ParquetStore.flush()` 写入剩余行、导出 CSV、关闭文件
+4. **定时 flush**：每 30 秒强制刷盘一次（基于 `time.time()` 检查），防止长时回测中途中断导致缓冲区数据丢失
+5. `run()` 结束后调用 `ParquetStore.flush()` 写入剩余行、导出 CSV、关闭文件
+
+**写入可靠性**：
+- **原子写入**：先写 `.tmp` 临时文件（如 `backtest_result.parquet.tmp`），写入完成并验证后通过 `os.rename` 原子重命名为正式文件名。避免写入中途崩溃导致 Parquet 文件损坏，确保读取方永远看不到半成品文件。
+- **定时 flush**：每 30 秒强制刷盘，与行缓冲区满触发形成双重保障——短回测靠缓冲满触发，长回测靠定时触发，确保中断时数据损失不超过 30 秒。
 
 **CSV 生成时机**：Parquet 写入完成后，用 pandas 读取并 `to_csv` 导出，不逐行写 CSV。
 
@@ -181,7 +190,7 @@ if self.parquet_store:
         "bar_timestamp": bar_timestamp,
         "v0_日线_sig": views[0].signal,
         "v0_日线_pnl_long": views[0].pnl_long,
-        # ... 其余 32 列
+        # ... 其余 48 列
     })
 ```
 
@@ -191,8 +200,8 @@ if self.parquet_store:
 
 假设一个回测 session 有 10,000 个 min_tf bar（约 2 个月 5min 数据）：
 
-- Parquet（ZSTD level=3）：34 列 x 10000 行，大量重复值（粗周期 + bool 列），预计 **~500KB-2MB**
-- CSV：相同数据无压缩，预计 **~3-5MB**
+- Parquet（ZSTD level=3）：50 列 x 10000 行，大量重复值（粗周期 + bool 列），预计 **~800KB-3MB**
+- CSV：相同数据无压缩，预计 **~5-8MB**
 
 ### 6.5 验证标准
 
@@ -213,7 +222,7 @@ if self.parquet_store:
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "3.1",
   "session_id": "20240716-143052",
   "ticker": "AAPL",
   "min_tf": "5min",
@@ -221,9 +230,37 @@ if self.parquet_store:
   "start_time": "2024-01-02T09:30:00",
   "end_time": "2024-12-31T16:00:00",
   "bar_count": 10000,
-  "created_at": "2024-07-16T14:30:52"
+  "created_at": "2024-07-16T14:30:52",
+  "view_configs": {
+    "v0_日线": {
+      "filter_type": "kalman",
+      "filter_params": {"delta": 1e-5, "R": 0.01},
+      "schmitt_params": {"threshold_up": 0.5, "threshold_down": -0.5},
+      "strategy_params": {"stop_loss": 0.05, "take_profit": 0.10}
+    },
+    "v1_60min": {
+      "filter_type": "butterworth",
+      "filter_params": {"order": 4, "cutoff": 0.1},
+      "schmitt_params": {"threshold_up": 0.3, "threshold_down": -0.3},
+      "strategy_params": {"stop_loss": 0.03, "take_profit": 0.06}
+    },
+    "v2_15min": {
+      "filter_type": "kalman",
+      "filter_params": {"delta": 1e-4, "R": 0.1},
+      "schmitt_params": {"threshold_up": 0.2, "threshold_down": -0.2},
+      "strategy_params": {"stop_loss": 0.02, "take_profit": 0.04}
+    },
+    "v3_5min": {
+      "filter_type": "ema",
+      "filter_params": {"span": 20},
+      "schmitt_params": {"threshold_up": 0.15, "threshold_down": -0.15},
+      "strategy_params": {"stop_loss": 0.01, "take_profit": 0.02}
+    }
+  }
 }
 ```
+
+**必须存储 `view_configs`**：包含每个视图的滤波器类型及参数（`filter_type` + `filter_params`）、施密特参数（`schmitt_params`）和策略参数（`strategy_params`）。这些配置是回测结果可复现的前提——缺少任意一项，后续重新加载数据时无法还原图表或验证策略行为。
 
 未来 schema 变更时递增 `schema_version`，读取方根据版本号选择解析逻辑。
 

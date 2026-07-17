@@ -205,7 +205,7 @@
 
 <h1>回测存储方案 — 统一时间轴 Parquet 效果图</h1>
 <p class="subtitle">
-  核心思想：以 <code>_min_tf</code> bar 为统一行索引，各周期信号 / PnL / 持仓 / 交易对齐到同一行，粗周期数据自然重复
+  核心思想：以 <code>_min_tf</code> bar 为统一行索引，各周期信号 / PnL / 持仓 / 交易对齐到同一行，粗周期数据自然重复 &nbsp;|&nbsp; <strong>v3.1</strong>
 </p>
 
 <!-- ====== 板块1: 架构流程图 ====== -->
@@ -231,88 +231,88 @@ flowchart LR
         <tr>
           <th class="col-min" rowspan="2">bar_index</th>
           <th class="col-min" rowspan="2">_min_tf<br>timestamp</th>
-          <th class="col-daily" colspan="3">日线 (v0)</th>
-          <th class="col-60m" colspan="3">60分钟 (v1)</th>
-          <th class="col-15m" colspan="3">15分钟 (v2)</th>
-          <th class="col-5m" colspan="3">5分钟 (v3, min_tf)</th>
+          <th class="col-daily" colspan="5">日线 (v0)</th>
+          <th class="col-60m" colspan="5">60分钟 (v1)</th>
+          <th class="col-15m" colspan="5">15分钟 (v2)</th>
+          <th class="col-5m" colspan="5">5分钟 (v3, min_tf)</th>
         </tr>
         <tr>
-          <th class="col-daily">sig</th><th class="col-daily">pnl</th><th class="col-daily">pos</th>
-          <th class="col-60m">sig</th><th class="col-60m">pnl</th><th class="col-60m">pos</th>
-          <th class="col-15m">sig</th><th class="col-15m">pnl</th><th class="col-15m">pos</th>
-          <th class="col-5m">sig</th><th class="col-5m">pnl</th><th class="col-5m">pos</th>
+          <th class="col-daily">sig</th><th class="col-daily">pnl</th><th class="col-daily">pos</th><th class="col-daily" style="font-size:10px">flt</th><th class="col-daily" style="font-size:10px">eps</th>
+          <th class="col-60m">sig</th><th class="col-60m">pnl</th><th class="col-60m">pos</th><th class="col-60m" style="font-size:10px">flt</th><th class="col-60m" style="font-size:10px">eps</th>
+          <th class="col-15m">sig</th><th class="col-15m">pnl</th><th class="col-15m">pos</th><th class="col-15m" style="font-size:10px">flt</th><th class="col-15m" style="font-size:10px">eps</th>
+          <th class="col-5m">sig</th><th class="col-5m">pnl</th><th class="col-5m">pos</th><th class="col-5m" style="font-size:10px">flt</th><th class="col-5m" style="font-size:10px">eps</th>
         </tr>
       </thead>
       <tbody>
         <tr>
           <td class="bar-idx">0</td><td class="td-empty">09:35</td>
-          <td class="td-repeat">-1</td><td class="td-repeat">0.12</td><td class="td-repeat">short</td>
-          <td class="td-repeat">1</td><td class="td-repeat">-0.05</td><td class="td-repeat">long</td>
-          <td class="td-repeat">0</td><td class="td-repeat">0.00</td><td class="td-empty">—</td>
-          <td class="td-change">0</td><td class="td-change">0.00</td><td class="td-empty">—</td>
+          <td class="td-repeat">-1</td><td class="td-repeat">0.12</td><td class="td-repeat">short</td><td class="td-repeat">102.5</td><td class="td-repeat">0.80</td>
+          <td class="td-repeat">1</td><td class="td-repeat">-0.05</td><td class="td-repeat">long</td><td class="td-repeat">102.5</td><td class="td-repeat">0.65</td>
+          <td class="td-repeat">0</td><td class="td-repeat">0.00</td><td class="td-empty">—</td><td class="td-repeat">102.5</td><td class="td-repeat">0.50</td>
+          <td class="td-change">0</td><td class="td-change">0.00</td><td class="td-empty">—</td><td class="td-change">102.50</td><td class="td-change">0.30</td>
         </tr>
         <tr>
           <td class="bar-idx">1</td><td class="td-empty">09:40</td>
-          <td class="td-repeat">-1</td><td class="td-repeat">0.08</td><td class="td-repeat">short</td>
-          <td class="td-repeat">1</td><td class="td-repeat">-0.03</td><td class="td-repeat">long</td>
-          <td class="td-repeat">0</td><td class="td-repeat">0.00</td><td class="td-empty">—</td>
-          <td class="td-change">1</td><td class="td-change">0.02</td><td class="td-change">long</td>
+          <td class="td-repeat">-1</td><td class="td-repeat">0.08</td><td class="td-repeat">short</td><td class="td-repeat">102.5</td><td class="td-repeat">0.80</td>
+          <td class="td-repeat">1</td><td class="td-repeat">-0.03</td><td class="td-repeat">long</td><td class="td-repeat">102.5</td><td class="td-repeat">0.65</td>
+          <td class="td-repeat">0</td><td class="td-repeat">0.00</td><td class="td-empty">—</td><td class="td-repeat">102.5</td><td class="td-repeat">0.50</td>
+          <td class="td-change">1</td><td class="td-change">0.02</td><td class="td-change">long</td><td class="td-change">102.53</td><td class="td-change">0.30</td>
         </tr>
         <tr>
           <td class="bar-idx">2</td><td class="td-empty">09:45</td>
-          <td class="td-repeat">-1</td><td class="td-repeat">0.15</td><td class="td-repeat">short</td>
-          <td class="td-repeat">1</td><td class="td-repeat">0.01</td><td class="td-repeat">long</td>
-          <td class="td-repeat">0</td><td class="td-repeat">0.00</td><td class="td-empty">—</td>
-          <td class="td-change">-1</td><td class="td-change">0.00</td><td class="td-change">short</td>
+          <td class="td-repeat">-1</td><td class="td-repeat">0.15</td><td class="td-repeat">short</td><td class="td-repeat">102.5</td><td class="td-repeat">0.80</td>
+          <td class="td-repeat">1</td><td class="td-repeat">0.01</td><td class="td-repeat">long</td><td class="td-repeat">102.5</td><td class="td-repeat">0.65</td>
+          <td class="td-repeat">0</td><td class="td-repeat">0.00</td><td class="td-empty">—</td><td class="td-repeat">102.5</td><td class="td-repeat">0.50</td>
+          <td class="td-change">-1</td><td class="td-change">0.00</td><td class="td-change">short</td><td class="td-change">102.37</td><td class="td-change">0.30</td>
         </tr>
         <tr style="border-top: 3px solid var(--border);">
           <td class="bar-idx">3</td><td class="td-empty">09:50</td>
-          <td class="td-repeat">-1</td><td class="td-repeat">-0.02</td><td class="td-repeat">short</td>
-          <td class="td-change">-1</td><td class="td-repeat">0.00</td><td class="td-change">short</td>
-          <td class="td-change">1</td><td class="td-repeat">0.03</td><td class="td-change">long</td>
-          <td class="td-change">1</td><td class="td-change">-0.01</td><td class="td-change">long</td>
+          <td class="td-repeat">-1</td><td class="td-repeat">-0.02</td><td class="td-repeat">short</td><td class="td-repeat">102.5</td><td class="td-repeat">0.80</td>
+          <td class="td-change">-1</td><td class="td-repeat">0.00</td><td class="td-change">short</td><td class="td-repeat">102.5</td><td class="td-repeat">0.65</td>
+          <td class="td-change">1</td><td class="td-repeat">0.03</td><td class="td-change">long</td><td class="td-change">102.1</td><td class="td-repeat">0.50</td>
+          <td class="td-change">1</td><td class="td-change">-0.01</td><td class="td-change">long</td><td class="td-change">102.30</td><td class="td-change">0.30</td>
         </tr>
         <tr>
           <td class="bar-idx">4</td><td class="td-empty">09:55</td>
-          <td class="td-repeat">-1</td><td class="td-repeat">-0.05</td><td class="td-repeat">short</td>
-          <td class="td-repeat">-1</td><td class="td-repeat">0.02</td><td class="td-repeat">short</td>
-          <td class="td-repeat">1</td><td class="td-repeat">0.05</td><td class="td-repeat">long</td>
-          <td class="td-change">0</td><td class="td-change">0.00</td><td class="td-empty">—</td>
+          <td class="td-repeat">-1</td><td class="td-repeat">-0.05</td><td class="td-repeat">short</td><td class="td-repeat">102.5</td><td class="td-repeat">0.80</td>
+          <td class="td-repeat">-1</td><td class="td-repeat">0.02</td><td class="td-repeat">short</td><td class="td-repeat">102.5</td><td class="td-repeat">0.65</td>
+          <td class="td-repeat">1</td><td class="td-repeat">0.05</td><td class="td-repeat">long</td><td class="td-repeat">102.1</td><td class="td-repeat">0.50</td>
+          <td class="td-change">0</td><td class="td-change">0.00</td><td class="td-empty">—</td><td class="td-change">102.42</td><td class="td-change">0.30</td>
         </tr>
         <tr>
           <td class="bar-idx">5</td><td class="td-empty">10:00</td>
-          <td class="td-repeat">-1</td><td class="td-repeat">-0.10</td><td class="td-repeat">short</td>
-          <td class="td-repeat">-1</td><td class="td-repeat">0.05</td><td class="td-repeat">short</td>
-          <td class="td-repeat">1</td><td class="td-repeat">0.01</td><td class="td-repeat">long</td>
-          <td class="td-change">-1</td><td class="td-change">0.00</td><td class="td-change">short</td>
+          <td class="td-repeat">-1</td><td class="td-repeat">-0.10</td><td class="td-repeat">short</td><td class="td-repeat">102.5</td><td class="td-repeat">0.80</td>
+          <td class="td-repeat">-1</td><td class="td-repeat">0.05</td><td class="td-repeat">short</td><td class="td-repeat">102.5</td><td class="td-repeat">0.65</td>
+          <td class="td-repeat">1</td><td class="td-repeat">0.01</td><td class="td-repeat">long</td><td class="td-repeat">102.1</td><td class="td-repeat">0.50</td>
+          <td class="td-change">-1</td><td class="td-change">0.00</td><td class="td-change">short</td><td class="td-change">102.28</td><td class="td-change">0.30</td>
         </tr>
         <tr>
           <td class="bar-idx">6</td><td class="td-empty">10:05</td>
-          <td class="td-repeat">-1</td><td class="td-repeat">-0.07</td><td class="td-repeat">short</td>
-          <td class="td-repeat">-1</td><td class="td-repeat">0.03</td><td class="td-repeat">short</td>
-          <td class="td-repeat">1</td><td class="td-repeat">0.04</td><td class="td-repeat">long</td>
-          <td class="td-change">1</td><td class="td-change">0.01</td><td class="td-change">long</td>
+          <td class="td-repeat">-1</td><td class="td-repeat">-0.07</td><td class="td-repeat">short</td><td class="td-repeat">102.5</td><td class="td-repeat">0.80</td>
+          <td class="td-repeat">-1</td><td class="td-repeat">0.03</td><td class="td-repeat">short</td><td class="td-repeat">102.5</td><td class="td-repeat">0.65</td>
+          <td class="td-repeat">1</td><td class="td-repeat">0.04</td><td class="td-repeat">long</td><td class="td-repeat">102.1</td><td class="td-repeat">0.50</td>
+          <td class="td-change">1</td><td class="td-change">0.01</td><td class="td-change">long</td><td class="td-change">102.36</td><td class="td-change">0.30</td>
         </tr>
         <tr>
           <td class="bar-idx">7</td><td class="td-empty">10:10</td>
-          <td class="td-repeat">-1</td><td class="td-repeat">-0.12</td><td class="td-repeat">short</td>
-          <td class="td-repeat">-1</td><td class="td-repeat">0.05</td><td class="td-repeat">short</td>
-          <td class="td-repeat">1</td><td class="td-repeat">0.02</td><td class="td-repeat">long</td>
-          <td class="td-change">0</td><td class="td-change">-0.02</td><td class="td-empty">—</td>
+          <td class="td-repeat">-1</td><td class="td-repeat">-0.12</td><td class="td-repeat">short</td><td class="td-repeat">102.5</td><td class="td-repeat">0.80</td>
+          <td class="td-repeat">-1</td><td class="td-repeat">0.05</td><td class="td-repeat">short</td><td class="td-repeat">102.5</td><td class="td-repeat">0.65</td>
+          <td class="td-repeat">1</td><td class="td-repeat">0.02</td><td class="td-repeat">long</td><td class="td-repeat">102.1</td><td class="td-repeat">0.50</td>
+          <td class="td-change">0</td><td class="td-change">-0.02</td><td class="td-empty">—</td><td class="td-change">102.44</td><td class="td-change">0.30</td>
         </tr>
         <tr>
           <td class="bar-idx">8</td><td class="td-empty">10:15</td>
-          <td class="td-repeat">-1</td><td class="td-repeat">-0.08</td><td class="td-repeat">short</td>
-          <td class="td-repeat">-1</td><td class="td-repeat">0.07</td><td class="td-repeat">short</td>
-          <td class="td-change">-1</td><td class="td-repeat">0.00</td><td class="td-change">short</td>
-          <td class="td-change">-1</td><td class="td-change">-0.03</td><td class="td-change">short</td>
+          <td class="td-repeat">-1</td><td class="td-repeat">-0.08</td><td class="td-repeat">short</td><td class="td-repeat">102.5</td><td class="td-repeat">0.80</td>
+          <td class="td-repeat">-1</td><td class="td-repeat">0.07</td><td class="td-repeat">short</td><td class="td-repeat">102.5</td><td class="td-repeat">0.65</td>
+          <td class="td-change">-1</td><td class="td-repeat">0.00</td><td class="td-change">short</td><td class="td-change">101.8</td><td class="td-repeat">0.50</td>
+          <td class="td-change">-1</td><td class="td-change">-0.03</td><td class="td-change">short</td><td class="td-change">102.12</td><td class="td-change">0.30</td>
         </tr>
         <tr>
           <td class="bar-idx">...</td><td class="td-empty">...</td>
-          <td class="td-ellipsis" colspan="3">日线信号 ~78 bar 不变</td>
-          <td class="td-ellipsis" colspan="3">60min 信号 ~12 bar 不变</td>
-          <td class="td-ellipsis" colspan="3">15min 信号 ~3 bar 不变</td>
-          <td class="td-ellipsis" colspan="3">5min 信号每行都可变</td>
+          <td class="td-ellipsis" colspan="5">日线信号 ~78 bar 不变</td>
+          <td class="td-ellipsis" colspan="5">60min 信号 ~12 bar 不变</td>
+          <td class="td-ellipsis" colspan="5">15min 信号 ~3 bar 不变</td>
+          <td class="td-ellipsis" colspan="5">5min 信号每行都可变</td>
         </tr>
       </tbody>
     </table>
@@ -336,11 +336,13 @@ flowchart LR
 <!-- ====== 板块3: Plotly 图表演示 ====== -->
 <div class="section">
   <div class="section-title"><span class="num">3</span> Plotly 模拟数据演示（120 bar，min_tf = 5 分钟）</div>
-  <div id="plotly-charts" class="plotly-container" style="height:1150px;"></div>
+  <div id="plotly-charts" class="plotly-container" style="height:1500px;"></div>
   <p class="annotation">
     对应 Parquet 列名：
     <span class="col-tag daily">v0_日线_sig</span>
     <span class="col-tag daily">v0_日线_pnl_long</span>
+    <span class="col-tag daily">v0_filtered</span>
+    <span class="col-tag daily">v0_eps</span>
     <span class="col-tag m60">v1_60分钟_sig</span>
     <span class="col-tag m60">v1_60分钟_pnl_long</span>
     <span class="col-tag m15">v2_15分钟_pos</span>
@@ -414,13 +416,13 @@ flowchart LR
   <div class="section-title"><span class="num">6</span> Parquet / CSV 列结构示意</div>
   <pre class="code-block">
 <span class="col-tag meta">_min_tf</span>  <span class="col-tag meta">bar_index</span>
-<span class="col-tag daily">v0_日线_sig</span>  <span class="col-tag daily">v0_日线_pnl_long</span>  <span class="col-tag daily">v0_日线_pnl_short</span>  <span class="col-tag daily">v0_日线_pos</span>  <span class="col-tag daily">v0_日线_bs</span>
-<span class="col-tag m60">v1_60分钟_sig</span>  <span class="col-tag m60">v1_60分钟_pnl_long</span>  <span class="col-tag m60">v1_60分钟_pnl_short</span>  <span class="col-tag m60">v1_60分钟_pos</span>  <span class="col-tag m60">v1_60分钟_bs</span>
-<span class="col-tag m15">v2_15分钟_sig</span>  <span class="col-tag m15">v2_15分钟_pnl_long</span>  <span class="col-tag m15">v2_15分钟_pnl_short</span>  <span class="col-tag m15">v2_15分钟_pos</span>  <span class="col-tag m15">v2_15分钟_bs</span>
-<span class="col-tag m5">v3_5分钟_sig</span>  <span class="col-tag m5">v3_5分钟_pnl_long</span>  <span class="col-tag m5">v3_5分钟_pnl_short</span>  <span class="col-tag m5">v3_5分钟_pos</span>  <span class="col-tag m5">v3_5分钟_bs</span>
+<span class="col-tag daily">v0_日线_sig</span>  <span class="col-tag daily">v0_日线_pnl_long</span>  <span class="col-tag daily">v0_日线_pnl_short</span>  <span class="col-tag daily">v0_日线_pos</span>  <span class="col-tag daily">v0_日线_bs</span>  <span class="col-tag daily">v0_filtered 🆕 v3.1</span>  <span class="col-tag daily">v0_eps 🆕 v3.1</span>
+<span class="col-tag m60">v1_60分钟_sig</span>  <span class="col-tag m60">v1_60分钟_pnl_long</span>  <span class="col-tag m60">v1_60分钟_pnl_short</span>  <span class="col-tag m60">v1_60分钟_pos</span>  <span class="col-tag m60">v1_60分钟_bs</span>  <span class="col-tag m60">v1_filtered 🆕 v3.1</span>  <span class="col-tag m60">v1_eps 🆕 v3.1</span>
+<span class="col-tag m15">v2_15分钟_sig</span>  <span class="col-tag m15">v2_15分钟_pnl_long</span>  <span class="col-tag m15">v2_15分钟_pnl_short</span>  <span class="col-tag m15">v2_15分钟_pos</span>  <span class="col-tag m15">v2_15分钟_bs</span>  <span class="col-tag m15">v2_filtered 🆕 v3.1</span>  <span class="col-tag m15">v2_eps 🆕 v3.1</span>
+<span class="col-tag m5">v3_5分钟_sig</span>  <span class="col-tag m5">v3_5分钟_pnl_long</span>  <span class="col-tag m5">v3_5分钟_pnl_short</span>  <span class="col-tag m5">v3_5分钟_pos</span>  <span class="col-tag m5">v3_5分钟_bs</span>  <span class="col-tag m5">v3_filtered 🆕 v3.1</span>  <span class="col-tag m5">v3_eps 🆕 v3.1</span>
   </pre>
   <p class="annotation">
-    每周期 5 列（sig, pnl_long, pnl_short, pos, bs），4 个周期 = 20 数据列 + 2 索引列 = <strong>22 列</strong>。
+    每周期 7 列（sig, pnl_long, pnl_short, pos, bs, filtered 🆕 v3.1, eps 🆕 v3.1），4 个周期 = 28 数据列 + 2 索引列 = <strong>30 列</strong>。
     日线 78 行重复 → 压缩比极高（Parquet RLE + 字典编码）。
   </p>
 </div>
@@ -503,7 +505,44 @@ const m60Pos   = m60Sig.slice();
 const m15Pos   = m15Sig.slice();
 const m5Pos    = m5Sig.slice();
 
-// ========== Plotly: 3 subplots vertical stack ==========
+// Filtered price: base price with noise, then smoothed
+const rawPrice = [];
+let p = 102;
+for (let i = 0; i < N; i++) {
+  p += (rand() - 0.5) * 0.60;
+  rawPrice.push(p);
+}
+// Simple moving average filter (window=4)
+const v0Filtered = [];
+const win = 4;
+for (let i = 0; i < N; i++) {
+  let s = 0, c = 0;
+  for (let j = Math.max(0, i - win + 1); j <= i; j++) { s += rawPrice[j]; c++; }
+  v0Filtered.push(+(s / c).toFixed(2));
+}
+const v0Eps = 0.80;
+// Eps band: filtered + eps, filtered - eps
+const v0FilteredUpper = v0Filtered.map(v => +(v + v0Eps).toFixed(2));
+const v0FilteredLower = v0Filtered.map(v => +(v - v0Eps).toFixed(2));
+
+// Signal change markers for v0 (daily sig)
+const sigChgX = [], sigChgY = [];
+for (let i = 1; i < N; i++) {
+  if (dailySig[i] !== dailySig[i-1]) {
+    sigChgX.push(i);
+    sigChgY.push(v0Filtered[i]);
+  }
+}
+// Vertical spans for sig changes
+const sigShapes = sigChgX.map(x => ({
+  type: 'line',
+  x0: x, x1: x, y0: 0, y1: 1,
+  yref: 'y4',
+  line: { color: '#f85149', width: 1.5, dash: 'dot' },
+  opacity: 0.7
+}));
+
+// ========== Plotly: 4 subplots vertical stack ==========
 
 // Subplot 1: Signal comparison
 const trDailySig = {
@@ -563,6 +602,40 @@ const trHeatmap = {
   xaxis: 'x3', yaxis: 'y3'
 };
 
+// Subplot 4: Filtered price + eps band + signal markers
+const trV0Filtered = {
+  x: barIndex, y: v0Filtered,
+  type: 'scatter', mode: 'lines',
+  name: 'v0_filtered',
+  line: { width: 2.2, color: '#39d2c0' },
+  xaxis: 'x4', yaxis: 'y4'
+};
+const trEpsUpper = {
+  x: barIndex, y: v0FilteredUpper,
+  type: 'scatter', mode: 'lines',
+  name: 'v0_filtered+eps',
+  line: { width: 0, color: 'rgba(57,210,192,0)' },
+  xaxis: 'x4', yaxis: 'y4',
+  showlegend: false
+};
+const trEpsLower = {
+  x: barIndex, y: v0FilteredLower,
+  type: 'scatter', mode: 'lines',
+  name: 'v0_filtered-eps',
+  fill: 'tonexty',
+  fillcolor: 'rgba(57,210,192,0.12)',
+  line: { width: 0, color: 'rgba(57,210,192,0)' },
+  xaxis: 'x4', yaxis: 'y4',
+  showlegend: false
+};
+const trSigChg = {
+  x: sigChgX, y: sigChgY,
+  type: 'scatter', mode: 'markers',
+  name: 'sig 翻转',
+  marker: { symbol: 'diamond', size: 10, color: '#f85149', line: { width: 1.5, color: '#fff' } },
+  xaxis: 'x4', yaxis: 'y4'
+};
+
 const layout = {
   template: 'plotly_dark',
   paper_bgcolor: '#161b22',
@@ -571,16 +644,17 @@ const layout = {
   displayModeBar: false,
   margin: { l: 80, r: 80, t: 60, b: 50 },
   grid: {
-    rows: 3, columns: 1,
+    rows: 4, columns: 1,
     pattern: 'independent',
     roworder: 'top to bottom',
-    ygap: 0.10
+    ygap: 0.06
   },
-  // Subplot 1 (top)
+  shapes: sigShapes,
+  // Subplot 1 (top): signal
   xaxis: {
     title: 'bar_index',
     showgrid: true, gridcolor: '#21262d', zeroline: false,
-    domain: [0.72, 1]
+    domain: [0.795, 1]
   },
   yaxis: {
     title: 'signal',
@@ -588,28 +662,40 @@ const layout = {
     range: [-1.8, 1.8],
     showgrid: true, gridcolor: '#21262d',
     zeroline: true, zerolinecolor: '#30363d',
-    domain: [0.72, 1]
+    domain: [0.795, 1]
   },
-  // Subplot 2 (middle)
+  // Subplot 2: PnL
   xaxis2: {
     title: 'bar_index',
     showgrid: true, gridcolor: '#21262d', zeroline: false,
-    domain: [0.38, 0.65]
+    domain: [0.53, 0.735]
   },
   yaxis2: {
     title: 'PnL (累计)',
     showgrid: true, gridcolor: '#21262d',
     zeroline: true, zerolinecolor: '#30363d',
-    domain: [0.38, 0.65]
+    domain: [0.53, 0.735]
   },
-  // Subplot 3 (bottom)
+  // Subplot 3: Position heatmap
   xaxis3: {
     title: 'bar_index',
     showgrid: true, gridcolor: '#21262d', zeroline: false,
-    domain: [0, 0.31]
+    domain: [0.265, 0.47]
   },
   yaxis3: {
-    domain: [0, 0.31]
+    domain: [0.265, 0.47]
+  },
+  // Subplot 4 (bottom): Filtered price + eps band + sig markers
+  xaxis4: {
+    title: 'bar_index',
+    showgrid: true, gridcolor: '#21262d', zeroline: false,
+    domain: [0, 0.205]
+  },
+  yaxis4: {
+    title: 'price',
+    showgrid: true, gridcolor: '#21262d',
+    zeroline: false,
+    domain: [0, 0.205]
   },
   legend: {
     orientation: 'h', y: 1.12, x: 0.5, xanchor: 'center',
@@ -623,13 +709,18 @@ const layout = {
       showarrow: false, font: { size: 13, color: '#f0f6fc' }, xanchor: 'left'
     },
     {
-      x: 0.02, y: 0.73, xref: 'paper', yref: 'paper',
+      x: 0.02, y: 0.80, xref: 'paper', yref: 'paper',
       text: '<b>子图 2：PnL 曲线</b> — 日线 PnL vs 60分钟 PnL 叠加对比',
       showarrow: false, font: { size: 13, color: '#f0f6fc' }, xanchor: 'left'
     },
     {
-      x: 0.02, y: 0.39, xref: 'paper', yref: 'paper',
+      x: 0.02, y: 0.53, xref: 'paper', yref: 'paper',
       text: '<b>子图 3：持仓热力图</b> — 绿=做多，红=做空，灰=空仓',
+      showarrow: false, font: { size: 13, color: '#f0f6fc' }, xanchor: 'left'
+    },
+    {
+      x: 0.02, y: 0.27, xref: 'paper', yref: 'paper',
+      text: '<b>子图 4：滤波价格 + eps 阈值带 + 信号翻转标记</b> — 青色线=v0_filtered，半透明带=±eps，菱形=v0 sig 翻转点',
       showarrow: false, font: { size: 13, color: '#f0f6fc' }, xanchor: 'left'
     }
   ]
@@ -638,7 +729,7 @@ const layout = {
 const config = { displayModeBar: false, responsive: true };
 
 Plotly.newPlot('plotly-charts',
-  [trDailySig, trM60Sig, trDailyPnl, trM60Pnl, trHeatmap],
+  [trDailySig, trM60Sig, trDailyPnl, trM60Pnl, trHeatmap, trV0Filtered, trEpsUpper, trEpsLower, trSigChg],
   layout, config
 );
 </script>
