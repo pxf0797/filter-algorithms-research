@@ -339,14 +339,14 @@ flowchart LR
   <div id="plotly-charts" class="plotly-container" style="height:1500px;"></div>
   <p class="annotation">
     对应 Parquet 列名：
-    <span class="col-tag daily">v0_日线_sig</span>
-    <span class="col-tag daily">v0_日线_pnl_long</span>
+    <span class="col-tag daily">v0_sig</span>
+    <span class="col-tag daily">v0_pnl_long</span>
     <span class="col-tag daily">v0_filtered</span>
     <span class="col-tag daily">v0_eps</span>
-    <span class="col-tag m60">v1_60分钟_sig</span>
-    <span class="col-tag m60">v1_60分钟_pnl_long</span>
-    <span class="col-tag m15">v2_15分钟_pos</span>
-    <span class="col-tag m5">v3_5分钟_pos</span>
+    <span class="col-tag m60">v1_sig</span>
+    <span class="col-tag m60">v1_pnl_long</span>
+    <span class="col-tag m15">v2_pos</span>
+    <span class="col-tag m5">v3_pos</span>
     &nbsp; 日线 = 78 bar / 周期，60分钟 = 12 bar，15分钟 = 3 bar
   </p>
 </div>
@@ -416,10 +416,10 @@ flowchart LR
   <div class="section-title"><span class="num">6</span> Parquet / CSV 列结构示意</div>
   <pre class="code-block">
 <span class="col-tag meta">_min_tf</span>  <span class="col-tag meta">bar_index</span>
-<span class="col-tag daily">v0_日线_sig</span>  <span class="col-tag daily">v0_日线_pnl_long</span>  <span class="col-tag daily">v0_日线_pnl_short</span>  <span class="col-tag daily">v0_日线_pos</span>  <span class="col-tag daily">v0_日线_bs</span>  <span class="col-tag daily">v0_filtered 🆕 v3.1</span>  <span class="col-tag daily">v0_eps 🆕 v3.1</span>
-<span class="col-tag m60">v1_60分钟_sig</span>  <span class="col-tag m60">v1_60分钟_pnl_long</span>  <span class="col-tag m60">v1_60分钟_pnl_short</span>  <span class="col-tag m60">v1_60分钟_pos</span>  <span class="col-tag m60">v1_60分钟_bs</span>  <span class="col-tag m60">v1_filtered 🆕 v3.1</span>  <span class="col-tag m60">v1_eps 🆕 v3.1</span>
-<span class="col-tag m15">v2_15分钟_sig</span>  <span class="col-tag m15">v2_15分钟_pnl_long</span>  <span class="col-tag m15">v2_15分钟_pnl_short</span>  <span class="col-tag m15">v2_15分钟_pos</span>  <span class="col-tag m15">v2_15分钟_bs</span>  <span class="col-tag m15">v2_filtered 🆕 v3.1</span>  <span class="col-tag m15">v2_eps 🆕 v3.1</span>
-<span class="col-tag m5">v3_5分钟_sig</span>  <span class="col-tag m5">v3_5分钟_pnl_long</span>  <span class="col-tag m5">v3_5分钟_pnl_short</span>  <span class="col-tag m5">v3_5分钟_pos</span>  <span class="col-tag m5">v3_5分钟_bs</span>  <span class="col-tag m5">v3_filtered 🆕 v3.1</span>  <span class="col-tag m5">v3_eps 🆕 v3.1</span>
+<span class="col-tag daily">v0_sig</span>  <span class="col-tag daily">v0_pnl_long</span>  <span class="col-tag daily">v0_pnl_short</span>  <span class="col-tag daily">v0_pos</span>  <span class="col-tag daily">v0_bs</span>  <span class="col-tag daily">v0_filtered 🆕 v3.1</span>  <span class="col-tag daily">v0_eps 🆕 v3.1</span>
+<span class="col-tag m60">v1_sig</span>  <span class="col-tag m60">v1_pnl_long</span>  <span class="col-tag m60">v1_pnl_short</span>  <span class="col-tag m60">v1_pos</span>  <span class="col-tag m60">v1_bs</span>  <span class="col-tag m60">v1_filtered 🆕 v3.1</span>  <span class="col-tag m60">v1_eps 🆕 v3.1</span>
+<span class="col-tag m15">v2_sig</span>  <span class="col-tag m15">v2_pnl_long</span>  <span class="col-tag m15">v2_pnl_short</span>  <span class="col-tag m15">v2_pos</span>  <span class="col-tag m15">v2_bs</span>  <span class="col-tag m15">v2_filtered 🆕 v3.1</span>  <span class="col-tag m15">v2_eps 🆕 v3.1</span>
+<span class="col-tag m5">v3_sig</span>  <span class="col-tag m5">v3_pnl_long</span>  <span class="col-tag m5">v3_pnl_short</span>  <span class="col-tag m5">v3_pos</span>  <span class="col-tag m5">v3_bs</span>  <span class="col-tag m5">v3_filtered 🆕 v3.1</span>  <span class="col-tag m5">v3_eps 🆕 v3.1</span>
   </pre>
   <p class="annotation">
     每周期 7 列（sig, pnl_long, pnl_short, pos, bs, filtered 🆕 v3.1, eps 🆕 v3.1），4 个周期 = 28 数据列 + 2 索引列 = <strong>30 列</strong>。
@@ -548,14 +548,14 @@ const sigShapes = sigChgX.map(x => ({
 const trDailySig = {
   x: barIndex, y: dailySig,
   type: 'scatter', mode: 'lines',
-  name: 'v0_日线_sig',
+  name: 'v0_sig',
   line: { shape: 'hv', width: 2.8, color: '#d97706' },
   xaxis: 'x', yaxis: 'y'
 };
 const trM60Sig = {
   x: barIndex, y: m60Sig,
   type: 'scatter', mode: 'lines',
-  name: 'v1_60分钟_sig',
+  name: 'v1_sig',
   line: { shape: 'hv', width: 2, color: '#a371f7' },
   xaxis: 'x', yaxis: 'y'
 };
@@ -564,21 +564,21 @@ const trM60Sig = {
 const trDailyPnl = {
   x: barIndex, y: dailyPnlLong,
   type: 'scatter', mode: 'lines',
-  name: 'v0_日线_pnl_long',
+  name: 'v0_pnl_long',
   line: { width: 2.2, color: '#d97706' },
   xaxis: 'x2', yaxis: 'y2'
 };
 const trM60Pnl = {
   x: barIndex, y: m60PnlLong,
   type: 'scatter', mode: 'lines',
-  name: 'v1_60分钟_pnl_long',
+  name: 'v1_pnl_long',
   line: { width: 2.2, color: '#a371f7' },
   xaxis: 'x2', yaxis: 'y2'
 };
 
 // Subplot 3: Position heatmap
 const hmZ = [dailyPos, m60Pos, m15Pos, m5Pos];
-const hmY = ['v0_日线_pos', 'v1_60分钟_pos', 'v2_15分钟_pos', 'v3_5分钟_pos'];
+const hmY = ['v0_pos', 'v1_pos', 'v2_pos', 'v3_pos'];
 const hmColorscale = [
   [0,    '#f85149'],
   [0.49, '#f85149'],
