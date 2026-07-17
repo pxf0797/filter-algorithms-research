@@ -24,6 +24,7 @@ if _pkg_dir not in sys.path:
 from services.backtest_core import BacktestRunner, ALL_TFS
 from services.event_recorder import EventRecorder
 from services.filter_engine import FILTERS
+from filter_app.services.parquet_store import ParquetStore
 from config_db import apply_preset, list_presets
 from db import has_data, get_conn
 
@@ -94,6 +95,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir", default="./backtest_output/",
         help="输出根目录（默认: ./backtest_output/）",
+    )
+    parser.add_argument(
+        "--save-data", action="store_true",
+        help="保存回测结果为 Parquet (.parquet) 和 CSV (.csv) 格式",
     )
     parser.add_argument(
         "--step-interval", type=int, default=1,
@@ -480,6 +485,14 @@ def main() -> None:
         "configs": configs,
     })
 
+    # ParquetStore for full data persistence (if --save-data)
+    parquet_store = None
+    if args.save_data:
+        parquet_store = ParquetStore(args.output_dir, args.ticker, configs)
+        parquet_store.start_session()
+        if not args.quiet:
+            print(f"数据存储已启用: {parquet_store.output_dir}")
+
     # ── 5. 运行回测循环 ──
     results = []
     step_count = 0
@@ -487,6 +500,13 @@ def main() -> None:
         results = runner.run(start, end, args.step_interval)
         for step_idx, output in enumerate(results):
             recorder.record_step(step_idx, output["cutoff_date"], output)
+            if parquet_store:
+                parquet_store.append_row(
+                    bar_index=output["bar_index"],
+                    bar_timestamp=output["bar_timestamp"],
+                    cutoff_date=output["cutoff_date"],
+                    stage_outputs=output,
+                )
             step_count = step_idx + 1
             if not args.quiet:
                 bar_index = output["step_index"]
@@ -500,6 +520,10 @@ def main() -> None:
         sys.exit(1)
     finally:
         recorder.end_session()
+        if parquet_store:
+            parquet_store.end_session()
+            if not args.quiet:
+                print(f"回测数据已保存到: {parquet_store.output_dir}")
 
     # ── 6. 打印摘要 ──
     output_path = Path(args.output_dir) / f"{args.ticker}_{session_id}"
