@@ -401,8 +401,8 @@ class TestSyncToDisplay:
             assert ok is True
             assert count == 20
 
-            # Verify parquet file was created
-            parquet_path = tmp_path / "data" / "display" / "日线.parquet"
+            # Verify parquet file was created in ticker-scoped directory
+            parquet_path = tmp_path / "data" / "display" / "AAPL" / "日线.parquet"
             assert parquet_path.exists()
             loaded = pd.read_parquet(parquet_path)
             assert len(loaded) == 20

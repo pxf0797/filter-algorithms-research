@@ -497,11 +497,11 @@ def prune_snapshots(max_keep=5):
 def clear_display_cache():
     """清除显示缓存。
 
-    删除 ``data/display/`` 目录下的所有 ``.parquet`` 文件。
+    删除 ``data/display/`` 目录下的所有 ``.parquet`` 文件（含 ticker 子目录）。
     """
     display_dir = DB_PATH.parent / "display"
     if display_dir.exists():
-        for f in display_dir.glob("*.parquet"):
+        for f in display_dir.glob("**/*.parquet"):
             try:
                 f.unlink()
             except OSError:

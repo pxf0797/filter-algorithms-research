@@ -335,7 +335,7 @@ class BacktestRunner:
             日期索引。parquet 不存在或数据不足时返回 ``None``。
         """
         display_path = (
-            Path(__file__).parent.parent.parent / "data" / "display" / f"{tf}.parquet"
+            Path(__file__).parent.parent.parent / "data" / "display" / self.ticker / f"{tf}.parquet"
         )
         if not display_path.exists():
             logger.warning("parquet 不存在: {}", display_path)

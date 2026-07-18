@@ -188,7 +188,7 @@ def _load_chart_data(market, ticker_code, tf, n_pts, window_start=None, cutoff_d
             # parquet 写入失败，直接走 API 回退
             return _cached_fetch_stock(market, ticker_code, tf, n_pts)
         _is_backtest = False
-    display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
+    display_path = Path(__file__).parent.parent / "data" / "display" / ticker_code / f"{tf}.parquet"
     err = None
     if display_path.exists():
         try:

@@ -195,6 +195,9 @@ def _sync_to_display(ticker_code: str, tf: str, n_pts: int = 120,
     Tuple[bool, int]
         (是否成功, 写入的数据条数)。
     """
+    display_base = Path(__file__).parent.parent.parent / "data" / "display" / ticker_code
+    display_base.mkdir(parents=True, exist_ok=True)
+
     if cutoff_date is not None:
         # 回测模式：查询截止到 cutoff_date 的最后 n_pts 条，按日期对齐
         from db import get_conn
@@ -208,9 +211,7 @@ def _sync_to_display(ticker_code: str, tf: str, n_pts: int = 120,
         if rows:
             rows.reverse()  # DESC → ASC
             df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
-            display_dir = Path(__file__).parent.parent.parent / "data" / "display"
-            display_dir.mkdir(parents=True, exist_ok=True)
-            df.to_parquet(display_dir / f"{tf}.parquet", index=False)
+            df.to_parquet(display_base / f"{tf}.parquet", index=False)
             return True, len(df)
         return False, 0
 
@@ -219,9 +220,7 @@ def _sync_to_display(ticker_code: str, tf: str, n_pts: int = 120,
     if len(df) < 5:
         return False, len(df)
     df["Date"] = pd.to_datetime(df["Date"])
-    display_dir = Path(__file__).parent.parent.parent / "data" / "display"
-    display_dir.mkdir(parents=True, exist_ok=True)
-    df.to_parquet(display_dir / f"{tf}.parquet", index=False)
+    df.to_parquet(display_base / f"{tf}.parquet", index=False)
     return True, len(df)
 
 
@@ -707,8 +706,8 @@ def _build_output_df(db_rows: list, synthesized_bar: _Optional[dict], n_pts: int
         data = data[-n_pts:]
     return pd.DataFrame(data, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
 
-def _write_parquet(tf: str, df: pd.DataFrame) -> bool:
-    """将 DataFrame 写入 data/display/{tf}.parquet 文件。
+def _write_parquet(tf: str, df: pd.DataFrame, ticker_code: str = "") -> bool:
+    """将 DataFrame 写入 data/display/{ticker_code}/{tf}.parquet 文件。
 
     Parameters
     ----------
@@ -716,6 +715,8 @@ def _write_parquet(tf: str, df: pd.DataFrame) -> bool:
         周期名称，用于确定文件名。
     df : pd.DataFrame
         要写入的 DataFrame 数据。
+    ticker_code : str
+        股票代码，用于隔离不同 ticker 的显示缓存文件。
 
     Returns
     -------
@@ -723,7 +724,9 @@ def _write_parquet(tf: str, df: pd.DataFrame) -> bool:
         写入成功返回 True，失败返回 False。
     """
     try:
-        display_dir = Path(__file__).parent.parent.parent / "data" / "display"
+        display_dir = (
+            Path(__file__).parent.parent.parent / "data" / "display" / ticker_code
+        )
         display_dir.mkdir(parents=True, exist_ok=True)
         df.to_parquet(display_dir / f"{tf}.parquet", index=False)
         return True
@@ -798,7 +801,7 @@ def _sync_all_cascading(ticker_code: str, tfs: list, cutoff_date: str,
                 logger.debug(f"[cascading] {tf}: no finer_tf ({finer_tf}) in cache, skip synth")
 
         combined = _build_output_df(db_rows, synthesized_bar, tf_n_pts)
-        ok = _write_parquet(tf, combined)
+        ok = _write_parquet(tf, combined, ticker_code)
         results[tf] = ok
 
         synth_cache[tf] = {
