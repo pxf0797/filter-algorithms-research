@@ -38,6 +38,7 @@ class CSVBuilder:
     def __init__(self) -> None:
         self._rows: dict[int, dict] = {}  # bar_index -> {col_name: value}
         self._min_tf: str = ""
+        self._last_pnl: dict[str, float] = {}
 
     def accumulate(
         self,
@@ -70,6 +71,18 @@ class CSVBuilder:
         }
         for view_name, view_data in views_data.items():
             cols = self._extract_view_columns(view_name, view_data)
+            # ── PnL freeze: when a position is closed, lock PnL at last known value ──
+            prefix = view_name.split("_", 1)[0]
+            long_pos = cols.get(f"{prefix}_long_pos", 0)
+            short_pos = cols.get(f"{prefix}_short_pos", 0)
+            for pnl_key, pos_flag in [("pnl_long", long_pos), ("pnl_short", short_pos)]:
+                col_name = f"{prefix}_{pnl_key}"
+                last_key = f"{prefix}_{pnl_key}"
+                if col_name in cols:
+                    if pos_flag:
+                        self._last_pnl[last_key] = cols[col_name]
+                    else:
+                        cols[col_name] = self._last_pnl.get(last_key, 100.0)
             row.update(cols)
         self._rows[bar_index] = row
 

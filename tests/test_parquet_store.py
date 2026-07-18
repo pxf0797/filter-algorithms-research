@@ -1528,3 +1528,205 @@ class TestLabelRegressionSuite:
         assert isinstance(viewLabel('v0', {}), str)
         assert isinstance(viewLabel('v0', {'v0': '15分钟'}), str)
         assert len(viewLabel('v0', {})) > 0
+
+
+# ============================================================================
+# TestPnlFreeze — PnL 冻结逻辑
+# ============================================================================
+
+
+class TestPnlFreeze:
+    """PnL 冻结：未持仓时 PnL 应锁定在上次交易退出时的值，不随滑动窗口漂移。
+
+    问题背景：_extract_view_columns 对 pnl_long/pnl_short 无条件取 [-1]
+    （窗口最后一个值），但 120-bar 滑动窗口导致即便当前 bar 没有持仓，
+    PnL 值仍会随窗口滑动而变化。
+
+    修复：在 append_row 中维护 _last_pnl 字典，持仓时更新、未持仓时冻结。
+    """
+
+    @staticmethod
+    def _make_store(tmp_path, ticker="TEST"):
+        store = ParquetStore(str(tmp_path), ticker, [{"tf": "日线"}])
+        store.start_session()
+        return store
+
+    @staticmethod
+    def _make_stage_output(view_data_override=None):
+        """构建标准 stage_outputs，可选覆盖 view_data。"""
+        n = 50
+        t = np.arange(n, dtype=float)
+        long_pnl = np.linspace(100, 110, n)
+        short_pnl = np.linspace(100, 105, n)
+        long_mask = np.zeros(n, dtype=bool)
+        short_mask = np.zeros(n, dtype=bool)
+        sig = np.zeros(n, dtype=int)
+        filtered = np.random.RandomState(0).randn(n).cumsum() * 0.01 + 100
+
+        view_data = {
+            "t": t,
+            "schmitt": {"sig": sig, "eps": np.full(n, 0.1)},
+            "filtered": filtered,
+            "long_pnl": long_pnl,
+            "short_pnl": short_pnl,
+            "long_mask": long_mask,
+            "short_mask": short_mask,
+            "trade_records": [],
+            "bs_markers": {"entry_markers": [], "exit_markers": []},
+        }
+
+        if view_data_override:
+            view_data.update(view_data_override)
+
+        return {"views": {"v0_日线": view_data}}
+
+    # ── 初始值 ──────────────────────────────────────────────────────────
+
+    def test_pnl_initial_value_is_100(self, tmp_path):
+        """未持仓时的第一个 bar：PnL 应为 100.0（_last_pnl 初始值）。"""
+        store = self._make_store(tmp_path)
+        so = self._make_stage_output()
+        row = store._extract_row(0, "2024-01-01", so)
+        assert row["v0_pnl_long"] == pytest.approx(100.0)
+        assert row["v0_pnl_short"] == pytest.approx(100.0)
+
+    # ── 持仓时更新 ──────────────────────────────────────────────────────
+
+    def test_pnl_long_updates_when_long_position(self, tmp_path):
+        """long_pos=True 时，pnl_long 正常更新为数组最后一个值。"""
+        store = self._make_store(tmp_path)
+        so = self._make_stage_output({"long_mask": np.ones(50, dtype=bool)})
+        row = store._extract_row(0, "2024-01-01", so)
+        # long_pnl = linspace(100, 110, 50), last = 110
+        assert row["v0_pnl_long"] == pytest.approx(110.0)
+        assert row["v0_long_pos"] == True  # noqa: E712
+
+    def test_pnl_short_updates_when_short_position(self, tmp_path):
+        """short_pos=True 时，pnl_short 正常更新为数组最后一个值。"""
+        store = self._make_store(tmp_path)
+        so = self._make_stage_output({"short_mask": np.ones(50, dtype=bool)})
+        row = store._extract_row(0, "2024-01-01", so)
+        # short_pnl = linspace(100, 105, 50), last = 105
+        assert row["v0_pnl_short"] == pytest.approx(105.0)
+        assert row["v0_short_pos"] == True  # noqa: E712
+
+    # ── 未持仓时冻结 ────────────────────────────────────────────────────
+
+    def test_pnl_long_frozen_when_no_long_position(self, tmp_path):
+        """long_pos=False 时 pnl_long 不变（冻结在上次值）。"""
+        store = self._make_store(tmp_path)
+
+        # Bar 0: enter position, PnL updates
+        so_enter = self._make_stage_output({"long_mask": np.ones(50, dtype=bool)})
+        row0 = store._extract_row(0, "2024-01-01", so_enter)
+        assert row0["v0_pnl_long"] == pytest.approx(110.0)
+
+        # Bar 1: exit position (long_mask all False), long_pnl drifts to 120
+        so_exit = self._make_stage_output({
+            "long_mask": np.zeros(50, dtype=bool),
+            "long_pnl": np.linspace(100, 120, 50),
+        })
+        row1 = store._extract_row(1, "2024-01-02", so_exit)
+        # PnL 应冻结在 bar 0 持仓时的值（110），不随窗口滑动到 120
+        assert row1["v0_pnl_long"] == pytest.approx(110.0)
+        assert row1["v0_long_pos"] == False  # noqa: E712
+
+    def test_pnl_short_frozen_when_no_short_position(self, tmp_path):
+        """short_pos=False 时 pnl_short 不变（冻结在上次值）。"""
+        store = self._make_store(tmp_path)
+
+        # Bar 0: enter short position, PnL updates
+        so_enter = self._make_stage_output({"short_mask": np.ones(50, dtype=bool)})
+        row0 = store._extract_row(0, "2024-01-01", so_enter)
+        assert row0["v0_pnl_short"] == pytest.approx(105.0)
+
+        # Bar 1: exit position, short_pnl drifts to 115
+        so_exit = self._make_stage_output({
+            "short_mask": np.zeros(50, dtype=bool),
+            "short_pnl": np.linspace(100, 115, 50),
+        })
+        row1 = store._extract_row(1, "2024-01-02", so_exit)
+        # PnL 应冻结在上次值（105），不随窗口滑动到 115
+        assert row1["v0_pnl_short"] == pytest.approx(105.0)
+        assert row1["v0_short_pos"] == False  # noqa: E712
+
+    # ── 同时操作多空 PnL ───────────────────────────────────────────────
+
+    def test_long_and_short_pnl_freeze_independently(self, tmp_path):
+        """做多和做空 PnL 各自独立冻结/更新。"""
+        store = self._make_store(tmp_path)
+
+        # Bar 0: long only
+        so0 = self._make_stage_output({
+            "long_mask": np.ones(50, dtype=bool),
+            "short_mask": np.zeros(50, dtype=bool),
+        })
+        row0 = store._extract_row(0, "2024-01-01", so0)
+        assert row0["v0_pnl_long"] == pytest.approx(110.0)
+        assert row0["v0_pnl_short"] == pytest.approx(100.0)  # frozen at 100 (never held)
+
+        # Bar 1: switch to short only
+        so1 = self._make_stage_output({
+            "long_mask": np.zeros(50, dtype=bool),
+            "short_mask": np.ones(50, dtype=bool),
+            "long_pnl": np.linspace(100, 130, 50),  # drifts
+            "short_pnl": np.linspace(100, 115, 50),  # updates
+        })
+        row1 = store._extract_row(1, "2024-01-02", so1)
+        # long PnL frozen at last position value (110)
+        assert row1["v0_pnl_long"] == pytest.approx(110.0)
+        # short PnL updates (last = 115)
+        assert row1["v0_pnl_short"] == pytest.approx(115.0)
+
+    # ── 多次进出 ────────────────────────────────────────────────────────
+
+    def test_pnl_freeze_across_multiple_trades(self, tmp_path):
+        """多次进出：每次退出时 PnL 冻结在当前值，再次进场时恢复更新。"""
+        store = self._make_store(tmp_path)
+
+        # Bar 0: enter long, PnL=110
+        so0 = self._make_stage_output({"long_mask": np.ones(50, dtype=bool)})
+        row0 = store._extract_row(0, "2024-01-01", so0)
+        assert row0["v0_pnl_long"] == pytest.approx(110.0)
+
+        # Bar 1: exit, PnL drifts to 120 but should freeze at 110
+        so1 = self._make_stage_output({
+            "long_mask": np.zeros(50, dtype=bool),
+            "long_pnl": np.linspace(100, 120, 50),
+        })
+        row1 = store._extract_row(1, "2024-01-02", so1)
+        assert row1["v0_pnl_long"] == pytest.approx(110.0)
+
+        # Bar 2: still flat, PnL drifts to 130, should stay frozen at 110
+        so2 = self._make_stage_output({
+            "long_mask": np.zeros(50, dtype=bool),
+            "long_pnl": np.linspace(100, 130, 50),
+        })
+        row2 = store._extract_row(2, "2024-01-03", so2)
+        assert row2["v0_pnl_long"] == pytest.approx(110.0)
+
+        # Bar 3: re-enter long, PnL=140 (new position)
+        so3 = self._make_stage_output({
+            "long_mask": np.ones(50, dtype=bool),
+            "long_pnl": np.linspace(100, 140, 50),
+        })
+        row3 = store._extract_row(3, "2024-01-04", so3)
+        assert row3["v0_pnl_long"] == pytest.approx(140.0)
+
+    # ── view_data 为 None ────────────────────────────────────────────────
+
+    def test_pnl_frozen_when_view_data_is_none(self, tmp_path):
+        """view_data 为 None 时 PnL 也应冻结（不因 default NaN 覆盖）。"""
+        store = self._make_store(tmp_path)
+
+        # First bar: enter long position
+        so_entry = self._make_stage_output({"long_mask": np.ones(50, dtype=bool)})
+        row0 = store._extract_row(0, "2024-01-01", so_entry)
+        assert row0["v0_pnl_long"] == pytest.approx(110.0)
+
+        # Second bar: view_data is None → defaults (NaN, False)
+        # PnL should be frozen at 110, not reset to NaN
+        so_none = {"views": {"v0_日线": None}}
+        row1 = store._extract_row(1, "2024-01-02", so_none)
+        assert row1["v0_pnl_long"] == pytest.approx(110.0)
+        assert row1["v0_long_pos"] == False  # noqa: E712

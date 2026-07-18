@@ -175,6 +175,7 @@ class ParquetStore:
         self._part_index = 0
         self._last_flush_time = time.time()
         self._total_row_count = 0
+        self._last_pnl: dict[str, float] = {}
 
         self._write_metadata(status="running")
         return self._session_id
@@ -335,18 +336,28 @@ class ParquetStore:
             if view_data is None:
                 for col in _VIEW_COLUMNS:
                     row[f"{prefix}_{col}"] = _COL_DEFAULTS[col]
-                continue
+            else:
+                try:
+                    extracted = self._extract_view_columns(prefix, view_data)
+                    row.update(extracted)
+                except Exception:
+                    print(
+                        f"WARNING: ParquetStore: failed to extract columns "
+                        f"for view {view_key} at bar_index={bar_index}"
+                    )
+                    for col in _VIEW_COLUMNS:
+                        row[f"{prefix}_{col}"] = _COL_DEFAULTS[col]
 
-            try:
-                extracted = self._extract_view_columns(prefix, view_data)
-                row.update(extracted)
-            except Exception:
-                print(
-                    f"WARNING: ParquetStore: failed to extract columns "
-                    f"for view {view_key} at bar_index={bar_index}"
-                )
-                for col in _VIEW_COLUMNS:
-                    row[f"{prefix}_{col}"] = _COL_DEFAULTS[col]
+            # ── PnL freeze: when a position is closed, lock PnL at last known value ──
+            long_pos = row.get(f"{prefix}_long_pos", False)
+            short_pos = row.get(f"{prefix}_short_pos", False)
+            for pnl_key, pos_flag in [("pnl_long", long_pos), ("pnl_short", short_pos)]:
+                col_name = f"{prefix}_{pnl_key}"
+                last_key = f"{prefix}_{pnl_key}"
+                if pos_flag:
+                    self._last_pnl[last_key] = row.get(col_name, 100.0)
+                else:
+                    row[col_name] = self._last_pnl.get(last_key, 100.0)
 
         return row
 
