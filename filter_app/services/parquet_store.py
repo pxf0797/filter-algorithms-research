@@ -595,7 +595,7 @@ class ParquetStore:
         meta: dict[str, Any] = {
             **existing,
             "format_version": "1.0",
-            "schema_version": "3.2",
+            "schema_version": "3.3",
             "status": status,
             "session_id": self._session_id,
             "ticker": self._ticker,

@@ -1,4 +1,4 @@
-# 回测数据 CLI 存储方案设计 v3.2
+# 回测数据 CLI 存储方案设计 v3.3（已实现）
 
 ## 1. 现状分析
 
@@ -42,6 +42,35 @@ bar_index | bar_timestamp        | v0_sig | v1_sig | v2_sig | v3_sig
 
 粗周期（日线）在同一日线 bar 内的 48 个 min_tf 行上值自然重复——这不是 ffill 造假，而是准确反映"该时刻该周期的信号状态"。因为日线信号在新日线 bar 到来前确实保持不变。
 
+### 4.1.1 数据坐标系说明
+
+Parquet 存储中存在两套索引体系，理解它们的区别是正确使用 BS 标记和 trade 列的前提。
+
+**全局 bar_index**（Parquet 行索引）：
+- 以 `_min_tf`（最细粒度周期）为基准，从 0 开始编号
+- 所有视图共享同一个全局 bar_index——每一行对应一个 min_tf bar 时刻
+- 这是 Parquet 文件的行索引，也是 `bar_index` 列的值
+
+**视图窗口索引**（view_last_idx）：
+- 每个视图内部的数据数组（`t`、`filtered`、`schmitt["sig"]` 等）在视图自己的周期上计算
+- 粗周期视图的内部数组长度远小于全局 bar_index（日线视图每 48 个 min_tf bar 才增长 1）
+- `view_last_idx = len(t_arr) - 1`，即视图内部数组的最后一个有效索引（0-based，范围 0..n_pts-1）
+- **BS marker 的坐标系统和 trade 记录的 entry_idx/exit_idx 均使用视图窗口索引**，而非全局 bar_index
+
+**为什么 BS marker 必须用视图窗口索引匹配**：
+
+BS marker 由回测引擎在视图内部生成，其坐标 `(bar_idx, label, ...)` 中的 `bar_idx` 是**视图窗口内的相对位置**，并非全局 bar_index。例如，日线视图的第 5 个 bar 上出现 BS 入场标记，其 `bar_idx=4`（视图窗口索引），但此时全局 bar_index 可能已经是 `4 × 48 = 192`（假设 min_tf=5min）。
+
+因此，在 `ParquetStore._extract_view_columns()` 和 `CSVBuilder._extract_view_columns()` 中，BS marker 和 trade 记录的匹配条件均为：
+
+```python
+view_last_idx = len(t_arr) - 1        # 视图窗口索引
+if int(marker[0]) == view_last_idx:    # 非 bar_index
+    ...
+```
+
+> **历史记录**：早期实现曾错误地使用全局 `bar_index` 匹配 BS marker，导致几乎所有 marker 都无法命中，BS 列全为空。v3.3 已修复为使用 `view_last_idx` 匹配。
+
 ### 4.2 Schema 定义
 
 **固定列（每行 2 列）**：
@@ -53,22 +82,27 @@ bar_index | bar_timestamp        | v0_sig | v1_sig | v2_sig | v3_sig
 
 **每视图列（4 个视图 v0-v3，每视图 12 列，共 48 列）**：
 
-| 列名格式 | 中文标签 | 类型 | 说明 |
-|----------|----------|------|------|
-| `{view}_sig` | v0: 日线信号, v1: 60分钟信号, ... | int8 | 施密特信号（-1=空头, 0=中性, 1=多头） |
-| `{view}_filtered` | v0: 日线滤波价, v1: 60分钟滤波价, ... | float32 | P0: 滤波价格，图表复现必需 |
-| `{view}_eps` | v0: 日线自适应阈值, ... | float32 | P0: 自适应阈值，判断信号质量 |
-| `{view}_pnl_long` | v0: 日线做多PnL, ... | float32 | 做多累计 PnL（从 100 起始，100±盈亏） |
-| `{view}_pnl_short` | v0: 日线做空PnL, ... | float32 | 做空累计 PnL（从 100 起始，100±盈亏） |
-| `{view}_long_pos` | v0: 日线做多持仓, ... | bool | 是否在做多持仓中 |
-| `{view}_short_pos` | v0: 日线做空持仓, ... | bool | 是否在做空持仓中 |
-| `{view}_trade` | v0: 日线交易事件, ... | str | 交易事件：`"entry_long"` / `"exit_long"` / `"entry_short"` / `"exit_short"` / `null` |
-| `{view}_trade_return` | v0: 日线交易盈亏, ... | float32 | P1: 交易盈亏百分比 |
-| `{view}_trade_reason` | v0: 日线离场原因, ... | str | P1: 离场原因(stop_loss/take_profit/signal_reverse) |
-| `{view}_bs_entry` | v0: 日线BS入场, ... | str | BS 入场标记：`"B"` / `"S"` / `null` |
-| `{view}_bs_exit` | v0: 日线BS离场, ... | str | BS 离场标记：`"B"` / `"S"` / `null` |
+| 列名格式 | 类型 | 含义 | 数据来源 |
+|----------|------|------|----------|
+| `{view}_sig` | int8 | 施密特触发器信号值：+1(做多)/-1(做空)/0(空仓) | `schmitt["sig"][-1]`，取数组最后一个元素；fallback `0` |
+| `{view}_filtered` | float32 | 滤波后的价格（视图窗口最后一个值），图表复现必需 | `filtered[-1]`，取数组最后一个元素；fallback `NaN` |
+| `{view}_eps` | float32 | 自适应阈值带宽（epsilon），值越大信号切换越不敏感、越稳定 | `schmitt["eps"][-1]`，取数组最后一个元素；fallback `NaN` |
+| `{view}_pnl_long` | float32 | 做多累计收益率，初始值 100（100 表示起始，>100 盈利，<100 亏损） | `long_pnl[-1]`，取数组最后一个元素；fallback `NaN` |
+| `{view}_pnl_short` | float32 | 做空累计收益率，初始值 100（100 表示起始，>100 盈利，<100 亏损） | `short_pnl[-1]`，取数组最后一个元素；fallback `NaN` |
+| `{view}_long_pos` | bool | 当前 bar 是否在做多持仓中 | `long_mask[-1]` → `bool()`，取数组最后一个元素；fallback `False` |
+| `{view}_short_pos` | bool | 当前 bar 是否在做空持仓中 | `short_mask[-1]` → `bool()`，取数组最后一个元素；fallback `False` |
+| `{view}_trade` | str | 交易事件标记 | 遍历 `trade_records[]`，匹配 `exit_idx == view_last_idx` 时写 `exit_{type}`，匹配 `entry_idx == view_last_idx` 时写 `entry_{type}`（type 为 `long`/`short`），无匹配则为空字符串 |
+| `{view}_trade_return` | float32 | 该笔交易的盈亏百分比（仅离场 bar 有值，入场 bar 为 NaN） | 同上匹配条件，取 `trade["return_pct"]`；fallback `NaN` |
+| `{view}_trade_reason` | str | 离场原因 | 同上匹配条件，取 `trade["exit_reason"]`；取值：`stop_loss`/`take_profit`/`eod`/`signal_reverse`；fallback 空字符串 |
+| `{view}_bs_entry` | str | BS 入场标记 | 遍历 `bs_markers["entry_markers"][]`（每项为 `(bar_idx, label, color, date)`），匹配 `m[0] == view_last_idx` 时取 `m[1]`；取值：`B`(买入)/`S`(卖出)/空字符串(无) |
+| `{view}_bs_exit` | str | BS 离场标记 | 遍历 `bs_markers["exit_markers"][]`（每项为 `(bar_idx, label, color, exit_reason, date)`），匹配 `m[0] == view_last_idx` 时取 `m[1]`；取值：`B`(买入平仓)/`S`(卖出平仓)/空字符串(无) |
 
-> **列名设计决策**：列名使用纯 ASCII （如 `v0_sig` 而非 `v0_日线_sig`），确保 Parquet、pandas、DuckDB、BI 工具的最大兼容性。中文周期标签通过 `metadata.json` 中的 `view_labels` 字段映射（见 9.2 节）。
+> **数据来源说明**：
+> - `[-1]`：直接取数组最后一个元素（7 列），对应 `_last_float()`/`_last_int()`/`_last_scalar()` helper
+> - `view_last_idx`：`len(t_arr) - 1`，即视图窗口内的最后一个索引（0-based），用于 BS marker 和 trade 记录的精确匹配（5 列）。详见 4.1.1 坐标系说明。
+> - Parquet 类型使用 pyarrow 原生类型：`pa.int8()`, `pa.float32()`, `pa.bool_()`, `pa.string()`，确保跨工具兼容
+
+> **列名设计决策**：列名使用纯 ASCII（如 `v0_sig` 而非 `v0_日线_sig`），确保 Parquet、pandas、DuckDB、BI 工具的最大兼容性。中文周期标签通过 `metadata.json` 中的 `view_labels` 字段映射（见 9.2 节）。
 
 **视图前缀映射**：
 
@@ -85,17 +119,22 @@ bar_index | bar_timestamp        | v0_sig | v1_sig | v2_sig | v3_sig
 
 ```
 {output_dir}/
-  {TICKER}/
-    {SESSION_ID}/
-      backtest_result.parquet
-      backtest_result.csv
-      metadata.json
+  {TICKER}_{SESSION_ID}/
+    part_0001.parquet       # 分段文件（回测进行中）
+    part_0002.parquet
+    ...
+    backtest_result.parquet # 合并后的最终文件（回测完成后）
+    backtest_result.csv     # CSV 导出副本
+    metadata.json
 ```
 
-- `{output_dir}` — 由 `--output-dir` 指定，默认 `./backtest_results`
+- `{output_dir}` — 由 `--output-dir` 指定，默认 `./backtest_output/`
 - `{TICKER}` — 股票代码，如 `AAPL`
-- `{SESSION_ID}` — 会话标识，格式 `YYYYMMDD-HHMMSS` 或 UUID
+- `{SESSION_ID}` — 会话标识，格式 `YYYYMMDD-HHMMSS-{TICKER}`（如 `20240716-143052-AAPL`）
+- `part_NNNN.parquet` — 分段 Parquet 文件（每次 flush 写入一个），`end_session` 时合并为 `backtest_result.parquet` 并删除分段
 - `metadata.json` — 会话元信息（见 9.2 节 schema 版本化）
+
+> **实际实现差异**：目录结构由原设计的 `{output_dir}/{TICKER}/{SESSION_ID}/` 两级嵌套简化为 `{output_dir}/{TICKER}_{SESSION_ID}/` 单级平铺——ticker 已包含在目录名中，无需额外嵌套层级。
 
 ### 4.4 写入机制
 
@@ -106,7 +145,7 @@ bar_index | bar_timestamp        | v0_sig | v1_sig | v2_sig | v3_sig
 **实现方式**：
 1. `BacktestRunner` 每步将各视图计算结果收集为 dict
 2. 调用 `ParquetStore.write_row(row_dict)` 追加一行
-3. `ParquetStore` 内部维护一个行缓冲区（如 1000 行），满后批量写入（避免每行触发一次 I/O）
+3. `ParquetStore` 内部维护一个行缓冲区（默认 100 行），满后批量写入（避免每行触发一次 I/O）
 4. **定时 flush**：每 30 秒强制刷盘一次（基于 `time.time()` 检查），防止长时回测中途中断导致缓冲区数据丢失
 5. `run()` 结束后调用 `ParquetStore.flush()` 写入剩余行、导出 CSV、关闭文件
 
@@ -116,28 +155,51 @@ bar_index | bar_timestamp        | v0_sig | v1_sig | v2_sig | v3_sig
 
 **CSV 生成时机**：Parquet 写入完成后，用 pandas 读取并 `to_csv` 导出，不逐行写 CSV。
 
-## 5. CLI 增强方案
+## 5. CLI 参数完整说明
 
-### 5.1 新增参数
+### 5.1 全部参数
 
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `--save-data` | flag | `False` | 启用 Parquet + CSV 存储 |
-| `--output-dir` | str | `./backtest_results` | 输出根目录（已有参数，复用） |
+```bash
+python -m filter_app.backtest_cli --help
+```
+
+| 参数 | 类型 | 默认值 | 含义 | 示例 |
+|------|------|--------|------|------|
+| `--ticker` | str | **必填** | 股票代码 | `--ticker AAPL`、`--ticker 03690.HK` |
+| `--preset` | str | 无 | 预设配置名称（从 config_db 加载，与 `--config-file` 互斥） | `--preset 3690_HK_DP` |
+| `--config-file` | str | 无 | JSON 配置文件路径（与 `--preset` 互斥） | `--config-file my_config.json` |
+| `--start-bar` | int | 最小 n_pts | 起始 bar 索引（min_tf 周期），用于跳过预热期 | `--start-bar 500` |
+| `--end-bar` | int | 总 bar 数 | 结束 bar 索引（不包含），用于限制回测范围 | `--end-bar 1000` |
+| `--output-dir` | str | `./backtest_output/` | EventRecorder 和 ParquetStore 的输出根目录 | `--output-dir ./my_results` |
+| `--save-data` | flag | `False` | 启用 Parquet + CSV 全量数据存储（调用 ParquetStore） | `--save-data` |
+| `--step-interval` | int | `1` | 步进间隔，>1 时跳 bar 运行（加速调试） | `--step-interval 5` |
+| `--view-filter` | str | 无 | 只运行指定视图（格式 `v{i}_{周期}`），默认运行全部 4 个视图 | `--view-filter v0_日线` |
+| `--quiet` | flag | `False` | 静默模式，只打印开始和结束信息，不逐 bar 输出进度 | `--quiet` |
 
 ### 5.2 使用示例
 
 ```bash
-# 基础用法：回测并保存全量数据
-python backtest_cli.py --ticker AAPL --start 2024-01-01 --end 2024-12-31 --save-data
+# 基础用法：用预设配置回测并保存全量数据
+python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP --save-data
 
-# 指定输出目录
-python backtest_cli.py --ticker AAPL --start 2024-01-01 --end 2024-12-31 \
-  --save-data --output-dir ./my_results
+# 用 JSON 配置文件回测
+python -m filter_app.backtest_cli --ticker AAPL --config-file my_config.json --save-data
+
+# 限制 bar 范围（跳过预热期，加速调试）
+python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP \
+  --start-bar 500 --end-bar 1000 --quiet
+
+# 只运行单个视图
+python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP \
+  --view-filter v0_日线 --save-data
+
+# 指定输出目录 + 跳 bar 加速
+python -m filter_app.backtest_cli --ticker AAPL --preset 3690_HK_DP \
+  --save-data --output-dir ./my_results --step-interval 5
 
 # 批量回测（shell 循环）
 for ticker in AAPL GOOGL MSFT; do
-  python backtest_cli.py --ticker $ticker --start 2024-01-01 --end 2024-12-31 --save-data
+  python -m filter_app.backtest_cli --ticker $ticker --config-file my_config.json --save-data --quiet
 done
 ```
 
@@ -146,8 +208,8 @@ done
 ```python
 import pandas as pd
 
-# 加载全量数据
-df = pd.read_parquet("backtest_results/AAPL/20240716-143052/backtest_result.parquet")
+# 加载全量数据（注意实际目录结构为 {output_dir}/{TICKER}_{SESSION_ID}/）
+df = pd.read_parquet("backtest_output/AAPL_20240716-143052-AAPL/backtest_result.parquet")
 
 # 查看日线信号切换点
 daily_switches = df[df["v0_sig"] != df["v0_sig"].shift(1)]
@@ -276,19 +338,21 @@ finally:
 
 ### 7.1 最小改动方案
 
-新增一个 `ParquetStore` 类，**不修改** `EventRecorder` 现有行为（保持向后兼容）。改动仅涉及 2 个文件：
+新增一个 `ParquetStore` 类，**不修改** `EventRecorder` 现有行为（保持向后兼容）。改动涉及以下文件：
 
-| 文件 | 改动 | 理由 |
+| 文件 | 改动 | 状态 |
 |------|------|------|
-| 新增 `parquet_store.py` | 实现 `ParquetStore` 类 | 独立模块，职责单一 |
-| 修改 `backtest_cli.py` | 新增 `--save-data` 参数，run 中集成 `ParquetStore` | 最小侵入 |
+| 新增 `parquet_store.py` | 实现 `ParquetStore` 类（分段写入、原子 flush、CSV 导出、metadata 管理） | ✅ 已实现 |
+| 修改 `backtest_cli.py` | 新增 `--save-data` 参数，run 循环中集成 `ParquetStore.append_row()` | ✅ 已实现 |
+| 新增 `view_backtest.py` | 可视化工具：Parquet 读取 + HTML 嵌入 + 浏览器打开（含 HTTP 服务器模式） | ✅ 已实现 |
+| `event_recorder.py` | CSVBuilder 扩展：新增 pnl/long_pos/short_pos/trade/trade_return/trade_reason 列 | ✅ 已实现 |
 
 ### 7.2 ParquetStore 接口
 
 ```python
 class ParquetStore:
     def __init__(self, output_dir: str, ticker: str, session_id: str,
-                 schema: dict, buffer_size: int = 1000)
+                 schema: dict, buffer_size: int = 100)
     def write_row(self, row: dict) -> None       # 追加一行到缓冲区
     def flush(self) -> None                       # 刷缓冲区 + 写 CSV + 写 metadata
     def close(self) -> None                       # 清理资源
@@ -320,10 +384,15 @@ if self.parquet_store:
 
 ### 7.5 验证标准
 
-- Parquet 文件可用 `pd.read_parquet()` 加载且 schema 正确
-- CSV 内容与 Parquet 一致（`pd.read_csv` vs `pd.read_parquet` 对比通过）
-- `metadata.json` 包含 session_id、ticker、时间范围、schema_version
-- `--save-data` 不传时，行为与现有完全一致（零影响）
+| 验证项 | 状态 |
+|--------|------|
+| Parquet 文件可用 `pd.read_parquet()` 加载且 schema 正确 | ✅ 已验证 |
+| CSV 内容与 Parquet 一致（`pd.read_csv` vs `pd.read_parquet` 对比通过） | ✅ 已验证 |
+| `metadata.json` 包含 session_id、ticker、时间范围、schema_version | ✅ 已验证 |
+| `--save-data` 不传时，行为与现有完全一致（零影响） | ✅ 已验证 |
+| BS marker 坐标匹配正确（使用 view_last_idx 而非 bar_index） | ✅ 已验证（v3.3 修复） |
+| 分段文件在 `end_session` 后正确合并为 `backtest_result.parquet` 并清理 | ✅ 已验证 |
+| 崩溃恢复：自动跳过损坏的分段文件 | ⏳ 待完善（当前仅清理 `.tmp` 残留） |
 
 ---
 
@@ -400,6 +469,32 @@ if self.parquet_store:
 
 metadata.json 中记录 `status` 字段：`"running"`（回测中）/ `"completed"`（正常结束）/ `"crashed"`（异常）。读取时发现 `status: "running"` 即知回测未正常结束。
 
+### 8.8 CSVBuilder 修复记录（v3.3）
+
+v3.3 中对 `EventRecorder.CSVBuilder` 进行了以下修复和扩展：
+
+**BS 坐标系 bug 修复**：
+- **问题**：早期实现使用全局 `bar_index` 匹配 BS marker 的坐标，导致几乎所有 marker 都无法命中（BS 列全为 `-`）
+- **根因**：BS marker 的 `bar_idx` 是视图窗口内的相对索引（0..n_pts-1），而非全局 min_tf bar 序号
+- **修复**：将匹配条件从 `int(m[0]) == bar_index` 改为 `int(m[0]) == view_last_idx`（其中 `view_last_idx = len(t_arr) - 1`）
+- **影响范围**：`CSVBuilder._extract_view_columns()` 和 `ParquetStore._extract_view_columns()` 两处同步修复
+
+**新增 6 列/视图（v3.3）**：
+
+| 新增列 | 类型 | 含义 |
+|--------|------|------|
+| `{prefix}_pnl_long` | float | 做多累计 PnL 终值 |
+| `{prefix}_pnl_short` | float | 做空累计 PnL 终值 |
+| `{prefix}_long_pos` | int (0/1) | 是否在做多持仓中 |
+| `{prefix}_short_pos` | int (0/1) | 是否在做空持仓中 |
+| `{prefix}_trade` | str | 交易事件（`entry_long`/`exit_long`/`entry_short`/`exit_short`） |
+| `{prefix}_trade_return` | float | 交易盈亏百分比 |
+| `{prefix}_trade_reason` | str | 离场原因 |
+
+**CSV 列数变化**：每视图从 11 列增至 17 列，总列数从 47 增至 73（含 5 列 OHLCV 基础数据 + 4 视图 x 17 列）。
+
+> **注意**：CSVBuilder（EventRecorder 产出）与 ParquetStore 的列集不完全一致。CSVBuilder 额外包含 OHLCV 基础列（`close`/`open`/`high`/`low`/`volume`）和 Schmitt 内部状态列（`mu_v`/`sigma_v`/`sig_dur`/`pair_count`/`trade_count`），而 ParquetStore 只存储 50 列核心分析数据。两者定位不同：CSV 为人眼观察设计（包含行情上下文和调试信息），Parquet 为程序分析设计（只含必要的决策数据）。
+
 ---
 
 ## 9. 风险与注意事项
@@ -415,7 +510,7 @@ metadata.json 中记录 `status` 字段：`"running"`（回测中）/ `"complete
 ```json
 {
   "format_version": "1.0",
-  "schema_version": "3.2",
+  "schema_version": "3.3",
   "status": "completed",
   "session_id": "20240716-143052",
   "ticker": "AAPL",
@@ -464,7 +559,7 @@ metadata.json 中记录 `status` 字段：`"running"`（回测中）/ `"complete
 }
 ```
 
-**新增字段说明（v3.2）**：
+**新增字段说明（v3.3）**：
 - `view_labels`：ASCII 列名到中文标签的映射，供下游 UI/分析工具展示中文名称
 - `status`：会话状态标记（`"running"` / `"completed"` / `"crashed"`），读取方可据此判断数据完整性
 - `parquet_row_count`：Parquet 实际行数（真相源），与 `bar_count` 对比可检测一致性
@@ -477,7 +572,7 @@ metadata.json 中记录 `status` 字段：`"running"`（回测中）/ `"complete
 
 ### 9.3 内存与性能
 
-- 行缓冲区（默认 1000 行）限制内存占用；10 万行 session 也仅 ~100 次 flush
+- 行缓冲区（默认 100 行）限制内存占用；10 万行 session 也仅 ~1000 次 flush
 - ZSTD compression_level=3 是速度与压缩率的平衡点（pandas 默认 level=1，3 略慢但体积更优）
 - 如果 session 极长（>50 万 bar），考虑降级为只存 Parquet，不生成 CSV（CSV 写入会显著变慢）
 
@@ -486,3 +581,70 @@ metadata.json 中记录 `status` 字段：`"running"`（回测中）/ `"complete
 - `--save-data` 默认 `False`，不影响现有 CLI 使用方式
 - `EventRecorder` 保持不变，不修改其接口或行为
 - 两个输出文件 + metadata.json 是纯增量，不覆盖任何已有文件
+
+---
+
+## 10. 可视化工具
+
+### 10.1 view_backtest.py
+
+`tools/view_backtest.py` 是一个独立的 Python 脚本，用于在浏览器中可视化回测 Parquet 数据。支持三种使用模式：
+
+**模式 1：直接指定 Parquet 文件**
+
+```bash
+python tools/view_backtest.py backtest_output/AAPL_20240716-143052-AAPL/backtest_result.parquet
+```
+
+流程：读取 Parquet → 序列化为 JSON → 嵌入 HTML 模板 → 在浏览器中打开。自动探测同目录下的 `metadata.json` 以获取 `view_labels`（中文周期标签映射）。
+
+**模式 2：自动找最新结果**
+
+```bash
+python tools/view_backtest.py --latest ./backtest_output
+```
+
+在指定目录下按文件修改时间排序，自动选择最新的 `backtest_result.parquet`。
+
+**模式 3：HTTP 服务器模式（浏览器拖入）**
+
+```bash
+python tools/view_backtest.py --serve          # 默认端口 8899
+python tools/view_backtest.py --serve --port 9090
+```
+
+启动本地 HTTP 服务器，浏览器自动打开页面。用户可将 `.parquet` 文件拖入页面进行可视化——无需命令行操作。服务器提供 `/api/parse` 端点解析上传的 Parquet 文件并返回 column-major JSON。
+
+**可选参数**：
+
+| 参数 | 含义 |
+|------|------|
+| `-m, --metadata` | 手动指定 metadata.json 路径 |
+| `-t, --template` | 自定义 HTML 模板路径（默认 `docs/backtesting/回测结果可视化.html`） |
+
+### 10.2 数据传递方式
+
+`view_backtest.py` 使用 **column-major JSON 嵌入** 方式将数据传递给前端：
+
+1. 用 pandas 读取 Parquet 文件
+2. 将 DataFrame 转换为 `{列名: [值数组]}` 格式（column-major）
+3. 时间戳列转换为 ISO 8601 字符串
+4. NaN/Inf 值统一替换为 `null`
+5. 注入到 HTML 模板的 `<script>` 标签中（`window.BACKTEST_DATA`）
+6. HTML 通过 `file://` 协议或 HTTP 服务器在浏览器中打开
+
+column-major 格式使前端 JavaScript 可以直接按列访问数据（如绘制 K 线图只需 `data.close` 和 `data.bar_timestamp`），无需逐行解包。
+
+### 10.3 前端依赖
+
+HTML 模板（`docs/backtesting/回测结果可视化.html`）自行管理前端依赖（如 Plotly.js、数据表格库等），`view_backtest.py` 只负责数据提取和注入，不引入额外 Python 依赖。
+
+---
+
+## 附录：变更记录
+
+| 版本 | 日期 | 变更内容 |
+|------|------|----------|
+| v3.1 | 2024-07 | 初始设计：Parquet + CSV 双输出、分段写入、原子 flush |
+| v3.2 | 2024-07 | 新增 `view_labels`、`status`、`column_names` 到 metadata.json；细化边缘情况 |
+| v3.3 | 2024-07 | **实现完成**。修复 BS 坐标系 bug（bar_index → view_last_idx）；CSVBuilder 新增 6 列/视图（47→73 列）；补全 CLI 参数文档；新增可视化工具章节；新增坐标系说明；目录结构从两级嵌套简化为单级平铺；buffer_size 从设计 1000 调整为实际 100；schema_version 更新到 3.3 |
