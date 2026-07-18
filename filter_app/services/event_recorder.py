@@ -158,14 +158,16 @@ class CSVBuilder:
         bs_markers: dict = view_data.get("bs_markers", {})
         entry_label = "-"
         exit_label = "-"
+        # Use <= to capture the most recent entry/exit up to view_last_idx.
+        # Exact match (==) systematically misses entry markers because
+        # pair_end (entry bar) almost never lands on the last bar, while
+        # stop-loss exits can reach the last bar.
         for m in bs_markers.get("entry_markers", []):
-            if int(m[0]) == view_last_idx:
+            if int(m[0]) <= view_last_idx:
                 entry_label = str(m[1])
-                break
         for m in bs_markers.get("exit_markers", []):
-            if int(m[0]) == view_last_idx:
+            if int(m[0]) <= view_last_idx:
                 exit_label = str(m[1])
-                break
         result[f"{prefix}_bs_entry"] = entry_label
         result[f"{prefix}_bs_exit"] = exit_label
 
@@ -184,20 +186,22 @@ class CSVBuilder:
             result[f"{prefix}_short_pos"] = int(_last_value(short_mask))
 
         # --- 交易事件匹配 ---
+        # Use <= to find the most recent trade event at or before
+        # view_last_idx.  Exact match (==) systematically misses
+        # entry events because entry_idx (pair_end) almost never
+        # lands on the last bar of the dataset.
         trade_val = ""
         trade_return = float("nan")
         trade_reason = ""
         for t in view_data.get("trade_records", []):
-            if t.get("exit_idx") == view_last_idx:
+            if t.get("exit_idx") is not None and int(t["exit_idx"]) <= view_last_idx:
                 trade_type = t.get("type", "long")
                 trade_val = f"exit_{trade_type}"
                 trade_return = t.get("return_pct", float("nan"))
                 trade_reason = t.get("exit_reason", "")
-                break
-            elif t.get("entry_idx") == view_last_idx:
+            elif t.get("entry_idx") is not None and int(t["entry_idx"]) <= view_last_idx:
                 trade_type = t.get("type", "long")
                 trade_val = f"entry_{trade_type}"
-                break
         result[f"{prefix}_trade"] = trade_val
         result[f"{prefix}_trade_return"] = trade_return
         result[f"{prefix}_trade_reason"] = trade_reason

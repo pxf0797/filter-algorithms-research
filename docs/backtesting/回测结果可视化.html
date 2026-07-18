@@ -322,6 +322,17 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 	    return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
 	  }
 
+	  /** Pick tickformat based on the time span of bar_timestamp data. */
+	  function getTimeTickFormat(barTs) {
+	    if (!barTs || barTs.length < 2) return '%m/%d %H:%M';
+	    const t0 = new Date(barTs[0]).getTime();
+	    const t1 = new Date(barTs[barTs.length - 1]).getTime();
+	    const spanDays = (t1 - t0) / (1000 * 60 * 60 * 24);
+	    if (spanDays < 7) return '%m/%d %H:%M';
+	    if (spanDays < 365) return '%m/%d';
+	    return '%Y-%m-%d';
+	  }
+
   // ========== Plotly config ==========
   const plotConfig = { displayModeBar: false, responsive: true };
   const baseFont = { color: '#c9d1d9', size: 11 };
@@ -383,7 +394,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   // --- Section 2: Signals (4 subplots with shared x-axis) ---
   function buildSignals(data) {
     const { columns, N } = data;
-    const barIdx = col(data, 'bar_index');
+    const barTs = col(data, 'bar_timestamp');
     const traces = [];
     const shapes = [];
     const nViews = VIEWS.length;
@@ -412,14 +423,13 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         if (i === sig.length || sig[i] !== segVal) {
           var key = String(segVal);
           if (sigBgColors[key]) {
-            var x0 = barIdx[segStart];
+            var x0 = barTs[segStart];
             var x1;
             if (i < sig.length) {
-              x1 = barIdx[i];
+              x1 = barTs[i];
             } else {
-              var lastGap = barIdx[segStart + 1] - barIdx[segStart];
-              if (isNaN(lastGap) || lastGap <= 0) lastGap = 1;
-              x1 = barIdx[segStart] + lastGap;
+              // last segment: extend to the final timestamp
+              x1 = barTs[barTs.length - 1];
             }
             rects.push({
               type: 'rect',
@@ -440,6 +450,8 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       return rects;
     }
 
+    const tickFormat = getTimeTickFormat(barTs);
+
     VIEWS.forEach(function(v, vi) {
       var sig = col(data, v + '_sig');
       var style = lineStyles[v];
@@ -448,7 +460,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       var yaxisName = vi === 0 ? 'y' : ('y' + (vi + 1));
 
       traces.push({
-        x: barIdx, y: sig,
+        x: barTs, y: sig,
         type: 'scatter', mode: 'lines',
         name: v + ' (' + (viewLabels[v] || v) + ')',
         line: { shape: 'hv', width: style.width, color: rgbaColor },
@@ -474,13 +486,13 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       var xkey = 'xaxis' + (vi === 0 ? '' : (vi + 1));
       var ykey = 'yaxis' + (vi === 0 ? '' : (vi + 1));
 
-      layout[xkey] = { showgrid: true, gridcolor: gridColor, zeroline: false };
+      layout[xkey] = { showgrid: true, gridcolor: gridColor, zeroline: false, type: 'date', tickformat: tickFormat };
       // Share x-axis with the bottom subplot
       if (vi < nViews - 1) {
         layout[xkey].matches = 'x' + nViews;
       }
       if (vi === nViews - 1) {
-        layout[xkey].title = { text: 'bar_index', font: { size: 10, color: '#8b949e' } };
+        layout[xkey].title = { text: '时间', font: { size: 10, color: '#8b949e' } };
       }
 
       layout[ykey] = {
@@ -499,7 +511,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   // --- Section 3: Filtered Price + EPS (merged overlay) ---
   function buildFiltered(data) {
     const { columns, N } = data;
-    const barIdx = col(data, 'bar_index');
+    const barTs = col(data, 'bar_timestamp');
     const traces = [];
 
     // Line styles for filtered price: hierarchical by cycle length
@@ -515,7 +527,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       var filtered = col(data, v + '_filtered');
       var style = lineStyles[v];
       traces.push({
-        x: barIdx, y: filtered,
+        x: barTs, y: filtered,
         type: 'scatter', mode: 'lines',
         name: v + ' (' + (viewLabels[v] || v) + ')',
         line: { width: style.width, color: VIEW_COLORS[v] },
@@ -532,7 +544,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
     // Upper band (invisible line to anchor fill)
     traces.push({
-      x: barIdx, y: epsUpper,
+      x: barTs, y: epsUpper,
       type: 'scatter', mode: 'lines',
       name: 'v2 +eps',
       line: { width: 0 },
@@ -541,7 +553,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
     // Lower band + fill to upper
     traces.push({
-      x: barIdx, y: epsLower,
+      x: barTs, y: epsLower,
       type: 'scatter', mode: 'lines',
       name: 'v2 ±eps',
       line: { width: 0 },
@@ -550,13 +562,15 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       showlegend: true,
     });
 
+    const tickFormat = getTimeTickFormat(barTs);
+
     var layout = {
       template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
       font: baseFont, displayModeBar: false,
       margin: { l: 70, r: 40, t: 20, b: 40 },
       showlegend: true,
       legend: { orientation: 'h', y: 1.08, x: 0.5, xanchor: 'center', font: { size: 11, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
-      xaxis: { title: { text: 'bar_index', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
+      xaxis: { title: { text: '时间', font: { size: 10, color: '#8b949e' } }, type: 'date', tickformat: tickFormat, showgrid: true, gridcolor: gridColor, zeroline: false },
       yaxis: { title: { text: '滤波价格', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
     };
 
@@ -567,21 +581,21 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   // --- Section 4: PnL Curves ---
   function buildPnl(data) {
     const { columns, N } = data;
-    const barIdx = col(data, 'bar_index');
+    const barTs = col(data, 'bar_timestamp');
     const traces = [];
 
     VIEWS.forEach(v => {
       const pnlLong = col(data, v + '_pnl_long');
       const pnlShort = col(data, v + '_pnl_short');
       traces.push({
-        x: barIdx, y: pnlLong,
+        x: barTs, y: pnlLong,
         type: 'scatter', mode: 'lines',
         name: v + ' 做多 (' + (viewLabels[v] || v) + ')',
         line: { width: 2, color: VIEW_COLORS[v], dash: 'solid' },
         showlegend: true,
       });
       traces.push({
-        x: barIdx, y: pnlShort,
+        x: barTs, y: pnlShort,
         type: 'scatter', mode: 'lines',
         name: v + ' 做空 (' + (viewLabels[v] || v) + ')',
         line: { width: 2, color: VIEW_COLORS[v], dash: 'dash' },
@@ -597,7 +611,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       const lastS = toNum(pnlShort[N - 1]);
       if (!isNaN(lastL)) {
         annotations.push({
-          x: N - 1, y: lastL,
+          x: barTs[N - 1], y: lastL,
           text: '<b>' + (lastL - 100).toFixed(2) + '%</b>',
           showarrow: false, font: { size: 10, color: VIEW_COLORS[v] },
           xanchor: 'left', xshift: 5,
@@ -605,7 +619,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       }
       if (!isNaN(lastS)) {
         annotations.push({
-          x: N - 1, y: lastS,
+          x: barTs[N - 1], y: lastS,
           text: '<b>' + (lastS - 100).toFixed(2) + '%</b>',
           showarrow: false, font: { size: 10, color: VIEW_COLORS[v] },
           xanchor: 'left', xshift: 5,
@@ -614,9 +628,11 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     });
 
     const shapes = [{
-      type: 'line', x0: 0, x1: N - 1, y0: 100, y1: 100,
+      type: 'line', x0: barTs[0], x1: barTs[N - 1], y0: 100, y1: 100,
       line: { color: '#30363d', width: 1, dash: 'dot' },
     }];
+
+    const tickFormat = getTimeTickFormat(barTs);
 
     const layout = {
       template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
@@ -624,7 +640,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       margin: { l: 70, r: 80, t: 20, b: 40 },
       showlegend: true,
       legend: { orientation: 'h', y: 1.08, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
-      xaxis: { title: { text: 'bar_index', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
+      xaxis: { title: { text: '时间', font: { size: 10, color: '#8b949e' } }, type: 'date', tickformat: tickFormat, showgrid: true, gridcolor: gridColor, zeroline: false },
       yaxis: { title: { text: 'PnL (累计)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
       shapes, annotations,
     };
@@ -635,11 +651,16 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   // --- Section 5: Position Heatmap ---
   function buildHeatmap(data) {
     const { columns, N } = data;
+    const barTs = col(data, 'bar_timestamp');
     const sampleN = Math.min(100, N);
     const step = Math.max(1, Math.floor(N / sampleN));
-    const sampledX = [];
-    for (let i = 0; i < N; i += step) sampledX.push(i);
-    if (sampledX.length > sampleN) sampledX.length = sampleN;
+    const sampledIndices = [];
+    const sampledTs = [];
+    for (let i = 0; i < N; i += step) {
+      sampledIndices.push(i);
+      sampledTs.push(barTs[i]);
+    }
+    if (sampledIndices.length > sampleN) sampledIndices.length = sampleN;
 
     const rows = [];
     const rowLabels = [];
@@ -652,7 +673,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     VIEWS.forEach(v => {
       ['long_pos', 'short_pos'].forEach(posType => {
         const arr = col(data, v + '_' + posType);
-        const sampled = sampledX.map(i => {
+        const sampled = sampledIndices.map(i => {
           const val = arr[i];
           return (val === true || val === 1) ? (posType === 'long_pos' ? 1 : 2) : 0;
         });
@@ -662,15 +683,17 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       });
     });
 
+    const tickFormat = getTimeTickFormat(barTs);
+
     const trace = {
       z: rows, type: 'heatmap',
       colorscale: colorMap,
       showscale: false,
-      x: sampledX,
+      x: sampledTs,
       y: rowLabels,
       xgap: 1, ygap: 2,
       hoverongaps: false,
-      hovertemplate: 'bar_index=%{x}<br>%{y}=%{z}<extra></extra>',
+      hovertemplate: '时间=%{x}<br>%{y}=%{z}<extra></extra>',
     };
 
     const layout = {
@@ -678,7 +701,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       font: { color: '#c9d1d9', size: 11 },
       displayModeBar: false,
       margin: { l: 160, r: 40, t: 20, b: 40 },
-      xaxis: { title: { text: 'bar_index', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, side: 'top' },
+      xaxis: { title: { text: '时间', font: { size: 10, color: '#8b949e' } }, type: 'date', tickformat: tickFormat, showgrid: true, gridcolor: gridColor, side: 'top' },
       yaxis: { automargin: true },
     };
 
@@ -779,7 +802,15 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     const { columns, N, parquetCols } = data;
     const wrap = document.getElementById('table-wrap');
     const maxRows = Math.min(50, N);
-    const displayCols = parquetCols;
+    let displayCols = [...parquetCols];
+    // Ensure bar_timestamp appears right after bar_index
+    const biIdx = displayCols.indexOf('bar_index');
+    const btIdx = displayCols.indexOf('bar_timestamp');
+    if (biIdx !== -1 && btIdx !== -1 && btIdx !== biIdx + 1) {
+      displayCols.splice(btIdx, 1);
+      const newBiIdx = displayCols.indexOf('bar_index');
+      displayCols.splice(newBiIdx + 1, 0, 'bar_timestamp');
+    }
 
     let table = '<table class="data-table"><thead><tr><th>#</th>';
     displayCols.forEach(c => {

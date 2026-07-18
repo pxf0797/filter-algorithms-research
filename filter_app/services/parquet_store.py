@@ -437,22 +437,24 @@ class ParquetStore:
         trade_return = _FLOAT_NA
         trade_reason = _STR_NA
 
+        # Use <= to find the most recent trade event at or before
+        # view_last_idx.  Exact match (==) systematically misses
+        # entry events because entry_idx (pair_end) almost never
+        # lands on the last bar of the dataset.
         for trade in trade_records:
             exit_idx = trade.get("exit_idx")
             entry_idx = trade.get("entry_idx")
             tt = trade.get("type", "")
 
-            if exit_idx is not None and int(exit_idx) == view_last_idx:
+            if exit_idx is not None and int(exit_idx) <= view_last_idx:
                 trade_val = f"exit_{tt}"
                 trade_return = float(trade.get("return_pct", _FLOAT_NA))
                 trade_reason = str(trade.get("exit_reason", ""))
-                break
-            elif entry_idx is not None and int(entry_idx) == view_last_idx:
+            elif entry_idx is not None and int(entry_idx) <= view_last_idx:
                 trade_val = f"entry_{tt}"
                 # entry has no realised return yet
                 trade_return = _FLOAT_NA
                 trade_reason = _STR_NA
-                break
 
         result[f"{prefix}_trade"] = trade_val
         result[f"{prefix}_trade_return"] = trade_return
@@ -466,15 +468,16 @@ class ParquetStore:
 
         if bs_markers is not None:
             # entry_markers: (bar_idx, label, color, date)
+            # Use <= to capture the most recent entry up to view_last_idx.
+            # Exact match (==) misses entries because pair_end (entry bar)
+            # almost never lands on the last bar, while stop-loss exits can.
             for m in bs_markers.get("entry_markers", []):
-                if int(m[0]) == view_last_idx:
+                if int(m[0]) <= view_last_idx:
                     bs_entry = str(m[1])
-                    break
             # exit_markers: (bar_idx, label, color, exit_reason, date)
             for m in bs_markers.get("exit_markers", []):
-                if int(m[0]) == view_last_idx:
+                if int(m[0]) <= view_last_idx:
                     bs_exit = str(m[1])
-                    break
 
         result[f"{prefix}_bs_entry"] = bs_entry
         result[f"{prefix}_bs_exit"] = bs_exit
