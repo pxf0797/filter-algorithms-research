@@ -21,57 +21,32 @@ body {
 h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; color: var(--text-hl); }
 .subtitle { text-align: center; color: var(--text-dim); font-size: 13px; margin-bottom: 32px; }
 
-/* Loading overlay */
-#loading-overlay {
-  position: fixed; inset: 0; background: rgba(13,17,23,0.92);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 9999;
-}
-#loading-overlay.hidden { display: none; }
-.loading-spinner {
-  width: 48px; height: 48px; border: 3px solid var(--border);
-  border-top-color: var(--blue); border-radius: 50%;
-  animation: spin 0.8s linear infinite; margin-bottom: 20px;
-}
-@keyframes spin { to { transform: rotate(360deg); } }
-#loading-status { color: var(--text-dim); font-size: 14px; }
-#loading-progress {
-  width: 280px; height: 4px; background: var(--border); border-radius: 2px;
-  margin-top: 12px; overflow: hidden;
-}
-#loading-progress-bar {
-  height: 100%; width: 0%; background: var(--blue); border-radius: 2px;
-  transition: width 0.3s ease;
-}
-
-/* Welcome state */
-#welcome-state {
+/* Guide page */
+#guide-page {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   min-height: 60vh; text-align: center;
 }
-#welcome-state.hidden { display: none; }
-#welcome-state h1 { margin-bottom: 8px; }
-#welcome-state .welcome-icon { font-size: 64px; margin-bottom: 20px; opacity: 0.5; }
-#welcome-state .welcome-desc { color: var(--text-dim); font-size: 15px; max-width: 500px; margin-bottom: 32px; line-height: 1.8; }
-
-/* File selector area */
-.file-select-area {
-  background: var(--card); border: 2px dashed var(--border); border-radius: 12px;
-  padding: 40px 48px; text-align: center; cursor: pointer; transition: border-color 0.2s;
-  max-width: 480px; margin: 0 auto;
+#guide-page.hidden { display: none; }
+#guide-page h1 { margin-bottom: 8px; }
+#guide-page .guide-icon { font-size: 64px; margin-bottom: 20px; opacity: 0.5; }
+#guide-page .guide-desc { color: var(--text-dim); font-size: 15px; max-width: 560px; margin-bottom: 32px; line-height: 1.8; }
+#guide-page .cmd-box {
+  background: #0d1117; border: 1px solid var(--border); border-radius: 8px;
+  padding: 16px 24px; font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 13px; color: var(--text-hl); text-align: left; margin-bottom: 24px;
+  max-width: 620px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
 }
-.file-select-area:hover, .file-select-area.drag-over { border-color: var(--blue); }
-.file-select-area .select-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.6; }
-.file-select-area .select-text { color: var(--text-hl); font-size: 16px; font-weight: 600; margin-bottom: 6px; }
-.file-select-area .select-hint { color: var(--text-dim); font-size: 12px; }
-.file-select-area input[type="file"] { display: none; }
-
-/* Meta input */
-.meta-toggle {
-  margin-top: 16px; font-size: 12px; color: var(--text-dim); cursor: pointer;
-  user-select: none; transition: color 0.2s;
+#guide-page .cmd-box .comment { color: var(--text-dim); }
+#guide-page .cmd-box .cmd { color: var(--green); }
+#guide-page .btn-browse {
+  background: var(--blue); color: #fff; border: none; border-radius: 6px;
+  padding: 8px 20px; font-size: 14px; cursor: pointer; font-weight: 600;
+  transition: opacity 0.2s;
 }
-.meta-toggle:hover { color: var(--blue); }
-#metadata-input { display: none; }
+#guide-page .btn-browse:hover { opacity: 0.85; }
+
+/* File input (hidden, for "choose another file" button) */
+#reload-file-input { display: none; }
 
 /* Dashboard */
 #dashboard.hidden { display: none; }
@@ -180,48 +155,33 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   display: inline-block; padding: 2px 8px; border-radius: 4px;
   font-size: 11px; background: rgba(163,113,247,0.15); color: var(--purple);
 }
-
-/* Error toast */
-.error-toast {
-  position: fixed; top: 24px; left: 50%; transform: translateX(-50%);
-  background: #490d0d; border: 1px solid var(--red); color: #fdaeb7;
-  padding: 12px 24px; border-radius: 8px; font-size: 14px; z-index: 10000;
-  display: none; max-width: 600px; text-align: center;
-}
-.error-toast.show { display: block; }
 </style>
 </head>
 <body>
 
-<!-- Loading overlay -->
-<div id="loading-overlay">
-  <div class="loading-spinner"></div>
-  <p id="loading-status">正在初始化 DuckDB-WASM 引擎...</p>
-  <div id="loading-progress"><div id="loading-progress-bar"></div></div>
-</div>
-
-<!-- Error toast -->
-<div class="error-toast" id="error-toast"></div>
-
-<!-- Welcome state -->
-<div id="welcome-state" class="hidden">
+<!-- Guide page (shown when no embedded data) -->
+<div id="guide-page">
   <h1>回测结果可视化</h1>
-  <p class="subtitle">支持 DuckDB-WASM 直接读取 Parquet 文件 | 无需后端服务</p>
-  <div class="welcome-icon">&#128202;</div>
-  <p class="welcome-desc">
-    选择 <code>backtest_result.parquet</code> 文件，在浏览器中直接分析回测数据。<br>
-    支持信号对比、滤波价格、PnL 曲线、持仓热力图、交易统计等可视化。
+  <p class="subtitle">Python 启动脚本嵌入数据 | 浏览器直接渲染图表</p>
+  <div class="guide-icon">&#128202;</div>
+  <p class="guide-desc">
+    本页面通过 Python 脚本<strong>嵌入数据</strong>后打开，无需 DuckDB-WASM 初始化。
+    <br>请使用以下命令加载回测结果：
   </p>
-  <div class="file-select-area" id="file-select-area">
-    <div class="select-icon">&#128194;</div>
-    <div class="select-text">点击选择 Parquet 文件</div>
-    <div class="select-hint">或拖放文件到此处（.parquet）</div>
-    <input type="file" id="file-input" accept=".parquet">
+  <div class="cmd-box">
+<span class="comment"># 直接指定 parquet 文件</span>
+<span class="cmd">python tools/view_backtest.py</span> <span class="comment">&lt;parquet 文件路径&gt;</span>
+
+<span class="comment"># 自动找最新的回测结果</span>
+<span class="cmd">python tools/view_backtest.py --latest ./test_backtest_output</span>
+
+<span class="comment"># 同时加载 metadata.json</span>
+<span class="cmd">python tools/view_backtest.py -m metadata.json result.parquet</span>
   </div>
-  <div class="meta-toggle" id="meta-toggle">
-    + 加载 metadata.json（可选，用于中文视图标签）
-    <input type="file" id="metadata-input" accept=".json">
-  </div>
+  <p style="color:var(--text-dim);font-size:12px;margin-top:-8px">
+    也支持拖放 .parquet 文件到本页面快速加载（需要浏览器兼容的轻量解析）
+  </p>
+  <input type="file" id="reload-file-input" accept=".parquet">
 </div>
 
 <!-- Dashboard -->
@@ -280,779 +240,573 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   </div>
 </div>
 
-<script type="module">
-import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0/dist/duckdb-browser.mjs';
+<script>
+// ========== 数据来源：Python view_backtest.py 嵌入的 JSON ==========
+// 如果没有嵌入数据则显示引导页，有数据则直接渲染。
 
-// ========== Constants ==========
-const VIEWS = ['v0', 'v1', 'v2', 'v3'];
-const VIEW_COLORS = { v0: '#58a6ff', v1: '#3fb950', v2: '#d2991d', v3: '#f78166' };
-const DEFAULT_VIEW_LABELS = { v0: 'v0', v1: 'v1', v2: 'v2', v3: 'v3' };
-const ALL_COLS = [
-  'bar_index', 'bar_timestamp',
-  ...VIEWS.flatMap(v => [
-    `${v}_sig`, `${v}_filtered`, `${v}_eps`,
-    `${v}_pnl_long`, `${v}_pnl_short`,
-    `${v}_long_pos`, `${v}_short_pos`,
-    `${v}_trade`, `${v}_trade_return`, `${v}_trade_reason`,
-    `${v}_bs_entry`, `${v}_bs_exit`
-  ])
-];
-const NUMERIC_COLS = new Set(
-  VIEWS.flatMap(v => [`${v}_sig`, `${v}_filtered`, `${v}_eps`, `${v}_pnl_long`, `${v}_pnl_short`, `${v}_trade_return`])
-);
-const BOOL_COLS = new Set(
-  VIEWS.flatMap(v => [`${v}_long_pos`, `${v}_short_pos`])
-);
-const STRING_COLS = new Set(
-  VIEWS.flatMap(v => [`${v}_trade`, `${v}_trade_reason`, `${v}_bs_entry`, `${v}_bs_exit`])
-);
+(function() {
+  // ========== Constants ==========
+  const VIEWS = ['v0', 'v1', 'v2', 'v3'];
+  const VIEW_COLORS = { v0: '#58a6ff', v1: '#3fb950', v2: '#d2991d', v3: '#f78166' };
+  const DEFAULT_VIEW_LABELS = { v0: 'v0', v1: 'v1', v2: 'v2', v3: 'v3' };
 
-// ========== DOM refs ==========
-const loadingOverlay = document.getElementById('loading-overlay');
-const loadingStatus = document.getElementById('loading-status');
-const loadingProgressBar = document.getElementById('loading-progress-bar');
-const welcomeState = document.getElementById('welcome-state');
-const dashboard = document.getElementById('dashboard');
-const errorToast = document.getElementById('error-toast');
-const fileSelectArea = document.getElementById('file-select-area');
-const fileInput = document.getElementById('file-input');
-const metaInput = document.getElementById('metadata-input');
-const metaToggle = document.getElementById('meta-toggle');
+  // ========== State ==========
+  let viewLabels = { ...DEFAULT_VIEW_LABELS };
 
-// ========== State ==========
-let db = null;
-let viewLabels = { ...DEFAULT_VIEW_LABELS };
-let metaLoaded = false;
+  // ========== Helpers ==========
+  function toNum(v) { return (v === null || v === undefined || isNaN(v)) ? NaN : Number(v); }
+  function toStr(v) { return (v === null || v === undefined) ? '' : String(v); }
+  function toBool(v) { return v === true || v === 1; }
 
-// ========== Helpers ==========
-function showError(msg, duration = 6000) {
-  errorToast.textContent = msg;
-  errorToast.classList.add('show');
-  clearTimeout(errorToast._timeout);
-  errorToast._timeout = setTimeout(() => errorToast.classList.remove('show'), duration);
-  console.error(msg);
-}
+  function col(data, name) { return data.columns[name] || []; }
 
-function setLoading(percent, status) {
-  loadingStatus.textContent = status;
-  loadingProgressBar.style.width = percent + '%';
-}
+  // ========== Plotly config ==========
+  const plotConfig = { displayModeBar: false, responsive: true };
+  const baseFont = { color: '#c9d1d9', size: 11 };
+  const gridColor = '#21262d';
+  const zeroLineColor = '#30363d';
+  const plotBg = '#0d1117';
+  const paperBg = '#161b22';
 
-function toNum(v) { return (v === null || v === undefined || isNaN(v)) ? NaN : Number(v); }
-function toStr(v) { return (v === null || v === undefined) ? '' : String(v); }
-function toBool(v) { return v === true || v === 1; }
+  // --- Section 1: Overview ---
+  function buildOverview(data) {
+    const { columns, N } = data;
+    let bestLongPnl = -Infinity, bestLongView = '';
+    let bestShortPnl = -Infinity, bestShortView = '';
+    let totalTrades = 0;
+    let sigNonZero = 0, sigTotal = 0;
 
-// ========== DuckDB-WASM Initialization ==========
-async function initDuckDB() {
-  const BASE = 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0/dist';
+    VIEWS.forEach(v => {
+      const pl = col(data, v + '_pnl_long');
+      const ps = col(data, v + '_pnl_short');
+      const lastL = toNum(pl[N - 1]) || 100;
+      const lastS = toNum(ps[N - 1]) || 100;
+      if (lastL > bestLongPnl) { bestLongPnl = lastL; bestLongView = v; }
+      if (lastS > bestShortPnl) { bestShortPnl = lastS; bestShortView = v; }
 
-  setLoading(10, '正在选择 DuckDB 引擎变体...');
+      const tr = col(data, v + '_trade');
+      for (let i = 0; i < N; i++) {
+        if (tr[i]) totalTrades++;
+      }
 
-  // Try getJsDelivrBundles (newer API), fall back to manual URLs
-  let bundles;
-  if (typeof duckdb.getJsDelivrBundles === 'function') {
-    bundles = duckdb.getJsDelivrBundles();
-  } else {
-    bundles = {
-      mvp: {
-        mainModule: `${BASE}/duckdb-mvp.wasm`,
-        mainWorker: `${BASE}/duckdb-browser-mvp.worker.js`,
-      },
-      eh: {
-        mainModule: `${BASE}/duckdb-eh.wasm`,
-        mainWorker: `${BASE}/duckdb-browser-eh.worker.js`,
-      },
+      const sig = col(data, v + '_sig');
+      for (let i = 0; i < N; i++) {
+        sigTotal++;
+        if (sig[i] !== 0 && sig[i] != null) sigNonZero++;
+      }
+    });
+
+    const sigCov = sigTotal > 0 ? (sigNonZero / sigTotal * 100) : 0;
+
+    const kpiGrid = document.getElementById('kpi-grid');
+    const kpis = [
+      { label: '最佳做多 PnL', value: (bestLongPnl - 100).toFixed(2) + '%', cls: bestLongPnl >= 100 ? 'positive' : 'negative', sub: bestLongView + ' (' + (viewLabels[bestLongView] || bestLongView) + ')' },
+      { label: '最佳做空 PnL', value: (bestShortPnl - 100).toFixed(2) + '%', cls: bestShortPnl >= 100 ? 'positive' : 'negative', sub: bestShortView + ' (' + (viewLabels[bestShortView] || bestShortView) + ')' },
+      { label: '总交易次数', value: totalTrades, cls: '', sub: '4 视图合计' },
+      { label: '信号覆盖率', value: sigCov.toFixed(1) + '%', cls: '', sub: sigNonZero + ' / ' + sigTotal + ' 非零' },
+    ];
+    kpiGrid.innerHTML = kpis.map(k =>
+      '<div class="kpi-card"><div class="kpi-label">' + k.label + '</div><div class="kpi-value ' + k.cls + '">' + k.value + '</div><div class="kpi-sub">' + k.sub + '</div></div>'
+    ).join('');
+
+    const barTs = col(data, 'bar_timestamp');
+    const dateMin = barTs[0] ? new Date(barTs[0]).toISOString().substring(0, 16) : '?';
+    const dateMax = barTs[N - 1] ? new Date(barTs[N - 1]).toISOString().substring(0, 16) : '?';
+    document.getElementById('summary-row').innerHTML =
+      '<span>日期范围: <strong>' + dateMin + '</strong> &rarr; <strong>' + dateMax + '</strong></span>' +
+      '<span>数据规模: <strong>' + N + ' 行 x ' + data.parquetCols.length + ' 列</strong></span>' +
+      '<span>metadata: <span class="meta-badge">&#10003; 已加载</span></span>';
+  }
+
+  // --- Section 2: Signals ---
+  function buildSignals(data) {
+    const { columns, N } = data;
+    const barIdx = col(data, 'bar_index');
+    const traces = [];
+    const allShapes = [];
+    const annotations = [];
+    const nViews = VIEWS.length;
+    const gap = 0.04;
+    const eachH = (1 - gap * (nViews - 1)) / nViews;
+
+    VIEWS.forEach((v, vi) => {
+      const y0 = 1 - (vi + 1) * eachH - vi * gap;
+      const sig = col(data, v + '_sig');
+      const xref = vi === 0 ? 'x' : ('x' + (vi + 1));
+      const yref = vi === 0 ? 'y' : ('y' + (vi + 1));
+
+      let regionStart = 0;
+      let regionVal = sig[0];
+      for (let i = 1; i <= N; i++) {
+        if (i === N || sig[i] !== regionVal) {
+          let bgColor;
+          if (regionVal === 1) bgColor = 'rgba(63,185,80,0.10)';
+          else if (regionVal === -1) bgColor = 'rgba(248,81,73,0.10)';
+          else bgColor = 'rgba(48,54,61,0.04)';
+
+          allShapes.push({
+            type: 'rect', xref, yref,
+            x0: regionStart, x1: i - 1 + 0.9,
+            y0: -1.4, y1: 1.4,
+            fillcolor: bgColor, line: { width: 0 }, layer: 'below',
+          });
+          regionStart = i;
+          if (i < N) regionVal = sig[i];
+        }
+      }
+
+      traces.push({
+        x: barIdx, y: sig,
+        type: 'scatter', mode: 'lines',
+        name: v + ' (' + (viewLabels[v] || v) + ')',
+        line: { shape: 'hv', width: 2.2, color: VIEW_COLORS[v] },
+        xaxis: vi === 0 ? 'x' : ('x' + (vi + 1)),
+        yaxis: vi === 0 ? 'y' : ('y' + (vi + 1)),
+        showlegend: true,
+      });
+
+      annotations.push({
+        x: 0.01, y: y0 + eachH / 2, xref: 'paper', yref: 'paper',
+        text: '<b>' + v + '_sig</b> <span style="font-size:10px;color:#8b949e">' + (viewLabels[v] || v) + '</span>',
+        showarrow: false, font: { size: 12, color: VIEW_COLORS[v] }, xanchor: 'left',
+      });
+    });
+
+    const layout = {
+      template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
+      font: baseFont, displayModeBar: false,
+      margin: { l: 60, r: 40, t: 20, b: 30 },
+      showlegend: true, shapes: allShapes,
+      legend: { orientation: 'h', y: 1.05, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
+      grid: { rows: nViews, columns: 1, pattern: 'independent', roworder: 'top to bottom', ygap: gap },
     };
+
+    VIEWS.forEach((v, vi) => {
+      const y0 = 1 - (vi + 1) * eachH - vi * gap;
+      const y1 = y0 + eachH;
+      const xkey = 'xaxis' + (vi === 0 ? '' : (vi + 1));
+      const ykey = 'yaxis' + (vi === 0 ? '' : (vi + 1));
+      layout[xkey] = { showgrid: true, gridcolor: gridColor, zeroline: false, domain: [y0, y1] };
+      if (vi === nViews - 1) {
+        layout[xkey].title = { text: 'bar_index', font: { size: 10, color: '#8b949e' } };
+      }
+      layout[ykey] = {
+        tickvals: [-1, 0, 1], ticktext: ['空头', '中性', '多头'],
+        range: [-1.4, 1.4], showgrid: true, gridcolor: gridColor,
+        zeroline: true, zerolinecolor: zeroLineColor, domain: [y0, y1],
+      };
+    });
+
+    Plotly.newPlot('chart-signals', traces, layout, plotConfig);
   }
 
-  setLoading(20, '正在检测浏览器兼容性...');
-  const bundle = await duckdb.selectBundle(bundles);
+  // --- Section 3: Filtered Price + EPS ---
+  function buildFiltered(data) {
+    const { columns, N } = data;
+    const barIdx = col(data, 'bar_index');
+    const traces = [];
+    const annotations = [];
+    const nViews = VIEWS.length;
+    const gap = 0.04;
+    const eachH = (1 - gap * (nViews - 1)) / nViews;
 
-  setLoading(30, '正在初始化 Worker...');
-  // Use importScripts pattern recommended by DuckDB docs
-  const worker_url = URL.createObjectURL(
-    new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' })
-  );
-  const worker = new Worker(worker_url);
+    VIEWS.forEach((v, vi) => {
+      const y0 = 1 - (vi + 1) * eachH - vi * gap;
+      const filtered = col(data, v + '_filtered');
+      const eps = col(data, v + '_eps');
 
-  const logger = new duckdb.ConsoleLogger();
-  db = new duckdb.AsyncDuckDB(logger, worker);
+      const upper = filtered.map((f, i) => toNum(f) + toNum(eps[i]));
+      const lower = filtered.map((f, i) => toNum(f) - toNum(eps[i]));
 
-  setLoading(50, '正在下载并初始化 WebAssembly 引擎 (~30MB)...');
-  await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
-  URL.revokeObjectURL(worker_url);
+      // Upper band
+      traces.push({
+        x: barIdx, y: upper,
+        type: 'scatter', mode: 'lines',
+        name: v + ' +eps',
+        line: { width: 0 },
+        xaxis: vi === 0 ? 'x' : ('x' + (vi + 1)),
+        yaxis: vi === 0 ? 'y' : ('y' + (vi + 1)),
+        showlegend: false,
+      });
 
-  setLoading(100, 'DuckDB-WASM 初始化完成');
-}
+      // Lower band + fill
+      traces.push({
+        x: barIdx, y: lower,
+        type: 'scatter', mode: 'lines',
+        name: v + ' -eps',
+        line: { width: 0 },
+        fill: 'tonexty',
+        fillcolor: VIEW_COLORS[v].replace(')', ',0.08)').replace('rgb', 'rgba'),
+        xaxis: vi === 0 ? 'x' : ('x' + (vi + 1)),
+        yaxis: vi === 0 ? 'y' : ('y' + (vi + 1)),
+        showlegend: false,
+      });
 
-// ========== Metadata loading ==========
-async function loadMetadata(file) {
-  try {
-    const text = await file.text();
-    const meta = JSON.parse(text);
-    if (meta.view_labels) {
-      viewLabels = { ...DEFAULT_VIEW_LABELS, ...meta.view_labels };
-    }
-    metaLoaded = true;
-    return meta;
-  } catch (e) {
-    console.warn('metadata.json 解析失败，使用默认标签', e);
-    metaLoaded = false;
-    return null;
+      // Filtered price line
+      traces.push({
+        x: barIdx, y: filtered,
+        type: 'scatter', mode: 'lines',
+        name: v + ' (' + (viewLabels[v] || v) + ')',
+        line: { width: 1.8, color: VIEW_COLORS[v] },
+        xaxis: vi === 0 ? 'x' : ('x' + (vi + 1)),
+        yaxis: vi === 0 ? 'y' : ('y' + (vi + 1)),
+        showlegend: true,
+      });
+
+      annotations.push({
+        x: 0.01, y: y0 + eachH / 2, xref: 'paper', yref: 'paper',
+        text: '<b>' + v + '_filtered</b> <span style="font-size:10px;color:#8b949e">' + (viewLabels[v] || v) + '</span>',
+        showarrow: false, font: { size: 12, color: VIEW_COLORS[v] }, xanchor: 'left',
+      });
+    });
+
+    const layout = {
+      template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
+      font: baseFont, displayModeBar: false,
+      margin: { l: 60, r: 40, t: 20, b: 30 },
+      showlegend: true,
+      legend: { orientation: 'h', y: 1.05, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
+      grid: { rows: nViews, columns: 1, pattern: 'independent', roworder: 'top to bottom', ygap: gap },
+    };
+
+    VIEWS.forEach((v, vi) => {
+      const y0 = 1 - (vi + 1) * eachH - vi * gap;
+      const y1 = y0 + eachH;
+      const xkey = 'xaxis' + (vi === 0 ? '' : (vi + 1));
+      const ykey = 'yaxis' + (vi === 0 ? '' : (vi + 1));
+      layout[xkey] = { showgrid: true, gridcolor: gridColor, zeroline: false, domain: [y0, y1] };
+      if (vi === nViews - 1) {
+        layout[xkey].title = { text: 'bar_index', font: { size: 10, color: '#8b949e' } };
+      }
+      layout[ykey] = { showgrid: true, gridcolor: gridColor, zeroline: false, domain: [y0, y1] };
+    });
+
+    Plotly.newPlot('chart-filtered', traces, layout, plotConfig);
   }
-}
 
-// ========== Data loading from Parquet ==========
-async function loadParquetData(file) {
-  const arrayBuffer = await file.arrayBuffer();
-  const buffer = new Uint8Array(arrayBuffer);
-  await db.registerFileBuffer('data.parquet', buffer);
+  // --- Section 4: PnL Curves ---
+  function buildPnl(data) {
+    const { columns, N } = data;
+    const barIdx = col(data, 'bar_index');
+    const traces = [];
 
-  const conn = await db.connect();
+    VIEWS.forEach(v => {
+      const pnlLong = col(data, v + '_pnl_long');
+      const pnlShort = col(data, v + '_pnl_short');
+      traces.push({
+        x: barIdx, y: pnlLong,
+        type: 'scatter', mode: 'lines',
+        name: v + ' 做多 (' + (viewLabels[v] || v) + ')',
+        line: { width: 2, color: VIEW_COLORS[v], dash: 'solid' },
+        showlegend: true,
+      });
+      traces.push({
+        x: barIdx, y: pnlShort,
+        type: 'scatter', mode: 'lines',
+        name: v + ' 做空 (' + (viewLabels[v] || v) + ')',
+        line: { width: 2, color: VIEW_COLORS[v], dash: 'dash' },
+        showlegend: true,
+      });
+    });
 
-  // Get row count and column info
-  const metaResult = await conn.query(`SELECT count(*) as n FROM 'data.parquet'`);
-  const N = Number(metaResult.getChild('n').get(0));
-
-  // Get column names from parquet
-  const schemaResult = await conn.query(`DESCRIBE SELECT * FROM 'data.parquet'`);
-  const numSchemaRows = schemaResult.numRows;
-  const parquetCols = [];
-  for (let i = 0; i < numSchemaRows; i++) {
-    parquetCols.push(String(schemaResult.getChild('column_name').get(i)));
-  }
-
-  // Query all data
-  const result = await conn.query(`SELECT * FROM 'data.parquet' ORDER BY bar_index`);
-  await conn.close();
-
-  // Convert Arrow table to column arrays
-  const columns = {};
-  for (const colName of parquetCols) {
-    columns[colName] = result.getChild(colName).toArray();
-  }
-
-  return { columns, N, parquetCols };
-}
-
-// ========== Chart rendering ==========
-const plotConfig = { displayModeBar: false, responsive: true };
-const baseFont = { color: '#c9d1d9', size: 11 };
-const gridColor = '#21262d';
-const zeroLineColor = '#30363d';
-const plotBg = '#0d1117';
-const paperBg = '#161b22';
-
-function col(data, name) { return data.columns[name] || []; }
-
-// --- Section 1: Overview ---
-function buildOverview(data) {
-  const { columns, N } = data;
-  let bestLongPnl = -Infinity, bestLongView = '';
-  let bestShortPnl = -Infinity, bestShortView = '';
-  let totalTrades = 0;
-  let sigNonZero = 0, sigTotal = 0;
-
-  VIEWS.forEach(v => {
-    const pl = col(data, v + '_pnl_long');
-    const ps = col(data, v + '_pnl_short');
-    const lastL = toNum(pl[N - 1]) || 100;
-    const lastS = toNum(ps[N - 1]) || 100;
-    if (lastL > bestLongPnl) { bestLongPnl = lastL; bestLongView = v; }
-    if (lastS > bestShortPnl) { bestShortPnl = lastS; bestShortView = v; }
-
-    const tr = col(data, v + '_trade');
-    for (let i = 0; i < N; i++) {
-      if (tr[i]) totalTrades++;
-    }
-
-    const sig = col(data, v + '_sig');
-    for (let i = 0; i < N; i++) {
-      sigTotal++;
-      if (sig[i] !== 0 && sig[i] != null) sigNonZero++;
-    }
-  });
-
-  const sigCov = sigTotal > 0 ? (sigNonZero / sigTotal * 100) : 0;
-
-  const kpiGrid = document.getElementById('kpi-grid');
-  const kpis = [
-    { label: '最佳做多 PnL', value: (bestLongPnl - 100).toFixed(2) + '%', cls: bestLongPnl >= 100 ? 'positive' : 'negative', sub: bestLongView + ' (' + (viewLabels[bestLongView] || bestLongView) + ')' },
-    { label: '最佳做空 PnL', value: (bestShortPnl - 100).toFixed(2) + '%', cls: bestShortPnl >= 100 ? 'positive' : 'negative', sub: bestShortView + ' (' + (viewLabels[bestShortView] || bestShortView) + ')' },
-    { label: '总交易次数', value: totalTrades, cls: '', sub: '4 视图合计' },
-    { label: '信号覆盖率', value: sigCov.toFixed(1) + '%', cls: '', sub: sigNonZero + ' / ' + sigTotal + ' 非零' },
-  ];
-  kpiGrid.innerHTML = kpis.map(k =>
-    '<div class="kpi-card"><div class="kpi-label">' + k.label + '</div><div class="kpi-value ' + k.cls + '">' + k.value + '</div><div class="kpi-sub">' + k.sub + '</div></div>'
-  ).join('');
-
-  const barTs = col(data, 'bar_timestamp');
-  const dateMin = barTs[0] ? new Date(barTs[0]).toISOString().substring(0, 16) : '?';
-  const dateMax = barTs[N - 1] ? new Date(barTs[N - 1]).toISOString().substring(0, 16) : '?';
-  document.getElementById('summary-row').innerHTML =
-    '<span>日期范围: <strong>' + dateMin + '</strong> &rarr; <strong>' + dateMax + '</strong></span>' +
-    '<span>数据规模: <strong>' + N + ' 行 x ' + data.parquetCols.length + ' 列</strong></span>' +
-    (metaLoaded ? '<span>metadata: <span class="meta-badge">&#10003; 已加载</span></span>' :
-      '<span>metadata: <span class="meta-badge" style="opacity:0.5">使用默认标签</span></span>');
-}
-
-// --- Section 2: Signals ---
-function buildSignals(data) {
-  const { columns, N } = data;
-  const barIdx = col(data, 'bar_index');
-  const traces = [];
-  const allShapes = [];
-  const annotations = [];
-  const nViews = VIEWS.length;
-  const gap = 0.04;
-  const eachH = (1 - gap * (nViews - 1)) / nViews;
-
-  VIEWS.forEach((v, vi) => {
-    const y0 = 1 - (vi + 1) * eachH - vi * gap;
-    const sig = col(data, v + '_sig');
-    const xref = vi === 0 ? 'x' : ('x' + (vi + 1));
-    const yref = vi === 0 ? 'y' : ('y' + (vi + 1));
-
-    let regionStart = 0;
-    let regionVal = sig[0];
-    for (let i = 1; i <= N; i++) {
-      if (i === N || sig[i] !== regionVal) {
-        let bgColor;
-        if (regionVal === 1) bgColor = 'rgba(63,185,80,0.10)';
-        else if (regionVal === -1) bgColor = 'rgba(248,81,73,0.10)';
-        else bgColor = 'rgba(48,54,61,0.04)';
-
-        allShapes.push({
-          type: 'rect', xref, yref,
-          x0: regionStart, x1: i - 1 + 0.9,
-          y0: -1.4, y1: 1.4,
-          fillcolor: bgColor, line: { width: 0 }, layer: 'below',
+    const annotations = [];
+    VIEWS.forEach(v => {
+      const pnlLong = col(data, v + '_pnl_long');
+      const pnlShort = col(data, v + '_pnl_short');
+      const lastL = toNum(pnlLong[N - 1]);
+      const lastS = toNum(pnlShort[N - 1]);
+      if (!isNaN(lastL)) {
+        annotations.push({
+          x: N - 1, y: lastL,
+          text: '<b>' + (lastL - 100).toFixed(2) + '%</b>',
+          showarrow: false, font: { size: 10, color: VIEW_COLORS[v] },
+          xanchor: 'left', xshift: 5,
         });
-        regionStart = i;
-        if (i < N) regionVal = sig[i];
       }
-    }
+      if (!isNaN(lastS)) {
+        annotations.push({
+          x: N - 1, y: lastS,
+          text: '<b>' + (lastS - 100).toFixed(2) + '%</b>',
+          showarrow: false, font: { size: 10, color: VIEW_COLORS[v] },
+          xanchor: 'left', xshift: 5,
+        });
+      }
+    });
 
-    traces.push({
-      x: barIdx, y: sig,
-      type: 'scatter', mode: 'lines',
-      name: v + ' (' + (viewLabels[v] || v) + ')',
-      line: { shape: 'hv', width: 2.2, color: VIEW_COLORS[v] },
-      xaxis: vi === 0 ? 'x' : ('x' + (vi + 1)),
-      yaxis: vi === 0 ? 'y' : ('y' + (vi + 1)),
+    const shapes = [{
+      type: 'line', x0: 0, x1: N - 1, y0: 100, y1: 100,
+      line: { color: '#30363d', width: 1, dash: 'dot' },
+    }];
+
+    const layout = {
+      template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
+      font: baseFont, displayModeBar: false,
+      margin: { l: 70, r: 80, t: 20, b: 40 },
       showlegend: true,
-    });
-
-    annotations.push({
-      x: 0.01, y: y0 + eachH / 2, xref: 'paper', yref: 'paper',
-      text: '<b>' + v + '_sig</b> <span style="font-size:10px;color:#8b949e">' + (viewLabels[v] || v) + '</span>',
-      showarrow: false, font: { size: 12, color: VIEW_COLORS[v] }, xanchor: 'left',
-    });
-  });
-
-  const layout = {
-    template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
-    font: baseFont, displayModeBar: false,
-    margin: { l: 60, r: 40, t: 20, b: 30 },
-    showlegend: true, shapes: allShapes,
-    legend: { orientation: 'h', y: 1.05, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
-    grid: { rows: nViews, columns: 1, pattern: 'independent', roworder: 'top to bottom', ygap: gap },
-  };
-
-  VIEWS.forEach((v, vi) => {
-    const y0 = 1 - (vi + 1) * eachH - vi * gap;
-    const y1 = y0 + eachH;
-    const xkey = 'xaxis' + (vi === 0 ? '' : (vi + 1));
-    const ykey = 'yaxis' + (vi === 0 ? '' : (vi + 1));
-    layout[xkey] = { showgrid: true, gridcolor: gridColor, zeroline: false, domain: [y0, y1] };
-    if (vi === nViews - 1) {
-      layout[xkey].title = { text: 'bar_index', font: { size: 10, color: '#8b949e' } };
-    }
-    layout[ykey] = {
-      tickvals: [-1, 0, 1], ticktext: ['空头', '中性', '多头'],
-      range: [-1.4, 1.4], showgrid: true, gridcolor: gridColor,
-      zeroline: true, zerolinecolor: zeroLineColor, domain: [y0, y1],
+      legend: { orientation: 'h', y: 1.08, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
+      xaxis: { title: { text: 'bar_index', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
+      yaxis: { title: { text: 'PnL (累计)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
+      shapes, annotations,
     };
-  });
 
-  Plotly.newPlot('chart-signals', traces, layout, plotConfig);
-}
+    Plotly.newPlot('chart-pnl', traces, layout, plotConfig);
+  }
 
-// --- Section 3: Filtered Price + EPS ---
-function buildFiltered(data) {
-  const { columns, N } = data;
-  const barIdx = col(data, 'bar_index');
-  const traces = [];
-  const annotations = [];
-  const nViews = VIEWS.length;
-  const gap = 0.04;
-  const eachH = (1 - gap * (nViews - 1)) / nViews;
+  // --- Section 5: Position Heatmap ---
+  function buildHeatmap(data) {
+    const { columns, N } = data;
+    const sampleN = Math.min(100, N);
+    const step = Math.max(1, Math.floor(N / sampleN));
+    const sampledX = [];
+    for (let i = 0; i < N; i += step) sampledX.push(i);
+    if (sampledX.length > sampleN) sampledX.length = sampleN;
 
-  VIEWS.forEach((v, vi) => {
-    const y0 = 1 - (vi + 1) * eachH - vi * gap;
-    const filtered = col(data, v + '_filtered');
-    const eps = col(data, v + '_eps');
+    const rows = [];
+    const rowLabels = [];
+    const colorMap = [
+      [0, 'rgba(13,17,23,0.9)'],
+      [1, 'rgba(63,185,80,0.85)'],
+      [2, 'rgba(248,81,73,0.85)'],
+    ];
 
-    const upper = filtered.map((f, i) => toNum(f) + toNum(eps[i]));
-    const lower = filtered.map((f, i) => toNum(f) - toNum(eps[i]));
-
-    // Upper band
-    traces.push({
-      x: barIdx, y: upper,
-      type: 'scatter', mode: 'lines',
-      name: v + ' +eps',
-      line: { width: 0 },
-      xaxis: vi === 0 ? 'x' : ('x' + (vi + 1)),
-      yaxis: vi === 0 ? 'y' : ('y' + (vi + 1)),
-      showlegend: false,
-    });
-
-    // Lower band + fill
-    traces.push({
-      x: barIdx, y: lower,
-      type: 'scatter', mode: 'lines',
-      name: v + ' -eps',
-      line: { width: 0 },
-      fill: 'tonexty',
-      fillcolor: VIEW_COLORS[v].replace(')', ',0.08)').replace('rgb', 'rgba'),
-      xaxis: vi === 0 ? 'x' : ('x' + (vi + 1)),
-      yaxis: vi === 0 ? 'y' : ('y' + (vi + 1)),
-      showlegend: false,
-    });
-
-    // Filtered price line
-    traces.push({
-      x: barIdx, y: filtered,
-      type: 'scatter', mode: 'lines',
-      name: v + ' (' + (viewLabels[v] || v) + ')',
-      line: { width: 1.8, color: VIEW_COLORS[v] },
-      xaxis: vi === 0 ? 'x' : ('x' + (vi + 1)),
-      yaxis: vi === 0 ? 'y' : ('y' + (vi + 1)),
-      showlegend: true,
-    });
-
-    annotations.push({
-      x: 0.01, y: y0 + eachH / 2, xref: 'paper', yref: 'paper',
-      text: '<b>' + v + '_filtered</b> <span style="font-size:10px;color:#8b949e">' + (viewLabels[v] || v) + '</span>',
-      showarrow: false, font: { size: 12, color: VIEW_COLORS[v] }, xanchor: 'left',
-    });
-  });
-
-  const layout = {
-    template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
-    font: baseFont, displayModeBar: false,
-    margin: { l: 60, r: 40, t: 20, b: 30 },
-    showlegend: true,
-    legend: { orientation: 'h', y: 1.05, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
-    grid: { rows: nViews, columns: 1, pattern: 'independent', roworder: 'top to bottom', ygap: gap },
-  };
-
-  VIEWS.forEach((v, vi) => {
-    const y0 = 1 - (vi + 1) * eachH - vi * gap;
-    const y1 = y0 + eachH;
-    const xkey = 'xaxis' + (vi === 0 ? '' : (vi + 1));
-    const ykey = 'yaxis' + (vi === 0 ? '' : (vi + 1));
-    layout[xkey] = { showgrid: true, gridcolor: gridColor, zeroline: false, domain: [y0, y1] };
-    if (vi === nViews - 1) {
-      layout[xkey].title = { text: 'bar_index', font: { size: 10, color: '#8b949e' } };
-    }
-    layout[ykey] = { showgrid: true, gridcolor: gridColor, zeroline: false, domain: [y0, y1] };
-  });
-
-  Plotly.newPlot('chart-filtered', traces, layout, plotConfig);
-}
-
-// --- Section 4: PnL Curves ---
-function buildPnl(data) {
-  const { columns, N } = data;
-  const barIdx = col(data, 'bar_index');
-  const traces = [];
-
-  VIEWS.forEach(v => {
-    const pnlLong = col(data, v + '_pnl_long');
-    const pnlShort = col(data, v + '_pnl_short');
-    traces.push({
-      x: barIdx, y: pnlLong,
-      type: 'scatter', mode: 'lines',
-      name: v + ' 做多 (' + (viewLabels[v] || v) + ')',
-      line: { width: 2, color: VIEW_COLORS[v], dash: 'solid' },
-      showlegend: true,
-    });
-    traces.push({
-      x: barIdx, y: pnlShort,
-      type: 'scatter', mode: 'lines',
-      name: v + ' 做空 (' + (viewLabels[v] || v) + ')',
-      line: { width: 2, color: VIEW_COLORS[v], dash: 'dash' },
-      showlegend: true,
-    });
-  });
-
-  const annotations = [];
-  VIEWS.forEach(v => {
-    const pnlLong = col(data, v + '_pnl_long');
-    const pnlShort = col(data, v + '_pnl_short');
-    const lastL = toNum(pnlLong[N - 1]);
-    const lastS = toNum(pnlShort[N - 1]);
-    if (!isNaN(lastL)) {
-      annotations.push({
-        x: N - 1, y: lastL,
-        text: '<b>' + (lastL - 100).toFixed(2) + '%</b>',
-        showarrow: false, font: { size: 10, color: VIEW_COLORS[v] },
-        xanchor: 'left', xshift: 5,
+    VIEWS.forEach(v => {
+      ['long_pos', 'short_pos'].forEach(posType => {
+        const arr = col(data, v + '_' + posType);
+        const sampled = sampledX.map(i => {
+          const val = arr[i];
+          return (val === true || val === 1) ? (posType === 'long_pos' ? 1 : 2) : 0;
+        });
+        rows.push(sampled);
+        const label = posType === 'long_pos' ? '做多' : '做空';
+        rowLabels.push(v + ' ' + label + ' (' + (viewLabels[v] || v) + ')');
       });
-    }
-    if (!isNaN(lastS)) {
-      annotations.push({
-        x: N - 1, y: lastS,
-        text: '<b>' + (lastS - 100).toFixed(2) + '%</b>',
-        showarrow: false, font: { size: 10, color: VIEW_COLORS[v] },
-        xanchor: 'left', xshift: 5,
-      });
-    }
-  });
-
-  const shapes = [{
-    type: 'line', x0: 0, x1: N - 1, y0: 100, y1: 100,
-    line: { color: '#30363d', width: 1, dash: 'dot' },
-  }];
-
-  const layout = {
-    template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
-    font: baseFont, displayModeBar: false,
-    margin: { l: 70, r: 80, t: 20, b: 40 },
-    showlegend: true,
-    legend: { orientation: 'h', y: 1.08, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
-    xaxis: { title: { text: 'bar_index', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
-    yaxis: { title: { text: 'PnL (累计)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
-    shapes, annotations,
-  };
-
-  Plotly.newPlot('chart-pnl', traces, layout, plotConfig);
-}
-
-// --- Section 5: Position Heatmap ---
-function buildHeatmap(data) {
-  const { columns, N } = data;
-  const sampleN = Math.min(100, N);
-  const step = Math.max(1, Math.floor(N / sampleN));
-  const sampledX = [];
-  for (let i = 0; i < N; i += step) sampledX.push(i);
-  if (sampledX.length > sampleN) sampledX.length = sampleN;
-
-  const rows = [];
-  const rowLabels = [];
-  const colorMap = [
-    [0, 'rgba(13,17,23,0.9)'],
-    [1, 'rgba(63,185,80,0.85)'],
-    [2, 'rgba(248,81,73,0.85)'],
-  ];
-
-  VIEWS.forEach(v => {
-    ['long_pos', 'short_pos'].forEach(posType => {
-      const arr = col(data, v + '_' + posType);
-      const sampled = sampledX.map(i => {
-        const val = arr[i];
-        return (val === true || val === 1) ? (posType === 'long_pos' ? 1 : 2) : 0;
-      });
-      rows.push(sampled);
-      const label = posType === 'long_pos' ? '做多' : '做空';
-      rowLabels.push(v + ' ' + label + ' (' + (viewLabels[v] || v) + ')');
     });
-  });
 
-  const trace = {
-    z: rows, type: 'heatmap',
-    colorscale: colorMap,
-    showscale: false,
-    x: sampledX,
-    y: rowLabels,
-    xgap: 1, ygap: 2,
-    hoverongaps: false,
-    hovertemplate: 'bar_index=%{x}<br>%{y}=%{z}<extra></extra>',
-  };
+    const trace = {
+      z: rows, type: 'heatmap',
+      colorscale: colorMap,
+      showscale: false,
+      x: sampledX,
+      y: rowLabels,
+      xgap: 1, ygap: 2,
+      hoverongaps: false,
+      hovertemplate: 'bar_index=%{x}<br>%{y}=%{z}<extra></extra>',
+    };
 
-  const layout = {
-    template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
-    font: { color: '#c9d1d9', size: 11 },
-    displayModeBar: false,
-    margin: { l: 160, r: 40, t: 20, b: 40 },
-    xaxis: { title: { text: 'bar_index', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, side: 'top' },
-    yaxis: { automargin: true },
-  };
+    const layout = {
+      template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
+      font: { color: '#c9d1d9', size: 11 },
+      displayModeBar: false,
+      margin: { l: 160, r: 40, t: 20, b: 40 },
+      xaxis: { title: { text: 'bar_index', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, side: 'top' },
+      yaxis: { automargin: true },
+    };
 
-  Plotly.newPlot('chart-heatmap', [trace], layout, plotConfig);
-}
+    Plotly.newPlot('chart-heatmap', [trace], layout, plotConfig);
+  }
 
-// --- Section 6: Trade Events & BS Markers ---
-function buildTrades(data) {
-  const { columns, N } = data;
-  const viewTradeCounts = {};
-  const tradeReasons = {};
-  let bsEntryB = 0, bsEntryS = 0, bsExitB = 0, bsExitS = 0;
+  // --- Section 6: Trade Events & BS Markers ---
+  function buildTrades(data) {
+    const { columns, N } = data;
+    const viewTradeCounts = {};
+    const tradeReasons = {};
+    let bsEntryB = 0, bsEntryS = 0, bsExitB = 0, bsExitS = 0;
 
-  VIEWS.forEach(v => {
-    viewTradeCounts[v] = { entry_long: 0, exit_long: 0, entry_short: 0, exit_short: 0 };
-    const trades = col(data, v + '_trade');
-    const reasons = col(data, v + '_trade_reason');
-    const bsE = col(data, v + '_bs_entry');
-    const bsX = col(data, v + '_bs_exit');
+    VIEWS.forEach(v => {
+      viewTradeCounts[v] = { entry_long: 0, exit_long: 0, entry_short: 0, exit_short: 0 };
+      const trades = col(data, v + '_trade');
+      const reasons = col(data, v + '_trade_reason');
+      const bsE = col(data, v + '_bs_entry');
+      const bsX = col(data, v + '_bs_exit');
 
-    for (let i = 0; i < N; i++) {
-      const t = toStr(trades[i]);
-      if (t) viewTradeCounts[v][t] = (viewTradeCounts[v][t] || 0) + 1;
+      for (let i = 0; i < N; i++) {
+        const t = toStr(trades[i]);
+        if (t) viewTradeCounts[v][t] = (viewTradeCounts[v][t] || 0) + 1;
 
-      const r = toStr(reasons[i]);
-      if (r) tradeReasons[r] = (tradeReasons[r] || 0) + 1;
+        const r = toStr(reasons[i]);
+        if (r) tradeReasons[r] = (tradeReasons[r] || 0) + 1;
 
-      const be = toStr(bsE[i]);
-      if (be === 'B') bsEntryB++;
-      else if (be === 'S') bsEntryS++;
+        const be = toStr(bsE[i]);
+        if (be === 'B') bsEntryB++;
+        else if (be === 'S') bsEntryS++;
 
-      const bx = toStr(bsX[i]);
-      if (bx === 'B') bsExitB++;
-      else if (bx === 'S') bsExitS++;
-    }
-  });
-
-  const eventTypes = ['entry_long', 'exit_long', 'entry_short', 'exit_short'];
-  const eventLabels = ['开多', '平多', '开空', '平空'];
-
-  const traces1 = VIEWS.map(v => ({
-    x: eventLabels,
-    y: eventTypes.map(et => viewTradeCounts[v][et] || 0),
-    type: 'bar', name: v + ' (' + (viewLabels[v] || v) + ')',
-    marker: { color: VIEW_COLORS[v], opacity: 0.85 },
-    xaxis: 'x', yaxis: 'y', showlegend: true,
-  }));
-
-  const trace2a = {
-    x: ['B (买入)', 'S (卖出)'], y: [bsEntryB, bsEntryS],
-    type: 'bar', name: 'BS 入场',
-    marker: { color: '#58a6ff' },
-    xaxis: 'x2', yaxis: 'y2', showlegend: true,
-  };
-  const trace2b = {
-    x: ['B (买入)', 'S (卖出)'], y: [bsExitB, bsExitS],
-    type: 'bar', name: 'BS 离场',
-    marker: { color: '#a371f7' },
-    xaxis: 'x2', yaxis: 'y2', showlegend: true,
-  };
-
-  const reasonKeys = Object.keys(tradeReasons).sort((a, b) => (tradeReasons[b] || 0) - (tradeReasons[a] || 0));
-  const reasonLabels = reasonKeys.length > 0 ? reasonKeys : ['(无数据)'];
-  const reasonVals = reasonKeys.map(k => tradeReasons[k] || 0);
-  const reasonColors = ['#f85149', '#3fb950', '#d2991d', '#58a6ff', '#8b949e'];
-
-  const trace3 = {
-    x: reasonLabels, y: reasonVals,
-    type: 'bar',
-    marker: { color: reasonColors.slice(0, reasonLabels.length) },
-    xaxis: 'x3', yaxis: 'y3', showlegend: false,
-  };
-
-  const layout = {
-    template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
-    font: baseFont, displayModeBar: false,
-    margin: { l: 60, r: 30, t: 40, b: 50 },
-    grid: { rows: 1, columns: 3, pattern: 'independent', xgap: 0.06 },
-    xaxis: { title: { text: '交易事件', font: { size: 10, color: '#8b949e' } }, domain: [0, 0.30], showgrid: false },
-    yaxis: { title: { text: '次数', font: { size: 10, color: '#8b949e' } }, domain: [0, 1], showgrid: true, gridcolor: gridColor },
-    xaxis2: { title: { text: 'BS 标记', font: { size: 10, color: '#8b949e' } }, domain: [0.35, 0.62], showgrid: false },
-    yaxis2: { title: { text: '次数', font: { size: 10, color: '#8b949e' } }, domain: [0, 1], showgrid: true, gridcolor: gridColor, anchor: 'x2' },
-    xaxis3: { title: { text: '交易原因', font: { size: 10, color: '#8b949e' } }, domain: [0.68, 1], showgrid: false },
-    yaxis3: { title: { text: '次数', font: { size: 10, color: '#8b949e' } }, domain: [0, 1], showgrid: true, gridcolor: gridColor, anchor: 'x3' },
-    legend: { orientation: 'h', y: 1.15, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
-    annotations: [
-      { x: 0.15, y: 1.08, xref: 'paper', yref: 'paper', text: '<b>交易事件分布</b>', showarrow: false, font: { size: 12, color: '#f0f6fc' } },
-      { x: 0.485, y: 1.08, xref: 'paper', yref: 'paper', text: '<b>BS 标记统计</b>', showarrow: false, font: { size: 12, color: '#f0f6fc' } },
-      { x: 0.84, y: 1.08, xref: 'paper', yref: 'paper', text: '<b>交易原因分布</b>', showarrow: false, font: { size: 12, color: '#f0f6fc' } },
-    ],
-  };
-
-  Plotly.newPlot('chart-trades', [...traces1, trace2a, trace2b, trace3], layout, plotConfig);
-}
-
-// --- Section 7: Data Table ---
-function buildTable(data) {
-  const { columns, N, parquetCols } = data;
-  const wrap = document.getElementById('table-wrap');
-  const maxRows = Math.min(50, N);
-  const displayCols = parquetCols;
-
-  let table = '<table class="data-table"><thead><tr><th>#</th>';
-  displayCols.forEach(c => {
-    const v = VIEWS.find(vv => c.startsWith(vv + '_'));
-    const cls = v ? ('col-' + v) : 'col-fixed';
-    table += '<th class="' + cls + '" title="' + c + '">' + c + '</th>';
-  });
-  table += '</tr></thead><tbody>';
-
-  for (let i = 0; i < maxRows; i++) {
-    table += '<tr><td style="color:#8b949e;font-weight:600">' + i + '</td>';
-    displayCols.forEach(c => {
-      let v = columns[c] ? columns[c][i] : null;
-      let cls = '';
-      let display = '';
-
-      if (v === null || v === undefined || v === '') {
-        display = '—'; cls = 'val-zero';
-      } else if (c === 'bar_timestamp' && v instanceof Date) {
-        display = v.toISOString().substring(0, 19).replace('T', ' ');
-        cls = '';
-      } else if (typeof v === 'number') {
-        if (Math.abs(v) < 0.0001) { display = '0'; cls = 'val-zero'; }
-        else if (v > 0) { display = Number(v).toFixed(4); cls = 'val-pos'; }
-        else { display = Number(v).toFixed(4); cls = 'val-neg'; }
-      } else if (typeof v === 'boolean') {
-        display = v ? 'T' : 'F';
-        cls = v ? 'val-pos' : 'val-zero';
-      } else {
-        display = String(v).substring(0, 24);
-        cls = '';
+        const bx = toStr(bsX[i]);
+        if (bx === 'B') bsExitB++;
+        else if (bx === 'S') bsExitS++;
       }
-      table += '<td class="' + cls + '">' + display + '</td>';
     });
-    table += '</tr>';
+
+    const eventTypes = ['entry_long', 'exit_long', 'entry_short', 'exit_short'];
+    const eventLabels = ['开多', '平多', '开空', '平空'];
+
+    const traces1 = VIEWS.map(v => ({
+      x: eventLabels,
+      y: eventTypes.map(et => viewTradeCounts[v][et] || 0),
+      type: 'bar', name: v + ' (' + (viewLabels[v] || v) + ')',
+      marker: { color: VIEW_COLORS[v], opacity: 0.85 },
+      xaxis: 'x', yaxis: 'y', showlegend: true,
+    }));
+
+    const trace2a = {
+      x: ['B (买入)', 'S (卖出)'], y: [bsEntryB, bsEntryS],
+      type: 'bar', name: 'BS 入场',
+      marker: { color: '#58a6ff' },
+      xaxis: 'x2', yaxis: 'y2', showlegend: true,
+    };
+    const trace2b = {
+      x: ['B (买入)', 'S (卖出)'], y: [bsExitB, bsExitS],
+      type: 'bar', name: 'BS 离场',
+      marker: { color: '#a371f7' },
+      xaxis: 'x2', yaxis: 'y2', showlegend: true,
+    };
+
+    const reasonKeys = Object.keys(tradeReasons).sort((a, b) => (tradeReasons[b] || 0) - (tradeReasons[a] || 0));
+    const reasonLabels = reasonKeys.length > 0 ? reasonKeys : ['(无数据)'];
+    const reasonVals = reasonKeys.map(k => tradeReasons[k] || 0);
+    const reasonColors = ['#f85149', '#3fb950', '#d2991d', '#58a6ff', '#8b949e'];
+
+    const trace3 = {
+      x: reasonLabels, y: reasonVals,
+      type: 'bar',
+      marker: { color: reasonColors.slice(0, reasonLabels.length) },
+      xaxis: 'x3', yaxis: 'y3', showlegend: false,
+    };
+
+    const layout = {
+      template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
+      font: baseFont, displayModeBar: false,
+      margin: { l: 60, r: 30, t: 40, b: 50 },
+      grid: { rows: 1, columns: 3, pattern: 'independent', xgap: 0.06 },
+      xaxis: { title: { text: '交易事件', font: { size: 10, color: '#8b949e' } }, domain: [0, 0.30], showgrid: false },
+      yaxis: { title: { text: '次数', font: { size: 10, color: '#8b949e' } }, domain: [0, 1], showgrid: true, gridcolor: gridColor },
+      xaxis2: { title: { text: 'BS 标记', font: { size: 10, color: '#8b949e' } }, domain: [0.35, 0.62], showgrid: false },
+      yaxis2: { title: { text: '次数', font: { size: 10, color: '#8b949e' } }, domain: [0, 1], showgrid: true, gridcolor: gridColor, anchor: 'x2' },
+      xaxis3: { title: { text: '交易原因', font: { size: 10, color: '#8b949e' } }, domain: [0.68, 1], showgrid: false },
+      yaxis3: { title: { text: '次数', font: { size: 10, color: '#8b949e' } }, domain: [0, 1], showgrid: true, gridcolor: gridColor, anchor: 'x3' },
+      legend: { orientation: 'h', y: 1.15, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
+      annotations: [
+        { x: 0.15, y: 1.08, xref: 'paper', yref: 'paper', text: '<b>交易事件分布</b>', showarrow: false, font: { size: 12, color: '#f0f6fc' } },
+        { x: 0.485, y: 1.08, xref: 'paper', yref: 'paper', text: '<b>BS 标记统计</b>', showarrow: false, font: { size: 12, color: '#f0f6fc' } },
+        { x: 0.84, y: 1.08, xref: 'paper', yref: 'paper', text: '<b>交易原因分布</b>', showarrow: false, font: { size: 12, color: '#f0f6fc' } },
+      ],
+    };
+
+    Plotly.newPlot('chart-trades', [...traces1, trace2a, trace2b, trace3], layout, plotConfig);
   }
-  table += '</tbody></table>';
 
-  if (N > maxRows) {
-    table += '<p class="annotation" style="margin-top:10px">仅展示前 ' + maxRows + ' 行，完整数据共 ' + N + ' 行。横向滚动查看更多列。</p>';
-  }
+  // --- Section 7: Data Table ---
+  function buildTable(data) {
+    const { columns, N, parquetCols } = data;
+    const wrap = document.getElementById('table-wrap');
+    const maxRows = Math.min(50, N);
+    const displayCols = parquetCols;
 
-  wrap.innerHTML = table;
-}
+    let table = '<table class="data-table"><thead><tr><th>#</th>';
+    displayCols.forEach(c => {
+      const v = VIEWS.find(vv => c.startsWith(vv + '_'));
+      const cls = v ? ('col-' + v) : 'col-fixed';
+      table += '<th class="' + cls + '" title="' + c + '">' + c + '</th>';
+    });
+    table += '</tr></thead><tbody>';
 
-// ========== Main data loading & rendering ==========
-async function processFile(file) {
-  // Show dashboard with loading state
-  document.getElementById('welcome-state').classList.add('hidden');
-  dashboard.classList.remove('hidden');
-  document.getElementById('dashboard-subtitle').textContent = '正在读取数据...';
+    for (let i = 0; i < maxRows; i++) {
+      table += '<tr><td style="color:#8b949e;font-weight:600">' + i + '</td>';
+      displayCols.forEach(c => {
+        let v = columns[c] ? columns[c][i] : null;
+        let cls = '';
+        let display = '';
 
-  // Clear charts
-  ['chart-signals', 'chart-filtered', 'chart-pnl', 'chart-heatmap', 'chart-trades'].forEach(id => {
-    document.getElementById(id).innerHTML = '';
-  });
-  document.getElementById('table-wrap').innerHTML = '<p style="text-align:center;color:var(--text-dim);padding:40px">正在解析 Parquet 文件...</p>';
-
-  // Read and query data
-  let data;
-  try {
-    data = await loadParquetData(file);
-  } catch (e) {
-    showError('Parquet 读取失败: ' + e.message);
-    document.getElementById('welcome-state').classList.remove('hidden');
-    dashboard.classList.add('hidden');
-    throw e;
-  }
-
-  const { columns, N, parquetCols } = data;
-
-  // Update header info
-  const barTs = col(data, 'bar_timestamp');
-  const dateMin = barTs[0] ? new Date(barTs[0]).toISOString().substring(0, 16) : '?';
-  const dateMax = barTs[N - 1] ? new Date(barTs[N - 1]).toISOString().substring(0, 16) : '?';
-
-  document.getElementById('dashboard-subtitle').innerHTML =
-    '文件: <strong>' + file.name + '</strong> &nbsp;|&nbsp;' +
-    '数据规模: <strong>' + N + ' 行 x ' + parquetCols.length + ' 列</strong> &nbsp;|&nbsp;' +
-    '日期范围: <strong>' + dateMin + '</strong> ~ <strong>' + dateMax + '</strong> &nbsp;|&nbsp;' +
-    '视图: ' + VIEWS.map(v => '<span class="view-tag ' + v + '">' + v + ' ' + (viewLabels[v] || v) + '</span>').join(' ');
-
-  document.getElementById('file-info-bar').innerHTML =
-    '<span>文件: <strong>' + file.name + '</strong></span>' +
-    '<span>行数: <strong>' + N + '</strong></span>' +
-    '<span>列数: <strong>' + parquetCols.length + '</strong></span>' +
-    (metaLoaded ? '<span class="meta-badge">metadata 已加载</span>' : '') +
-    '<button class="btn-reselect" onclick="location.reload()">重新选择文件</button>';
-
-  // Render all sections
-  buildOverview(data);
-  buildSignals(data);
-  buildFiltered(data);
-  buildPnl(data);
-  buildHeatmap(data);
-  buildTrades(data);
-  buildTable(data);
-}
-
-// ========== Event handlers ==========
-fileSelectArea.addEventListener('click', () => fileInput.click());
-
-fileSelectArea.addEventListener('dragover', (e) => {
-  e.preventDefault();
-  fileSelectArea.classList.add('drag-over');
-});
-fileSelectArea.addEventListener('dragleave', () => {
-  fileSelectArea.classList.remove('drag-over');
-});
-fileSelectArea.addEventListener('drop', (e) => {
-  e.preventDefault();
-  fileSelectArea.classList.remove('drag-over');
-  const file = e.dataTransfer.files[0];
-  if (file && file.name.endsWith('.parquet')) {
-    processFile(file);
-  } else {
-    showError('请选择 .parquet 文件');
-  }
-});
-
-fileInput.addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if (file) processFile(file);
-});
-
-metaToggle.addEventListener('click', (e) => {
-  e.stopPropagation();
-  metaInput.click();
-});
-
-metaInput.addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (file) {
-    const meta = await loadMetadata(file);
-    metaToggle.innerHTML = meta
-      ? '&#10003; metadata.json 已加载 (view_labels: ' + JSON.stringify(viewLabels) + ')'
-      : '! metadata.json 解析失败';
-    metaToggle.style.color = meta ? 'var(--green)' : 'var(--red)';
-    if (meta) {
-      metaToggle.style.pointerEvents = 'none';
+        if (v === null || v === undefined || v === '') {
+          display = '—'; cls = 'val-zero';
+        } else if (typeof v === 'number') {
+          if (Math.abs(v) < 0.0001) { display = '0'; cls = 'val-zero'; }
+          else if (v > 0) { display = Number(v).toFixed(4); cls = 'val-pos'; }
+          else { display = Number(v).toFixed(4); cls = 'val-neg'; }
+        } else if (typeof v === 'boolean') {
+          display = v ? 'T' : 'F';
+          cls = v ? 'val-pos' : 'val-zero';
+        } else {
+          display = String(v).substring(0, 24);
+          cls = '';
+        }
+        table += '<td class="' + cls + '">' + display + '</td>';
+      });
+      table += '</tr>';
     }
-    // If data is already loaded, re-render labels
-    if (!dashboard.classList.contains('hidden')) {
-      document.getElementById('dashboard-subtitle').innerHTML =
-        document.getElementById('dashboard-subtitle').innerHTML.replace(
-          /v\d\s(v\d)/g, (m, v) => v + ' ' + (viewLabels[v] || v)
-        );
-    }
-  }
-});
+    table += '</tbody></table>';
 
-// ========== Initialization ==========
-async function init() {
-  try {
-    // 1. Load Plotly (already loaded via script tag)
+    if (N > maxRows) {
+      table += '<p class="annotation" style="margin-top:10px">仅展示前 ' + maxRows + ' 行，完整数据共 ' + N + ' 行。横向滚动查看更多列。</p>';
+    }
+
+    wrap.innerHTML = table;
+  }
+
+  // ========== Main rendering ==========
+  function renderAll(columns, stats, metadata) {
+    // Set view labels from metadata
+    if (metadata && metadata.view_labels) {
+      viewLabels = { ...DEFAULT_VIEW_LABELS, ...metadata.view_labels };
+    }
+
+    const data = {
+      columns: columns,
+      N: stats.n_rows,
+      parquetCols: stats.column_names,
+    };
+
+    const N = stats.n_rows;
+    const parquetCols = stats.column_names;
+    const barTs = col(data, 'bar_timestamp');
+    const dateMin = barTs[0] ? new Date(barTs[0]).toISOString().substring(0, 16) : '?';
+    const dateMax = barTs[N - 1] ? new Date(barTs[N - 1]).toISOString().substring(0, 16) : '?';
+
+    // Show dashboard
+    document.getElementById('guide-page').classList.add('hidden');
+    const dashboard = document.getElementById('dashboard');
+    dashboard.classList.remove('hidden');
+
+    document.getElementById('dashboard-subtitle').innerHTML =
+      '数据规模: <strong>' + N + ' 行 x ' + parquetCols.length + ' 列</strong> &nbsp;|&nbsp;' +
+      '日期范围: <strong>' + dateMin + '</strong> ~ <strong>' + dateMax + '</strong> &nbsp;|&nbsp;' +
+      '视图: ' + VIEWS.map(v => '<span class="view-tag ' + v + '">' + v + ' ' + (viewLabels[v] || v) + '</span>').join(' ');
+
+    document.getElementById('file-info-bar').innerHTML =
+      '<span>行数: <strong>' + N + '</strong></span>' +
+      '<span>列数: <strong>' + parquetCols.length + '</strong></span>' +
+      (metadata ? '<span class="meta-badge">metadata 已加载</span>' : '') +
+      '<button class="btn-reselect" onclick="location.reload()">重新选择文件</button>';
+
+    // Render all 7 sections
+    buildOverview(data);
+    buildSignals(data);
+    buildFiltered(data);
+    buildPnl(data);
+    buildHeatmap(data);
+    buildTrades(data);
+    buildTable(data);
+  }
+
+  // ========== Initialization ==========
+  function init() {
     if (typeof Plotly === 'undefined') {
-      throw new Error('Plotly 加载失败，请检查网络连接');
+      document.getElementById('guide-page').querySelector('.guide-desc').innerHTML =
+        '<span style="color:var(--red)">错误：Plotly.js 加载失败，请检查网络连接。</span><br>然后刷新页面重试。';
+      return;
     }
 
-    // 2. Init DuckDB-WASM
-    await initDuckDB();
-
-    // 3. Show welcome state
-    loadingOverlay.classList.add('hidden');
-    welcomeState.classList.remove('hidden');
-
-  } catch (e) {
-    loadingStatus.textContent = '初始化失败: ' + e.message;
-    loadingProgressBar.style.background = 'var(--red)';
-    loadingProgressBar.style.width = '100%';
-    console.error('Initialization error:', e);
+    if (window.BACKTEST_DATA && window.BACKTEST_STATS) {
+      // 数据已由 Python 脚本嵌入，直接渲染
+      renderAll(window.BACKTEST_DATA, window.BACKTEST_STATS, window.BACKTEST_METADATA || null);
+    } else {
+      // 无嵌入数据，显示引导页
+      document.getElementById('guide-page').classList.remove('hidden');
+      document.getElementById('dashboard').classList.add('hidden');
+    }
   }
-}
 
-init();
+  init();
+})();
 </script>
 </body>
 </html>
