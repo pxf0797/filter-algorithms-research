@@ -104,7 +104,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
 /* Chart containers */
 .plot-wrap { width: 100%; }
-.plot-wrap-signals { width: 100%; height: 350px; }
+.plot-wrap-signals { width: 100%; height: 600px; }
 .plot-wrap-filtered { width: 100%; height: 450px; }
 .plot-wrap-pnl { width: 100%; height: 550px; }
 .plot-wrap-heatmap { width: 100%; height: 280px; }
@@ -257,16 +257,16 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
   <!-- Section 2: Signal Comparison -->
   <div class="section">
-    <div class="section-title"><span class="num">2</span> 信号对比（统一时间轴叠加）</div>
+    <div class="section-title"><span class="num">2</span> 信号对比（4 视图独立子图，共享 x 轴）</div>
     <div class="plot-wrap-signals" id="chart-signals"></div>
-    <p class="annotation">4 条信号线叠加在同一时间轴。线越粗/越不透明周期越长，粗周期信号长时间不变为正常行为。竖虚线标注关键 bar 位置供对照。</p>
+    <p class="annotation">4 个子图垂直堆叠，共享 x 轴，各自独立 y 轴固定 [-1, +1]。绿(+1)/红(-1)/灰(0) 背景着色，阶梯信号线。</p>
   </div>
 
   <!-- Section 3: Filtered Price + EPS -->
   <div class="section">
-    <div class="section-title"><span class="num">3</span> 滤波价格 + EPS 阈值带（4 视图）</div>
+    <div class="section-title"><span class="num">3</span> 滤波价格叠加 + EPS 阈值带（v2 日线参考）</div>
     <div class="plot-wrap-filtered" id="chart-filtered"></div>
-    <p class="annotation">实线=滤波价格，半透明带=±eps 阈值。</p>
+    <p class="annotation">4 条滤波价格线叠加（颜色+线宽分层），半透明带=v2(日线) ±eps 阈值参考。</p>
   </div>
 
   <!-- Section 4: PnL Curves -->
@@ -380,148 +380,189 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       '<span>metadata: <span class="meta-badge">&#10003; 已加载</span></span>';
   }
 
-	// --- Section 2: Signals (unified overlay) ---
-	function buildSignals(data) {
-	  const { columns, N } = data;
-	  const barIdx = col(data, 'bar_index');
-	  const traces = [];
-	  const shapes = [];
+  // --- Section 2: Signals (4 subplots with shared x-axis) ---
+  function buildSignals(data) {
+    const { columns, N } = data;
+    const barIdx = col(data, 'bar_index');
+    const traces = [];
+    const shapes = [];
+    const nViews = VIEWS.length;
 
-	  // Line styles: thinner+transparent = shorter cycle, thicker+opaque = longer cycle
-	  const lineStyles = {
-	    v0: { width: 1.2, opacity: 0.45 },
-	    v1: { width: 1.8, opacity: 0.65 },
-	    v2: { width: 2.8, opacity: 0.85 },
-	    v3: { width: 3.8, opacity: 1.0 },
-	  };
+    // Line styles: thinner+transparent = shorter cycle, thicker+opaque = longer cycle
+    const lineStyles = {
+      v0: { width: 1.5, opacity: 0.7 },
+      v1: { width: 2.2, opacity: 0.8 },
+      v2: { width: 3.0, opacity: 0.9 },
+      v3: { width: 3.8, opacity: 1.0 },
+    };
 
-	  VIEWS.forEach(v => {
-	    const sig = col(data, v + '_sig');
-	    const style = lineStyles[v];
-	    const rgbaColor = hexToRgba(VIEW_COLORS[v], style.opacity);
+    // Background colors for signal values: green=+1, red=-1, gray=0
+    var sigBgColors = {
+      '1': 'rgba(63,185,80,0.10)',
+      '-1': 'rgba(248,81,73,0.10)',
+      '0': 'rgba(139,148,158,0.03)',
+    };
 
-	    traces.push({
-	      x: barIdx, y: sig,
-	      type: 'scatter', mode: 'lines',
-	      name: v + ' (' + (viewLabels[v] || v) + ')',
-	      line: { shape: 'hv', width: style.width, color: rgbaColor },
-	      showlegend: true,
-	    });
-	  });
+    // Helper: build background rectangles for consecutive same-signal segments
+    function buildBgShapes(sig, xref, yref) {
+      var rects = [];
+      var segStart = 0;
+      var segVal = sig[0];
+      for (var i = 1; i <= sig.length; i++) {
+        if (i === sig.length || sig[i] !== segVal) {
+          var key = String(segVal);
+          if (sigBgColors[key]) {
+            var x0 = barIdx[segStart];
+            var x1;
+            if (i < sig.length) {
+              x1 = barIdx[i];
+            } else {
+              var lastGap = barIdx[segStart + 1] - barIdx[segStart];
+              if (isNaN(lastGap) || lastGap <= 0) lastGap = 1;
+              x1 = barIdx[segStart] + lastGap;
+            }
+            rects.push({
+              type: 'rect',
+              x0: x0, x1: x1,
+              y0: -1.2, y1: 1.2,
+              fillcolor: sigBgColors[key],
+              line: { width: 0 },
+              layer: 'below',
+              xref: xref, yref: yref,
+            });
+          }
+          if (i < sig.length) {
+            segStart = i;
+            segVal = sig[i];
+          }
+        }
+      }
+      return rects;
+    }
 
-	  // Vertical dashed lines at key bar positions for cross-view comparison
-	  const nGuides = 7;
-	  for (let i = 1; i <= nGuides; i++) {
-	    const pos = Math.round(N * i / (nGuides + 1));
-	    shapes.push({
-	      type: 'line', x0: pos, x1: pos, y0: -1.3, y1: 1.3,
-	      line: { color: '#30363d', width: 0.8, dash: 'dash' },
-	      layer: 'below',
-	    });
-	  }
+    VIEWS.forEach(function(v, vi) {
+      var sig = col(data, v + '_sig');
+      var style = lineStyles[v];
+      var rgbaColor = hexToRgba(VIEW_COLORS[v], style.opacity);
+      var xaxisName = vi === 0 ? 'x' : ('x' + (vi + 1));
+      var yaxisName = vi === 0 ? 'y' : ('y' + (vi + 1));
 
-	  const layout = {
-	    template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
-	    font: baseFont, displayModeBar: false,
-	    margin: { l: 60, r: 40, t: 20, b: 40 },
-	    showlegend: true, shapes: shapes,
-	    legend: { orientation: 'h', y: 1.08, x: 0.5, xanchor: 'center', font: { size: 11, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
-	    xaxis: { title: { text: 'bar_index', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
-	    yaxis: {
-	      tickvals: [-1, 0, 1],
-	      ticktext: ['空头(-1)', '中性(0)', '多头(+1)'],
-	      range: [-1.35, 1.35],
-	      showgrid: true, gridcolor: gridColor,
-	      zeroline: true, zerolinecolor: zeroLineColor,
-	    },
-	  };
+      traces.push({
+        x: barIdx, y: sig,
+        type: 'scatter', mode: 'lines',
+        name: v + ' (' + (viewLabels[v] || v) + ')',
+        line: { shape: 'hv', width: style.width, color: rgbaColor },
+        xaxis: xaxisName, yaxis: yaxisName,
+        showlegend: true,
+      });
 
-	  Plotly.newPlot('chart-signals', traces, layout, plotConfig);
-	}
+      // Background shapes for this subplot
+      var bgShapes = buildBgShapes(sig, xaxisName, yaxisName);
+      for (var s = 0; s < bgShapes.length; s++) shapes.push(bgShapes[s]);
+    });
 
-  // --- Section 3: Filtered Price + EPS ---
+    var layout = {
+      template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
+      font: baseFont, displayModeBar: false,
+      margin: { l: 60, r: 40, t: 30, b: 40 },
+      showlegend: true, shapes: shapes,
+      legend: { orientation: 'h', y: 1.02, x: 0.5, xanchor: 'center', font: { size: 11, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
+      grid: { rows: nViews, columns: 1, pattern: 'independent', roworder: 'top to bottom', ygap: 0.03 },
+    };
+
+    VIEWS.forEach(function(v, vi) {
+      var xkey = 'xaxis' + (vi === 0 ? '' : (vi + 1));
+      var ykey = 'yaxis' + (vi === 0 ? '' : (vi + 1));
+
+      layout[xkey] = { showgrid: true, gridcolor: gridColor, zeroline: false };
+      // Share x-axis with the bottom subplot
+      if (vi < nViews - 1) {
+        layout[xkey].matches = 'x' + nViews;
+      }
+      if (vi === nViews - 1) {
+        layout[xkey].title = { text: 'bar_index', font: { size: 10, color: '#8b949e' } };
+      }
+
+      layout[ykey] = {
+        tickvals: [-1, 0, 1],
+        ticktext: ['空头(-1)', '中性(0)', '多头(+1)'],
+        range: [-1.2, 1.2],
+        showgrid: true, gridcolor: gridColor,
+        zeroline: true, zerolinecolor: zeroLineColor,
+      };
+    });
+
+    Plotly.newPlot('chart-signals', traces, layout, plotConfig);
+  }
+
+
+  // --- Section 3: Filtered Price + EPS (merged overlay) ---
   function buildFiltered(data) {
     const { columns, N } = data;
     const barIdx = col(data, 'bar_index');
     const traces = [];
-    const annotations = [];
-    const nViews = VIEWS.length;
-    const gap = 0.04;
-    const eachH = (1 - gap * (nViews - 1)) / nViews;
 
-    VIEWS.forEach((v, vi) => {
-      const y0 = 1 - (vi + 1) * eachH - vi * gap;
-      const filtered = col(data, v + '_filtered');
-      const eps = col(data, v + '_eps');
+    // Line styles for filtered price: hierarchical by cycle length
+    const lineStyles = {
+      v0: { width: 1.0, opacity: 0.40 },
+      v1: { width: 1.8, opacity: 0.60 },
+      v2: { width: 2.6, opacity: 0.85 },
+      v3: { width: 3.5, opacity: 1.0 },
+    };
 
-      const upper = filtered.map((f, i) => toNum(f) + toNum(eps[i]));
-      const lower = filtered.map((f, i) => toNum(f) - toNum(eps[i]));
-
-      // Upper band
-      traces.push({
-        x: barIdx, y: upper,
-        type: 'scatter', mode: 'lines',
-        name: v + ' +eps',
-        line: { width: 0 },
-        xaxis: vi === 0 ? 'x' : ('x' + (vi + 1)),
-        yaxis: vi === 0 ? 'y' : ('y' + (vi + 1)),
-        showlegend: false,
-      });
-
-      // Lower band + fill
-      traces.push({
-        x: barIdx, y: lower,
-        type: 'scatter', mode: 'lines',
-        name: v + ' -eps',
-        line: { width: 0 },
-        fill: 'tonexty',
-        fillcolor: VIEW_COLORS[v].replace(')', ',0.08)').replace('rgb', 'rgba'),
-        xaxis: vi === 0 ? 'x' : ('x' + (vi + 1)),
-        yaxis: vi === 0 ? 'y' : ('y' + (vi + 1)),
-        showlegend: false,
-      });
-
-      // Filtered price line
+    // Add filtered price lines for all 4 views
+    VIEWS.forEach(function(v) {
+      var filtered = col(data, v + '_filtered');
+      var style = lineStyles[v];
       traces.push({
         x: barIdx, y: filtered,
         type: 'scatter', mode: 'lines',
         name: v + ' (' + (viewLabels[v] || v) + ')',
-        line: { width: 1.8, color: VIEW_COLORS[v] },
-        xaxis: vi === 0 ? 'x' : ('x' + (vi + 1)),
-        yaxis: vi === 0 ? 'y' : ('y' + (vi + 1)),
+        line: { width: style.width, color: VIEW_COLORS[v] },
+        opacity: style.opacity,
         showlegend: true,
       });
-
-      annotations.push({
-        x: 0.01, y: y0 + eachH / 2, xref: 'paper', yref: 'paper',
-        text: '<b>' + v + '_filtered</b> <span style="font-size:10px;color:#8b949e">' + (viewLabels[v] || v) + '</span>',
-        showarrow: false, font: { size: 12, color: VIEW_COLORS[v] }, xanchor: 'left',
-      });
     });
 
-    const layout = {
+    // Add v2 (daily) EPS band as reference
+    var v2Filtered = col(data, 'v2_filtered');
+    var v2Eps = col(data, 'v2_eps');
+    var epsUpper = v2Filtered.map(function(f, i) { return toNum(f) + toNum(v2Eps[i]); });
+    var epsLower = v2Filtered.map(function(f, i) { return toNum(f) - toNum(v2Eps[i]); });
+
+    // Upper band (invisible line to anchor fill)
+    traces.push({
+      x: barIdx, y: epsUpper,
+      type: 'scatter', mode: 'lines',
+      name: 'v2 +eps',
+      line: { width: 0 },
+      showlegend: false,
+    });
+
+    // Lower band + fill to upper
+    traces.push({
+      x: barIdx, y: epsLower,
+      type: 'scatter', mode: 'lines',
+      name: 'v2 ±eps',
+      line: { width: 0 },
+      fill: 'tonexty',
+      fillcolor: 'rgba(210,153,29,0.08)',
+      showlegend: true,
+    });
+
+    var layout = {
       template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
       font: baseFont, displayModeBar: false,
-      margin: { l: 60, r: 40, t: 20, b: 30 },
+      margin: { l: 70, r: 40, t: 20, b: 40 },
       showlegend: true,
-      legend: { orientation: 'h', y: 1.05, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
-      grid: { rows: nViews, columns: 1, pattern: 'independent', roworder: 'top to bottom', ygap: gap },
+      legend: { orientation: 'h', y: 1.08, x: 0.5, xanchor: 'center', font: { size: 11, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
+      xaxis: { title: { text: 'bar_index', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
+      yaxis: { title: { text: '滤波价格', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
     };
-
-    VIEWS.forEach((v, vi) => {
-      const y0 = 1 - (vi + 1) * eachH - vi * gap;
-      const y1 = y0 + eachH;
-      const xkey = 'xaxis' + (vi === 0 ? '' : (vi + 1));
-      const ykey = 'yaxis' + (vi === 0 ? '' : (vi + 1));
-      layout[xkey] = { showgrid: true, gridcolor: gridColor, zeroline: false, domain: [y0, y1] };
-      if (vi === nViews - 1) {
-        layout[xkey].title = { text: 'bar_index', font: { size: 10, color: '#8b949e' } };
-      }
-      layout[ykey] = { showgrid: true, gridcolor: gridColor, zeroline: false, domain: [y0, y1] };
-    });
 
     Plotly.newPlot('chart-filtered', traces, layout, plotConfig);
   }
+
 
   // --- Section 4: PnL Curves ---
   function buildPnl(data) {
