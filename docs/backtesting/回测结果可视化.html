@@ -315,6 +315,10 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   function toBool(v) { return v === true || v === 1; }
 
   function col(data, name) { return data.columns[name] || []; }
+  function viewLabel(viewKey) {
+    const label = viewLabels[viewKey] || viewKey;
+    return viewKey + ' ' + label;
+  }
 	  function hexToRgba(hex, alpha) {
 	    const r = parseInt(hex.slice(1, 3), 16);
 	    const g = parseInt(hex.slice(3, 5), 16);
@@ -373,8 +377,8 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
     const kpiGrid = document.getElementById('kpi-grid');
     const kpis = [
-      { label: '最佳做多 PnL', value: (bestLongPnl - 100).toFixed(2) + '%', cls: bestLongPnl >= 100 ? 'positive' : 'negative', sub: bestLongView + ' (' + (viewLabels[bestLongView] || bestLongView) + ')' },
-      { label: '最佳做空 PnL', value: (bestShortPnl - 100).toFixed(2) + '%', cls: bestShortPnl >= 100 ? 'positive' : 'negative', sub: bestShortView + ' (' + (viewLabels[bestShortView] || bestShortView) + ')' },
+      { label: '最佳做多 PnL', value: (bestLongPnl - 100).toFixed(2) + '%', cls: bestLongPnl >= 100 ? 'positive' : 'negative', sub: viewLabel(bestLongView) },
+      { label: '最佳做空 PnL', value: (bestShortPnl - 100).toFixed(2) + '%', cls: bestShortPnl >= 100 ? 'positive' : 'negative', sub: viewLabel(bestShortView) },
       { label: '总交易次数', value: totalTrades, cls: '', sub: '4 视图合计' },
       { label: '信号覆盖率', value: sigCov.toFixed(1) + '%', cls: '', sub: sigNonZero + ' / ' + sigTotal + ' 非零' },
     ];
@@ -462,7 +466,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       traces.push({
         x: barTs, y: sig,
         type: 'scatter', mode: 'lines',
-        name: v + ' (' + (viewLabels[v] || v) + ')',
+        name: viewLabel(v),
         line: { shape: 'hv', width: style.width, color: rgbaColor },
         xaxis: xaxisName, yaxis: yaxisName,
         showlegend: true,
@@ -529,7 +533,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       traces.push({
         x: barTs, y: filtered,
         type: 'scatter', mode: 'lines',
-        name: v + ' (' + (viewLabels[v] || v) + ')',
+        name: viewLabel(v),
         line: { width: style.width, color: VIEW_COLORS[v] },
         opacity: style.opacity,
         showlegend: true,
@@ -590,14 +594,14 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       traces.push({
         x: barTs, y: pnlLong,
         type: 'scatter', mode: 'lines',
-        name: v + ' 做多 (' + (viewLabels[v] || v) + ')',
+        name: viewLabel(v) + ' 做多',
         line: { width: 2, color: VIEW_COLORS[v], dash: 'solid' },
         showlegend: true,
       });
       traces.push({
         x: barTs, y: pnlShort,
         type: 'scatter', mode: 'lines',
-        name: v + ' 做空 (' + (viewLabels[v] || v) + ')',
+        name: viewLabel(v) + ' 做空',
         line: { width: 2, color: VIEW_COLORS[v], dash: 'dash' },
         showlegend: true,
       });
@@ -679,7 +683,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         });
         rows.push(sampled);
         const label = posType === 'long_pos' ? '做多' : '做空';
-        rowLabels.push(v + ' ' + label + ' (' + (viewLabels[v] || v) + ')');
+        rowLabels.push(viewLabel(v) + ' ' + label);
       });
     });
 
@@ -745,7 +749,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     const traces1 = VIEWS.map(v => ({
       x: eventLabels,
       y: eventTypes.map(et => viewTradeCounts[v][et] || 0),
-      type: 'bar', name: v + ' (' + (viewLabels[v] || v) + ')',
+      type: 'bar', name: viewLabel(v),
       marker: { color: VIEW_COLORS[v], opacity: 0.85 },
       xaxis: 'x', yaxis: 'y', showlegend: true,
     }));
@@ -880,7 +884,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     document.getElementById('dashboard-subtitle').innerHTML =
       '数据规模: <strong>' + N + ' 行 x ' + parquetCols.length + ' 列</strong> &nbsp;|&nbsp;' +
       '日期范围: <strong>' + dateMin + '</strong> ~ <strong>' + dateMax + '</strong> &nbsp;|&nbsp;' +
-      '视图: ' + VIEWS.map(v => '<span class="view-tag ' + v + '">' + v + ' ' + (viewLabels[v] || v) + '</span>').join(' ');
+      '视图: ' + VIEWS.map(v => '<span class="view-tag ' + v + '">' + viewLabel(v) + '</span>').join(' ');
 
     document.getElementById('file-info-bar').innerHTML =
       '<span>行数: <strong>' + N + '</strong></span>' +
