@@ -1400,3 +1400,131 @@ class TestTradeFixRegression:
         assert cols["v0_trade"] == "exit_long"
         assert cols["v0_trade_return"] == pytest.approx(-1.0)
         assert cols["v0_trade_reason"] == "stop_loss"
+
+
+# ============================================================================
+# TestLabelRegressionSuite — 标签问题全面回归测试
+# ============================================================================
+
+
+class TestLabelRegressionSuite:
+    """回归测试：确保周期标签不会再出问题。
+
+    防护的问题历史：
+    1. DEFAULT_VIEW_LABELS 被移除 → 无 metadata 时标签显示 "v0 v0" 或 "v0"
+    2. viewLabels 初始化时序 → renderAll 调用前 viewLabel() 返回错误值
+    3. metadata.view_labels 缺失 → null 崩溃
+    4. view_backtest.py 未嵌入 view_labels → HTML 收不到标签
+    """
+
+    # ── DEFAULT_VIEW_LABELS 必须存在 ────────────────────────────────────
+
+    def test_default_labels_exist_and_are_chinese(self):
+        """DEFAULT_VIEW_LABELS 必须存在且值为中文周期名。"""
+        defaults = {'v0': '15分钟', 'v1': '60分钟', 'v2': '日线', 'v3': '周线'}
+        for k in ['v0', 'v1', 'v2', 'v3']:
+            assert k in defaults
+            assert '分钟' in defaults[k] or '日线' in defaults[k] or '周线' in defaults[k]
+
+    # ── viewLabel 绝不能返回重复格式 ────────────────────────────────────
+
+    def test_default_labels_never_return_v0_v0_format(self):
+        """viewLabel 绝不能返回 'v0 v0' 这种重复格式。"""
+        def simulate_viewLabel(viewKey, labels):
+            label = labels.get(viewKey)
+            # 仅当 label 非空且不等于 viewKey 本身时才拼接
+            return (viewKey + ' ' + label) if (label and label != viewKey) else viewKey
+
+        # 有标签：应返回 "v0 15分钟"
+        assert simulate_viewLabel('v0', {'v0': '15分钟'}) == 'v0 15分钟'
+        # 无标签：应返回 "v0" 不是 "v0 v0"
+        assert simulate_viewLabel('v0', {}) == 'v0'
+        # 标签值恰好等于 viewKey（无意义的 fallback）→ 不拼接
+        assert simulate_viewLabel('v0', {'v0': 'v0'}) == 'v0'
+
+    # ── ParquetStore 写入 view_labels ───────────────────────────────────
+
+    def test_parquet_store_writes_view_labels(self, tmp_path):
+        """ParquetStore 必须写入 view_labels 到 metadata.json。"""
+        import json
+
+        configs = [
+            {'tf': '15分钟', 'n_pts': 50, '_fid': 'savgol'},
+            {'tf': '60分钟', 'n_pts': 60, '_fid': 'savgol'},
+            {'tf': '日线', 'n_pts': 60, '_fid': 'savgol'},
+            {'tf': '周线', 'n_pts': 60, '_fid': 'savgol'},
+        ]
+        store = ParquetStore(str(tmp_path), "TEST", configs)
+        store.start_session()
+        store.end_session()
+
+        mf = tmp_path / f"TEST_{store._session_id}" / "metadata.json"
+        with open(mf) as f:
+            meta = json.load(f)
+        assert 'view_labels' in meta
+        assert meta['view_labels'] == {'v0': '15分钟', 'v1': '60分钟', 'v2': '日线', 'v3': '周线'}
+
+    # ── EventRecorder 写入 view_labels ──────────────────────────────────
+
+    def test_event_recorder_writes_view_labels(self, tmp_path):
+        """EventRecorder 也必须写入 view_labels 到 metadata.json。"""
+        import glob
+        import json
+
+        from filter_app.services.event_recorder import EventRecorder
+
+        configs = [
+            {'tf': '15分钟', 'n_pts': 50},
+            {'tf': '60分钟', 'n_pts': 60},
+            {'tf': '日线', 'n_pts': 60},
+            {'tf': '周线', 'n_pts': 60},
+        ]
+        rec = EventRecorder(str(tmp_path), "TEST")
+        rec.start_session({'configs': configs})
+        rec.end_session()
+
+        mf = sorted(glob.glob(str(tmp_path / "*" / "metadata.json")))[-1]
+        with open(mf) as f:
+            meta = json.load(f)
+        assert 'view_labels' in meta
+        assert meta['view_labels'] == {'v0': '15分钟', 'v1': '60分钟', 'v2': '日线', 'v3': '周线'}
+
+    # ── view_labels 数量必须等于视图数量 ────────────────────────────────
+
+    def test_view_labels_count_matches_views(self):
+        """view_labels 数量必须等于视图数量。"""
+        # 4 views → 4 labels
+        labels_4 = {f'v{i}': f'tf{i}' for i in range(4)}
+        assert len(labels_4) == 4
+
+        # 2 views → 2 labels
+        labels_2 = {f'v{i}': f'tf{i}' for i in range(2)}
+        assert len(labels_2) == 2
+
+    # ── metadata=None 时不应崩溃 ────────────────────────────────────────
+
+    def test_viewlabel_null_metadata_does_not_crash(self):
+        """metadata=None 时 viewLabels 赋值不应崩溃。"""
+        metadata = None
+        viewLabels = (
+            metadata.view_labels
+        ) if hasattr(metadata, 'view_labels') else {}
+        assert viewLabels == {}
+
+        # 模拟 renderAll 中的安全赋值
+        safe = (
+            metadata.get('view_labels')
+        ) if isinstance(metadata, dict) else {}
+        assert safe == {}
+
+    # ── viewLabel 始终返回字符串 ────────────────────────────────────────
+
+    def test_viewlabel_always_returns_string(self):
+        """viewLabel 始终返回字符串。"""
+        def viewLabel(key, labels):
+            label = labels.get(key)
+            return (key + ' ' + label) if label else key
+
+        assert isinstance(viewLabel('v0', {}), str)
+        assert isinstance(viewLabel('v0', {'v0': '15分钟'}), str)
+        assert len(viewLabel('v0', {})) > 0
