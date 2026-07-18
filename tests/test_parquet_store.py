@@ -585,3 +585,199 @@ class TestCSVBuilderExtractViewColumns:
         view_data["trade_records"] = []
         cols = self._extract("v0_日线", view_data)
         assert cols["v0_trade_count"] == 0
+
+
+# ============================================================================
+# TestBSMarkerRegression — BS 标记回归测试
+# ============================================================================
+
+
+class TestBSMarkerRegression:
+    """回归测试：BS entry marker 此前用 == 精确匹配导致始终为空。
+
+    Bug: 原始代码使用 ``if m[0] == view_last_idx`` 来匹配 BS marker，
+    但 entry marker 的 bar_idx (pair_end) 几乎永远不会恰好落在
+    view_last_idx 上（数据集的最后一个 bar）。修复方案：改用 ``<=``。
+    """
+
+    @staticmethod
+    def _extract(view_data: dict, prefix: str = "v0") -> dict:
+        return ParquetStore._extract_view_columns(prefix, view_data)
+
+    def test_bs_entry_at_exact_last_bar(self):
+        """entry marker 恰好在 view_last_idx 上（边界情况）。"""
+        view_data = make_mock_view_data(n_pts=50, has_entry=False)
+        # bar 49 = view_last_idx (len=50, last index=49)
+        view_data["bs_markers"]["entry_markers"] = [
+            (49, "B", "green", "2024-01-15", "2024-01-15")
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_bs_entry"] == "B"
+
+    def test_bs_entry_before_last_bar(self):
+        """entry marker 在 view_last_idx-1，应被 <= 匹配。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False)
+        # bar 118 = view_last_idx - 1
+        view_data["bs_markers"]["entry_markers"] = [
+            (118, "B", "green", "2024-01-15", "2024-01-15")
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_bs_entry"] == "B"
+
+    def test_bs_entry_far_from_last_bar(self):
+        """entry marker 在 bar 10, view_last_idx=119，应被 <= 匹配。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False)
+        view_data["bs_markers"]["entry_markers"] = [
+            (10, "B", "green", "2024-01-05", "2024-01-05")
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_bs_entry"] == "B"
+
+    def test_bs_entry_multiple_before_last(self):
+        """多个 entry marker 在 view_last_idx 之前，最后一个被匹配。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False)
+        view_data["bs_markers"]["entry_markers"] = [
+            (20, "B", "green", "2024-01-10", "2024-01-10"),
+            (40, "S", "red", "2024-01-20", "2024-01-20"),
+            (60, "B", "green", "2024-01-30", "2024-01-30"),
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_bs_entry"] == "B"  # 最后一个 marker (bar 60, label B)
+
+    def test_bs_exit_multiple_before_last(self):
+        """多个 exit marker，最后一个被匹配。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False)
+        view_data["bs_markers"]["exit_markers"] = [
+            (30, "B", "green", "take_profit", "2024-02-01"),
+            (70, "S", "red", "stop_loss", "2024-02-05"),
+            (90, "S", "red", "stop_loss", "2024-02-10"),
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_bs_exit"] == "S"  # 最后一个 marker (bar 90, label S)
+
+
+# ============================================================================
+# TestTradeMatchingRegression — Trade 匹配回归测试
+# ============================================================================
+
+
+class TestTradeMatchingRegression:
+    """回归测试：entry_idx 此前用 == 导致永远无法匹配。
+
+    Bug: 原始代码使用 ``if entry_idx == view_last_idx`` 来匹配 trade，
+    但 entry_idx (pair_end) 几乎永远不会恰好落在 view_last_idx 上。
+    修复方案：改用 ``<=``，并确保 exit 优先于 entry。
+    """
+
+    @staticmethod
+    def _extract(view_data: dict, prefix: str = "v0") -> dict:
+        return ParquetStore._extract_view_columns(prefix, view_data)
+
+    def test_trade_entry_before_last_bar(self):
+        """trade entry_idx 在 view_last_idx-5，应被匹配为 entry_long。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 114, "exit_idx": None}
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == "entry_long"
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
+
+    def test_trade_exit_before_last_bar(self):
+        """trade exit_idx 在 view_last_idx-3，应被匹配为 exit_long 并提取 return_pct。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 50, "exit_idx": 116,
+             "return_pct": 3.5, "exit_reason": "take_profit"}
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == "exit_long"
+        assert cols["v0_trade_return"] == pytest.approx(3.5)
+        assert cols["v0_trade_reason"] == "take_profit"
+
+    def test_trade_entry_and_exit_both_match(self):
+        """同一 trade 的 entry 和 exit 都 <= view_last_idx，应优先 exit。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 50, "exit_idx": 100,
+             "return_pct": 2.0, "exit_reason": "stop_loss"}
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == "exit_long"  # exit 优先
+        assert cols["v0_trade_return"] == pytest.approx(2.0)
+        assert cols["v0_trade_reason"] == "stop_loss"
+
+    def test_trade_same_bar_entry_exit(self):
+        """entry_idx == exit_idx，应优先 exit。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
+        view_data["trade_records"] = [
+            {"type": "short", "entry_idx": 80, "exit_idx": 80,
+             "return_pct": -1.5, "exit_reason": "stop_loss"}
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == "exit_short"  # exit 优先于同 bar 的 entry
+        assert cols["v0_trade_return"] == pytest.approx(-1.5)
+        assert cols["v0_trade_reason"] == "stop_loss"
+
+
+# ============================================================================
+# TestCSVBuilderEdgeCases — CSVBuilder 边界情况
+# ============================================================================
+
+
+class TestCSVBuilderEdgeCases:
+    """CSVBuilder 特有的边界：None 传感器不同、默认值不同。
+
+    ParquetStore 对 None 数据有完善保护（``or []``、``is not None`` 检查），
+    但 CSVBuilder 在部分路径上缺失这些保护，导致 None 值会触发异常。
+    此外 CSVBuilder 的默认值也不同：BS 为空时用 ``"-"`` 而非 ``""``，
+    schmitt 为 None 时省略列而非填充默认值。
+    """
+
+    @staticmethod
+    def _extract(view_name: str, view_data: dict) -> dict:
+        builder = CSVBuilder()
+        return builder._extract_view_columns(view_name, view_data)
+
+    @pytest.mark.xfail(
+        reason="CSVBuilder does not guard bs_markers=None (uses .get() on None)"
+    )
+    def test_bs_markers_none_crash(self):
+        """bs_markers 为 None 时不应崩溃（已知缺陷：当前会 AttributeError）。"""
+        view_data = make_mock_view_data(has_entry=False, has_exit=False)
+        view_data["bs_markers"] = None
+        cols = self._extract("v0_日线", view_data)
+        assert cols["v0_bs_entry"] == "-"
+
+    @pytest.mark.xfail(
+        reason="CSVBuilder does not guard trade_records=None (iterates None)"
+    )
+    def test_trade_records_none_crash(self):
+        """trade_records 为 None 时不应崩溃（已知缺陷：当前会 TypeError）。"""
+        view_data = make_mock_view_data(has_entry=False, has_exit=False)
+        view_data["trade_records"] = None
+        cols = self._extract("v0_日线", view_data)
+        assert cols["v0_trade"] == ""
+
+    def test_schmitt_none_omits_columns(self):
+        """schmitt 为 None 时，CSVBuilder 应省略 sig/eps 而非填默认值。
+
+        与 ParquetStore 不同：ParquetStore 会填充 0/NaN 默认值，
+        而 CSVBuilder 直接不写入这些键。
+        """
+        view_data = make_mock_view_data()
+        view_data["schmitt"] = None
+        cols = self._extract("v0_日线", view_data)
+        assert "v0_sig" not in cols
+        assert "v0_eps" not in cols
+
+    def test_empty_view_data_omits_arrays(self):
+        """完全空的 view_data 不崩溃。"""
+        empty: dict = {"t": None}
+        cols = self._extract("v0_日线", empty)
+        # BS markers default to "-"
+        assert cols.get("v0_bs_entry") == "-"
+        assert cols.get("v0_bs_exit") == "-"
+        # trade 默认 ""
+        assert cols.get("v0_trade") == ""

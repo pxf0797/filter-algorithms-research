@@ -200,6 +200,48 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 }
 .server-hint.hidden { display: none; }
 .server-hint .cmd-box { margin-top: 8px; margin-bottom: 0; }
+
+/* Embedded mode banner */
+.embedded-banner {
+  background: rgba(88,166,255,0.08); border: 1px solid rgba(88,166,255,0.25);
+  border-radius: 8px; padding: 14px 20px; margin-top: 12px;
+  font-size: 13px; color: var(--text-dim); line-height: 1.8;
+}
+.embedded-banner code {
+  background: rgba(88,166,255,0.12); color: var(--blue);
+  padding: 2px 8px; border-radius: 4px; font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
+}
+.embedded-banner.hidden { display: none; }
+
+/* Schema table */
+.schema-table-wrap { overflow-x: auto; }
+.schema-table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+}
+.schema-table th {
+  background: #21262d; color: var(--text-dim); font-weight: 600;
+  padding: 8px 12px; text-align: left; border: 1px solid var(--border);
+  white-space: nowrap; position: sticky; top: 0; z-index: 2;
+}
+.schema-table td {
+  padding: 6px 10px; border: 1px solid #21262d;
+  color: var(--text); white-space: nowrap;
+}
+.schema-table tbody tr:hover { background: rgba(88,166,255,0.05); }
+.schema-table .group-fixed { background: rgba(88,166,255,0.06); }
+.schema-table .group-signal { background: rgba(63,185,80,0.04); }
+.schema-table .group-pnl { background: rgba(163,113,247,0.04); }
+.schema-table .group-position { background: rgba(210,153,29,0.04); }
+.schema-table .group-trade { background: rgba(248,129,102,0.04); }
+.schema-table .group-bs { background: rgba(57,210,192,0.04); }
+.schema-table .group-label {
+  font-weight: 700; font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.5px; text-align: center;
+}
+.schema-table .col-name { font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; font-size: 11px; font-weight: 600; color: var(--text-hl); }
+.schema-table .col-type { font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; font-size: 11px; color: var(--text-dim); }
+.schema-table .col-source { font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace; font-size: 11px; color: var(--text-dim); }
 </style>
 </head>
 <body>
@@ -256,6 +298,9 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   <!-- File info bar -->
   <div class="file-info-bar" id="file-info-bar"></div>
 
+  <!-- Embedded mode banner -->
+  <div class="embedded-banner hidden" id="embedded-banner"></div>
+
   <!-- Section 1: Overview -->
   <div class="section">
     <div class="section-title"><span class="num">1</span> 概览仪表盘</div>
@@ -298,9 +343,16 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     <div class="plot-wrap-trades" id="chart-trades"></div>
   </div>
 
-  <!-- Section 7: Data Table -->
+  <!-- Section 7: Schema 4.2 Column Definitions -->
   <div class="section">
-    <div class="section-title"><span class="num">7</span> 完整数据表（前 50 行，横向滚动）</div>
+    <div class="section-title"><span class="num">7</span> Schema 4.2 列定义</div>
+    <div class="schema-table-wrap" id="schema-table-wrap"></div>
+    <p class="annotation">共 50 列：2 固定列 + 4 视图 x 12 列（信号 3 + PnL 2 + 持仓 2 + 交易 3 + BS 2）。背景色区分分组。</p>
+  </div>
+
+  <!-- Section 8: Data Table -->
+  <div class="section">
+    <div class="section-title"><span class="num">8</span> 完整数据表（前 50 行，横向滚动）</div>
     <div class="table-wrap" id="table-wrap"></div>
   </div>
 </div>
@@ -317,6 +369,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
   // ========== State ==========
   let viewLabels = { ...DEFAULT_VIEW_LABELS };
+  const isEmbedded = !!(window.BACKTEST_DATA && window.BACKTEST_STATS);
 
   // ========== Helpers ==========
   function toNum(v) { return (v === null || v === undefined || isNaN(v)) ? NaN : Number(v); }
@@ -940,7 +993,99 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     wrap.innerHTML = table;
   }
 
-  // ========== Main rendering ==========
+  // --- Schema 4.2 Column Definitions ---
+  function buildSchemaTable() {
+    // Static column definitions for Schema 4.2
+    const groups = [
+      { id: 'fixed', label: '固定列', cls: 'group-fixed', columns: [
+        { name: 'bar_index', type: 'int32', meaning: 'min_tf bar序号', source: 'BacktestRunner' },
+        { name: 'bar_timestamp', type: 'timestamp', meaning: 'bar UTC时间戳', source: 'BacktestRunner' },
+      ]},
+      { id: 'signal', label: '信号层', cls: 'group-signal', views: VIEWS, columns: [
+        { name: '{v}_sig', type: 'int8', meaning: '施密特信号(+1做多/-1做空/0空仓)', source: 'schmitt["sig"][-1]' },
+        { name: '{v}_filtered', type: 'float32', meaning: '滤波价格', source: 'filtered[-1]' },
+        { name: '{v}_eps', type: 'float32', meaning: '自适应阈值带宽', source: 'schmitt["eps"][-1]' },
+      ]},
+      { id: 'pnl', label: 'PnL层', cls: 'group-pnl', views: VIEWS, columns: [
+        { name: '{v}_pnl_long', type: 'float32', meaning: '做多累计PnL(100起始)', source: 'long_pnl[-1]' },
+        { name: '{v}_pnl_short', type: 'float32', meaning: '做空累计PnL', source: 'short_pnl[-1]' },
+      ]},
+      { id: 'position', label: '持仓层', cls: 'group-position', views: VIEWS, columns: [
+        { name: '{v}_long_pos', type: 'bool', meaning: '做多持仓状态', source: 'long_mask[-1]' },
+        { name: '{v}_short_pos', type: 'bool', meaning: '做空持仓状态', source: 'short_mask[-1]' },
+      ]},
+      { id: 'trade', label: '交易层', cls: 'group-trade', views: VIEWS, columns: [
+        { name: '{v}_trade', type: 'str', meaning: '交易事件', source: 'trade_records匹配' },
+        { name: '{v}_trade_return', type: 'float32', meaning: '交易盈亏%', source: 'trade["return_pct"]' },
+        { name: '{v}_trade_reason', type: 'str', meaning: '离场原因', source: 'trade["exit_reason"]' },
+      ]},
+      { id: 'bs', label: 'BS层', cls: 'group-bs', views: VIEWS, columns: [
+        { name: '{v}_bs_entry', type: 'str', meaning: 'BS入场标记(B/S)', source: 'entry_markers匹配' },
+        { name: '{v}_bs_exit', type: 'str', meaning: 'BS离场标记(B/S)', source: 'exit_markers匹配' },
+      ]},
+    ];
+
+    const groupColors = {
+      fixed: 'rgba(88,166,255,0.08)',
+      signal: 'rgba(63,185,80,0.05)',
+      pnl: 'rgba(163,113,247,0.05)',
+      position: 'rgba(210,153,29,0.05)',
+      trade: 'rgba(248,129,102,0.05)',
+      bs: 'rgba(57,210,192,0.05)',
+    };
+
+    var html = '<table class="schema-table"><thead><tr>';
+    html += '<th>列名分组</th><th>列名</th><th>类型</th><th>中文含义</th><th>数据来源</th>';
+    html += '</tr></thead><tbody>';
+
+    for (var g = 0; g < groups.length; g++) {
+      var group = groups[g];
+      var colDefs = group.columns;
+
+      if (group.views) {
+        // Per-view columns: render one row per view per column
+        for (var vi = 0; vi < group.views.length; vi++) {
+          var v = group.views[vi];
+          for (var ci = 0; ci < colDefs.length; ci++) {
+            var cd = colDefs[ci];
+            var colName = cd.name.replace('{v}', v);
+            var isFirst = (vi === 0 && ci === 0);
+            var rowSpan = group.views.length * colDefs.length;
+            var bg = groupColors[group.id] || 'transparent';
+            html += '<tr style="background:' + bg + '">';
+            if (isFirst) {
+              html += '<td class="group-label" rowspan="' + rowSpan + '" style="background:' + bg + '">' + group.label + '</td>';
+            }
+            html += '<td class="col-name">' + colName + '</td>';
+            html += '<td class="col-type">' + cd.type + '</td>';
+            html += '<td>' + cd.meaning + '</td>';
+            html += '<td class="col-source">' + cd.source + '</td>';
+            html += '</tr>';
+          }
+        }
+      } else {
+        // Fixed columns (no views): one row per column
+        for (var ci = 0; ci < colDefs.length; ci++) {
+          var cd = colDefs[ci];
+          var isFirst = (ci === 0);
+          var rowSpan = colDefs.length;
+          var bg = groupColors[group.id] || 'transparent';
+          html += '<tr style="background:' + bg + '">';
+          if (isFirst) {
+            html += '<td class="group-label" rowspan="' + rowSpan + '" style="background:' + bg + '">' + group.label + '</td>';
+          }
+          html += '<td class="col-name">' + cd.name + '</td>';
+          html += '<td class="col-type">' + cd.type + '</td>';
+          html += '<td>' + cd.meaning + '</td>';
+          html += '<td class="col-source">' + cd.source + '</td>';
+          html += '</tr>';
+        }
+      }
+    }
+
+    html += '</tbody></table>';
+    document.getElementById('schema-table-wrap').innerHTML = html;
+  }
   function renderAll(columns, stats, metadata) {
     // Set view labels from metadata
     if (metadata && metadata.view_labels) {
@@ -969,14 +1114,29 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       '日期范围: <strong>' + dateMin + '</strong> ~ <strong>' + dateMax + '</strong> &nbsp;|&nbsp;' +
       '视图: ' + VIEWS.map(v => '<span class="view-tag ' + v + '">' + viewLabel(v) + '</span>').join(' ');
 
-    document.getElementById('file-info-bar').innerHTML =
-      '<span>行数: <strong>' + N + '</strong></span>' +
-      '<span>列数: <strong>' + parquetCols.length + '</strong></span>' +
-      (metadata ? '<span class="meta-badge">metadata 已加载</span>' : '') +
-      '<button class="btn-reselect" onclick="location.reload()">重新选择文件</button>';
+    if (isEmbedded) {
+      document.getElementById('file-info-bar').innerHTML =
+        '<span>行数: <strong>' + N + '</strong></span>' +
+        '<span>列数: <strong>' + parquetCols.length + '</strong></span>' +
+        (metadata ? '<span class="meta-badge">metadata 已加载</span>' : '') +
+        '<span class="meta-badge" style="background:rgba(88,166,255,0.15);color:var(--blue)">嵌入模式</span>' +
+        '<button class="btn-reselect" disabled style="opacity:0.4;cursor:not-allowed;background:var(--text-dim)">重新选择文件</button>';
+      document.getElementById('embedded-banner').innerHTML =
+        '当前为嵌入数据模式。如需加载其他 parquet 文件，请运行：<br>' +
+        '<code>python tools/view_backtest.py --serve</code><br>' +
+        '然后通过浏览器拖入文件';
+      document.getElementById('embedded-banner').classList.remove('hidden');
+    } else {
+      document.getElementById('file-info-bar').innerHTML =
+        '<span>行数: <strong>' + N + '</strong></span>' +
+        '<span>列数: <strong>' + parquetCols.length + '</strong></span>' +
+        (metadata ? '<span class="meta-badge">metadata 已加载</span>' : '') +
+        '<button class="btn-reselect" onclick="location.reload()">重新选择文件</button>';
+    }
 
     // Render all sections
     buildOverview(data);
+    buildSchemaTable();
     buildFilteredOverview(data);
     buildSignals(data);
     buildPnl(data);
