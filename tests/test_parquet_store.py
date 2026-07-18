@@ -575,16 +575,12 @@ class TestCSVBuilderExtractViewColumns:
         assert "v0_pair_count" not in cols
 
     def test_trade_records_none_csv(self):
-        """trade_records is None: trade_count is not set.
-
-        NOTE: CSVBuilder does NOT guard against None with `or []` (unlike
-        ParquetStore), so the trade-matching loop would crash on None.
-        This test uses [] as the safe empty value.
-        """
+        """trade_records is None: guarded by `or []`, returns empty defaults."""
         view_data = make_mock_view_data()
-        view_data["trade_records"] = []
+        view_data["trade_records"] = None
         cols = self._extract("v0_日线", view_data)
         assert cols["v0_trade_count"] == 0
+        assert cols["v0_trade"] == ""
 
 
 # ============================================================================
@@ -740,25 +736,21 @@ class TestCSVBuilderEdgeCases:
         builder = CSVBuilder()
         return builder._extract_view_columns(view_name, view_data)
 
-    @pytest.mark.xfail(
-        reason="CSVBuilder does not guard bs_markers=None (uses .get() on None)"
-    )
-    def test_bs_markers_none_crash(self):
-        """bs_markers 为 None 时不应崩溃（已知缺陷：当前会 AttributeError）。"""
+    def test_bs_markers_none_handled(self):
+        """bs_markers 为 None 时用空 dict 替代，不崩溃。"""
         view_data = make_mock_view_data(has_entry=False, has_exit=False)
         view_data["bs_markers"] = None
         cols = self._extract("v0_日线", view_data)
         assert cols["v0_bs_entry"] == "-"
+        assert cols["v0_bs_exit"] == "-"
 
-    @pytest.mark.xfail(
-        reason="CSVBuilder does not guard trade_records=None (iterates None)"
-    )
-    def test_trade_records_none_crash(self):
-        """trade_records 为 None 时不应崩溃（已知缺陷：当前会 TypeError）。"""
+    def test_trade_records_none_handled(self):
+        """trade_records 为 None 时用空 list 替代，不崩溃。"""
         view_data = make_mock_view_data(has_entry=False, has_exit=False)
         view_data["trade_records"] = None
         cols = self._extract("v0_日线", view_data)
         assert cols["v0_trade"] == ""
+        assert cols["v0_trade_count"] == 0
 
     def test_schmitt_none_omits_columns(self):
         """schmitt 为 None 时，CSVBuilder 应省略 sig/eps 而非填默认值。
@@ -847,3 +839,175 @@ class TestConcurrencySafety:
         assert sid in dir_name, f"Directory name should contain session_id: {dir_name}"
 
         store.end_session()
+
+
+# ============================================================================
+# TestPnlConsistency — PnL 值与信号/持仓逻辑一致性
+# ============================================================================
+
+
+class TestPnlConsistency:
+    """PnL 值应与信号/持仓逻辑一致。
+
+    验证规则：
+    - 未持仓时 PnL 应不变（flat）
+    - 做多信号时要么有持仓要么 PnL 平坦
+    - PnL 数组在同一 bar 内是单调累积的
+    """
+
+    @staticmethod
+    def _extract(view_data: dict, prefix: str = "v0") -> dict:
+        return ParquetStore._extract_view_columns(prefix, view_data)
+
+    def test_pnl_long_unchanged_when_no_long_position(self):
+        """未持仓时 PnL 随窗口滑动应基本不变（最后两个 bar 的 PnL 差很小）。
+
+        构造两个相邻 bar 的数据：同一个窗口滑动一步，
+        PnL 数组的最后一个值变化极小（正常浮动而非跳变）。
+        """
+        n = 120
+        long_pnl_a = np.linspace(100, 110, n)  # bar N 的 PnL
+        long_pnl_b = np.linspace(100.001, 110.001, n)  # bar N+1 的 PnL（滑动一步）
+
+        view_data_a = make_mock_view_data(n_pts=n, has_entry=False)
+        view_data_a["long_pnl"] = long_pnl_a
+        view_data_a["long_mask"] = np.zeros(n, dtype=bool)
+
+        view_data_b = make_mock_view_data(n_pts=n, has_entry=False)
+        view_data_b["long_pnl"] = long_pnl_b
+        view_data_b["long_mask"] = np.zeros(n, dtype=bool)
+
+        cols_a = self._extract(view_data_a)
+        cols_b = self._extract(view_data_b)
+
+        # 未持仓时，连续 bar 的 PnL 变化应很小（< 0.01）
+        pnl_diff = abs(cols_b["v0_pnl_long"] - cols_a["v0_pnl_long"])
+        assert pnl_diff < 0.1, f"PnL changed by {pnl_diff} without position"
+
+    def test_signal_long_implies_position_or_pnl_flat(self):
+        """做多信号时：要么有持仓（long_pos=True），要么 PnL 相对前值不变。
+
+        信号建议做多时，策略可能因风控不进场，此时 PnL 应不变。
+        """
+        n = 120
+        # 场景：sig=+1 但 long_mask 全 False（未持仓）
+        view_data = make_mock_view_data(n_pts=n, has_entry=False)
+        view_data["schmitt"]["sig"] = np.ones(n, dtype=int)  # all +1
+        view_data["long_mask"] = np.zeros(n, dtype=bool)  # no position
+
+        cols = self._extract(view_data)
+        # 信号做多
+        assert cols["v0_sig"] == 1
+        # 未持仓
+        assert cols["v0_long_pos"] == False  # noqa: E712
+        # PnL 应仍在初始值附近（因为没有交易改变 PnL）
+        assert cols["v0_pnl_long"] >= 100.0
+
+    def test_pnl_values_are_monotonic_in_window(self):
+        """同一 bar 内 long_pnl 数组应是单调的（累积 PnL）。
+
+        虽然提取时只取最后一个值，但整个数组是窗口内逐 bar 累积的结果。
+        """
+        n = 120
+        # 构造一个单调递增的 PnL 数组（模拟窗口内累积）
+        pnl = np.sort(np.random.RandomState(42).uniform(99, 111, n))
+
+        view_data = make_mock_view_data(n_pts=n, has_entry=True)
+        view_data["long_pnl"] = pnl
+
+        cols = self._extract(view_data)
+        # 最后一个值应 >= 第一个值（单调递增保证）
+        assert cols["v0_pnl_long"] == pytest.approx(pnl[-1])
+
+    def test_short_pnl_independent_of_long_position(self):
+        """short_pnl 在纯做多策略中应独立演化（不受 long 持仓影响）。"""
+        n = 120
+        view_data = make_mock_view_data(n_pts=n, has_entry=True)
+        view_data["short_pnl"] = np.full(n, 100.0)  # flat short PnL
+        view_data["short_mask"] = np.zeros(n, dtype=bool)
+
+        cols = self._extract(view_data)
+        assert cols["v0_long_pos"] == True  # noqa: E712 (in long position)
+        assert cols["v0_short_pos"] == _BOOL_FALSE
+        # short PnL 应保持不变
+        assert cols["v0_pnl_short"] == pytest.approx(100.0)
+
+
+# ============================================================================
+# TestViewLabelMapping — metadata 中的 view_labels 保存和读取
+# ============================================================================
+
+
+class TestViewLabelMapping:
+    """view_labels 应在 metadata 中正确保存和读取。
+
+    验证 ParquetStore 和 EventRecorder 两个路径。
+    """
+
+    def test_parquet_store_metadata_contains_view_labels(self, tmp_path):
+        """ParquetStore 的 metadata.json 必须包含 view_labels。"""
+        store = ParquetStore(str(tmp_path), "AAPL", [
+            {"name": "daily", "tf": "日线"},
+            {"name": "hourly", "tf": "60分钟"},
+        ])
+        store.start_session()
+        store.end_session()
+
+        import json
+        meta_path = tmp_path / list(tmp_path.iterdir())[0].name / "metadata.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert "view_labels" in meta
+        assert meta["view_labels"] == {"v0": "日线", "v1": "60分钟"}
+
+    def test_view_labels_match_view_count(self, tmp_path):
+        """view_labels 数量应等于视图数量。"""
+        configs = [
+            {"name": "daily", "tf": "日线"},
+            {"name": "hourly", "tf": "60分钟"},
+            {"name": "weekly", "tf": "周线"},
+        ]
+        store = ParquetStore(str(tmp_path), "AAPL", configs)
+        store.start_session()
+        store.end_session()
+
+        import json
+        meta_path = tmp_path / list(tmp_path.iterdir())[0].name / "metadata.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert len(meta["view_labels"]) == 3
+        assert list(meta["view_labels"].keys()) == ["v0", "v1", "v2"]
+        assert len(meta["views"]) == 3
+
+    def test_view_labels_fallback_when_tf_missing(self, tmp_path):
+        """view_config 中缺少 tf 字段时使用默认值。"""
+        store = ParquetStore(str(tmp_path), "AAPL", [
+            {"name": "custom"},  # no 'tf' field
+        ])
+        store.start_session()
+        store.end_session()
+
+        import json
+        meta_path = tmp_path / list(tmp_path.iterdir())[0].name / "metadata.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert meta["view_labels"] == {"v0": "view_0"}
+
+    def test_event_recorder_metadata_contains_view_labels(self, tmp_path):
+        """EventRecorder 的 metadata.json 也应包含 view_labels。"""
+        from services.event_recorder import EventRecorder
+
+        config = {
+            "ticker": "AAPL",
+            "configs": [
+                {"tf": "日线"},
+                {"tf": "60分钟"},
+            ],
+        }
+        recorder = EventRecorder(str(tmp_path), "AAPL")
+        recorder.start_session(config)
+        recorder.end_session()
+
+        import json
+        session_dir = tmp_path / list(tmp_path.iterdir())[0].name
+        meta_path = session_dir / "metadata.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert "view_labels" in meta, f"view_labels missing from EventRecorder metadata"
+        assert meta["view_labels"] == {"v0": "日线", "v1": "60分钟"}

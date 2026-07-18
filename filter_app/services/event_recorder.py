@@ -146,7 +146,7 @@ class CSVBuilder:
             result[f"{prefix}_pair_count"] = len(all_pairs)
 
         # --- trade_records ---
-        trade_records = view_data.get("trade_records")
+        trade_records = view_data.get("trade_records") or []
         if trade_records is not None:
             result[f"{prefix}_trade_count"] = len(trade_records)
 
@@ -155,7 +155,7 @@ class CSVBuilder:
         view_last_idx = len(t_arr) - 1 if t_arr is not None else -1
 
         # --- BS markers ---
-        bs_markers: dict = view_data.get("bs_markers", {})
+        bs_markers = view_data.get("bs_markers") or {}
         entry_label = "-"
         exit_label = "-"
         # Use <= to capture the most recent entry/exit up to view_last_idx.
@@ -193,7 +193,7 @@ class CSVBuilder:
         trade_val = ""
         trade_return = float("nan")
         trade_reason = ""
-        for t in view_data.get("trade_records", []):
+        for t in trade_records:
             if t.get("exit_idx") is not None and int(t["exit_idx"]) <= view_last_idx:
                 trade_type = t.get("type", "long")
                 trade_val = f"exit_{trade_type}"
@@ -289,11 +289,18 @@ class EventRecorder:
         self._session_dir = self.output_dir / f"{self.ticker}_{self._session_id}"
         self._session_dir.mkdir(parents=True, exist_ok=True)
 
+        # Extract view_labels from config for consistency with ParquetStore
+        view_labels: dict[str, str] = {}
+        view_configs = config.get("configs", [])
+        for i, cfg in enumerate(view_configs):
+            view_labels[f"v{i}"] = cfg.get("tf", f"view_{i}")
+
         metadata: Dict[str, Any] = {
             "ticker": self.ticker,
             "session_id": self._session_id,
             "start_time": datetime.now().isoformat(),
             "config": config,
+            "view_labels": view_labels,
         }
         _write_json(self._session_dir / "metadata.json", metadata)
 
