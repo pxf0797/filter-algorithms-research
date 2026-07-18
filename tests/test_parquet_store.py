@@ -1195,3 +1195,208 @@ class TestViewLabelConsistency:
         stored_configs = meta.get("view_configs", {})
         assert stored_configs["v0"]["tf"] == "15分钟"
         assert stored_configs["v1"]["tf"] == "60分钟"
+
+
+# ============================================================================
+# TestLabelNullSafety — viewLabels 在 metadata 缺失时不应崩溃
+# ============================================================================
+
+
+class TestLabelNullSafety:
+    """viewLabels 在 metadata 缺失时不应崩溃。
+
+    验证 HTML 前端 viewLabel 函数的健壮性：
+    - 无 labels 时只返回 viewKey
+    - 有 labels 时返回 "viewKey 周期名"
+    - metadata=None 时 viewLabels 为空 dict
+    """
+
+    @staticmethod
+    def _simulate_viewlabel(view_key: str, labels: dict) -> str:
+        """模拟 HTML 前端的 viewLabel(viewKey) 函数。"""
+        label = labels.get(view_key, "")
+        return view_key + " " + label if label else view_key
+
+    @staticmethod
+    def _simulate_render_all(metadata: dict | None) -> dict:
+        """模拟 HTML 前端 renderAll 中的 viewLabels 初始化逻辑。"""
+        return (
+            {**metadata["view_labels"]}
+            if (metadata and metadata.get("view_labels"))
+            else {}
+        )
+
+    def test_viewlabel_with_empty_labels_returns_viewkey(self):
+        """无 labels 时 viewLabel('v0') 返回 'v0' 而非崩溃。"""
+        result = self._simulate_viewlabel("v0", {})
+        assert result == "v0"
+        # 不应包含额外空格或 "undefined"
+        assert "undefined" not in result
+        assert "null" not in result
+        assert result.strip() == "v0"
+
+    def test_viewlabel_with_labels_returns_viewkey_space_timeframe(self):
+        """有 labels 时 viewLabel('v0') 返回 'v0 15分钟'。"""
+        labels = {"v0": "15分钟", "v1": "60分钟", "v2": "日线", "v3": "周线"}
+        assert self._simulate_viewlabel("v0", labels) == "v0 15分钟"
+        assert self._simulate_viewlabel("v1", labels) == "v1 60分钟"
+        assert self._simulate_viewlabel("v2", labels) == "v2 日线"
+        assert self._simulate_viewlabel("v3", labels) == "v3 周线"
+
+    def test_metadata_null_does_not_crash_viewlabel(self):
+        """metadata=None 时 viewLabels 应为空 dict。"""
+        labels = self._simulate_render_all(None)
+        assert labels == {}
+        # viewLabel 在空 labels 下应正常返回 viewKey
+        assert self._simulate_viewlabel("v0", labels) == "v0"
+        assert self._simulate_viewlabel("v1", labels) == "v1"
+        assert self._simulate_viewlabel("v3", labels) == "v3"
+
+    def test_metadata_without_view_labels_field(self):
+        """metadata 存在但缺少 view_labels 字段时 viewLabels 应为空 dict。"""
+        labels = self._simulate_render_all({"other": "data"})
+        assert labels == {}
+        assert self._simulate_viewlabel("v0", labels) == "v0"
+
+    def test_metadata_with_empty_view_labels(self):
+        """metadata.view_labels 为空 dict 时 viewLabels 应为空 dict。"""
+        labels = self._simulate_render_all({"view_labels": {}})
+        assert labels == {}
+        assert self._simulate_viewlabel("v0", labels) == "v0"
+
+    def test_viewlabel_no_trailing_space_when_empty(self):
+        """空 labels 时 viewLabel 结果不应有多余尾部空格。"""
+        result = self._simulate_viewlabel("v2", {})
+        assert result == "v2"
+        assert not result.endswith(" ")
+
+    def test_missing_view_key_in_labels(self):
+        """某个 view key 不在 labels 中时，仍只返回 viewKey。"""
+        labels = {"v0": "15分钟"}  # v1 缺失
+        assert self._simulate_viewlabel("v1", labels) == "v1"
+
+
+# ============================================================================
+# TestTradeFixRegression — trade 列 entry/exit 修复回归测试
+# ============================================================================
+
+
+class TestTradeFixRegression:
+    """回归测试：trade 列 entry/exit 修复。
+
+    两轮 Bug 修复验证：
+    1. 原始代码用 ``==`` → entry 永远匹配不到
+    2. 改用 ``<=``  → 已完成 trade 的后续 bar 全显示 exit（列失去意义）
+    3. 最终方案：exit 仅在 ``== view_last_idx`` 且非 eod 时显示；
+       entry 在 ``<= view_last_idx`` 且未退出时显示。
+    """
+
+    @staticmethod
+    def _extract(view_data: dict, prefix: str = "v0") -> dict:
+        return ParquetStore._extract_view_columns(prefix, view_data)
+
+    # ── 活跃持仓时 trade 应显示 entry ────────────────────────────────────
+
+    def test_trade_entry_when_active_position(self):
+        """活跃持仓期间 trade 应为 entry_long/entry_short。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 80, "exit_idx": None}
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == "entry_long"
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
+
+    def test_trade_entry_short_when_active_short(self):
+        """活跃做空持仓期间 trade 应为 entry_short。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
+        view_data["trade_records"] = [
+            {"type": "short", "entry_idx": 60, "exit_idx": None}
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == "entry_short"
+
+    # ── exit 仅在精确退出 bar 显示 ──────────────────────────────────────
+
+    def test_trade_exit_only_at_exact_exit_bar(self):
+        """只有 exit_idx==view_last_idx 且非 eod 才显示 exit。"""
+        view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
+        # n_pts=50 → view_last_idx=49, exit at 49, not eod
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 20, "exit_idx": 49,
+             "return_pct": 3.0, "exit_reason": "take_profit"}
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == "exit_long"
+        assert cols["v0_trade_return"] == pytest.approx(3.0)
+        assert cols["v0_trade_reason"] == "take_profit"
+
+    def test_trade_exit_not_shown_when_eod(self):
+        """eod 退出的 bar 应显示 entry（仍在持仓中），而非 exit。"""
+        view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
+        view_data["trade_records"] = [
+            {"type": "short", "entry_idx": 30, "exit_idx": 49,
+             "return_pct": 1.5, "exit_reason": "eod"}
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == "entry_short"
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
+
+    def test_trade_exit_not_shown_before_exact_bar(self):
+        """exit bar 之前的续持 bar 不应显示 exit。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 50, "exit_idx": 100,
+             "return_pct": 2.0, "exit_reason": "stop_loss"}
+        ]
+        cols = self._extract(view_data)
+        # view_last_idx=119, exit at 100 → 不匹配当前 bar → 已完成 trade
+        assert cols["v0_trade"] == ""
+
+    # ── 无活跃交易时 trade 应为空 ────────────────────────────────────────
+
+    def test_trade_empty_when_no_active_trade(self):
+        """无活跃交易时 trade 应为空。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
+        view_data["trade_records"] = []  # no trades at all
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == ""
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
+
+    def test_trade_empty_when_all_completed(self):
+        """所有 trade 已完成时 trade 应为空。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 10, "exit_idx": 50,
+             "return_pct": 1.0, "exit_reason": "a"},
+            {"type": "short", "entry_idx": 60, "exit_idx": 80,
+             "return_pct": -0.5, "exit_reason": "b"},
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == ""
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
+
+    def test_trade_entry_past_view_last_idx_not_matched(self):
+        """entry_idx > view_last_idx 时不应匹配。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
+        view_data["trade_records"] = [
+            {"type": "short", "entry_idx": 200, "exit_idx": None}
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == ""
+
+    def test_exit_priority_over_entry_at_current_bar(self):
+        """同 bar entry/exit 时，exit 优先（非 eod 退出）。"""
+        view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 49, "exit_idx": 49,
+             "return_pct": -1.0, "exit_reason": "stop_loss"}
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == "exit_long"
+        assert cols["v0_trade_return"] == pytest.approx(-1.0)
+        assert cols["v0_trade_reason"] == "stop_loss"

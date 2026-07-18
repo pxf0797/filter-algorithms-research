@@ -1085,10 +1085,8 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     document.getElementById('schema-table-wrap').innerHTML = html;
   }
   function renderAll(columns, stats, metadata) {
-    // Set view labels from metadata
-    if (metadata && metadata.view_labels) {
-      viewLabels = { ...metadata.view_labels };
-    }
+    // Set view labels from metadata (null-safe: if metadata is null or has no view_labels, use empty dict)
+    viewLabels = (metadata && metadata.view_labels) ? { ...metadata.view_labels } : {};
 
     const data = {
       columns: columns,
