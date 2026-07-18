@@ -19,6 +19,7 @@ import os
 import sys
 import tempfile
 import webbrowser
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
 
 import pandas as pd
@@ -44,7 +45,11 @@ def serialize_value(v):
 def load_parquet(path: str) -> tuple[list[dict], dict]:
     """读取 parquet 文件，返回 (columns_dict, stats_dict)."""
     df = pd.read_parquet(path)
+    return df_to_columns(df)
 
+
+def df_to_columns(df: "pd.DataFrame") -> tuple[dict, dict]:
+    """将 DataFrame 转为 column-major JSON 格式的 (columns, stats)。"""
     # 转换时间戳列为 ISO 字符串
     for col in df.columns:
         if pd.api.types.is_datetime64_any_dtype(df[col]):
@@ -57,7 +62,6 @@ def load_parquet(path: str) -> tuple[list[dict], dict]:
     columns = {}
     for col in column_names:
         series = df[col]
-        # 处理 NaN/Inf、bool、object
         arr = []
         for v in series:
             arr.append(serialize_value(v))
@@ -88,6 +92,133 @@ def find_latest_parquet(base_dir: str) -> str | None:
     if not candidates:
         return None
     return str(candidates[0])
+
+
+# ========== HTTP 服务器模式 ==========
+
+class BacktestHandler(BaseHTTPRequestHandler):
+    """HTTP 请求处理器：GET 返回 HTML 页面，POST /api/parse 解析上传的 parquet 文件。"""
+    html_template = None  # 由 start_server() 设置
+
+    def do_GET(self):
+        if self.path == "/api/health":
+            self._send_json({"status": "ok"})
+        elif self.path == "/" or self.path == "/index.html":
+            self._serve_html()
+        else:
+            self.send_error(404)
+
+    def do_POST(self):
+        if self.path == "/api/parse":
+            self._handle_parse()
+        else:
+            self.send_error(404)
+
+    def _serve_html(self):
+        try:
+            with open(self.html_template, encoding="utf-8") as f:
+                html = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(html.encode("utf-8"))
+        except Exception as e:
+            self.send_error(500, str(e))
+
+    def _handle_parse(self):
+        file_data = self._parse_multipart()
+        if file_data is None:
+            self._send_json({"error": "未找到上传的文件，请拖入 .parquet 文件"}, 400)
+            return
+
+        # 写入临时文件后读取
+        fd, tmp_path = tempfile.mkstemp(suffix=".parquet")
+        os.close(fd)
+        try:
+            with open(tmp_path, "wb") as f:
+                f.write(file_data)
+            columns, stats = load_parquet(tmp_path)
+            self._send_json({"columns": columns, "stats": stats, "metadata": None})
+        except Exception as e:
+            self._send_json({"error": f"解析 parquet 失败: {str(e)}"}, 400)
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    def _parse_multipart(self) -> bytes | None:
+        """从 multipart/form-data 请求中提取上传的文件内容。"""
+        content_type = self.headers.get("Content-Type", "")
+        if "multipart/form-data" not in content_type:
+            return None
+
+        # 提取 boundary
+        boundary = None
+        for part in content_type.split(";"):
+            part = part.strip()
+            if part.startswith("boundary="):
+                boundary = part.split("=", 1)[1].strip('"').strip("'")
+        if not boundary:
+            return None
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(content_length)
+
+        boundary_bytes = ("--" + boundary).encode()
+        parts = body.split(boundary_bytes)
+
+        for part in parts:
+            if not part or part in (b"--\r\n", b"--", b"\r\n"):
+                continue
+            idx = part.find(b"\r\n\r\n")
+            if idx == -1:
+                continue
+            headers_raw = part[:idx].decode("utf-8", errors="replace")
+            data = part[idx + 4:]
+            if data.endswith(b"\r\n"):
+                data = data[:-2]
+            if "filename=" in headers_raw:
+                return data
+        return None
+
+    def _send_json(self, data, status=200):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False).encode("utf-8"))
+
+    def log_message(self, format, *args):
+        if args:
+            print(f"[server] {args[0]}")
+
+
+def start_server(port: int, html_template: str):
+    """启动本地 HTTP 服务器，支持拖入 Parquet 文件可视化。"""
+    BacktestHandler.html_template = html_template
+
+    try:
+        server = HTTPServer(("127.0.0.1", port), BacktestHandler)
+    except OSError as e:
+        print(f"错误：无法启动服务器 — {e}", file=sys.stderr)
+        sys.exit(1)
+
+    url = f"http://localhost:{port}"
+
+    print(f"\n{'='*60}")
+    print(f"  回测可视化服务器已启动")
+    print(f"  地址: {url}")
+    print(f"  拖入 .parquet 文件即可查看可视化")
+    print(f"  按 Ctrl+C 停止服务器")
+    print(f"{'='*60}\n")
+
+    webbrowser.open(url)
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\n服务器已停止")
+        server.server_close()
 
 
 def embed_and_open(parquet_path: str, metadata_path: str | None, html_template: str):
@@ -160,7 +291,14 @@ def main():
     parser.add_argument("--metadata", "-m", metavar="FILE", help="metadata.json 文件路径")
     parser.add_argument("--template", "-t", metavar="FILE", default=str(HTML_TEMPLATE),
                         help="HTML 模板路径（默认: docs/backtesting/回测结果可视化.html）")
+    parser.add_argument("--serve", "-s", action="store_true", help="启动本地 HTTP 服务器模式")
+    parser.add_argument("--port", "-p", type=int, default=8899, help="服务器端口（默认 8899，仅 --serve 模式）")
     args = parser.parse_args()
+
+    # --serve 模式
+    if args.serve:
+        start_server(args.port, args.template)
+        return
 
     # 确定 parquet 路径
     parquet_path = None
