@@ -198,9 +198,14 @@ class TestExtractViewColumns:
 
     # ── trade matching ─────────────────────────────────────────────────
 
-    def test_trade_exit_matching(self):
-        """Trade with exit_idx=100 <= view_last_idx=119: match exit."""
-        view_data = make_mock_view_data(n_pts=120, has_exit=True)
+    def test_trade_exit_at_current_bar(self):
+        """Trade 恰好在当前 bar 退出（exit_idx == view_last_idx, 非 eod）→ exit。"""
+        view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
+        # n_pts=50 → view_last_idx=49
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 20, "exit_idx": 49,
+             "return_pct": 5.0, "exit_reason": "take_profit"}
+        ]
         cols = self._extract(view_data)
         assert cols["v0_trade"] == "exit_long"
         assert cols["v0_trade_return"] == pytest.approx(5.0)
@@ -228,6 +233,16 @@ class TestExtractViewColumns:
         cols = self._extract(view_data)
         assert cols["v0_trade"] == ""
 
+    def test_trade_completed_before_current_bar(self):
+        """Trade completed (entry + exit) before current bar → ""，不显示 exit。"""
+        view_data = make_mock_view_data(n_pts=120, has_exit=True)
+        cols = self._extract(view_data)
+        # has_exit=True → trade with entry=50, exit=100 at view=119
+        # Trade completed 19 bars ago; NOT at current bar → ""
+        assert cols["v0_trade"] == ""
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
+
     # ── multiple markers ───────────────────────────────────────────────
 
     def test_multiple_markers_same_bar(self):
@@ -241,19 +256,19 @@ class TestExtractViewColumns:
         cols = self._extract(view_data)
         assert cols["v0_bs_entry"] == "S"  # last marker at bar 50 wins
 
-    def test_multiple_trades_last_wins(self):
-        """Multiple trades: last matching trade by exit_idx overwrites."""
+    def test_multiple_trades_last_active_wins(self):
+        """Multiple trades: last active trade wins, completed trades ignored."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 10, "exit_idx": 30,
              "return_pct": 1.0, "exit_reason": "first"},
-            {"type": "short", "entry_idx": 40, "exit_idx": 80,
-             "return_pct": 3.0, "exit_reason": "second"},
+            {"type": "short", "entry_idx": 40, "exit_idx": None},
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "exit_short"  # second trade wins
-        assert cols["v0_trade_return"] == pytest.approx(3.0)
-        assert cols["v0_trade_reason"] == "second"
+        # First trade completed (10→30), second active (40, no exit)
+        assert cols["v0_trade"] == "entry_short"
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
 
     # ── edge: empty / None data ────────────────────────────────────────
 
@@ -459,9 +474,13 @@ class TestCSVBuilderExtractViewColumns:
 
     # ── trade matching ─────────────────────────────────────────────────
 
-    def test_trade_exit_matching(self):
-        """Exit-based trade match: return_pct and exit_reason extracted."""
-        view_data = make_mock_view_data(n_pts=120, has_exit=True)
+    def test_trade_exit_at_current_bar_csv(self):
+        """Exit at current bar (exit_idx == view_last_idx, non-eod) → exit_long."""
+        view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 20, "exit_idx": 49,
+             "return_pct": 5.0, "exit_reason": "take_profit"}
+        ]
         cols = self._extract("v0_日线", view_data)
         assert cols["v0_trade"] == "exit_long"
         assert cols["v0_trade_return"] == pytest.approx(5.0)
@@ -475,6 +494,14 @@ class TestCSVBuilderExtractViewColumns:
         ]
         cols = self._extract("v0_日线", view_data)
         assert cols["v0_trade"] == "entry_short"
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
+
+    def test_trade_completed_before_current_bar_csv(self):
+        """Completed trade (entry + exit before current bar) → ""."""
+        view_data = make_mock_view_data(n_pts=120, has_exit=True)
+        cols = self._extract("v0_日线", view_data)
+        assert cols["v0_trade"] == ""
         assert np.isnan(cols["v0_trade_return"])
         assert cols["v0_trade_reason"] == ""
 
@@ -519,19 +546,19 @@ class TestCSVBuilderExtractViewColumns:
         cols = self._extract("v0_日线", view_data)
         assert cols["v0_bs_entry"] == "S"
 
-    def test_multiple_trades_last_wins_csv(self):
-        """Multiple matching trades: last one wins via overwrite."""
+    def test_multiple_trades_last_active_wins_csv(self):
+        """Multiple trades: last active wins, completed others ignored."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 10, "exit_idx": 30,
              "return_pct": 1.0, "exit_reason": "a"},
-            {"type": "short", "entry_idx": 40, "exit_idx": 80,
-             "return_pct": 3.0, "exit_reason": "b"},
+            {"type": "short", "entry_idx": 40, "exit_idx": None},
         ]
         cols = self._extract("v0_日线", view_data)
-        assert cols["v0_trade"] == "exit_short"
-        assert cols["v0_trade_return"] == pytest.approx(3.0)
-        assert cols["v0_trade_reason"] == "b"
+        # First trade completed (10→30), second active → entry_short
+        assert cols["v0_trade"] == "entry_short"
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
 
     # ── PnL and positions ──────────────────────────────────────────────
 
@@ -658,19 +685,24 @@ class TestBSMarkerRegression:
 
 
 class TestTradeMatchingRegression:
-    """回归测试：entry_idx 此前用 == 导致永远无法匹配。
+    """回归测试：trade 事件在窗口的正确匹配。
 
-    Bug: 原始代码使用 ``if entry_idx == view_last_idx`` 来匹配 trade，
-    但 entry_idx (pair_end) 几乎永远不会恰好落在 view_last_idx 上。
-    修复方案：改用 ``<=``，并确保 exit 优先于 entry。
+    两轮 Bug 修复：
+    1. 原始代码用 ``==`` → entry 永远匹配不到（pair_end 几乎不落在最后 bar）。
+    2. 改用 ``<=``   → 一旦有任何已完成的 trade，所有后续 bar 都显示 ``exit_*``，
+       导致 200 行数据出现 0 个 entry、200 个 exit（列失去意义）。
+    3. 最终方案：exit 仅在 ``== view_last_idx`` 且非 eod 时才显示 "exit_*"；
+       entry 在 ``<= view_last_idx`` 且未退出（exit > last 或 eod 退出）时显示。
     """
 
     @staticmethod
     def _extract(view_data: dict, prefix: str = "v0") -> dict:
         return ParquetStore._extract_view_columns(prefix, view_data)
 
-    def test_trade_entry_before_last_bar(self):
-        """trade entry_idx 在 view_last_idx-5，应被匹配为 entry_long。"""
+    # ── 当前持仓：entry active ─────────────────────────────────────────
+
+    def test_trade_entry_active_no_exit(self):
+        """trade 进入了（entry <= view_last_idx）但还没退出 → entry。"""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 114, "exit_idx": None}
@@ -680,11 +712,27 @@ class TestTradeMatchingRegression:
         assert np.isnan(cols["v0_trade_return"])
         assert cols["v0_trade_reason"] == ""
 
-    def test_trade_exit_before_last_bar(self):
-        """trade exit_idx 在 view_last_idx-3，应被匹配为 exit_long 并提取 return_pct。"""
-        view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
+    def test_trade_entry_active_eod_exit(self):
+        """trade 在窗口内以 eod 退出（数据结束）→ 仍视作 active，显示 entry。"""
+        view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
+        # view_last_idx = 49, entry at 40, eod exit at 49
         view_data["trade_records"] = [
-            {"type": "long", "entry_idx": 50, "exit_idx": 116,
+            {"type": "short", "entry_idx": 40, "exit_idx": 49,
+             "return_pct": 1.0, "exit_reason": "eod"}
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == "entry_short"
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
+
+    # ── 当前退出：exit at current bar ──────────────────────────────────
+
+    def test_trade_exit_at_current_bar(self):
+        """trade 恰好在当前 bar 退出（非 eod）→ exit。"""
+        view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
+        # view_last_idx = 49, exit at 49 with genuine reason
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 30, "exit_idx": 49,
              "return_pct": 3.5, "exit_reason": "take_profit"}
         ]
         cols = self._extract(view_data)
@@ -692,29 +740,67 @@ class TestTradeMatchingRegression:
         assert cols["v0_trade_return"] == pytest.approx(3.5)
         assert cols["v0_trade_reason"] == "take_profit"
 
-    def test_trade_entry_and_exit_both_match(self):
-        """同一 trade 的 entry 和 exit 都 <= view_last_idx，应优先 exit。"""
+    def test_trade_exit_at_current_bar_stop_loss(self):
+        """止损退出在 current bar → exit_short + return_pct。"""
+        view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
+        view_data["trade_records"] = [
+            {"type": "short", "entry_idx": 20, "exit_idx": 49,
+             "return_pct": -2.0, "exit_reason": "stop_loss"}
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == "exit_short"
+        assert cols["v0_trade_return"] == pytest.approx(-2.0)
+        assert cols["v0_trade_reason"] == "stop_loss"
+
+    # ── 历史已完成 trade → "" ─────────────────────────────────────────
+
+    def test_trade_completed_before_current_bar(self):
+        """trade 在当前 bar 之前已完成 → 列应为空。"""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 50, "exit_idx": 100,
              "return_pct": 2.0, "exit_reason": "stop_loss"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "exit_long"  # exit 优先
-        assert cols["v0_trade_return"] == pytest.approx(2.0)
-        assert cols["v0_trade_reason"] == "stop_loss"
+        assert cols["v0_trade"] == ""
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
 
-    def test_trade_same_bar_entry_exit(self):
-        """entry_idx == exit_idx，应优先 exit。"""
+    def test_trade_same_bar_entry_exit_past(self):
+        """同 bar entry/exit 发生在更早的 bar（非当前）→ ""。"""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "short", "entry_idx": 80, "exit_idx": 80,
              "return_pct": -1.5, "exit_reason": "stop_loss"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "exit_short"  # exit 优先于同 bar 的 entry
-        assert cols["v0_trade_return"] == pytest.approx(-1.5)
+        assert cols["v0_trade"] == ""
+
+    # ── 优先级：exit at current bar > entry active ────────────────────
+
+    def test_trade_exit_priority_at_current_bar(self):
+        """同一 bar 有 entry 和 exit（同 bar entry/exit at view_last_idx）→ exit 优先。"""
+        view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
+        # n_pts=50 → view_last_idx=49
+        view_data["trade_records"] = [
+            {"type": "short", "entry_idx": 49, "exit_idx": 49,
+             "return_pct": -1.0, "exit_reason": "stop_loss"}
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == "exit_short"
+        assert cols["v0_trade_return"] == pytest.approx(-1.0)
         assert cols["v0_trade_reason"] == "stop_loss"
+
+    def test_multiple_trades_active_last_wins(self):
+        """多个 trade 都 active，最后一个决定 trade 列。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 10, "exit_idx": 130,
+             "return_pct": 0.0, "exit_reason": "eod"},
+            {"type": "short", "entry_idx": 40, "exit_idx": None},
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_trade"] == "entry_short"  # 最后一个 active trade 胜出
 
 
 # ============================================================================
@@ -1011,3 +1097,101 @@ class TestViewLabelMapping:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         assert "view_labels" in meta, f"view_labels missing from EventRecorder metadata"
         assert meta["view_labels"] == {"v0": "日线", "v1": "60分钟"}
+
+
+# ============================================================================
+# TestViewLabelConsistency — 确保 view_labels 贯穿整个数据流
+# ============================================================================
+
+
+class TestViewLabelConsistency:
+    """确保 view_labels 正确使用中文周期名，且格式统一为 "vN 周期名"。
+
+    view_labels 来自 view_configs 中的 tf 字段，通过 metadata.json 传递给
+    HTML 前端。前端 ``viewLabel(v)`` 函数将其拼接为 ``"v0 15分钟"`` 格式，
+    用于图表标题、图例、统计面板等所有 UI 元素。
+    """
+
+    # ── 标签格式 ──────────────────────────────────────────────────────
+
+    def test_parquet_store_labels_are_chinese_timeframes(self, tmp_path):
+        """view_labels 的值应是中文周期名（如 '15分钟'），而非 v0/v1。"""
+        store = ParquetStore(str(tmp_path), "AAPL", [
+            {"name": "intraday", "tf": "15分钟"},
+            {"name": "hourly", "tf": "60分钟"},
+            {"name": "daily", "tf": "日线"},
+            {"name": "weekly", "tf": "周线"},
+        ])
+        store.start_session()
+        store.end_session()
+
+        import json
+        meta_path = tmp_path / list(tmp_path.iterdir())[0].name / "metadata.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+
+        labels = meta["view_labels"]
+        assert labels == {"v0": "15分钟", "v1": "60分钟", "v2": "日线", "v3": "周线"}
+        for v in ["v0", "v1", "v2", "v3"]:
+            assert v not in labels[v], (
+                f"view_labels[{v}] = {labels[v]!r} 不应包含 view key 本身"
+            )
+            assert any('一' <= c <= '鿿' for c in labels[v]), (
+                f"view_labels[{v}] = {labels[v]!r} 缺少中文字符"
+            )
+
+    def test_all_four_views_have_labels(self, tmp_path):
+        """4 个视图都有对应的标签。"""
+        store = ParquetStore(str(tmp_path), "AAPL", [
+            {"tf": "15分钟"},
+            {"tf": "60分钟"},
+            {"tf": "日线"},
+            {"tf": "周线"},
+        ])
+        store.start_session()
+        store.end_session()
+
+        import json
+        meta_path = tmp_path / list(tmp_path.iterdir())[0].name / "metadata.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+
+        labels = meta["view_labels"]
+        assert len(labels) == 4, f"应有 4 个标签，实际 {len(labels)}"
+        assert set(labels.keys()) == {"v0", "v1", "v2", "v3"}
+        for k in labels:
+            assert labels[k], f"view_labels[{k}] 不应为空"
+
+    def test_viewlabel_renders_as_viewkey_space_timeframe(self):
+        """viewLabel 渲染结果应为 'v0 15分钟' 格式，而非 'v0 v0'。"""
+        def simulate_viewlabel(view_key, labels):
+            label = labels.get(view_key, "")
+            return view_key + " " + label if label else view_key
+
+        labels = {"v0": "15分钟", "v1": "60分钟", "v2": "日线", "v3": "周线"}
+
+        assert simulate_viewlabel("v0", labels) == "v0 15分钟"
+        assert simulate_viewlabel("v1", labels) == "v1 60分钟"
+        assert simulate_viewlabel("v2", labels) == "v2 日线"
+        assert simulate_viewlabel("v3", labels) == "v3 周线"
+        assert simulate_viewlabel("v0", {}) == "v0"
+
+    def test_label_format_is_consistent_with_metadata(self, tmp_path):
+        """metadata 中的 view_labels 值与 view_configs 中的 tf 一致。"""
+        configs = [
+            {"name": "a", "tf": "15分钟"},
+            {"name": "b", "tf": "60分钟"},
+        ]
+        store = ParquetStore(str(tmp_path), "AAPL", configs)
+        store.start_session()
+        store.end_session()
+
+        import json
+        meta_path = tmp_path / list(tmp_path.iterdir())[0].name / "metadata.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+
+        labels = meta["view_labels"]
+        expected = {"v0": "15分钟", "v1": "60分钟"}
+        assert labels == expected
+
+        stored_configs = meta.get("view_configs", {})
+        assert stored_configs["v0"]["tf"] == "15分钟"
+        assert stored_configs["v1"]["tf"] == "60分钟"

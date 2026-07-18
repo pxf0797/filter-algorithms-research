@@ -186,22 +186,43 @@ class CSVBuilder:
             result[f"{prefix}_short_pos"] = int(_last_value(short_mask))
 
         # --- 交易事件匹配 ---
-        # Use <= to find the most recent trade event at or before
-        # view_last_idx.  Exact match (==) systematically misses
-        # entry events because entry_idx (pair_end) almost never
-        # lands on the last bar of the dataset.
+        # Trade matching strategy:
+        # - "exit_*"  → trade exited at current bar (exit_idx == view_last_idx,
+        #                but not eod forced exits — those mean the trade is still
+        #                active beyond this window).
+        # - "entry_*" → trade entered before or at current bar and is still
+        #                active (no exit, exit after current bar, or eod exit).
+        # - ""        → no current trade.
+        #
+        # Previous code used ``<=`` for both, which caused every bar after the
+        # first completed trade to forever show "exit_*" — making the column
+        # useless (200 consecutive "exit" values, 0 "entry").
         trade_val = ""
         trade_return = float("nan")
         trade_reason = ""
         for t in trade_records:
-            if t.get("exit_idx") is not None and int(t["exit_idx"]) <= view_last_idx:
-                trade_type = t.get("type", "long")
+            exit_idx = t.get("exit_idx")
+            entry_idx = t.get("entry_idx")
+            trade_type = t.get("type", "long")
+            reason = str(t.get("exit_reason", ""))
+
+            # Genuine exit at current bar (not eod forced exit)
+            if (
+                exit_idx is not None
+                and int(exit_idx) == view_last_idx
+                and reason != "eod"
+            ):
                 trade_val = f"exit_{trade_type}"
                 trade_return = t.get("return_pct", float("nan"))
-                trade_reason = t.get("exit_reason", "")
-            elif t.get("entry_idx") is not None and int(t["entry_idx"]) <= view_last_idx:
-                trade_type = t.get("type", "long")
-                trade_val = f"entry_{trade_type}"
+                trade_reason = reason
+            # Active trade at current bar
+            elif entry_idx is not None and int(entry_idx) <= view_last_idx:
+                if (
+                    exit_idx is None
+                    or int(exit_idx) > view_last_idx
+                    or reason == "eod"
+                ):
+                    trade_val = f"entry_{trade_type}"
         result[f"{prefix}_trade"] = trade_val
         result[f"{prefix}_trade_return"] = trade_return
         result[f"{prefix}_trade_reason"] = trade_reason

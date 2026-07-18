@@ -427,7 +427,7 @@ class ParquetStore:
             else _BOOL_NA
         )
 
-        # ── Trade columns: traverse, match exit_idx ───────────────
+        # ── Trade columns: match exit/entry at current bar ─────────
 
         t_arr = view_data.get("t")
         view_last_idx: int = len(t_arr) - 1 if t_arr is not None else -1
@@ -437,24 +437,43 @@ class ParquetStore:
         trade_return = _FLOAT_NA
         trade_reason = _STR_NA
 
-        # Use <= to find the most recent trade event at or before
-        # view_last_idx.  Exact match (==) systematically misses
-        # entry events because entry_idx (pair_end) almost never
-        # lands on the last bar of the dataset.
+        # Trade matching strategy:
+        # - "exit_*"  → trade exited at current bar (exit_idx == view_last_idx,
+        #                but not eod forced exits — those mean the trade is still
+        #                active beyond this window).
+        # - "entry_*" → trade entered before or at current bar and is still
+        #                active (no exit, exit after current bar, or eod exit).
+        # - ""        → no current trade.
+        #
+        # Previous code used ``<=`` for both, which caused every bar after the
+        # first completed trade to forever show "exit_*" — making the column
+        # useless (200 consecutive "exit" values, 0 "entry").
         for trade in trade_records:
             exit_idx = trade.get("exit_idx")
             entry_idx = trade.get("entry_idx")
             tt = trade.get("type", "")
+            reason = str(trade.get("exit_reason", ""))
 
-            if exit_idx is not None and int(exit_idx) <= view_last_idx:
+            # Genuine exit at current bar (not eod forced exit)
+            if (
+                exit_idx is not None
+                and int(exit_idx) == view_last_idx
+                and reason != "eod"
+            ):
                 trade_val = f"exit_{tt}"
                 trade_return = float(trade.get("return_pct", _FLOAT_NA))
-                trade_reason = str(trade.get("exit_reason", ""))
+                trade_reason = reason
+            # Active trade at current bar
             elif entry_idx is not None and int(entry_idx) <= view_last_idx:
-                trade_val = f"entry_{tt}"
-                # entry has no realised return yet
-                trade_return = _FLOAT_NA
-                trade_reason = _STR_NA
+                if (
+                    exit_idx is None
+                    or int(exit_idx) > view_last_idx
+                    or reason == "eod"
+                ):
+                    trade_val = f"entry_{tt}"
+                    # entry has no realised return yet
+                    trade_return = _FLOAT_NA
+                    trade_reason = _STR_NA
 
         result[f"{prefix}_trade"] = trade_val
         result[f"{prefix}_trade_return"] = trade_return
