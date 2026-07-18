@@ -477,6 +477,80 @@ class TestFetchAllTimeframes:
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# TestDisplayCacheIsolation — 显示缓存 ticker 隔离测试
+# ---------------------------------------------------------------------------
+
+class TestDisplayCacheIsolation:
+    """测试显示缓存的 ticker 隔离。
+
+    确保 ``data/display/{ticker_code}/{tf}.parquet`` 格式不会退化回
+    ``data/display/{tf}.parquet``（此前已修复的 bug）。
+    """
+
+    def test_parquet_path_includes_ticker(self, tmp_path):
+        """_sync_to_display 写入 ``data/display/{ticker}/{tf}.parquet``。"""
+        df = _mock_ohlc_df(days=20)
+        mock_df = _query_result(df)
+        with patch("services.data_loader.query_kline", return_value=mock_df), \
+             patch("services.data_loader.Path") as mock_path_cls:
+            fake_file = tmp_path / "filter_app" / "services" / "data_loader.py"
+            mock_path_cls.return_value = fake_file
+
+            from services.data_loader import _sync_to_display
+            ok, _ = _sync_to_display("AAPL", "日线", n_pts=20)
+            assert ok is True
+
+            expected = tmp_path / "data" / "display" / "AAPL" / "日线.parquet"
+            assert expected.exists(), f"Expected {expected} to exist"
+
+    def test_different_tickers_different_dirs(self, tmp_path):
+        """不同 ticker 写入不同目录，互不覆盖。"""
+        df = _mock_ohlc_df(days=20)
+        mock_df = _query_result(df)
+        with patch("services.data_loader.query_kline", return_value=mock_df), \
+             patch("services.data_loader.Path") as mock_path_cls:
+            fake_file = tmp_path / "filter_app" / "services" / "data_loader.py"
+            mock_path_cls.return_value = fake_file
+
+            from services.data_loader import _sync_to_display
+            _sync_to_display("AAPL", "日线", n_pts=20)
+            _sync_to_display("TSLA", "日线", n_pts=20)
+
+            aapl_dir = tmp_path / "data" / "display" / "AAPL"
+            tsla_dir = tmp_path / "data" / "display" / "TSLA"
+            assert aapl_dir.exists(), "AAPL display dir should exist"
+            assert tsla_dir.exists(), "TSLA display dir should exist"
+            assert (aapl_dir / "日线.parquet").exists()
+            assert (tsla_dir / "日线.parquet").exists()
+
+    def test_path_format_does_not_regress(self, tmp_path):
+        """回归测试：路径格式是 ``display/{ticker}/{tf}.parquet`` 而非
+        ``display/{tf}.parquet``（此前 bug 的回归防护）。
+        """
+        df = _mock_ohlc_df(days=20)
+        mock_df = _query_result(df)
+        with patch("services.data_loader.query_kline", return_value=mock_df), \
+             patch("services.data_loader.Path") as mock_path_cls:
+            fake_file = tmp_path / "filter_app" / "services" / "data_loader.py"
+            mock_path_cls.return_value = fake_file
+
+            from services.data_loader import _sync_to_display
+            _sync_to_display("000001.SZ", "60分钟", n_pts=20)
+
+            display_root = tmp_path / "data" / "display"
+            # 确保没有直接放在 display/ 根目录下的 parquet（退化格式）
+            root_parquets = list(display_root.glob("*.parquet"))
+            assert len(root_parquets) == 0, (
+                f"Regression: found parquet at display root: {root_parquets}. "
+                f"Files must be in ticker-scoped subdirectories."
+            )
+            # 确认 ticker 子目录存在
+            ticker_dir = display_root / "000001.SZ"
+            assert ticker_dir.exists()
+            assert (ticker_dir / "60分钟.parquet").exists()
+
+
 # Smoke tests: module-level import does not crash
 # ---------------------------------------------------------------------------
 

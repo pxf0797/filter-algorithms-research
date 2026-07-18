@@ -781,3 +781,69 @@ class TestCSVBuilderEdgeCases:
         assert cols.get("v0_bs_exit") == "-"
         # trade 默认 ""
         assert cols.get("v0_trade") == ""
+
+
+# ============================================================================
+# TestConcurrencySafety — ParquetStore 并发安全 / 隔离测试
+# ============================================================================
+
+
+class TestConcurrencySafety:
+    """测试 ParquetStore 在并发/串行场景下的目录隔离。
+
+    验证不同 ticker 写入不同 session 目录，同一 ticker 串行运行
+    不互相覆盖。
+    """
+
+    def test_different_tickers_independent(self, tmp_path):
+        """不同 ticker 的 session 目录互不重叠。"""
+        store_a = ParquetStore(str(tmp_path), "AAPL", [{"name": "v0"}])
+        store_b = ParquetStore(str(tmp_path), "TSLA", [{"name": "v0"}])
+
+        sid_a = store_a.start_session()
+        sid_b = store_b.start_session()
+
+        assert store_a._session_dir != store_b._session_dir
+        assert "AAPL" in str(store_a._session_dir)
+        assert "TSLA" in str(store_b._session_dir)
+        assert sid_a != sid_b
+
+        # 清理
+        store_a.end_session()
+        store_b.end_session()
+
+    def test_same_ticker_serial_runs_isolated(self, tmp_path):
+        """同一 ticker 串行运行使用不同的 session 目录。"""
+        import time
+
+        store = ParquetStore(str(tmp_path), "AAPL", [{"name": "v0"}])
+
+        sid1 = store.start_session()
+        dir1 = store._session_dir
+        store.end_session()
+
+        # 等待至少 1 秒以确保时间戳不同（session ID 精度为秒级）
+        time.sleep(1.1)
+
+        sid2 = store.start_session()
+        dir2 = store._session_dir
+
+        assert dir1 != dir2, (
+            f"Serial runs should use different session dirs: {dir1} == {dir2}"
+        )
+        assert sid1 != sid2, (
+            f"Serial runs should have different session IDs: {sid1} == {sid2}"
+        )
+
+        store.end_session()
+
+    def test_session_dir_includes_ticker_and_session_id(self, tmp_path):
+        """session 目录路径同时包含 ticker 和 session_id。"""
+        store = ParquetStore(str(tmp_path), "AAPL", [{"name": "v0"}])
+        sid = store.start_session()
+
+        dir_name = store._session_dir.name
+        assert "AAPL" in dir_name, f"Directory name should contain ticker: {dir_name}"
+        assert sid in dir_name, f"Directory name should contain session_id: {dir_name}"
+
+        store.end_session()

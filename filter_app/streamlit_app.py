@@ -609,7 +609,7 @@ def _save_backtest_config(ticker_code, min_tf, bar_count, window_size):
     """保存回测配置到 JSON 文件。"""
     import json
     from datetime import datetime
-    config_path = Path(__file__).parent.parent / "data" / "backtest_config.json"
+    config_path = Path(__file__).parent.parent / "data" / f"backtest_config_{ticker_code}.json"
     config = {
         "ticker": ticker_code,
         "min_tf": min_tf,
@@ -624,7 +624,7 @@ def _save_backtest_config(ticker_code, min_tf, bar_count, window_size):
 def _load_backtest_config(ticker_code):
     """加载回测配置缓存。ticker匹配时返回配置，否则返回None。"""
     import json
-    config_path = Path(__file__).parent.parent / "data" / "backtest_config.json"
+    config_path = Path(__file__).parent.parent / "data" / f"backtest_config_{ticker_code}.json"
     if config_path.exists():
         try:
             with open(config_path) as f:
