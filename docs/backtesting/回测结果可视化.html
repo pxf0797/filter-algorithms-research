@@ -106,7 +106,6 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 .plot-wrap { width: 100%; }
 .plot-wrap-signals { width: 100%; height: 600px; }
 .plot-wrap-overview { width: 100%; height: 450px; }
-.plot-wrap-filtered { width: 100%; height: 450px; }
 .plot-wrap-pnl { width: 100%; height: 550px; }
 .plot-wrap-heatmap { width: 100%; height: 280px; }
 .plot-wrap-trades { width: 100%; height: 500px; }
@@ -131,6 +130,14 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 .data-table td.val-pos { color: var(--green); }
 .data-table td.val-neg { color: var(--red); }
 .data-table td.val-zero { color: var(--text-dim); }
+
+	/* Parameter summary table in overview */
+	.param-summary-table { margin-top: 20px; overflow-x: auto; }
+	.param-summary-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+	.param-summary-table th { background: #21262d; color: var(--text-dim); font-weight: 600; padding: 8px 12px; text-align: center; border: 1px solid var(--border); white-space: nowrap; }
+	.param-summary-table td { padding: 6px 10px; text-align: center; border: 1px solid #21262d; color: var(--text); white-space: nowrap; font-variant-numeric: tabular-nums; }
+	.param-summary-table td.col-label { text-align: left; font-weight: 600; color: var(--text-hl); }
+	.param-summary-table tbody tr:hover { background: rgba(88,166,255,0.06); }
 .data-table th.col-fixed { background: #1a2332; color: var(--blue); }
 .data-table th.col-v0 { background: #1a2332; }
 .data-table th.col-v1 { background: #1a2e1a; }
@@ -254,13 +261,14 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     <div class="section-title"><span class="num">1</span> 概览仪表盘</div>
     <div class="kpi-grid" id="kpi-grid"></div>
     <div class="summary-row" id="summary-row"></div>
-  </div>
+	    <div class="param-summary-table" id="param-summary"></div>
+	  </div>
 
-  <!-- Section 2: Filtered Price Overview -->
+	  <!-- Section 2: Filtered Price Overview -->
 	  <div class="section">
-	    <div class="section-title"><span class="num">2</span> Filtered 价格总览（4 视图叠加 + 日线 eps 阈值带）</div>
+	    <div class="section-title"><span class="num">2</span> Filtered 价格总览 + eps 阈值带（4 线叠加 + v2 eps 带）</div>
 	    <div class="plot-wrap-overview" id="chart-filtered-overview"></div>
-	    <p class="annotation">4 条滤波价格线叠加（颜色+线宽分层），半透明带=v2(日线) ±eps 阈值参考。</p>
+	    <p class="annotation">4 条滤波价格线叠加（颜色+线宽分层），半透明带=v2(日线) ±eps 阈值参考。已合并原板块4内容。</p>
 	  </div>
 
   <!-- Section 3: Signal Comparison -->
@@ -270,36 +278,29 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     <p class="annotation">4 个子图垂直堆叠，共享 x 轴，各自独立 y 轴固定 [-1, +1]。绿(+1)/红(-1)/灰(0) 背景着色，阶梯信号线。</p>
   </div>
 
-  <!-- Section 4: Filtered Price + EPS -->
+  <!-- Section 4: PnL Curves -->
   <div class="section">
-    <div class="section-title"><span class="num">4</span> 滤波价格叠加 + EPS 阈值带（v2 日线参考）</div>
-    <div class="plot-wrap-filtered" id="chart-filtered"></div>
-    <p class="annotation">4 条滤波价格线叠加（颜色+线宽分层），半透明带=v2(日线) ±eps 阈值参考。</p>
-  </div>
-
-  <!-- Section 5: PnL Curves -->
-  <div class="section">
-    <div class="section-title"><span class="num">5</span> PnL 曲线（4 视图 x 做多+做空）</div>
+    <div class="section-title"><span class="num">4</span> PnL 曲线（4 视图 x 做多+做空）</div>
     <div class="plot-wrap-pnl" id="chart-pnl"></div>
     <p class="annotation">实线=做多 PnL，虚线=做空 PnL。标注为各曲线终值。</p>
   </div>
 
-  <!-- Section 6: Position Heatmap -->
+  <!-- Section 5: Position Heatmap -->
   <div class="section">
-    <div class="section-title"><span class="num">6</span> 持仓状态热力图（4 视图 x long_pos + short_pos）</div>
+    <div class="section-title"><span class="num">5</span> 持仓状态热力图（4 视图 x long_pos + short_pos）</div>
     <div class="plot-wrap-heatmap" id="chart-heatmap"></div>
     <p class="annotation">行=视图，列=时间（采样 100 点）。绿色=做多持仓，红色=做空持仓，灰色=空仓。</p>
   </div>
 
-  <!-- Section 7: Trade Events -->
+  <!-- Section 6: Trade Events -->
   <div class="section">
-    <div class="section-title"><span class="num">7</span> 交易事件 &amp; BS 标记统计</div>
+    <div class="section-title"><span class="num">6</span> 交易事件 &amp; BS 标记统计</div>
     <div class="plot-wrap-trades" id="chart-trades"></div>
   </div>
 
-  <!-- Section 8: Data Table -->
+  <!-- Section 7: Data Table -->
   <div class="section">
-    <div class="section-title"><span class="num">8</span> 完整数据表（前 50 行，横向滚动）</div>
+    <div class="section-title"><span class="num">7</span> 完整数据表（前 50 行，横向滚动）</div>
     <div class="table-wrap" id="table-wrap"></div>
   </div>
 </div>
@@ -401,7 +402,76 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       '<span>日期范围: <strong>' + dateMin + '</strong> &rarr; <strong>' + dateMax + '</strong></span>' +
       '<span>数据规模: <strong>' + N + ' 行 x ' + data.parquetCols.length + ' 列</strong></span>' +
       '<span>metadata: <span class="meta-badge">&#10003; 已加载</span></span>';
-  }
+
+	    // Build parameter summary table
+	    buildParamSummaryTable(data);
+	  }
+
+	  // Parameter summary table: per-view stats
+	  function buildParamSummaryTable(data) {
+	    const { columns, N } = data;
+	    var headers = ['视图', '周期', 'eps均值', '信号翻转', '做多PnL', '做空PnL', '交易笔数', 'BS标记数'];
+	    var tableHtml = '<div class="section-title" style="margin-top:8px;border-bottom:1px solid var(--border);padding-bottom:8px;font-size:14px;color:var(--text-dim)">各周期参数摘要</div>';
+	    tableHtml += '<table><thead><tr>';
+	    headers.forEach(function(h) { tableHtml += '<th>' + h + '</th>'; });
+	    tableHtml += '</tr></thead><tbody>';
+
+	    VIEWS.forEach(function(v) {
+	      var label = viewLabels[v] || v;
+
+	      // eps mean
+	      var eps = col(data, v + '_eps');
+	      var epsSum = 0, epsCount = 0;
+	      for (var i = 0; i < N; i++) {
+	        var val = toNum(eps[i]);
+	        if (!isNaN(val)) { epsSum += val; epsCount++; }
+	      }
+	      var epsMean = epsCount > 0 ? (epsSum / epsCount) : NaN;
+
+	      // signal flips (any change between adjacent rows)
+	      var sig = col(data, v + '_sig');
+	      var flips = 0;
+	      for (var i = 1; i < N; i++) {
+	        if (sig[i] !== sig[i - 1]) flips++;
+	      }
+
+	      // PnL final values
+	      var pnlLong = col(data, v + '_pnl_long');
+	      var pnlShort = col(data, v + '_pnl_short');
+	      var lastL = toNum(pnlLong[N - 1]) || 100;
+	      var lastS = toNum(pnlShort[N - 1]) || 100;
+
+	      // trade count
+	      var trades = col(data, v + '_trade');
+	      var tradeCount = 0;
+	      for (var i = 0; i < N; i++) {
+	        if (trades[i]) tradeCount++;
+	      }
+
+	      // BS marker count (entry + exit)
+	      var bsEntry = col(data, v + '_bs_entry');
+	      var bsExit = col(data, v + '_bs_exit');
+	      var bsCount = 0;
+	      for (var i = 0; i < N; i++) {
+	        if (bsEntry[i]) bsCount++;
+	        if (bsExit[i]) bsCount++;
+	      }
+
+	      tableHtml += '<tr>' +
+	        '<td class="col-label">' + v + '</td>' +
+	        '<td>' + label + '</td>' +
+	        '<td>' + (isNaN(epsMean) ? '—' : epsMean.toFixed(4)) + '</td>' +
+	        '<td>' + flips + '</td>' +
+	        '<td style="color:var(--' + (lastL >= 100 ? 'green' : 'red') + ')">' + (lastL - 100).toFixed(2) + '%</td>' +
+	        '<td style="color:var(--' + (lastS >= 100 ? 'green' : 'red') + ')">' + (lastS - 100).toFixed(2) + '%</td>' +
+	        '<td>' + tradeCount + '</td>' +
+	        '<td>' + bsCount + '</td>' +
+	        '</tr>';
+	    });
+
+	    tableHtml += '</tbody></table>';
+	    document.getElementById('param-summary').innerHTML = tableHtml;
+	  }
 
   // --- Section 2: Filtered Price Overview (4 views overlay + daily EPS band) ---
   function buildFilteredOverview(data) {
@@ -595,77 +665,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   }
 
 
-  // --- Section 4: Filtered Price + EPS (merged overlay) ---
-  function buildFiltered(data) {
-    const { columns, N } = data;
-    const barTs = col(data, 'bar_timestamp');
-    const traces = [];
-
-    // Line styles for filtered price: hierarchical by cycle length
-    const lineStyles = {
-      v0: { width: 1.0, opacity: 0.40 },
-      v1: { width: 1.8, opacity: 0.60 },
-      v2: { width: 2.6, opacity: 0.85 },
-      v3: { width: 3.5, opacity: 1.0 },
-    };
-
-    // Add filtered price lines for all 4 views
-    VIEWS.forEach(function(v) {
-      var filtered = col(data, v + '_filtered');
-      var style = lineStyles[v];
-      traces.push({
-        x: barTs, y: filtered,
-        type: 'scatter', mode: 'lines',
-        name: viewLabel(v),
-        line: { width: style.width, color: VIEW_COLORS[v] },
-        opacity: style.opacity,
-        showlegend: true,
-      });
-    });
-
-    // Add v2 (daily) EPS band as reference
-    var v2Filtered = col(data, 'v2_filtered');
-    var v2Eps = col(data, 'v2_eps');
-    var epsUpper = v2Filtered.map(function(f, i) { return toNum(f) + toNum(v2Eps[i]); });
-    var epsLower = v2Filtered.map(function(f, i) { return toNum(f) - toNum(v2Eps[i]); });
-
-    // Upper band (invisible line to anchor fill)
-    traces.push({
-      x: barTs, y: epsUpper,
-      type: 'scatter', mode: 'lines',
-      name: 'v2 +eps',
-      line: { width: 0 },
-      showlegend: false,
-    });
-
-    // Lower band + fill to upper
-    traces.push({
-      x: barTs, y: epsLower,
-      type: 'scatter', mode: 'lines',
-      name: 'v2 ±eps',
-      line: { width: 0 },
-      fill: 'tonexty',
-      fillcolor: 'rgba(210,153,29,0.08)',
-      showlegend: true,
-    });
-
-    const tickFormat = getTimeTickFormat(barTs);
-
-    var layout = {
-      template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
-      font: baseFont, displayModeBar: false,
-      margin: { l: 70, r: 40, t: 20, b: 40 },
-      showlegend: true,
-      legend: { orientation: 'h', y: 1.08, x: 0.5, xanchor: 'center', font: { size: 11, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
-      xaxis: { title: { text: '时间', font: { size: 10, color: '#8b949e' } }, type: 'date', tickformat: tickFormat, showgrid: true, gridcolor: gridColor, zeroline: false },
-      yaxis: { title: { text: '滤波价格', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
-    };
-
-    Plotly.newPlot('chart-filtered', traces, layout, plotConfig);
-  }
-
-
-  // --- Section 5: PnL Curves ---
+  // --- Section 4: PnL Curves ---
   function buildPnl(data) {
     const { columns, N } = data;
     const barTs = col(data, 'bar_timestamp');
@@ -735,7 +735,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     Plotly.newPlot('chart-pnl', traces, layout, plotConfig);
   }
 
-  // --- Section 6: Position Heatmap ---
+  // --- Section 5: Position Heatmap ---
   function buildHeatmap(data) {
     const { columns, N } = data;
     const barTs = col(data, 'bar_timestamp');
@@ -795,7 +795,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     Plotly.newPlot('chart-heatmap', [trace], layout, plotConfig);
   }
 
-  // --- Section 7: Trade Events & BS Markers ---
+  // --- Section 6: Trade Events & BS Markers ---
   function buildTrades(data) {
     const { columns, N } = data;
     const viewTradeCounts = {};
@@ -884,7 +884,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     Plotly.newPlot('chart-trades', [...traces1, trace2a, trace2b, trace3], layout, plotConfig);
   }
 
-  // --- Section 8: Data Table ---
+  // --- Section 7: Data Table ---
   function buildTable(data) {
     const { columns, N, parquetCols } = data;
     const wrap = document.getElementById('table-wrap');
@@ -975,11 +975,10 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       (metadata ? '<span class="meta-badge">metadata 已加载</span>' : '') +
       '<button class="btn-reselect" onclick="location.reload()">重新选择文件</button>';
 
-    // Render all 8 sections
+    // Render all sections
     buildOverview(data);
     buildFilteredOverview(data);
     buildSignals(data);
-    buildFiltered(data);
     buildPnl(data);
     buildHeatmap(data);
     buildTrades(data);
