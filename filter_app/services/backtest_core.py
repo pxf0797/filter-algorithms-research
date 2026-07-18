@@ -739,3 +739,77 @@ class BacktestRunner:
         except Exception as e:
             logger.warning("查询 bar_count 失败: {}", e)
             return 0
+
+
+# ═══════════════════════════════════════════════════════════════
+# 按需重算函数
+# ═══════════════════════════════════════════════════════════════
+
+def replay_bar(
+    ticker: str,
+    bar_index: int,
+    view_configs: list[dict],
+) -> Optional[dict]:
+    """重算指定 bar 的完整管道输出，与 Streamlit 回测状态完全一致。
+
+    创建 ``BacktestRunner`` 实例，在目标 bar 上运行一步管道计算，
+    返回该 bar 的完整 stage_output。
+
+    Parameters
+    ----------
+    ticker : str
+        股票代码（DB 中存储的原始代码，如 ``"AAPL"``）。
+    bar_index : int
+        目标 bar 索引（min_tf 上的全局索引）。
+    view_configs : list[dict]
+        视图配置列表（从 metadata.json 的 ``config.configs`` 获取）。
+
+    Returns
+    -------
+    Optional[dict]
+        该 bar 的完整管道输出，结构与 ``BacktestRunner.run()``
+        单步结果相同：``{"bar_index": ..., "bar_timestamp": ...,
+        "cutoff_date": ..., "views": {...}, "ohlcv": {...}}``。
+        若数据不足或重算失败则返回 ``None``。
+
+    Notes
+    -----
+    边界处理：若 ``bar_index`` 小于所有视图中最大的 ``n_pts``，
+    则自动调整为 ``max(n_pts)``，以确保有足够的历史窗口数据。
+    """
+    if not ticker or not ticker.strip():
+        logger.warning("replay_bar: ticker 为空")
+        return None
+    if not view_configs:
+        logger.warning("replay_bar: view_configs 为空")
+        return None
+
+    ticker = ticker.strip()
+
+    # 计算窗口安全边界：bar_index 必须 >= max(n_pts)
+    max_n_pts = max(cfg.get("n_pts", 120) for cfg in view_configs)
+    if bar_index < max_n_pts:
+        logger.info(
+            "replay_bar: bar_index={} < max_n_pts={}, 自动调整为 {}",
+            bar_index, max_n_pts, max_n_pts,
+        )
+        bar_index = max_n_pts
+
+    runner = BacktestRunner(ticker, view_configs)
+    total_bars = runner.get_bar_count()
+    if bar_index >= total_bars:
+        logger.warning(
+            "replay_bar: bar_index={} 超出范围 (total={})", bar_index, total_bars,
+        )
+        return None
+
+    try:
+        results = runner.run(bar_index, bar_index + 1, 1)
+    except (ValueError, IndexError) as e:
+        logger.error("replay_bar 执行失败: ticker={}, bar_index={}, error={}",
+                     ticker, bar_index, e)
+        return None
+
+    if results:
+        return results[0]
+    return None
