@@ -69,12 +69,12 @@ class CSVBuilder:
             "volume": ohlcv.get("volume", float("nan")),
         }
         for view_name, view_data in views_data.items():
-            cols = self._extract_view_columns(view_name, view_data, bar_index)
+            cols = self._extract_view_columns(view_name, view_data)
             row.update(cols)
         self._rows[bar_index] = row
 
     def _extract_view_columns(
-        self, view_name: str, view_data: dict, bar_index: int
+        self, view_name: str, view_data: dict
     ) -> dict:
         """从一个视图数据中提取 CSV 列。
 
@@ -89,6 +89,13 @@ class CSVBuilder:
         - ``{prefix}_trade_count``: trade_records 数量
         - ``{prefix}_bs_entry``: entry marker label (B/S/-)
         - ``{prefix}_bs_exit``: exit marker label (B/S/-)
+        - ``{prefix}_pnl_long``: 做多 PnL 终值
+        - ``{prefix}_pnl_short``: 做空 PnL 终值
+        - ``{prefix}_long_pos``: 做多持仓 (1/0)
+        - ``{prefix}_short_pos``: 做空持仓 (1/0)
+        - ``{prefix}_trade``: 交易事件 (entry_long/exit_long/...)
+        - ``{prefix}_trade_return``: 盈亏%
+        - ``{prefix}_trade_reason``: 离场原因
 
         Parameters
         ----------
@@ -96,8 +103,6 @@ class CSVBuilder:
             视图名，如 ``"v0_日线"``。前缀从名称中提取。
         view_data : dict
             该视图的管道输出数据。
-        bar_index : int
-            当前 bar 索引，用于匹配 BS marker 的 bar_idx。
 
         Returns
         -------
@@ -145,20 +150,57 @@ class CSVBuilder:
         if trade_records is not None:
             result[f"{prefix}_trade_count"] = len(trade_records)
 
+        # --- 局部窗口索引（用于 BS marker 和 trade 匹配） ---
+        t_arr = view_data.get("t")
+        view_last_idx = len(t_arr) - 1 if t_arr is not None else -1
+
         # --- BS markers ---
         bs_markers: dict = view_data.get("bs_markers", {})
         entry_label = "-"
         exit_label = "-"
         for m in bs_markers.get("entry_markers", []):
-            if int(m[0]) == bar_index:
+            if int(m[0]) == view_last_idx:
                 entry_label = str(m[1])
                 break
         for m in bs_markers.get("exit_markers", []):
-            if int(m[0]) == bar_index:
+            if int(m[0]) == view_last_idx:
                 exit_label = str(m[1])
                 break
         result[f"{prefix}_bs_entry"] = entry_label
         result[f"{prefix}_bs_exit"] = exit_label
+
+        # --- PnL & 持仓终值 ---
+        long_pnl = view_data.get("long_pnl")
+        if long_pnl is not None:
+            result[f"{prefix}_pnl_long"] = _last_value(long_pnl)
+        short_pnl = view_data.get("short_pnl")
+        if short_pnl is not None:
+            result[f"{prefix}_pnl_short"] = _last_value(short_pnl)
+        long_mask = view_data.get("long_mask")
+        if long_mask is not None:
+            result[f"{prefix}_long_pos"] = int(_last_value(long_mask))
+        short_mask = view_data.get("short_mask")
+        if short_mask is not None:
+            result[f"{prefix}_short_pos"] = int(_last_value(short_mask))
+
+        # --- 交易事件匹配 ---
+        trade_val = ""
+        trade_return = float("nan")
+        trade_reason = ""
+        for t in view_data.get("trade_records", []):
+            if t.get("exit_idx") == view_last_idx:
+                trade_type = t.get("type", "long")
+                trade_val = f"exit_{trade_type}"
+                trade_return = t.get("return_pct", float("nan"))
+                trade_reason = t.get("exit_reason", "")
+                break
+            elif t.get("entry_idx") == view_last_idx:
+                trade_type = t.get("type", "long")
+                trade_val = f"entry_{trade_type}"
+                break
+        result[f"{prefix}_trade"] = trade_val
+        result[f"{prefix}_trade_return"] = trade_return
+        result[f"{prefix}_trade_reason"] = trade_reason
 
         return result
 
