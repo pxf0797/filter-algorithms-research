@@ -281,7 +281,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 </div>
 
 <script type="module">
-import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0/dist/duckdb-browser-blocking.js';
+import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0/dist/duckdb-browser.mjs';
 
 // ========== Constants ==========
 const VIEWS = ['v0', 'v1', 'v2', 'v3'];
@@ -346,35 +346,41 @@ function toBool(v) { return v === true || v === 1; }
 async function initDuckDB() {
   const BASE = 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm@1.29.0/dist';
 
-  setLoading(10, '正在检测浏览器兼容性...');
+  setLoading(10, '正在选择 DuckDB 引擎变体...');
 
-  const bundles = {
-    mvp: {
-      mainModule: `${BASE}/duckdb-mvp.wasm`,
-      mainWorker: `${BASE}/duckdb-browser-mvp.worker.js`,
-    },
-    eh: {
-      mainModule: `${BASE}/duckdb-eh.wasm`,
-      mainWorker: `${BASE}/duckdb-browser-eh.worker.js`,
-    },
-  };
+  // Try getJsDelivrBundles (newer API), fall back to manual URLs
+  let bundles;
+  if (typeof duckdb.getJsDelivrBundles === 'function') {
+    bundles = duckdb.getJsDelivrBundles();
+  } else {
+    bundles = {
+      mvp: {
+        mainModule: `${BASE}/duckdb-mvp.wasm`,
+        mainWorker: `${BASE}/duckdb-browser-mvp.worker.js`,
+      },
+      eh: {
+        mainModule: `${BASE}/duckdb-eh.wasm`,
+        mainWorker: `${BASE}/duckdb-browser-eh.worker.js`,
+      },
+    };
+  }
 
-  setLoading(20, '正在选择 DuckDB 引擎变体...');
+  setLoading(20, '正在检测浏览器兼容性...');
   const bundle = await duckdb.selectBundle(bundles);
 
-  setLoading(30, '正在加载 Worker 脚本...');
-  const workerResp = await fetch(bundle.mainWorker);
-  const workerJs = await workerResp.text();
-  const workerBlob = new Blob([workerJs], { type: 'application/javascript' });
-  const workerUrl = URL.createObjectURL(workerBlob);
-  const worker = new Worker(workerUrl);
+  setLoading(30, '正在初始化 Worker...');
+  // Use importScripts pattern recommended by DuckDB docs
+  const worker_url = URL.createObjectURL(
+    new Blob([`importScripts("${bundle.mainWorker}");`], { type: 'text/javascript' })
+  );
+  const worker = new Worker(worker_url);
 
   const logger = new duckdb.ConsoleLogger();
   db = new duckdb.AsyncDuckDB(logger, worker);
 
   setLoading(50, '正在下载并初始化 WebAssembly 引擎 (~30MB)...');
-  await db.instantiate(bundle.mainModule);
-  URL.revokeObjectURL(workerUrl);
+  await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+  URL.revokeObjectURL(worker_url);
 
   setLoading(100, 'DuckDB-WASM 初始化完成');
 }
