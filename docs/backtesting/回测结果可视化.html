@@ -366,7 +366,8 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   const VIEWS = ['v0', 'v1', 'v2', 'v3'];
   const VIEW_COLORS = { v0: '#58a6ff', v1: '#3fb950', v2: '#d2991d', v3: '#f78166' };
   // ========== State ==========
-  let viewLabels = {};
+  const DEFAULT_VIEW_LABELS = { v0: '15分钟', v1: '60分钟', v2: '日线', v3: '周线' };
+  let viewLabels = { ...DEFAULT_VIEW_LABELS };
   const isEmbedded = !!(window.BACKTEST_DATA && window.BACKTEST_STATS);
 
   // ========== Helpers ==========
@@ -1086,7 +1087,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   }
   function renderAll(columns, stats, metadata) {
     // Set view labels from metadata (null-safe: if metadata is null or has no view_labels, use empty dict)
-    viewLabels = (metadata && metadata.view_labels) ? { ...metadata.view_labels } : {};
+    viewLabels = (metadata && metadata.view_labels) ? { ...DEFAULT_VIEW_LABELS, ...metadata.view_labels } : { ...DEFAULT_VIEW_LABELS };
 
     const data = {
       columns: columns,
