@@ -365,10 +365,8 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   // ========== Constants ==========
   const VIEWS = ['v0', 'v1', 'v2', 'v3'];
   const VIEW_COLORS = { v0: '#58a6ff', v1: '#3fb950', v2: '#d2991d', v3: '#f78166' };
-  const DEFAULT_VIEW_LABELS = { v0: 'v0', v1: 'v1', v2: 'v2', v3: 'v3' };
-
   // ========== State ==========
-  let viewLabels = { ...DEFAULT_VIEW_LABELS };
+  let viewLabels = {};
   const isEmbedded = !!(window.BACKTEST_DATA && window.BACKTEST_STATS);
 
   // ========== Helpers ==========
@@ -378,8 +376,8 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
   function col(data, name) { return data.columns[name] || []; }
   function viewLabel(viewKey) {
-    const label = viewLabels[viewKey] || viewKey;
-    return viewKey + ' ' + label;
+    const label = viewLabels[viewKey];
+    return label ? (viewKey + ' ' + label) : viewKey;
   }
 	  function hexToRgba(hex, alpha) {
 	    const r = parseInt(hex.slice(1, 3), 16);
@@ -1089,7 +1087,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   function renderAll(columns, stats, metadata) {
     // Set view labels from metadata
     if (metadata && metadata.view_labels) {
-      viewLabels = { ...DEFAULT_VIEW_LABELS, ...metadata.view_labels };
+      viewLabels = { ...metadata.view_labels };
     }
 
     const data = {
