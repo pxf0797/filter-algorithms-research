@@ -1730,3 +1730,268 @@ class TestPnlFreeze:
         row1 = store._extract_row(1, "2024-01-02", so_none)
         assert row1["v0_pnl_long"] == pytest.approx(110.0)
         assert row1["v0_long_pos"] == False  # noqa: E712
+
+
+# ============================================================================
+# TestSignalHysteresis — 信号迟滞：禁止 +1↔-1 直接跳变
+# ============================================================================
+
+
+class TestSignalHysteresis:
+    """信号迟滞: 禁止 +1↔-1 直接跳变。
+
+    根因：每个 120-bar 窗口独立计算施密特触发器（EWMA 重新初始化），
+    导致跨窗口时信号状态分叉，从 +1 直接跳到 -1（跳过 0）。
+    修复：在 append_row 中维护 _last_sig 字典，强制经过中性状态。
+    """
+
+    @staticmethod
+    def _make_store(tmp_path, ticker="TEST"):
+        store = ParquetStore(str(tmp_path), ticker, [{"tf": "日线"}])
+        store.start_session()
+        return store
+
+    @staticmethod
+    def _make_stage_output(sig_val=0):
+        """构建标准 stage_outputs，可指定 sig 值。"""
+        n = 50
+        t = np.arange(n, dtype=float)
+        long_pnl = np.linspace(100, 110, n)
+        short_pnl = np.linspace(100, 105, n)
+        long_mask = np.zeros(n, dtype=bool)
+        short_mask = np.zeros(n, dtype=bool)
+        sig = np.full(n, sig_val, dtype=int)
+        filtered = np.random.RandomState(0).randn(n).cumsum() * 0.01 + 100
+
+        view_data = {
+            "t": t,
+            "schmitt": {"sig": sig, "eps": np.full(n, 0.1)},
+            "filtered": filtered,
+            "long_pnl": long_pnl,
+            "short_pnl": short_pnl,
+            "long_mask": long_mask,
+            "short_mask": short_mask,
+            "trade_records": [],
+            "bs_markers": {"entry_markers": [], "exit_markers": []},
+        }
+        return {"views": {"v0_日线": view_data}}
+
+    # ── 正常路径 ──────────────────────────────────────────────────────────
+
+    def test_signal_long_to_neutral_to_short(self, tmp_path):
+        """+1→0→-1 正常路径：经过中性状态后翻转，不拦截。"""
+        store = self._make_store(tmp_path)
+
+        # Bar 0: +1 (long)
+        row = store._extract_row(0, "2024-01-01", self._make_stage_output(1))
+        assert row["v0_sig"] == 1
+
+        # Bar 1: 0 (neutral) — 允许
+        row = store._extract_row(1, "2024-01-02", self._make_stage_output(0))
+        assert row["v0_sig"] == 0
+
+        # Bar 2: -1 (short) — 经过 0，应通过
+        row = store._extract_row(2, "2024-01-03", self._make_stage_output(-1))
+        assert row["v0_sig"] == -1
+
+    def test_signal_short_to_neutral_to_long(self, tmp_path):
+        """-1→0→+1 正常路径：经过中性状态后翻转，不拦截。"""
+        store = self._make_store(tmp_path)
+
+        # Bar 0: -1 (short)
+        row = store._extract_row(0, "2024-01-01", self._make_stage_output(-1))
+        assert row["v0_sig"] == -1
+
+        # Bar 1: 0 (neutral)
+        row = store._extract_row(1, "2024-01-02", self._make_stage_output(0))
+        assert row["v0_sig"] == 0
+
+        # Bar 2: +1 (long)
+        row = store._extract_row(2, "2024-01-03", self._make_stage_output(1))
+        assert row["v0_sig"] == 1
+
+    # ── 直接跳变被拦截 ────────────────────────────────────────────────────
+
+    def test_signal_direct_flip_blocked(self, tmp_path):
+        """+1→-1 直接跳变被拦截为 0。"""
+        store = self._make_store(tmp_path)
+
+        # Bar 0: +1
+        row = store._extract_row(0, "2024-01-01", self._make_stage_output(1))
+        assert row["v0_sig"] == 1
+
+        # Bar 1: -1 directly — 应被强制为 0
+        row = store._extract_row(1, "2024-01-02", self._make_stage_output(-1))
+        assert row["v0_sig"] == 0, f"Expected 0 (hysteresis blocked), got {row['v0_sig']}"
+
+        # Bar 2: -1 again — 此时 last_sig=0，允许
+        row = store._extract_row(2, "2024-01-03", self._make_stage_output(-1))
+        assert row["v0_sig"] == -1
+
+    def test_signal_direct_flip_short_to_long_blocked(self, tmp_path):
+        """-1→+1 直接跳变被拦截为 0。"""
+        store = self._make_store(tmp_path)
+
+        # Bar 0: -1
+        row = store._extract_row(0, "2024-01-01", self._make_stage_output(-1))
+        assert row["v0_sig"] == -1
+
+        # Bar 1: +1 directly — 应被强制为 0
+        row = store._extract_row(1, "2024-01-02", self._make_stage_output(1))
+        assert row["v0_sig"] == 0, f"Expected 0 (hysteresis blocked), got {row['v0_sig']}"
+
+        # Bar 2: +1 again — 此时 last_sig=0，允许
+        row = store._extract_row(2, "2024-01-03", self._make_stage_output(1))
+        assert row["v0_sig"] == 1
+
+    # ── 连续同向不变 ──────────────────────────────────────────────────────
+
+    def test_signal_stays_long(self, tmp_path):
+        """连续 +1 保持不变。"""
+        store = self._make_store(tmp_path)
+
+        for i in range(5):
+            row = store._extract_row(i, f"2024-01-{i+1:02d}", self._make_stage_output(1))
+            assert row["v0_sig"] == 1
+
+    def test_signal_stays_short(self, tmp_path):
+        """连续 -1 保持不变。"""
+        store = self._make_store(tmp_path)
+
+        for i in range(5):
+            row = store._extract_row(i, f"2024-01-{i+1:02d}", self._make_stage_output(-1))
+            assert row["v0_sig"] == -1
+
+    # ── 同值不变 ──────────────────────────────────────────────────────────
+
+    def test_signal_stays_neutral(self, tmp_path):
+        """连续 0 保持不变。"""
+        store = self._make_store(tmp_path)
+
+        for i in range(5):
+            row = store._extract_row(i, f"2024-01-{i+1:02d}", self._make_stage_output(0))
+            assert row["v0_sig"] == 0
+
+    # ── 多视图独立 ──────────────────────────────────────────────────────
+
+    def test_signal_hysteresis_per_view_independent(self, tmp_path):
+        """各视图的 _last_sig 独立跟踪，互不干扰。"""
+        store = ParquetStore(str(tmp_path), "TEST", [
+            {"tf": "日线"}, {"tf": "周线"}
+        ])
+        store.start_session()
+
+        n = 50
+        t = np.arange(n, dtype=float)
+
+        def _make_multi_view(v0_sig, v1_sig):
+            views = {}
+            for vi, sig_val in enumerate([v0_sig, v1_sig]):
+                sig = np.full(n, sig_val, dtype=int)
+                views[f"v{vi}_tf"] = {
+                    "t": t,
+                    "schmitt": {"sig": sig, "eps": np.full(n, 0.1)},
+                    "filtered": np.random.RandomState(vi).randn(n).cumsum() * 0.01 + 100,
+                    "long_pnl": np.linspace(100, 110, n),
+                    "short_pnl": np.linspace(100, 105, n),
+                    "long_mask": np.zeros(n, dtype=bool),
+                    "short_mask": np.zeros(n, dtype=bool),
+                    "trade_records": [],
+                    "bs_markers": {"entry_markers": [], "exit_markers": []},
+                }
+            return {"views": views}
+
+        # Bar 0: v0=+1, v1=-1
+        row = store._extract_row(0, "2024-01-01", _make_multi_view(1, -1))
+        assert row["v0_sig"] == 1
+        assert row["v1_sig"] == -1
+
+        # Bar 1: v0=-1 (should be blocked), v1=+1 (should be blocked)
+        row = store._extract_row(1, "2024-01-02", _make_multi_view(-1, 1))
+        assert row["v0_sig"] == 0, f"v0: +1→-1 should be blocked, got {row['v0_sig']}"
+        assert row["v1_sig"] == 0, f"v1: -1→+1 should be blocked, got {row['v1_sig']}"
+
+
+# ============================================================================
+# TestBarIndexRendering — x 轴使用 bar_index 避免时间空白
+# ============================================================================
+
+
+class TestBarIndexRendering:
+    """x 轴使用 bar_index 避免时间空白。
+
+    HTML 前端 buildFilteredOverview / buildSignals / buildPnl 使用 bar_index
+    作为 x 轴（搭配 tickvals/ticktext 显示日期），避免周末/隔夜空白被
+    Plotly 连成直线。
+
+    由于无法直接测试 JS 逻辑，改为测试数据完整性：验证 bar_index 和
+    bar_timestamp 列都存在且单调递增，确保前端有正确数据可用。
+    """
+
+    @staticmethod
+    def _make_store(tmp_path, ticker="TEST"):
+        store = ParquetStore(str(tmp_path), ticker, [{"tf": "日线"}])
+        store.start_session()
+        return store
+
+    @staticmethod
+    def _make_stage_output():
+        n = 50
+        t = np.arange(n, dtype=float)
+        sig = np.zeros(n, dtype=int)
+        filtered = np.random.RandomState(0).randn(n).cumsum() * 0.01 + 100
+
+        view_data = {
+            "t": t,
+            "schmitt": {"sig": sig, "eps": np.full(n, 0.1)},
+            "filtered": filtered,
+            "long_pnl": np.linspace(100, 110, n),
+            "short_pnl": np.linspace(100, 105, n),
+            "long_mask": np.zeros(n, dtype=bool),
+            "short_mask": np.zeros(n, dtype=bool),
+            "trade_records": [],
+            "bs_markers": {"entry_markers": [], "exit_markers": []},
+        }
+        return {"views": {"v0_日线": view_data}}
+
+    def test_filtered_overview_uses_bar_index(self, tmp_path):
+        """每行数据必须包含 bar_index 且值正确。"""
+        store = self._make_store(tmp_path)
+
+        rows = []
+        for i in range(5):
+            row = store._extract_row(i, f"2024-01-{i+1:02d}T10:00:00", self._make_stage_output())
+            rows.append(row)
+
+        bar_indices = [r["bar_index"] for r in rows]
+        assert bar_indices == [0, 1, 2, 3, 4], f"bar_index should be 0..4, got {bar_indices}"
+
+        bar_ts = [r["bar_timestamp"] for r in rows]
+        assert all(ts is not None for ts in bar_ts), "bar_timestamp should never be None"
+
+    def test_signals_uses_bar_index(self, tmp_path):
+        """信号对比图数据行必须包含 bar_index 和 bar_timestamp。"""
+        store = self._make_store(tmp_path)
+        row = store._extract_row(42, "2024-01-15T10:00:00", self._make_stage_output())
+
+        assert "bar_index" in row, "bar_index column must exist for signal chart"
+        assert row["bar_index"] == 42
+        assert "bar_timestamp" in row, "bar_timestamp column must exist for signal chart"
+
+    def test_pnl_uses_bar_index(self, tmp_path):
+        """PnL 曲线数据行必须包含 bar_index，且单调递增连续。"""
+        store = self._make_store(tmp_path)
+
+        rows = []
+        for i in range(100, 105):
+            row = store._extract_row(i, f"2024-07-{i-85:02d}T10:00:00", self._make_stage_output())
+            rows.append(row)
+
+        bar_indices = [r["bar_index"] for r in rows]
+        assert bar_indices == [100, 101, 102, 103, 104], (
+            f"bar_index should be monotonically increasing, got {bar_indices}"
+        )
+
+        # bar_timestamp 应各不相同（隔夜/周末会导致时间跳跃，但每个 bar 有值）
+        bar_ts_set = set(str(r["bar_timestamp"]) for r in rows)
+        assert len(bar_ts_set) == 5, "Each bar should have a unique timestamp"

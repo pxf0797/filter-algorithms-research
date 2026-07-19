@@ -612,6 +612,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   function buildSignals(data) {
     const { columns, N } = data;
     const barTs = col(data, 'bar_timestamp');
+    const barIdx = col(data, 'bar_index');
     const traces = [];
     const shapes = [];
     const nViews = VIEWS.length;
@@ -640,13 +641,13 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         if (i === sig.length || sig[i] !== segVal) {
           var key = String(segVal);
           if (sigBgColors[key]) {
-            var x0 = barTs[segStart];
+            var x0 = barIdx[segStart];
             var x1;
             if (i < sig.length) {
-              x1 = barTs[i];
+              x1 = barIdx[i];
             } else {
-              // last segment: extend to the final timestamp
-              x1 = barTs[barTs.length - 1];
+              // last segment: extend to the final bar
+              x1 = barIdx[barIdx.length - 1];
             }
             rects.push({
               type: 'rect',
@@ -667,7 +668,13 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       return rects;
     }
 
-    const tickFormat = getTimeTickFormat(barTs);
+    // 每 ~50 bar 显示一个日期标签
+    var tickStep = Math.max(1, Math.floor(N / 10));
+    var tickVals = [], tickTexts = [];
+    for (var i = 0; i < N; i += tickStep) {
+      tickVals.push(barIdx[i]);
+      tickTexts.push(barTs[i] ? barTs[i].substring(0, 16) : '');
+    }
 
     VIEWS.forEach(function(v, vi) {
       var sig = col(data, v + '_sig');
@@ -677,7 +684,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       var yaxisName = vi === 0 ? 'y' : ('y' + (vi + 1));
 
       traces.push({
-        x: barTs, y: sig,
+        x: barIdx, y: sig,
         type: 'scatter', mode: 'lines',
         name: viewLabel(v),
         line: { shape: 'hv', width: style.width, color: rgbaColor },
@@ -703,13 +710,13 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       var xkey = 'xaxis' + (vi === 0 ? '' : (vi + 1));
       var ykey = 'yaxis' + (vi === 0 ? '' : (vi + 1));
 
-      layout[xkey] = { showgrid: true, gridcolor: gridColor, zeroline: false, type: 'date', tickformat: tickFormat };
+      layout[xkey] = { showgrid: true, gridcolor: gridColor, zeroline: false, tickvals: tickVals, ticktext: tickTexts };
       // Share x-axis with the bottom subplot
       if (vi < nViews - 1) {
         layout[xkey].matches = 'x' + nViews;
       }
       if (vi === nViews - 1) {
-        layout[xkey].title = { text: '时间', font: { size: 10, color: '#8b949e' } };
+        layout[xkey].title = { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } };
       }
 
       layout[ykey] = {
@@ -729,20 +736,21 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   function buildPnl(data) {
     const { columns, N } = data;
     const barTs = col(data, 'bar_timestamp');
+    const barIdx = col(data, 'bar_index');
     const traces = [];
 
     VIEWS.forEach(v => {
       const pnlLong = col(data, v + '_pnl_long');
       const pnlShort = col(data, v + '_pnl_short');
       traces.push({
-        x: barTs, y: pnlLong,
+        x: barIdx, y: pnlLong,
         type: 'scatter', mode: 'lines',
         name: viewLabel(v) + ' 做多',
         line: { width: 2, color: VIEW_COLORS[v], dash: 'solid' },
         showlegend: true,
       });
       traces.push({
-        x: barTs, y: pnlShort,
+        x: barIdx, y: pnlShort,
         type: 'scatter', mode: 'lines',
         name: viewLabel(v) + ' 做空',
         line: { width: 2, color: VIEW_COLORS[v], dash: 'dash' },
@@ -758,7 +766,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       const lastS = toNum(pnlShort[N - 1]);
       if (!isNaN(lastL)) {
         annotations.push({
-          x: barTs[N - 1], y: lastL,
+          x: barIdx[N - 1], y: lastL,
           text: '<b>' + (lastL - 100).toFixed(2) + '%</b>',
           showarrow: false, font: { size: 10, color: VIEW_COLORS[v] },
           xanchor: 'left', xshift: 5,
@@ -766,7 +774,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       }
       if (!isNaN(lastS)) {
         annotations.push({
-          x: barTs[N - 1], y: lastS,
+          x: barIdx[N - 1], y: lastS,
           text: '<b>' + (lastS - 100).toFixed(2) + '%</b>',
           showarrow: false, font: { size: 10, color: VIEW_COLORS[v] },
           xanchor: 'left', xshift: 5,
@@ -775,11 +783,17 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     });
 
     const shapes = [{
-      type: 'line', x0: barTs[0], x1: barTs[N - 1], y0: 100, y1: 100,
+      type: 'line', x0: barIdx[0], x1: barIdx[N - 1], y0: 100, y1: 100,
       line: { color: '#30363d', width: 1, dash: 'dot' },
     }];
 
-    const tickFormat = getTimeTickFormat(barTs);
+    // 每 ~50 bar 显示一个日期标签
+    var tickStepPnl = Math.max(1, Math.floor(N / 10));
+    var tickValsPnl = [], tickTextsPnl = [];
+    for (var i = 0; i < N; i += tickStepPnl) {
+      tickValsPnl.push(barIdx[i]);
+      tickTextsPnl.push(barTs[i] ? barTs[i].substring(0, 16) : '');
+    }
 
     const layout = {
       template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
@@ -787,7 +801,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       margin: { l: 70, r: 80, t: 20, b: 40 },
       showlegend: true,
       legend: { orientation: 'h', y: 1.08, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
-      xaxis: { title: { text: '时间', font: { size: 10, color: '#8b949e' } }, type: 'date', tickformat: tickFormat, showgrid: true, gridcolor: gridColor, zeroline: false },
+      xaxis: { title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, tickvals: tickValsPnl, ticktext: tickTextsPnl, showgrid: true, gridcolor: gridColor, zeroline: false },
       yaxis: { title: { text: 'PnL (累计)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
       shapes, annotations,
     };
