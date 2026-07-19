@@ -97,8 +97,8 @@ def parse_args() -> argparse.Namespace:
         help="输出根目录（默认: ./backtest_output/）",
     )
     parser.add_argument(
-        "--save-data", action="store_true",
-        help="保存回测结果为 Parquet (.parquet) 和 CSV (.csv) 格式",
+        "--no-save-data", action="store_true",
+        help="不保存 Parquet/CSV，仅生成 JSONL 事件流",
     )
     parser.add_argument(
         "--step-interval", type=int, default=1,
@@ -515,9 +515,9 @@ def main() -> None:
         "resumed_from": args.resume,
     })
 
-    # ParquetStore for full data persistence (if --save-data)
+    # ParquetStore for full data persistence (default on; use --no-save-data to skip)
     parquet_store = None
-    if args.save_data:
+    if not args.no_save_data:
         parquet_store = ParquetStore(args.output_dir, args.ticker, configs)
         parquet_store.start_session()
         if not args.quiet:
