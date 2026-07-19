@@ -529,6 +529,8 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   function buildFilteredOverview(data) {
     const { columns, N } = data;
     const barTs = col(data, 'bar_timestamp');
+    // 使用 bar_index 避免周末/隔夜空白被 Plotly 连成直线
+    const barIdx = col(data, 'bar_index');
     const traces = [];
 
     // Line styles: hierarchical — longer cycle = thicker
@@ -551,7 +553,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       var filtered = col(data, v + '_filtered');
       var style = lineStyles[v];
       traces.push({
-        x: barTs, y: filtered,
+        x: barIdx, y: filtered,
         type: 'scatter', mode: 'lines',
         name: viewLabel(v),
         line: { width: style.width, color: overviewColors[v] },
@@ -567,7 +569,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
     // Upper band trace (invisible, for fill anchoring)
     traces.push({
-      x: barTs, y: epsUpper,
+      x: barIdx, y: epsUpper,
       type: 'scatter', mode: 'lines',
       name: 'v2 +eps',
       line: { width: 0 },
@@ -576,7 +578,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
     // Lower band trace + fill to upper
     traces.push({
-      x: barTs, y: epsLower,
+      x: barIdx, y: epsLower,
       type: 'scatter', mode: 'lines',
       name: 'v2 ±eps',
       line: { width: 0 },
@@ -585,7 +587,13 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       showlegend: true,
     });
 
-    const tickFormat = getTimeTickFormat(barTs);
+    // 每 ~50 bar 显示一个日期标签
+    var tickStep = Math.max(1, Math.floor(N / 10));
+    var tickVals = [], tickTexts = [];
+    for (var i = 0; i < N; i += tickStep) {
+      tickVals.push(barIdx[i]);
+      tickTexts.push(barTs[i] ? barTs[i].substring(0, 16) : '');
+    }
 
     var layout = {
       template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
@@ -593,7 +601,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       margin: { l: 70, r: 40, t: 20, b: 40 },
       showlegend: true,
       legend: { orientation: 'h', y: 1.08, x: 0.5, xanchor: 'center', font: { size: 11, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
-      xaxis: { title: { text: '时间', font: { size: 10, color: '#8b949e' } }, type: 'date', tickformat: tickFormat, showgrid: true, gridcolor: gridColor, zeroline: false },
+      xaxis: { title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, tickvals: tickVals, ticktext: tickTexts, showgrid: true, gridcolor: gridColor, zeroline: false },
       yaxis: { title: { text: '滤波价格', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
     };
 
