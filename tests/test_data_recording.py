@@ -921,8 +921,9 @@ class TestCSVBuilder(unittest.TestCase):
     # ------------------------------------------------------------------
 
     def test_accumulate_creates_per_view_columns(self):
-        """验证每视图 10 列存在: _filtered, _sig, _eps, _mu_v, _sigma_v,
-        _sig_dur, _pair_count, _trade_count, _bs_entry, _bs_exit"""
+        """验证每视图 15 列存在: _filtered, _sig, _eps, _mu_v, _sigma_v,
+        _sig_dur, _pair_count, _trade_count, _bs_entry, _bs_exit,
+        _long_pos, _short_pos, _trade, _trade_reason, _trade_return"""
         from services.event_recorder import CSVBuilder
 
         builder = CSVBuilder()
@@ -935,6 +936,7 @@ class TestCSVBuilder(unittest.TestCase):
         expected_suffixes = [
             "_filtered", "_sig", "_eps", "_mu_v", "_sigma_v",
             "_sig_dur", "_pair_count", "_trade_count", "_bs_entry", "_bs_exit",
+            "_long_pos", "_short_pos", "_trade", "_trade_reason", "_trade_return",
         ]
         for vi in range(2):
             prefix = f"v{vi}"
@@ -942,8 +944,8 @@ class TestCSVBuilder(unittest.TestCase):
                 col = f"{prefix}{sfx}"
                 self.assertIn(col, row, f"视图 {prefix} 缺少列: {col}")
 
-        # 总列数 = 7 基础 + 2*13 视图 = 33
-        self.assertEqual(len(row), 33, f"期望 33 列，实际 {len(row)} 列")
+        # 总列数 = 7 基础 + 2*15 视图 = 37
+        self.assertEqual(len(row), 37, f"期望 37 列，实际 {len(row)} 列")
 
     # ------------------------------------------------------------------
     # 3. CSV 文件创建

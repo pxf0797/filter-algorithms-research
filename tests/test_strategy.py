@@ -253,12 +253,13 @@ class TestComputeStrategyPnL:
                        "fit_start": 25, "pair_end": 30}]
         long_pnl, short_pnl, trades = _compute_strategy_pnl(
             t, filtered, sig_t, all_pairs, pred_pairs, 2.0, 10)
-        longs = [tr for tr in trades if tr["type"] == "long" and tr["entry_idx"] == 7]
-        assert len(longs) >= 1, "无预测的 pair(pair_end=7) 也应入场做多(不再被静默丢弃)"
+        # P0 fix: entry at pair_start=5 (short, sig[5]=-1)
+        shorts = [tr for tr in trades if tr["type"] == "short" and tr["entry_idx"] == 5]
+        assert len(shorts) >= 1, "无预测的 pair 也应入场做空(P0 fix: entry at pair_start)"
 
     @pytest.mark.strategy
     def test_downward_parabola_no_longer_vetoes_long(self):
-        """回归: sig=+1 但抛物线外推向下(pred_up=False)，去掉过滤后仍应做多。"""
+        """回归: P0 fix 后入场索引改为 pair_start; sig[5]=-1 → short 入场仍执行。"""
         n = 40
         t = np.arange(n, dtype=float)
         filtered = 100.0 + 0.5 * t
@@ -272,26 +273,31 @@ class TestComputeStrategyPnL:
         pred_pairs = [{"fit_result": fit_result, "fit_start": 5, "pair_end": pair_end}]
         long_pnl, short_pnl, trades = _compute_strategy_pnl(
             t, filtered, sig_t, all_pairs, pred_pairs, 2.0, 10)
-        longs = [tr for tr in trades if tr["type"] == "long"]
-        assert len(longs) >= 1, "去掉 pred_up 过滤后，向下抛物线不应再否决做多"
+        # P0 fix: entry at pair_start=5, sig[5]=-1 → short
+        shorts = [tr for tr in trades if tr["type"] == "short"]
+        assert len(shorts) >= 1, "P0 fix: entry at pair_start=5 → short 仍应入场"
 
     @pytest.mark.strategy
     def test_stop_loss_trigger(self):
-        """Stop-loss triggers when price moves sharply against prediction."""
+        """Stop-loss triggers when price moves sharply against prediction.
+
+        P0 fix: entry at pair_start, so entry point and protection zone adjusted.
+        """
         n = 100
         t = np.arange(n, dtype=float)
         # Price rises then drops sharply after entry (produces upward poly2 fit)
         filtered = 100.0 + 0.02 * t ** 2
-        # After index 70, drop sharply to trigger stop-loss
-        filtered[71:] = filtered[70] - np.arange(0, n - 71, dtype=float) * 3.0
         sig_t = np.zeros(n, dtype=int)
-        sig_t[50:] = 1
+        sig_t[68:] = 1
+        # Entry at pair_start=68, protection zone [68, 78]
+        # Drop sharply inside protection zone to trigger stop-loss with loss
+        filtered[71:] = filtered[70] - np.arange(0, n - 71, dtype=float) * 10.0
         fit_end = 70
-        all_pairs = [(50, fit_end)]
-        fit_result = _fit_parabolic(t, filtered, 50, fit_end)
+        all_pairs = [(68, fit_end)]
+        fit_result = _fit_parabolic(t, filtered, 68, fit_end)
         assert fit_result is not None
         pred_pairs = [{
-            "fit_result": fit_result, "fit_start": 50, "pair_end": fit_end,
+            "fit_result": fit_result, "fit_start": 68, "pair_end": fit_end,
         }]
         long_pnl, short_pnl, trades = _compute_strategy_pnl(
             t, filtered, sig_t, all_pairs, pred_pairs, 2.0, 10

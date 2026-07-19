@@ -710,6 +710,49 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       for (var s = 0; s < bgShapes.length; s++) shapes.push(bgShapes[s]);
     });
 
+    // P2 fix: 持仓状态叠加带 — draw semi-transparent bands over position holding periods
+    function addPosOverlay(posArr, color, barIdx, xref, yref) {
+      var segStart = -1;
+      for (var i = 0; i <= posArr.length; i++) {
+        var inPos = i < posArr.length && (posArr[i] === true || posArr[i] === 1);
+        if (inPos && segStart === -1) {
+          segStart = i;
+        } else if (!inPos && segStart !== -1) {
+          shapes.push({
+            type: 'rect',
+            x0: barIdx[segStart], x1: barIdx[i],
+            y0: -1.2, y1: 1.2,
+            fillcolor: color,
+            line: { width: 0 },
+            layer: 'below',
+            xref: xref, yref: yref,
+          });
+          segStart = -1;
+        }
+      }
+      // Handle position held through the end
+      if (segStart !== -1) {
+        shapes.push({
+          type: 'rect',
+          x0: barIdx[segStart], x1: barIdx[barIdx.length - 1],
+          y0: -1.2, y1: 1.2,
+          fillcolor: color,
+          line: { width: 0 },
+          layer: 'below',
+          xref: xref, yref: yref,
+        });
+      }
+    }
+    // P2 fix: 持仓状态叠加带
+    VIEWS.forEach(function(v, vi) {
+      var longPos = col(data, v + '_long_pos');   // green band for long position
+      var shortPos = col(data, v + '_short_pos'); // red band for short position
+      var xaxisName = vi === 0 ? 'x' : ('x' + (vi + 1));
+      var yaxisName = vi === 0 ? 'y' : ('y' + (vi + 1));
+      addPosOverlay(longPos, 'rgba(0,255,0,0.08)', barIdx, xaxisName, yaxisName);
+      addPosOverlay(shortPos, 'rgba(255,0,0,0.08)', barIdx, xaxisName, yaxisName);
+    });
+
     var layout = {
       template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
       font: baseFont, displayModeBar: false,

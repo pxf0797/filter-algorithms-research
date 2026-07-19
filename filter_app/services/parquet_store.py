@@ -433,26 +433,37 @@ class ParquetStore:
             _last_float(short_pnl) if short_pnl is not None else _FLOAT_NA
         )
 
-        # long_pos
-        long_mask = view_data.get("long_mask")
-        result[f"{prefix}_long_pos"] = (
-            bool(_last_scalar(long_mask))
-            if long_mask is not None
-            else _BOOL_NA
-        )
-
-        # short_pos
-        short_mask = view_data.get("short_mask")
-        result[f"{prefix}_short_pos"] = (
-            bool(_last_scalar(short_mask))
-            if short_mask is not None
-            else _BOOL_NA
-        )
-
-        # ── Trade columns: match exit/entry at current bar ─────────
+        # ── Position state: computed from view's OWN trade_records ──
+        # P4 fix: previously derived from cross-TF aligned masks which could
+        # contradict the view's own PnL direction. Now position reflects the
+        # view's actual trading state, consistent with _pnl_long / _pnl_short.
 
         t_arr = view_data.get("t")
         view_last_idx: int = len(t_arr) - 1 if t_arr is not None else -1
+
+        long_pos: bool = _BOOL_NA
+        short_pos: bool = _BOOL_NA
+        pos_trades: list[dict] = view_data.get("trade_records") or []
+        for tr in pos_trades:
+            entry_idx = tr.get("entry_idx")
+            exit_idx = tr.get("exit_idx")
+            tt = tr.get("type", "")
+            reason = str(tr.get("exit_reason", ""))
+            # Active trade: entered at or before current bar and still open
+            if entry_idx is not None and int(entry_idx) <= view_last_idx:
+                if (
+                    exit_idx is None
+                    or int(exit_idx) > view_last_idx
+                    or reason == "eod"
+                ):
+                    if tt == "long":
+                        long_pos = True
+                    elif tt == "short":
+                        short_pos = True
+        result[f"{prefix}_long_pos"] = long_pos
+        result[f"{prefix}_short_pos"] = short_pos
+
+        # ── Trade columns: match exit/entry at current bar ─────────
 
         trade_records: list[dict] = view_data.get("trade_records") or []
         trade_val = _STR_NA
@@ -509,15 +520,14 @@ class ParquetStore:
 
         if bs_markers is not None:
             # entry_markers: (bar_idx, label, color, date)
-            # Use <= to capture the most recent entry up to view_last_idx.
-            # Exact match (==) misses entries because pair_end (entry bar)
-            # almost never lands on the last bar, while stop-loss exits can.
+            # Use == for event-based matching: a B/S marker only appears
+            # on the exact bar where the event occurred (P5 fix).
             for m in bs_markers.get("entry_markers", []):
-                if int(m[0]) <= view_last_idx:
+                if int(m[0]) == view_last_idx:
                     bs_entry = str(m[1])
             # exit_markers: (bar_idx, label, color, exit_reason, date)
             for m in bs_markers.get("exit_markers", []):
-                if int(m[0]) <= view_last_idx:
+                if int(m[0]) == view_last_idx:
                     bs_exit = str(m[1])
 
         result[f"{prefix}_bs_entry"] = bs_entry

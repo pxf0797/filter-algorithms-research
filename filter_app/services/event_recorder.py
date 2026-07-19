@@ -171,32 +171,45 @@ class CSVBuilder:
         bs_markers = view_data.get("bs_markers") or {}
         entry_label = "-"
         exit_label = "-"
-        # Use <= to capture the most recent entry/exit up to view_last_idx.
-        # Exact match (==) systematically misses entry markers because
-        # pair_end (entry bar) almost never lands on the last bar, while
-        # stop-loss exits can reach the last bar.
+        # Use == for event-based matching: a B/S marker only appears
+        # on the exact bar where the event occurred (P5 fix).
         for m in bs_markers.get("entry_markers", []):
-            if int(m[0]) <= view_last_idx:
+            if int(m[0]) == view_last_idx:
                 entry_label = str(m[1])
         for m in bs_markers.get("exit_markers", []):
-            if int(m[0]) <= view_last_idx:
+            if int(m[0]) == view_last_idx:
                 exit_label = str(m[1])
         result[f"{prefix}_bs_entry"] = entry_label
         result[f"{prefix}_bs_exit"] = exit_label
 
-        # --- PnL & 持仓终值 ---
+        # --- PnL 终值 ---
         long_pnl = view_data.get("long_pnl")
         if long_pnl is not None:
             result[f"{prefix}_pnl_long"] = _last_value(long_pnl)
         short_pnl = view_data.get("short_pnl")
         if short_pnl is not None:
             result[f"{prefix}_pnl_short"] = _last_value(short_pnl)
-        long_mask = view_data.get("long_mask")
-        if long_mask is not None:
-            result[f"{prefix}_long_pos"] = int(_last_value(long_mask))
-        short_mask = view_data.get("short_mask")
-        if short_mask is not None:
-            result[f"{prefix}_short_pos"] = int(_last_value(short_mask))
+
+        # --- 持仓终值 (P4 fix: 从本周期 trade_records 计算，非跨周期对齐) ---
+        long_pos = 0
+        short_pos = 0
+        for tr in trade_records:
+            entry_idx = tr.get("entry_idx")
+            exit_idx = tr.get("exit_idx")
+            tt = tr.get("type", "")
+            reason = str(tr.get("exit_reason", ""))
+            if entry_idx is not None and int(entry_idx) <= view_last_idx:
+                if (
+                    exit_idx is None
+                    or int(exit_idx) > view_last_idx
+                    or reason == "eod"
+                ):
+                    if tt == "long":
+                        long_pos = 1
+                    elif tt == "short":
+                        short_pos = 1
+        result[f"{prefix}_long_pos"] = long_pos
+        result[f"{prefix}_short_pos"] = short_pos
 
         # --- 交易事件匹配 ---
         # Trade matching strategy:

@@ -570,7 +570,7 @@ def _find_all_pairs(sig_t: np.ndarray) -> List[Tuple[int, int]]:
         else:
             i += 1
 
-    if len(segments) < 2:
+    if len(segments) == 0:
         return []
 
     # Step 2: 合并相邻同号段（+1,0,+1 → 一个连续多头段）
@@ -589,6 +589,13 @@ def _find_all_pairs(sig_t: np.ndarray) -> List[Tuple[int, int]]:
         s2, e2, v2 = merged[j + 1]
         if v1 != v2:  # 多→空 或 空→多
             pairs.append((s1, s2))  # 结束于相反信号的入口（边缘）
+
+    # Step 4: 最后一个信号段的配对（覆盖到数据末尾）
+    # P0 fix: 首个信号段及最后一程始终生成 pair，避免信号窗口两端的持仓被丢弃
+    if len(merged) >= 1:
+        s_last = merged[-1][0]
+        if s_last < n - 1:  # 至少有 1 根 bar 的持有空间
+            pairs.append((s_last, n - 1))
 
     return pairs
 
@@ -724,14 +731,15 @@ def _compute_strategy_pnl(
 
     for pair_start, pair_end in all_pairs:
         # ---- 判断交易方向（仅凭 Sig 反转方向；入场不再依赖抛物线预测）----
-        v2 = sig_t[pair_end]
+        # P0 fix: 入场索引改为 pair_start（首个信号段的持仓也会被交易）
+        v2 = sig_t[pair_start]
         is_long = (v2 == 1)
         is_short = (v2 == -1)
         if not is_long and not is_short:
             continue
 
         # ---- 入场 ----
-        entry_idx = pair_end
+        entry_idx = pair_start
         entry_price = filtered[entry_idx]
         if np.isnan(entry_price) or entry_price <= 0:
             continue

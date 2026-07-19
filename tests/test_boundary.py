@@ -72,15 +72,17 @@ class TestFindAllPairsBoundary:
         sig_t = np.array([1, 1, 0, 0, 1, 1, -1, -1], dtype=int)
         pairs = _find_all_pairs(sig_t)
         # 前 6 个元素应合并为一个多头段 (0,5)，与 (6,7) 的空头段配对
-        assert len(pairs) >= 1, "应产生至少一对"
+        assert len(pairs) >= 2, f"应产生至少两对（P0 fix），got {len(pairs)}: {pairs}"
         # 配对边界应为 (0, 6): 多头段起点 → 空头段入口
-        assert pairs[0] == (0, 6), "0 间隔同号段应合并"
+        assert pairs[0] == (0, 6), f"0 间隔同号段应合并，got {pairs[0]}"
+        # P0 fix: 最后一个段也应生成 pair
+        assert pairs[1] == (6, 7), f"最后一程配对应为 (6, 7)，got {pairs[1]}"
 
     def test_single_bar_signal(self):
-        """仅一个非零 bar: [0, +1, 0] → 无 pair (段数 < 2)."""
+        """仅一个非零 bar: [0, +1, 0] → 1 pair (P0 fix: first signal always traded)."""
         sig_t = np.array([0, 1, 0], dtype=int)
         pairs = _find_all_pairs(sig_t)
-        assert pairs == [], "单个非零信号不应产生 pair"
+        assert pairs == [(1, 2)], f"单个非零信号应产生 1 pair (P0 fix): got {pairs}"
 
     def test_frequent_alternation(self):
         """正负交替频繁: 每 2 个 bar 换方向 → 生成多对."""

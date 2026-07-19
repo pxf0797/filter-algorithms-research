@@ -176,44 +176,49 @@ class TestFindAllPairs:
 
     @pytest.mark.signal
     def test_single_segment_long(self):
-        """Single +1 segment → empty list (no pair)."""
+        """Single +1 segment → one pair covering from segment start to EOD."""
         sig = np.zeros(100, dtype=int)
         sig[20:60] = 1
-        assert _find_all_pairs(sig) == []
+        pairs = _find_all_pairs(sig)
+        assert len(pairs) == 1, f"Expected 1 pair (entry at start → EOD), got {len(pairs)}: {pairs}"
+        assert pairs[0] == (20, 99), f"Pair 0 mismatch: {pairs[0]}"
 
     @pytest.mark.signal
     def test_alternating(self):
-        """[+1, 0, -1, 0, +1] → correct pairing."""
+        """[+1, 0, -1, 0, +1] → correct pairing (3 pairs with P0 fix)."""
         sig = np.zeros(100, dtype=int)
         sig[10:30] = 1     # +1 segment
         sig[50:70] = -1    # -1 segment
         sig[80:90] = 1     # +1 segment
         pairs = _find_all_pairs(sig)
-        assert len(pairs) == 2, f"Expected 2 pairs, got {len(pairs)}"
+        assert len(pairs) == 3, f"Expected 3 pairs (with P0 fix), got {len(pairs)}"
         assert pairs[0] == (10, 50), f"Pair 0 mismatch: {pairs[0]}"
         assert pairs[1] == (50, 80), f"Pair 1 mismatch: {pairs[1]}"
+        assert pairs[2] == (80, 99), f"Pair 2 mismatch: {pairs[2]}"
 
     @pytest.mark.signal
     def test_adjacent_same_sign_merge(self):
-        """[+1, 0, +1] → merged into one segment → no pair (one segment remains)."""
+        """[+1, 0, +1] → merged into one segment → 1 pair (P0 fix: first signal always traded)."""
         sig = np.zeros(50, dtype=int)
         sig[5:15] = 1
         sig[19:25] = 1    # separated by zeros → should merge
         pairs = _find_all_pairs(sig)
-        assert len(pairs) == 0, (
-            f"Merged same-sign should leave no pair, got {pairs}"
+        assert len(pairs) == 1, (
+            f"Merged same-sign should leave 1 pair (P0 fix), got {pairs}"
         )
+        assert pairs[0] == (5, 49), f"Expected (5, 49), got {pairs[0]}"
 
     @pytest.mark.signal
     def test_adjacent_same_sign_merge_with_opposite(self):
-        """[+1, 0, +1, 0, -1] → [+1] and [-1] → 1 pair."""
+        """[+1, 0, +1, 0, -1] → [+1] and [-1] → 2 pairs (P0 fix)."""
         sig = np.zeros(50, dtype=int)
         sig[5:15] = 1
         sig[19:25] = 1     # merges with first +1
         sig[30:40] = -1
         pairs = _find_all_pairs(sig)
-        assert len(pairs) == 1, f"Expected 1 pair, got {len(pairs)}: {pairs}"
-        assert pairs[0] == (5, 30), f"Pair mismatch: {pairs[0]}"
+        assert len(pairs) == 2, f"Expected 2 pairs (P0 fix), got {len(pairs)}: {pairs}"
+        assert pairs[0] == (5, 30), f"Pair 0 mismatch: {pairs[0]}"
+        assert pairs[1] == (30, 49), f"Pair 1 mismatch: {pairs[1]}"
 
     @pytest.mark.signal
     def test_short_sequence(self):
@@ -223,13 +228,142 @@ class TestFindAllPairs:
 
     @pytest.mark.signal
     def test_no_zero_separator(self):
-        """相邻异号段配对，无零间隔: [+1, +1, -1, -1]."""
+        """Adjacent opposite-sign segments without zero gap: [+1, +1, -1, -1] → 2 pairs."""
         sig = np.zeros(40, dtype=int)
         sig[10:20] = 1
         sig[20:30] = -1   # directly adjacent, no zeros
         pairs = _find_all_pairs(sig)
-        assert len(pairs) == 1
-        assert pairs[0] == (10, 20), f"Pair mismatch: {pairs[0]}"
+        assert len(pairs) == 2, f"Expected 2 pairs (P0 fix), got {len(pairs)}"
+        assert pairs[0] == (10, 20), f"Pair 0 mismatch: {pairs[0]}"
+        assert pairs[1] == (20, 39), f"Pair 1 mismatch: {pairs[1]}"
+
+
+# ============================================================================
+# P0 fix: 首个信号段配对
+# ============================================================================
+
+
+class TestFindAllPairsP0Fix:
+    """P0 fix: 首个信号段始终生成 pair，PnL 反映全段持仓."""
+
+    @pytest.mark.signal
+    def test_single_segment_entire_window(self):
+        """全窗口为 +1 → 生成 1 个 pair，覆盖整个窗口."""
+        n = 50
+        sig = np.ones(n, dtype=int)  # all +1
+        pairs = _find_all_pairs(sig)
+        assert len(pairs) == 1, f"Expected 1 pair, got {len(pairs)}: {pairs}"
+        assert pairs[0] == (0, n - 1), f"Expected (0, {n - 1}), got {pairs[0]}"
+
+    @pytest.mark.signal
+    def test_two_segments(self):
+        """+1 then -1 → 2 pairs."""
+        sig = np.zeros(60, dtype=int)
+        sig[10:30] = 1
+        sig[30:50] = -1
+        pairs = _find_all_pairs(sig)
+        assert len(pairs) == 2, f"Expected 2 pairs, got {len(pairs)}: {pairs}"
+        assert pairs[0] == (10, 30), f"Expected (10, 30), got {pairs[0]}"
+        assert pairs[1] == (30, 59), f"Expected (30, 59), got {pairs[1]}"
+
+    @pytest.mark.signal
+    def test_three_segments(self):
+        """+1, -1, +1 → 3 pairs."""
+        sig = np.zeros(80, dtype=int)
+        sig[5:20] = 1
+        sig[30:45] = -1
+        sig[50:65] = 1
+        pairs = _find_all_pairs(sig)
+        assert len(pairs) == 3, f"Expected 3 pairs, got {len(pairs)}: {pairs}"
+        assert pairs[0] == (5, 30), f"Expected (5, 30), got {pairs[0]}"
+        assert pairs[1] == (30, 50), f"Expected (30, 50), got {pairs[1]}"
+        assert pairs[2] == (50, 79), f"Expected (50, 79), got {pairs[2]}"
+
+    @pytest.mark.signal
+    def test_pnl_reflects_first_segment(self):
+        """Verify PnL computation includes trade from the first signal segment."""
+        from services.filter_engine import _compute_strategy_pnl
+        n = 50
+        t = np.arange(n, dtype=float)
+        # Rising price: ensures long trade is profitable
+        filtered = 100.0 + 0.2 * t
+        sig_t = np.zeros(n, dtype=int)
+        sig_t[10:30] = 1    # first +1 segment
+        sig_t[30:40] = -1   # -1 segment
+        sig_t[40:45] = 1    # second +1 segment
+
+        # Generate pairs with the fixed _find_all_pairs
+        all_pairs = _find_all_pairs(sig_t)
+        # Should have 3 pairs: (10,30), (30,40), (40,n-1)
+        assert len(all_pairs) == 3, f"Expected 3 pairs, got {len(all_pairs)}"
+
+        # Create minimal prediction pairs to pass the guard
+        pred_pairs = []
+        for pair_start, pair_end in all_pairs:
+            if pair_end - pair_start >= 3:
+                fit_result = {"a": 0.0, "b": 0.2, "c": 100.0, "x0": None}
+                pred_pairs.append({
+                    "fit_result": fit_result,
+                    "fit_start": pair_start,
+                    "pair_end": pair_end,
+                })
+
+        long_pnl, short_pnl, trades = _compute_strategy_pnl(
+            t, filtered, sig_t, all_pairs, pred_pairs, stop_loss_pct=2.0, n_extend=10,
+        )
+
+        # Should have trades
+        assert len(trades) >= 1, "Expected at least 1 trade from P0 fix"
+
+        # The first trade should be long (entering at the first +1 signal)
+        long_trades = [tr for tr in trades if tr["type"] == "long"]
+        assert len(long_trades) >= 1, "Expected at least 1 long trade from first segment"
+
+        # First long trade should enter at the start of the first signal segment
+        first_long = long_trades[0]
+        assert first_long["entry_idx"] == 10, (
+            f"First long should enter at index 10, got {first_long['entry_idx']}"
+        )
+        # Entry should be at the first signal's start
+        assert sig_t[first_long["entry_idx"]] == 1, "Entry signal should be +1"
+
+        # PnL should reflect actual trading activity (not flat 100)
+        assert not np.allclose(long_pnl, 100.0), (
+            "Long PnL should reflect trading, not stay flat at 100"
+        )
+
+    @pytest.mark.signal
+    def test_single_segment_pnl(self):
+        """Single segment (+1) → one trade, PnL reflects price movement."""
+        from services.filter_engine import _compute_strategy_pnl
+        n = 30
+        t = np.arange(n, dtype=float)
+        filtered = 100.0 + 0.5 * t  # rising price
+        sig_t = np.ones(n, dtype=int)  # all +1
+
+        all_pairs = _find_all_pairs(sig_t)
+        assert len(all_pairs) == 1, f"Expected 1 pair, got {len(all_pairs)}"
+        assert all_pairs[0] == (0, n - 1)
+
+        # Create prediction pair (gap >= 3 so prediction is generated)
+        fit_result = {"a": 0.0, "b": 0.5, "c": 100.0, "x0": None}
+        pred_pairs = [{"fit_result": fit_result, "fit_start": 0, "pair_end": n - 1}]
+
+        long_pnl, short_pnl, trades = _compute_strategy_pnl(
+            t, filtered, sig_t, all_pairs, pred_pairs, stop_loss_pct=5.0, n_extend=10,
+        )
+
+        # Should have exactly 1 trade (long)
+        assert len(trades) == 1, f"Expected 1 trade, got {len(trades)}"
+        assert trades[0]["type"] == "long"
+        assert trades[0]["entry_idx"] == 0
+        assert trades[0]["exit_idx"] == n - 1
+        assert trades[0]["exit_reason"] == "eod"
+
+        # P0 fix: PnL should be > 100 (profitable) because price rises
+        assert long_pnl[-1] > 100.0, (
+            f"P0 fix: long PnL should reflect rising price, got {long_pnl[-1]:.2f}"
+        )
 
 
 # ============================================================================
