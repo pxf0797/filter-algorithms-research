@@ -176,7 +176,6 @@ class ParquetStore:
         self._last_flush_time = time.time()
         self._total_row_count = 0
         self._last_pnl: dict[str, float] = {}
-        self._last_sig: dict[str, int] = {}
 
         self._write_metadata(status="running")
         return self._session_id
@@ -348,16 +347,6 @@ class ParquetStore:
                     )
                     for col in _VIEW_COLUMNS:
                         row[f"{prefix}_{col}"] = _COL_DEFAULTS[col]
-
-            # ── Signal hysteresis: 禁止 +1↔-1 直接跳变 ──
-            sig_col = f"{prefix}_sig"
-            current_sig = int(row.get(sig_col, 0))
-            last_sig = self._last_sig.get(sig_col, 0)
-            if last_sig == 1 and current_sig == -1:
-                row[sig_col] = 0
-            elif last_sig == -1 and current_sig == 1:
-                row[sig_col] = 0
-            self._last_sig[sig_col] = int(row[sig_col])
 
             # ── PnL freeze: when a position is closed, lock PnL at last known value ──
             long_pos = row.get(f"{prefix}_long_pos", False)

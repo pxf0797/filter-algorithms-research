@@ -39,7 +39,6 @@ class CSVBuilder:
         self._rows: dict[int, dict] = {}  # bar_index -> {col_name: value}
         self._min_tf: str = ""
         self._last_pnl: dict[str, float] = {}
-        self._last_sig: dict[str, int] = {}
 
     def accumulate(
         self,
@@ -72,18 +71,7 @@ class CSVBuilder:
         }
         for view_name, view_data in views_data.items():
             cols = self._extract_view_columns(view_name, view_data)
-            # ── Signal hysteresis: 禁止 +1↔-1 直接跳变 ──
             prefix = view_name.split("_", 1)[0]
-            sig_col = f"{prefix}_sig"
-            if sig_col in cols:
-                current_sig = int(cols[sig_col])
-                last_sig = self._last_sig.get(sig_col, 0)
-                if last_sig == 1 and current_sig == -1:
-                    cols[sig_col] = 0
-                elif last_sig == -1 and current_sig == 1:
-                    cols[sig_col] = 0
-                self._last_sig[sig_col] = int(cols[sig_col])
-
             # ── PnL freeze: when a position is closed, lock PnL at last known value ──
             long_pos = cols.get(f"{prefix}_long_pos", 0)
             short_pos = cols.get(f"{prefix}_short_pos", 0)
