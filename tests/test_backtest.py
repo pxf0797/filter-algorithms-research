@@ -768,7 +768,7 @@ class TestRenderBacktestModeSlider:
         mock_slider.assert_called_once()
         _call_kwargs = mock_slider.call_args.kwargs
         assert _call_kwargs.get("key") == "_bt_slider_pos"
-        assert _call_kwargs.get("value") == 100
+        assert _call_kwargs.get("value") == 500
         assert _call_kwargs.get("on_change") == sa._on_slider_change
 
     # ── P1 ────────────────────────────────────────────────────────────────

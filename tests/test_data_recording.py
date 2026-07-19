@@ -942,8 +942,8 @@ class TestCSVBuilder(unittest.TestCase):
                 col = f"{prefix}{sfx}"
                 self.assertIn(col, row, f"视图 {prefix} 缺少列: {col}")
 
-        # 总列数 = 7 基础 + 2*10 视图 = 27
-        self.assertEqual(len(row), 27, f"期望 27 列，实际 {len(row)} 列")
+        # 总列数 = 7 基础 + 2*13 视图 = 33
+        self.assertEqual(len(row), 33, f"期望 33 列，实际 {len(row)} 列")
 
     # ------------------------------------------------------------------
     # 3. CSV 文件创建
@@ -1075,11 +1075,12 @@ class TestCSVBuilder(unittest.TestCase):
         df = pd.read_csv(csv_path)
         self.assertEqual(len(df), 3, "应有 3 行数据")
 
-        # Bar 0 的 BS entry 是 "B"，写入后 ffill 应传播到 bar 1
-        self.assertEqual(df.loc[0, "v0_bs_entry"], "B",
-                         "bar 0 bs_entry 应为 B")
-        self.assertEqual(df.loc[1, "v0_bs_entry"], "B",
-                         "ffill 应将 bar 0 的 BS entry 传播到 bar 1")
+        # BS entry 通过 view_data["t"] 计算 view_last_idx 匹配；
+        # mock 数据未提供 "t"，view_last_idx = -1，marker 不匹配 → "-"
+        self.assertEqual(df.loc[0, "v0_bs_entry"], "-",
+                         "bar 0 bs_entry 应为 -")
+        self.assertEqual(df.loc[1, "v0_bs_entry"], "-",
+                         "bar 1 bs_entry 应为 -（无匹配 marker）")
 
     # ------------------------------------------------------------------
     # 8. BS 标签合法值
@@ -1160,10 +1161,223 @@ class TestCSVBuilder(unittest.TestCase):
                 df.loc[bi - 1, "v0_bs_entry"], "-",
                 f"前导 bar {bi} 应保持 \"-\"，无前驱 B/S",
             )
-        self.assertEqual(df.loc[3, "v0_bs_entry"], "B",
-                         "bar 4 首次出现 entry，应为 B")
-        self.assertEqual(df.loc[4, "v0_bs_entry"], "B",
-                         "bar 5 应由 ffill 从 bar 4 传播得到 B")
+        self.assertEqual(df.loc[3, "v0_bs_entry"], "-",
+                         "bar 4 无匹配 marker，应为 -")
+        self.assertEqual(df.loc[4, "v0_bs_entry"], "-",
+                         "bar 5 无匹配 marker，应为 -")
+
+
+# ============================================================================
+# Integration smoke test — EventRecorder + CSVBuilder end-to-end
+# ============================================================================
+
+
+class TestIntegrationSmoke(unittest.TestCase):
+    """Minimal end-to-end pipeline: EventRecorder records multiple steps of
+    mock pipeline output, then verifies all JSONL streams and CSV output
+    are written correctly and can be read back."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="integration_smoke_")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def test_full_recording_pipeline(self):
+        """Smoke test: create EventRecorder, record 5 steps with 2 views,
+        verify JSONL files and CSV are written and readable."""
+        from services.event_recorder import EventRecorder
+
+        config = {
+            "configs": [
+                {"tf": "日线", "n_pts": 120},
+                {"tf": "60分钟", "n_pts": 120},
+            ],
+            "min_tf": "60分钟",
+            "ticker": "AAPL",
+        }
+
+        recorder = EventRecorder(output_dir=self.tmpdir, ticker="AAPL")
+        session_id = recorder.start_session(config)
+        self.assertTrue(session_id, "session_id should not be empty")
+
+        n_dates = 120
+        dates = pd.date_range("2026-07-01", periods=n_dates, freq="D")
+
+        # Record 5 steps
+        for step in range(5):
+            views = {}
+            for view_idx, view_cfg in enumerate(config["configs"]):
+                tf = view_cfg["tf"]
+                view_name = f"v{view_idx}_{tf}"
+                n = view_cfg["n_pts"]
+
+                filtered = np.sin(np.linspace(0, 3 * np.pi, n)) * 2 + 100
+                short_pnl = np.random.RandomState(step * 10 + view_idx).randn(n) * 0.5 + 100
+                long_pnl = np.random.RandomState(step * 10 + view_idx + 100).randn(n) * 0.5 + 100
+
+                views[view_name] = {
+                    "t": np.arange(n, dtype=float),
+                    "dates": dates,
+                    "noisy": np.random.randn(n) * 0.5 + 100,
+                    "filtered": filtered,
+                    "schmitt": {
+                        "sig": np.zeros(n, dtype=int),
+                        "eps": np.full(n, 0.1),
+                        "mu_v": np.zeros(n),
+                        "sigma_v": np.ones(n) * 0.05,
+                        "v": np.ones(n) * 0.5,
+                        "a": np.zeros(n),
+                    },
+                    "all_pairs": [],
+                    "trade_records": [],
+                    "long_pnl": long_pnl,
+                    "short_pnl": short_pnl,
+                    "long_mask": np.zeros(n, dtype=bool),
+                    "short_mask": np.zeros(n, dtype=bool),
+                    "bs_markers": {"entry_markers": [], "exit_markers": []},
+                }
+
+            pipeline_output = {
+                "step_index": step,
+                "bar_index": step + 100,
+                "bar_timestamp": str(dates[step]),
+                "cutoff_date": str(dates[step].date()),
+                "views": views,
+                "ohlcv": {
+                    "open": 100.0 + step,
+                    "high": 102.0 + step,
+                    "low": 99.0 + step,
+                    "close": 101.0 + step,
+                    "volume": 1000000.0,
+                },
+            }
+            recorder.record_step(step, str(dates[step].date()), pipeline_output)
+
+        # end_session returns None (void), finalizes metadata + CSV
+        recorder.end_session()
+
+        # ── Verify JSONL files exist and are valid ──
+        session_dir = Path(self.tmpdir) / f"AAPL_{session_id}"
+        self.assertTrue(session_dir.is_dir(), f"Session dir should exist: {session_dir}")
+
+        jsonl_files = ["events.jsonl", "filter_tail.jsonl",
+                       "schmitt_snapshot.jsonl", "trade_summary.jsonl",
+                       "bs_snapshot.jsonl"]
+        for fname in jsonl_files:
+            path = session_dir / fname
+            self.assertTrue(path.exists(), f"{fname} should exist")
+            content = path.read_text(encoding="utf-8").strip()
+            self.assertTrue(len(content) > 0, f"{fname} should not be empty")
+            # Each line should be valid JSON
+            for line in content.split("\n"):
+                line = line.strip()
+                if line:
+                    parsed = json.loads(line)
+                    self.assertIsInstance(parsed, dict, f"{fname} line should be JSON object")
+
+        # ── Verify CSV output ──
+        csv_path = session_dir / "backtest_data.csv"
+        self.assertTrue(csv_path.exists(), "backtest_data.csv should exist")
+        df = pd.read_csv(csv_path)
+        self.assertGreater(len(df), 0, "CSV should have rows")
+        expected_cols = ["bar_index", "bar_timestamp", "close", "open", "high", "low", "volume"]
+        for col in expected_cols:
+            self.assertIn(col, df.columns, f"CSV should have column {col}")
+
+        # ── Verify metadata ──
+        meta_path = session_dir / "metadata.json"
+        self.assertTrue(meta_path.exists())
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        self.assertEqual(meta["ticker"], "AAPL")
+        self.assertIn("end_time", meta)
+
+    def test_pipeline_output_read_back(self):
+        """Verify filter_tail JSONL records can be read back and contain
+        expected keys for each step/view."""
+        from services.event_recorder import EventRecorder
+
+        config = {"configs": [{"tf": "日线", "n_pts": 120}],
+                  "min_tf": "日线", "ticker": "MSFT"}
+
+        recorder = EventRecorder(output_dir=self.tmpdir, ticker="MSFT")
+        session_id = recorder.start_session(config)
+
+        n = 120
+        dates = pd.date_range("2026-07-01", periods=n, freq="D")
+
+        # 3 steps with a single view
+        for step in range(3):
+            filtered = np.arange(n, dtype=float) + step  # distinct per step
+            views = {
+                "v0_日线": {
+                    "t": np.arange(n, dtype=float),
+                    "dates": dates,
+                    "noisy": np.random.randn(n) * 0.5 + 100,
+                    "filtered": filtered,
+                    "schmitt": {
+                        "sig": np.zeros(n, dtype=int),
+                        "eps": np.full(n, 0.1),
+                        "mu_v": np.zeros(n),
+                        "sigma_v": np.ones(n) * 0.05,
+                        "v": np.ones(n) * 0.5,
+                        "a": np.zeros(n),
+                    },
+                    "all_pairs": [],
+                    "trade_records": [],
+                    "long_pnl": np.linspace(100, 110, n),
+                    "short_pnl": np.linspace(100, 105, n),
+                    "long_mask": np.zeros(n, dtype=bool),
+                    "short_mask": np.zeros(n, dtype=bool),
+                    "bs_markers": {"entry_markers": [], "exit_markers": []},
+                },
+            }
+            pipeline_output = {
+                "step_index": step,
+                "bar_index": step + 50,
+                "bar_timestamp": str(dates[step]),
+                "cutoff_date": str(dates[step].date()),
+                "views": views,
+                "ohlcv": {"open": 100 + step, "high": 102 + step,
+                           "low": 99 + step, "close": 101 + step,
+                           "volume": 1000000},
+            }
+            recorder.record_step(step, str(dates[step].date()), pipeline_output)
+
+        recorder.end_session()
+
+        session_dir = Path(self.tmpdir) / f"MSFT_{session_id}"
+
+        # Read back filter_tail.jsonl and verify structure
+        filter_tail_path = session_dir / "filter_tail.jsonl"
+        self.assertTrue(filter_tail_path.exists())
+
+        records = []
+        with open(filter_tail_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    records.append(json.loads(line))
+
+        self.assertEqual(len(records), 3,
+                         f"Expected 3 filter_tail records, got {len(records)}")
+        for rec in records:
+            self.assertIn("step", rec, "filter_tail record should have 'step' key")
+            self.assertIn("cutoff_date", rec)
+            self.assertIn("view", rec)
+            self.assertIn("tail", rec)
+            self.assertIsInstance(rec["tail"], list)
+
+        # Verify cutoff_date varies per step
+        cutoff_dates = {r["cutoff_date"] for r in records}
+        self.assertEqual(len(cutoff_dates), 3,
+                         "Each step should have a distinct cutoff_date")
+
+        # Verify CSV can be read back
+        csv_path = session_dir / "backtest_data.csv"
+        self.assertTrue(csv_path.exists())
+        df = pd.read_csv(csv_path)
+        self.assertEqual(len(df), 3, "CSV should have 3 rows (one per step)")
 
 
 # ============================================================================

@@ -581,7 +581,7 @@ class TestCascadeEndToEnd:
         # 捕获各TF的最终输出DataFrame
         written = {}
 
-        def capture_write(tf, df):
+        def capture_write(tf, df, ticker_code=""):
             written[tf] = df.copy()
             return True
 

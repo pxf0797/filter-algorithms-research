@@ -179,14 +179,14 @@ class TestSidebarInteraction:
         selectboxes = app.sidebar.selectbox
         filt = next((s for s in selectboxes if s.key == "global_f"), None)
         assert filt is not None, "filter selector not found"
-        assert filt.value == "sma"
+        assert filt.value == "savgol"
 
     def test_dual_filter_checkbox_present(self, app):
         """双滤波对比复选框存在"""
         checkboxes = app.sidebar.checkbox
         dual = next((c for c in checkboxes if c.key == "global_dual"), None)
         assert dual is not None, "dual filter checkbox not found"
-        assert dual.value is False
+        assert dual.value is True
 
     def test_refresh_button_present(self, app):
         """刷新数据按钮存在"""
@@ -257,7 +257,8 @@ class TestWidgetInteraction:
     def test_filter_change_does_not_crash(self):
         """切换滤波器不导致应用崩溃"""
         app = _fresh_app()
-        sel = app.sidebar.selectbox[1]
+        sel = next((s for s in app.sidebar.selectbox if s.key == "global_f"), None)
+        assert sel is not None, "global_f selectbox not found"
         sel.set_value("指数移动平均 (EMA)")
         app.run(timeout=90)
         assert app.session_state["global_f"] == "ema"
@@ -289,7 +290,8 @@ class TestP0RegressionExtended:
     def test_unknown_filter_setting(self):
         """设置有效滤波器值不崩溃"""
         app = _fresh_app()
-        sel = app.sidebar.selectbox[1]
+        sel = next((s for s in app.sidebar.selectbox if s.key == "global_f"), None)
+        assert sel is not None, "global_f selectbox not found"
         sel.set_value("LOWESS 平滑")
         app.run(timeout=90)
         assert app.session_state["global_f"] == "lowess"

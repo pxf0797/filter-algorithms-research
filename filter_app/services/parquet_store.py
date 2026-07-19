@@ -575,11 +575,19 @@ class ParquetStore:
         # Atomic write of the merged Parquet
         merged_path = self._session_dir / "backtest_result.parquet"
         tmp_parquet = self._session_dir / "backtest_result.parquet.tmp"
-        pq.write_table(
-            merged, str(tmp_parquet),
-            compression="zstd", compression_level=3,
-        )
-        os.replace(str(tmp_parquet), str(merged_path))
+        try:
+            pq.write_table(
+                merged, str(tmp_parquet),
+                compression="zstd", compression_level=3,
+            )
+            os.replace(str(tmp_parquet), str(merged_path))
+        except Exception:
+            if tmp_parquet.exists():
+                try:
+                    tmp_parquet.unlink()
+                except OSError:
+                    pass
+            raise
 
         # CSV export
         csv_path = self._session_dir / "backtest_result.csv"
@@ -652,9 +660,17 @@ class ParquetStore:
 
         # Atomic write
         tmp_path = self._session_dir / "metadata.json.tmp"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(meta, f, indent=2, default=str, ensure_ascii=False)
-        os.replace(str(tmp_path), str(meta_path))
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2, default=str, ensure_ascii=False)
+            os.replace(str(tmp_path), str(meta_path))
+        except Exception:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+            raise
 
 
 # ── Module-level helpers ─────────────────────────────────────────────────
