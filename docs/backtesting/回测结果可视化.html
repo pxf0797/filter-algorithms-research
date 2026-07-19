@@ -330,6 +330,19 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     <p class="annotation">实线=做多 PnL，虚线=做空 PnL。标注为各曲线终值。</p>
   </div>
 
+  <!-- Section 4b: Multi-Ticker PnL Overlay (仅多 ticker 时显示) -->
+  <div class="section" id="section-multi-pnl" style="display:none;">
+    <div class="section-title"><span class="num">4b</span> 多 Ticker PnL 对比叠加</div>
+    <div class="plot-wrap-pnl" id="chart-multi-pnl"></div>
+    <p class="annotation">每条线为一个 ticker 的做多 PnL 曲线（起始值 100）。不同颜色代表不同 ticker。</p>
+  </div>
+
+  <!-- Section 4c: Multi-Ticker Summary Table (仅多 ticker 时显示) -->
+  <div class="section" id="section-multi-summary" style="display:none;">
+    <div class="section-title"><span class="num">4c</span> 多 Ticker 汇总对比</div>
+    <div id="multi-summary-table"></div>
+  </div>
+
   <!-- Section 5: Position Heatmap -->
   <div class="section">
     <div class="section-title"><span class="num">5</span> 持仓状态热力图（4 视图 x long_pos + short_pos）</div>
@@ -809,6 +822,136 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     Plotly.newPlot('chart-pnl', traces, layout, plotConfig);
   }
 
+  // --- Section 4b: Multi-Ticker PnL Overlay ---
+  function buildMultiTickerPnl() {
+    if (!window.BACKTEST_IS_MULTI || !window.BACKTEST_ALL_DATA || !window.BACKTEST_TICKERS) return;
+
+    var tickerData = window.BACKTEST_ALL_DATA;
+    var tickers = window.BACKTEST_TICKERS;
+
+    document.getElementById('section-multi-pnl').style.display = '';
+    document.getElementById('section-multi-summary').style.display = '';
+
+    // ---- PnL Overlay Chart ----
+    var traces = [];
+    var annotations = [];
+
+    tickers.forEach(function(tk) {
+      var td = tickerData[tk.name];
+      if (!td) return;
+      var N = td.stats.n_rows;
+      var barIdx = td.columns.bar_index || [];
+      var barTs = td.columns.bar_timestamp || [];
+
+      // Use v2 (daily) PnL long by default, fallback to first view found
+      var pnlKey = 'v2_pnl_long';
+      if (!td.columns[pnlKey]) {
+        // Find any pnl_long column
+        var cols = td.stats.column_names || [];
+        for (var c = 0; c < cols.length; c++) {
+          if (cols[c].indexOf('_pnl_long') !== -1) { pnlKey = cols[c]; break; }
+        }
+      }
+      var pnlData = td.columns[pnlKey] || [];
+
+      traces.push({
+        x: barIdx, y: pnlData,
+        type: 'scatter', mode: 'lines',
+        name: tk.name + ' 做多',
+        line: { width: 2, color: tk.color },
+        showlegend: true,
+      });
+
+      // Annotation at end
+      var lastVal = toNum(pnlData[N - 1]);
+      if (!isNaN(lastVal)) {
+        annotations.push({
+          x: barIdx[N - 1], y: lastVal,
+          text: '<b>' + tk.name + ' ' + (lastVal - 100).toFixed(2) + '%</b>',
+          showarrow: false, font: { size: 10, color: tk.color },
+          xanchor: 'left', xshift: 5,
+        });
+      }
+
+      // Also plot short PnL with dashed line
+      var shortKey = pnlKey.replace('_pnl_long', '_pnl_short');
+      var shortData = td.columns[shortKey] || [];
+      if (shortData.length > 0) {
+        traces.push({
+          x: barIdx, y: shortData,
+          type: 'scatter', mode: 'lines',
+          name: tk.name + ' 做空',
+          line: { width: 2, color: tk.color, dash: 'dash' },
+          showlegend: true,
+        });
+        var lastS = toNum(shortData[N - 1]);
+        if (!isNaN(lastS)) {
+          annotations.push({
+            x: barIdx[N - 1], y: lastS,
+            text: '<b>' + tk.name + ' ' + (lastS - 100).toFixed(2) + '%</b>',
+            showarrow: false, font: { size: 10, color: tk.color },
+            xanchor: 'left', xshift: 5,
+          });
+        }
+      }
+    });
+
+    var shapes = [{
+      type: 'line', x0: 0, x1: 1, y0: 100, y1: 100,
+      xref: 'paper',
+      line: { color: '#30363d', width: 1, dash: 'dot' },
+    }];
+
+    var layout = {
+      template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
+      font: baseFont, displayModeBar: false,
+      margin: { l: 70, r: 80, t: 20, b: 40 },
+      showlegend: true,
+      legend: { orientation: 'h', y: 1.08, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
+      xaxis: { title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
+      yaxis: { title: { text: 'PnL (累计)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
+      shapes: shapes, annotations: annotations,
+    };
+
+    Plotly.newPlot('chart-multi-pnl', traces, layout, plotConfig);
+
+    // ---- Summary Table ----
+    var tableHtml = '<table class="data-table"><thead><tr>' +
+      '<th>Ticker</th><th>行数</th><th>列数</th><th>做多 PnL 终值</th><th>做空 PnL 终值</th>' +
+      '</tr></thead><tbody>';
+
+    tickers.forEach(function(tk) {
+      var td = tickerData[tk.name];
+      if (!td) return;
+      var N = td.stats.n_rows;
+
+      // Find long pnl
+      var longKey = null;
+      var cols = td.stats.column_names || [];
+      for (var c = 0; c < cols.length; c++) {
+        if (cols[c].indexOf('_pnl_long') !== -1) { longKey = cols[c]; break; }
+      }
+      var shortKey = longKey ? longKey.replace('_pnl_long', '_pnl_short') : null;
+
+      var lastLong = longKey ? toNum(td.columns[longKey][N - 1]) : NaN;
+      var lastShort = shortKey ? toNum(td.columns[shortKey][N - 1]) : NaN;
+
+      var longCls = !isNaN(lastLong) ? (lastLong >= 100 ? 'val-pos' : 'val-neg') : 'val-zero';
+      var shortCls = !isNaN(lastShort) ? (lastShort >= 100 ? 'val-pos' : 'val-neg') : 'val-zero';
+
+      tableHtml += '<tr>' +
+        '<td style="color:' + tk.color + ';font-weight:600">' + tk.name + '</td>' +
+        '<td>' + N + '</td>' +
+        '<td>' + td.stats.n_cols + '</td>' +
+        '<td class="' + longCls + '">' + (!isNaN(lastLong) ? (lastLong - 100).toFixed(2) + '%' : '—') + '</td>' +
+        '<td class="' + shortCls + '">' + (!isNaN(lastShort) ? (lastShort - 100).toFixed(2) + '%' : '—') + '</td>' +
+        '</tr>';
+    });
+
+    tableHtml += '</tbody></table>';
+    document.getElementById('multi-summary-table').innerHTML = tableHtml;
+  }
+
   // --- Section 5: Position Heatmap ---
   function buildHeatmap(data) {
     const { columns, N } = data;
@@ -1159,6 +1302,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     buildFilteredOverview(data);
     buildSignals(data);
     buildPnl(data);
+    buildMultiTickerPnl();
     buildHeatmap(data);
     buildTrades(data);
     buildTable(data);

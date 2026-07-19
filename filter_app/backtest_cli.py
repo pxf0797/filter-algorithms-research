@@ -105,6 +105,14 @@ def parse_args() -> argparse.Namespace:
         help="步进间隔（默认: 1）",
     )
     parser.add_argument(
+        "--resume", default=None, metavar="PATH",
+        help="从断点文件恢复回测",
+    )
+    parser.add_argument(
+        "--checkpoint-interval", type=int, default=100,
+        help="断点自动保存间隔（bar 数，默认: 100，设为 0 禁用）",
+    )
+    parser.add_argument(
         "--view-filter", default=None,
         help="只运行指定视图（如 v0_日线），默认运行全部",
     )
@@ -474,6 +482,27 @@ def main() -> None:
         print(f"错误: 初始化 BacktestRunner 失败: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # ── 断点恢复 ──
+    resume_bar = 0
+    if args.resume:
+        try:
+            resume_bar = runner._restore_checkpoint(args.resume, configs)
+            if not args.quiet:
+                print(f"已从断点恢复: bar_index={resume_bar}, 文件={args.resume}")
+        except ValueError as e:
+            print(f"错误: 断点恢复失败: {e}", file=sys.stderr)
+            sys.exit(1)
+        # 如果 CLI 未显式指定 start_bar，使用断点中的进度
+        if args.start_bar is None:
+            start = resume_bar + 1
+
+    # 确定断点文件路径
+    checkpoint_path = None
+    if args.checkpoint_interval > 0:
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        checkpoint_path = str(output_dir / f"{args.ticker}_checkpoint.json")
+
     recorder = EventRecorder(args.output_dir, args.ticker)
     session_id = recorder.start_session({
         "ticker": args.ticker,
@@ -483,6 +512,7 @@ def main() -> None:
         "end_bar": end,
         "step_interval": args.step_interval,
         "configs": configs,
+        "resumed_from": args.resume,
     })
 
     # ParquetStore for full data persistence (if --save-data)
@@ -497,7 +527,11 @@ def main() -> None:
     results = []
     step_count = 0
     try:
-        results = runner.run(start, end, args.step_interval)
+        results = runner.run(
+            start, end, args.step_interval,
+            checkpoint_interval=args.checkpoint_interval,
+            checkpoint_path=checkpoint_path,
+        )
         for step_idx, output in enumerate(results):
             recorder.record_step(step_idx, output["cutoff_date"], output)
             if parquet_store:

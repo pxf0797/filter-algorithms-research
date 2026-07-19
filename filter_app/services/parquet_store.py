@@ -261,6 +261,17 @@ class ParquetStore:
 
         try:
             table = self._buffer_to_table()
+
+            # Runtime schema validation before writing
+            issues = validate_schema(table, self._full_schema)
+            if issues:
+                print(
+                    f"WARNING: ParquetStore schema mismatch in "
+                    f"part_{self._part_index:04d}:"
+                )
+                for issue in issues:
+                    print(f"  - {issue}")
+
             pq.write_table(
                 table, str(tmp_path),
                 compression="zstd", compression_level=3,
@@ -568,9 +579,25 @@ class ParquetStore:
 
         tables: list[pa.Table] = []
         for pf in part_files:
-            tables.append(pq.read_table(str(pf)))
+            table = pq.read_table(str(pf))
+            issues = validate_schema(table, self._full_schema)
+            if issues:
+                print(
+                    f"WARNING: ParquetStore schema mismatch in "
+                    f"part file {pf.name}:"
+                )
+                for issue in issues:
+                    print(f"  - {issue}")
+            tables.append(table)
 
         merged = pa.concat_tables(tables)
+
+        # Validate merged table
+        merged_issues = validate_schema(merged, self._full_schema)
+        if merged_issues:
+            print("WARNING: ParquetStore schema mismatch in merged table:")
+            for issue in merged_issues:
+                print(f"  - {issue}")
 
         # Atomic write of the merged Parquet
         merged_path = self._session_dir / "backtest_result.parquet"
@@ -671,6 +698,89 @@ class ParquetStore:
                 except OSError:
                     pass
             raise
+
+
+# ── Schema validation ──────────────────────────────────────────────────
+
+
+def validate_schema(table: pa.Table, expected_schema: pa.Schema) -> list[str]:
+    """Validate that a PyArrow table matches the expected schema.
+
+    Parameters
+    ----------
+    table : pa.Table
+        The table to validate.
+    expected_schema : pa.Schema
+        The expected schema.
+
+    Returns
+    -------
+    list[str]
+        List of issue descriptions.  Empty list means the table is valid.
+    """
+    issues: list[str] = []
+
+    expected_names = set(expected_schema.names)
+    actual_names = set(table.column_names)
+
+    # Column count
+    if len(table.column_names) != len(expected_schema.names):
+        issues.append(
+            f"Column count mismatch: got {len(table.column_names)}, "
+            f"expected {len(expected_schema.names)}"
+        )
+
+    # Missing columns
+    missing = expected_names - actual_names
+    if missing:
+        issues.append(f"Missing columns: {sorted(missing)}")
+
+    # Extra columns
+    extra = actual_names - expected_names
+    if extra:
+        issues.append(f"Extra columns: {sorted(extra)}")
+
+    # Type mismatches (only for columns that exist in both)
+    for col_name in sorted(expected_names & actual_names):
+        expected_type = expected_schema.field(col_name).type
+        actual_type = table.schema.field(col_name).type
+        if actual_type != expected_type:
+            issues.append(
+                f"Type mismatch for '{col_name}': "
+                f"got {actual_type}, expected {expected_type}"
+            )
+
+    return issues
+
+
+def load_parquet(path: str, expected_schema: pa.Schema) -> pa.Table:
+    """Load a Parquet file and validate it against an expected schema.
+
+    Parameters
+    ----------
+    path : str
+        Path to the Parquet file.
+    expected_schema : pa.Schema
+        Expected schema to validate the loaded table against.
+
+    Returns
+    -------
+    pa.Table
+        The loaded table.
+
+    Raises
+    ------
+    ValueError
+        If the loaded table fails schema validation.
+    """
+    table = pq.read_table(str(path))
+    issues = validate_schema(table, expected_schema)
+    if issues:
+        raise ValueError(
+            f"Schema validation failed for {path}:\n"
+            + "\n".join(f"  - {i}" for i in issues)
+        )
+    return table
 
 
 # ── Module-level helpers ─────────────────────────────────────────────────

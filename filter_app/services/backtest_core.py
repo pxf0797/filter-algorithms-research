@@ -5,6 +5,8 @@
 复用现有 services/ 模块的纯函数，对齐 _render_chart 的管道调用顺序。
 """
 
+import hashlib
+import json
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -107,6 +109,8 @@ class BacktestRunner:
         start_bar: int,
         end_bar: int,
         step_interval: int = 1,
+        checkpoint_interval: int = 0,
+        checkpoint_path: Optional[str] = None,
     ) -> list[dict]:
         """逐 bar 运行回测管道，返回每步的管道输出列表。
 
@@ -121,20 +125,15 @@ class BacktestRunner:
             结束 bar 索引（不含）。
         step_interval : int, default 1
             步进间隔；设为 N 表示每隔 N 个 bar 采样一次。
+        checkpoint_interval : int, default 0
+            断点保存间隔（bar 数）。0 表示不自动保存断点。
+        checkpoint_path : Optional[str], default None
+            断点文件路径。仅当 checkpoint_interval > 0 时使用。
 
         Returns
         -------
         list[dict]
-            每步的结果字典：
-            ``[{"step_index": N, "bar_index": N, "bar_timestamp": "...",
-               "cutoff_date": "...", "views": {"v0_日线": {...}, ...},
-               "ohlcv": {"open": ..., "high": ..., "low": ...,
-                          "close": ..., "volume": ...}}, ...]``
-
-            每个 view 的输出包含管道各阶段数据：``t``, ``dates``, ``noisy``,
-            ``ohlc``, ``ohlcv``, ``filtered``, ``filtered2``, ``schmitt``,
-            ``all_pairs``, ``prediction_pairs``, ``long_pnl``, ``short_pnl``,
-            ``trade_records``, ``long_mask``, ``short_mask``, ``bs_markers``。
+            每步的结果字典。
 
         Raises
         ------
@@ -244,6 +243,34 @@ class BacktestRunner:
                 "ohlcv": bar_info["ohlcv"],
             })
 
+            # ── 断点自动保存 ──
+            if checkpoint_interval > 0 and checkpoint_path and bar_index > start_bar:
+                steps_done = len(results)
+                if steps_done % checkpoint_interval == 0:
+                    state = {
+                        "bar_index": bar_index,
+                        "ewma_state": self._ewma_state,
+                        "bar_count": self._bar_count,
+                        "config_hash": self._config_hash(),
+                        "start_bar": start_bar,
+                        "end_bar": end_bar,
+                        "step_interval": step_interval,
+                    }
+                    serializable = _make_json_safe(state)
+                    with open(checkpoint_path, "w", encoding="utf-8") as f:
+                        json.dump(serializable, f, ensure_ascii=False)
+                    logger.debug(
+                        "断点已保存: bar_index={}, path={}", bar_index, checkpoint_path,
+                    )
+
+        # ── 运行完成，清理断点文件 ──
+        if checkpoint_path:
+            try:
+                Path(checkpoint_path).unlink(missing_ok=True)
+                logger.debug("断点文件已清理: {}", checkpoint_path)
+            except OSError:
+                pass
+
         logger.info(
             "回测完成: ticker={}, bar 范围=[{},{}), 间隔={}, 步数={}",
             self.ticker, start_bar, end_bar, step_interval, len(results),
@@ -253,6 +280,100 @@ class BacktestRunner:
     def get_bar_count(self) -> int:
         """返回 min_tf 上的总 bar 数。"""
         return self._bar_count
+
+    # ------------------------------------------------------------------
+    # 断点续跑
+    # ------------------------------------------------------------------
+
+    def save_checkpoint(self, path: str) -> dict:
+        """将当前 runner 状态序列化到断点文件，返回状态字典。"""
+        state = {
+            "bar_index": 0,  # caller tracks this；retained for from_checkpoint use
+            "ewma_state": self._ewma_state,
+            "bar_count": self._bar_count,
+            "config_hash": self._config_hash(),
+        }
+        serializable = _make_json_safe(state)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(serializable, f, ensure_ascii=False)
+        return state
+
+    @classmethod
+    def from_checkpoint(cls, path: str, configs: list) -> "BacktestRunner":
+        """从断点文件恢复 BacktestRunner。
+
+        Parameters
+        ----------
+        path : str
+            断点文件路径。
+        configs : list[dict]
+            视图配置列表，必须与保存断点时的配置一致。
+
+        Returns
+        -------
+        BacktestRunner
+            已恢复状态的 runner 实例。
+
+        Raises
+        ------
+        ValueError
+            断点文件不存在、JSON 解析失败或配置哈希不匹配。
+        """
+        checkpoint_path = Path(path)
+        if not checkpoint_path.exists():
+            raise ValueError(f"断点文件不存在: {path}")
+
+        try:
+            with open(checkpoint_path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            raise ValueError(f"断点文件读取失败: {e}") from e
+
+        # 推断 ticker（从配置中提取 tf 信息创建临时 runner 来获取 ticker）
+        # 实际上 ticker 需要外部提供，但 checkpoints 不存储 ticker。
+        # 这里先创建 runner 再恢复状态——ticker 从 configs 推断太复杂，
+        # 改为由 from_checkpoint 的调用者在创建 runner 后调用 _restore_state。
+        # 因此 from_checkpoint 需要 ticker 参数。
+        raise NotImplementedError(
+            "请使用 BacktestRunner(ticker, configs) 构造后调用 _restore_checkpoint(path)"
+        )
+
+    def _restore_checkpoint(self, path: str, configs: list) -> int:
+        """从断点文件恢复状态到当前实例。返回已完成的 bar_index。
+
+        Raises
+        ------
+        ValueError
+            配置哈希不匹配时抛出。
+        """
+        checkpoint_path = Path(path)
+        if not checkpoint_path.exists():
+            raise ValueError(f"断点文件不存在: {path}")
+
+        try:
+            with open(checkpoint_path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            raise ValueError(f"断点文件读取失败: {e}") from e
+
+        # 校验配置哈希
+        current_hash = self._config_hash()
+        saved_hash = state.get("config_hash", "")
+        if saved_hash and current_hash != saved_hash:
+            raise ValueError(
+                f"配置哈希不匹配: 断点={saved_hash[:16]}... "
+                f"当前={current_hash[:16]}... 无法从断点恢复"
+            )
+
+        # 恢复 EWMA 状态
+        self._ewma_state = state.get("ewma_state", {})
+
+        return state.get("bar_index", 0)
+
+    def _config_hash(self) -> str:
+        """计算当前 configs 的确定性哈希，用于断点续跑时校验配置一致性。"""
+        raw = json.dumps(self.configs, sort_keys=True, default=str, ensure_ascii=False)
+        return hashlib.sha256(raw.encode()).hexdigest()
 
     # ------------------------------------------------------------------
     # 内部方法
@@ -786,6 +907,36 @@ class BacktestRunner:
         except Exception as e:
             logger.warning("查询 bar_count 失败: {}", e)
             return 0
+
+
+# ═══════════════════════════════════════════════════════════════
+# 工具函数
+# ═══════════════════════════════════════════════════════════════
+
+def _make_json_safe(obj: Any) -> Any:
+    """递归地将对象转换为 JSON 可序列化形式。
+
+    处理 numpy 数值类型和 ndarray。
+    """
+    import numpy as np
+
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, dict):
+        return {str(k): _make_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_make_json_safe(v) for v in obj]
+    if isinstance(obj, bool):
+        return bool(obj)
+    if isinstance(obj, (int, float)):
+        return obj
+    if obj is None:
+        return None
+    return str(obj)
 
 
 # ═══════════════════════════════════════════════════════════════

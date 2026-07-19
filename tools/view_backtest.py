@@ -28,6 +28,13 @@ import pandas as pd
 SCRIPT_DIR = Path(__file__).resolve().parent
 HTML_TEMPLATE = SCRIPT_DIR.parent / "docs" / "backtesting" / "回测结果可视化.html"
 
+# 多 Ticker 颜色调色板（深色背景可读）
+TICKER_COLORS = [
+    "#58a6ff", "#3fb950", "#f85149", "#d2991d", "#a371f7",
+    "#39d2c0", "#f78166", "#db61a2", "#8b949e", "#79c0ff",
+    "#56d364", "#e5534b",
+]
+
 
 def serialize_value(v):
     """将单个值转为 JSON 兼容的类型。"""
@@ -92,6 +99,66 @@ def find_latest_parquet(base_dir: str) -> str | None:
     if not candidates:
         return None
     return str(candidates[0])
+
+
+def find_all_parquet_dirs(base_dir: str) -> list[str]:
+    """在 base_dir 下找所有包含 backtest_result.parquet 的目录。"""
+    base = Path(base_dir)
+    dirs = set()
+    for p in base.glob("*/backtest_result.parquet"):
+        dirs.add(str(p.parent))
+    return sorted(dirs)
+
+
+def extract_ticker_name(path: str) -> str:
+    """从目录/文件路径提取 ticker 名称。如 'AAPL_20240101/backtest_result.parquet' -> 'AAPL'."""
+    p = Path(path)
+    # 如果是 .parquet 文件，使用父目录名；否则使用路径最后一个组件名
+    if p.suffix == ".parquet":
+        name = p.parent.name
+    else:
+        # 去掉末尾斜杠后取最后一个组件
+        name = p.name or p.parent.name
+    return name.split("_")[0].upper()
+
+
+def load_multi_parquet(paths: list[str]) -> dict:
+    """加载多个 parquet 路径，返回多 ticker 数据结构。
+
+    Returns:
+        {
+            "tickers": [{"name": "AAPL", "color": "#58a6ff"}, ...],
+            "data": {"AAPL": {"columns": ..., "stats": ...}, ...},
+            "is_multiticker": True,
+        }
+    """
+    result: dict = {"tickers": [], "data": {}, "is_multiticker": len(paths) > 1}
+
+    for i, path in enumerate(paths):
+        p = Path(path)
+        if p.is_dir():
+            candidates = list(p.glob("backtest_result.parquet")) or list(p.glob("*.parquet"))
+            if not candidates:
+                print(f"警告：在 {path} 中找不到 parquet 文件，跳过", file=sys.stderr)
+                continue
+            parquet_path = str(candidates[0])
+        elif p.exists() and p.suffix == ".parquet":
+            parquet_path = path
+        else:
+            print(f"警告：路径不存在或不是 parquet 文件: {path}，跳过", file=sys.stderr)
+            continue
+
+        ticker_name = extract_ticker_name(path)
+        color = TICKER_COLORS[i % len(TICKER_COLORS)]
+
+        print(f"[{i + 1}/{len(paths)}] 加载 {ticker_name}: {parquet_path}")
+        columns, stats = load_parquet(parquet_path)
+        print(f"       {stats['n_rows']} 行 x {stats['n_cols']} 列")
+
+        result["tickers"].append({"name": ticker_name, "color": color})
+        result["data"][ticker_name] = {"columns": columns, "stats": stats}
+
+    return result
 
 
 # ========== HTTP 服务器模式 ==========
@@ -221,21 +288,34 @@ def start_server(port: int, html_template: str):
         server.server_close()
 
 
-def embed_and_open(parquet_path: str, metadata_path: str | None, html_template: str):
-    """核心流程：读数据 → 序列化 → 嵌入 HTML → 打开浏览器。"""
-    print(f"[1/4] 读取 Parquet: {parquet_path}")
-    columns, stats = load_parquet(parquet_path)
-    print(f"       {stats['n_rows']} 行 x {stats['n_cols']} 列")
+def embed_and_open(parquet_paths: list[str], metadata_path: str | None, html_template: str):
+    """核心流程：读数据 → 序列化 → 嵌入 HTML → 打开浏览器。支持多 Ticker。"""
+    is_multi = len(parquet_paths) > 1
+    multi_data = None
+
+    if is_multi:
+        print(f"[1/4] 读取多 Ticker 数据: {len(parquet_paths)} 个路径")
+        multi_data = load_multi_parquet(parquet_paths)
+        # 取第一个 ticker 的数据用于单 ticker 图表（向后兼容）
+        first_ticker = multi_data["tickers"][0]["name"]
+        columns = multi_data["data"][first_ticker]["columns"]
+        stats = multi_data["data"][first_ticker]["stats"]
+    else:
+        print(f"[1/4] 读取 Parquet: {parquet_paths[0]}")
+        columns, stats = load_parquet(parquet_paths[0])
+        print(f"       {stats['n_rows']} 行 x {stats['n_cols']} 列")
 
     metadata = None
+    first_path = parquet_paths[0]
     if metadata_path:
         print(f"[2/4] 读取 Metadata: {metadata_path}")
         metadata = load_metadata(metadata_path)
         if metadata:
             print(f"       view_labels: {metadata.get('view_labels', {})}")
     else:
-        # 自动探测同目录下的 metadata.json
-        auto_meta = Path(parquet_path).parent / "metadata.json"
+        # 自动探测
+        auto_meta_dir = Path(first_path).parent if not Path(first_path).is_dir() else Path(first_path)
+        auto_meta = auto_meta_dir / "metadata.json"
         if auto_meta.exists():
             print(f"[2/4] 自动发现 Metadata: {auto_meta}")
             metadata = load_metadata(str(auto_meta))
@@ -257,6 +337,13 @@ def embed_and_open(parquet_path: str, metadata_path: str | None, html_template: 
         embed_script += "window.BACKTEST_METADATA = " + json.dumps(metadata, ensure_ascii=False) + ";\n"
     else:
         embed_script += "window.BACKTEST_METADATA = null;\n"
+
+    if multi_data:
+        embed_script += "window.BACKTEST_IS_MULTI = true;\n"
+        embed_script += "window.BACKTEST_TICKERS = " + json.dumps(multi_data["tickers"], ensure_ascii=False) + ";\n"
+        embed_script += "window.BACKTEST_ALL_DATA = " + json.dumps(multi_data["data"], ensure_ascii=False) + ";\n"
+    else:
+        embed_script += "window.BACKTEST_IS_MULTI = false;\n"
     embed_script += "</script>\n"
 
     # 注入到 </head> 之前
@@ -277,17 +364,25 @@ def embed_and_open(parquet_path: str, metadata_path: str | None, html_template: 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="回测结果可视化 — Python 脚本嵌入数据，浏览器打开",
+        description="回测结果可视化 — Python 脚本嵌入数据，浏览器打开。（支持多 Ticker 对比）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
+  # 单 ticker
   python tools/view_backtest.py result.parquet
   python tools/view_backtest.py --latest ./test_backtest_output
+
+  # 多 ticker 对比（传入多个目录或 parquet 文件）
+  python tools/view_backtest.py AAPL_dir/ MSFT_dir/ GOOGL_dir/
+  python tools/view_backtest.py --all ./test_backtest_output
+
+  # 带 metadata
   python tools/view_backtest.py -m metadata.json result.parquet
         """,
     )
-    parser.add_argument("parquet", nargs="?", help="Parquet 文件路径")
+    parser.add_argument("parquet", nargs="*", help="Parquet 文件或目录路径（支持多个用于多 ticker 对比）")
     parser.add_argument("--latest", "-l", metavar="DIR", help="自动找 DIR 下最新的 backtest_result.parquet")
+    parser.add_argument("--all", "-a", metavar="DIR", help="自动找 DIR 下所有 ticker 目录（多 ticker 对比模式）")
     parser.add_argument("--metadata", "-m", metavar="FILE", help="metadata.json 文件路径")
     parser.add_argument("--template", "-t", metavar="FILE", default=str(HTML_TEMPLATE),
                         help="HTML 模板路径（默认: docs/backtesting/回测结果可视化.html）")
@@ -300,31 +395,41 @@ def main():
         start_server(args.port, args.template)
         return
 
-    # 确定 parquet 路径
-    parquet_path = None
-    if args.latest:
-        parquet_path = find_latest_parquet(args.latest)
-        if not parquet_path:
+    # 确定 parquet 路径列表
+    parquet_paths: list[str] = []
+
+    if args.all:
+        parquet_paths = find_all_parquet_dirs(args.all)
+        if not parquet_paths:
+            print(f"错误：在 {args.all} 下找不到包含 backtest_result.parquet 的目录", file=sys.stderr)
+            sys.exit(1)
+        print(f"找到 {len(parquet_paths)} 个 ticker 目录")
+    elif args.latest:
+        path = find_latest_parquet(args.latest)
+        if not path:
             print(f"错误：在 {args.latest} 下找不到 backtest_result.parquet", file=sys.stderr)
             sys.exit(1)
+        parquet_paths = [path]
     elif args.parquet:
-        parquet_path = args.parquet
+        parquet_paths = list(args.parquet)
     else:
         # 默认在当前目录下找
-        parquet_path = find_latest_parquet("test_backtest_output")
-        if not parquet_path:
-            print("错误：请指定 parquet 文件路径或使用 --latest", file=sys.stderr)
+        path = find_latest_parquet("test_backtest_output")
+        if not path:
+            print("错误：请指定 parquet 文件路径、使用 --latest 或 --all", file=sys.stderr)
             sys.exit(1)
+        parquet_paths = [path]
 
-    if not os.path.exists(parquet_path):
-        print(f"错误：文件不存在: {parquet_path}", file=sys.stderr)
-        sys.exit(1)
+    for p in parquet_paths:
+        if not os.path.exists(p):
+            print(f"错误：路径不存在: {p}", file=sys.stderr)
+            sys.exit(1)
 
     if not os.path.exists(args.template):
         print(f"错误：HTML 模板不存在: {args.template}", file=sys.stderr)
         sys.exit(1)
 
-    embed_and_open(parquet_path, args.metadata, args.template)
+    embed_and_open(parquet_paths, args.metadata, args.template)
 
 
 if __name__ == "__main__":

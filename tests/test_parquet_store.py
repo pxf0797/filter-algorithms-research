@@ -10,6 +10,8 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 
 # Ensure filter_app is importable
@@ -1815,3 +1817,660 @@ class TestBarIndexRendering:
         # bar_timestamp 应各不相同（隔夜/周末会导致时间跳跃，但每个 bar 有值）
         bar_ts_set = set(str(r["bar_timestamp"]) for r in rows)
         assert len(bar_ts_set) == 5, "Each bar should have a unique timestamp"
+
+
+# ============================================================================
+# TestSchemaValidation — ParquetStore schema validation
+# ============================================================================
+
+
+class TestSchemaValidation:
+    """Tests for validate_schema and schema guard integration.
+
+    Covers column-count checks, missing/extra columns, type mismatches,
+    empty tables, and cross-view column verification.
+    """
+
+    # ── helpers ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_expected_schema(n_views: int = 4) -> pa.Schema:
+        """Build a reference schema with *n_views* views."""
+        from services.parquet_store import _build_full_schema
+        return _build_full_schema([f"v{i}" for i in range(n_views)])
+
+    @staticmethod
+    def _build_valid_table(n_views: int = 4, n_rows: int = 3) -> pa.Table:
+        """Build a table that passes validation for *n_views* views."""
+        import pyarrow as pa
+        from services.parquet_store import _build_full_schema
+
+        schema = _build_full_schema([f"v{i}" for i in range(n_views)])
+        columns: dict[str, list] = {f.name: [] for f in schema}
+        for _ in range(n_rows):
+            for field in schema:
+                if pa.types.is_int32(field.type):
+                    columns[field.name].append(0)
+                elif pa.types.is_timestamp(field.type):
+                    columns[field.name].append(np.datetime64("2024-01-01T00:00:00", "ns"))
+                elif pa.types.is_int8(field.type):
+                    columns[field.name].append(0)
+                elif pa.types.is_float32(field.type):
+                    columns[field.name].append(0.0)
+                elif pa.types.is_boolean(field.type):
+                    columns[field.name].append(False)
+                elif pa.types.is_string(field.type) or pa.types.is_large_string(field.type):
+                    columns[field.name].append("")
+                else:
+                    columns[field.name].append(None)
+
+        return pa.Table.from_pydict(columns, schema=schema)
+
+    # ── valid schema ───────────────────────────────────────────────────
+
+    def test_valid_schema_passes(self):
+        """validate_schema returns no issues for a correctly-typed table."""
+        from services.parquet_store import validate_schema
+
+        schema = self._build_expected_schema()
+        table = self._build_valid_table()
+        issues = validate_schema(table, schema)
+        assert issues == [], f"Expected no issues, got: {issues}"
+
+    def test_valid_schema_with_fewer_views(self):
+        """2-view schema also validates correctly."""
+        from services.parquet_store import validate_schema
+
+        schema = self._build_expected_schema(n_views=2)
+        table = self._build_valid_table(n_views=2)
+        issues = validate_schema(table, schema)
+        assert issues == []
+
+    # ── missing column ─────────────────────────────────────────────────
+
+    def test_missing_column_detected(self):
+        """A table with a column removed from the expected schema is flagged."""
+        from services.parquet_store import validate_schema
+
+        schema = self._build_expected_schema()
+        table = self._build_valid_table()
+        # Remove one column
+        col_names = [c for c in table.column_names if c != "v0_sig"]
+        trimmed = table.select(col_names)
+
+        issues = validate_schema(trimmed, schema)
+        assert len(issues) >= 1
+        assert any("Missing columns" in i for i in issues)
+        assert any("v0_sig" in i for i in issues)
+
+    def test_multiple_missing_columns(self):
+        """Multiple missing columns are all reported."""
+        from services.parquet_store import validate_schema
+
+        schema = self._build_expected_schema(n_views=2)
+        table = self._build_valid_table(n_views=2)
+        # Drop several columns
+        keep = [c for c in table.column_names if c not in ("v0_sig", "v0_eps", "v1_filtered")]
+        trimmed = table.select(keep)
+
+        issues = validate_schema(trimmed, schema)
+        # Should mention all three missing
+        missing_issue = next(i for i in issues if "Missing columns" in i)
+        assert "v0_sig" in missing_issue
+        assert "v0_eps" in missing_issue
+        assert "v1_filtered" in missing_issue
+
+    # ── extra column ───────────────────────────────────────────────────
+
+    def test_extra_column_detected(self):
+        """Extra columns are flagged but do not raise."""
+        from services.parquet_store import validate_schema
+
+        schema = self._build_expected_schema()
+        table = self._build_valid_table()
+        # Append an extra column
+        extra = table.append_column(
+            pa.field("bonus_column", pa.int32()),
+            pa.array([1, 2, 3], type=pa.int32()),
+        )
+
+        issues = validate_schema(extra, schema)
+        assert any("Extra columns" in i for i in issues)
+        assert any("bonus_column" in i for i in issues)
+
+    def test_extra_column_does_not_raise(self):
+        """validate_schema returns issues rather than raising — callers decide."""
+        from services.parquet_store import validate_schema
+
+        schema = self._build_expected_schema()
+        table = self._build_valid_table()
+        extra = table.append_column(
+            pa.field("extra", pa.string()),
+            pa.array(["a", "b", "c"], type=pa.string()),
+        )
+
+        # Should not raise
+        issues = validate_schema(extra, schema)
+        assert len(issues) >= 1
+
+    # ── type mismatch ──────────────────────────────────────────────────
+
+    def test_type_mismatch_detected(self):
+        """A column with the wrong type is flagged."""
+        from services.parquet_store import validate_schema
+
+        schema = self._build_expected_schema()
+        table = self._build_valid_table()
+
+        # Replace v0_sig (int8) with a float64 column of the same name
+        idx = table.column_names.index("v0_sig")
+        wrong_typed = table.set_column(
+            idx,
+            pa.field("v0_sig", pa.float64()),
+            pa.array([0.5, 1.5, 2.5], type=pa.float64()),
+        )
+
+        issues = validate_schema(wrong_typed, schema)
+        assert any("Type mismatch" in i and "v0_sig" in i for i in issues), (
+            f"Expected type mismatch for v0_sig, got: {issues}"
+        )
+
+    def test_multiple_type_mismatches(self):
+        """Multiple type mismatches are all reported."""
+        from services.parquet_store import validate_schema
+
+        schema = self._build_expected_schema(n_views=2)
+        table = self._build_valid_table(n_views=2)
+
+        # Replace two columns with wrong types
+        idx_sig = table.column_names.index("v0_sig")
+        table = table.set_column(
+            idx_sig,
+            pa.field("v0_sig", pa.float64()),
+            pa.array([0.0, 0.0, 0.0], type=pa.float64()),
+        )
+        idx_filt = table.column_names.index("v0_filtered")
+        table = table.set_column(
+            idx_filt,
+            pa.field("v0_filtered", pa.int32()),
+            pa.array([0, 0, 0], type=pa.int32()),
+        )
+
+        issues = validate_schema(table, schema)
+        type_issues = [i for i in issues if "Type mismatch" in i]
+        assert len(type_issues) >= 2
+
+    # ── empty table ────────────────────────────────────────────────────
+
+    def test_empty_table_validates(self):
+        """A table with zero rows but correct schema passes validation."""
+        from services.parquet_store import validate_schema
+
+        schema = self._build_expected_schema()
+        empty = self._build_valid_table(n_rows=0)
+        issues = validate_schema(empty, schema)
+        assert issues == []
+
+    def test_empty_table_missing_column_detected(self):
+        """A zero-row table missing a column is still flagged."""
+        from services.parquet_store import validate_schema
+
+        schema = self._build_expected_schema()
+        empty = self._build_valid_table(n_rows=0)
+        trimmed = empty.select([c for c in empty.column_names if c != "v3_bs_exit"])
+        issues = validate_schema(trimmed, schema)
+        assert any("v3_bs_exit" in i for i in issues)
+
+    # ── cross-view column count ───────────────────────────────────────
+
+    def test_cross_view_column_count_4_views(self):
+        """4-view schema has 2 fixed + 4*12 = 50 columns."""
+        schema = self._build_expected_schema(n_views=4)
+        assert len(schema.names) == 50
+
+    def test_cross_view_column_count_2_views(self):
+        """2-view schema has 2 + 2*12 = 26 columns."""
+        schema = self._build_expected_schema(n_views=2)
+        assert len(schema.names) == 26
+
+    def test_cross_view_column_count_1_view(self):
+        """1-view schema has 2 + 12 = 14 columns."""
+        schema = self._build_expected_schema(n_views=1)
+        assert len(schema.names) == 14
+
+    def test_each_view_has_12_columns(self):
+        """Every view prefix contributes exactly 12 columns."""
+        schema = self._build_expected_schema(n_views=4)
+        view_cols = {f"v{i}": 0 for i in range(4)}
+        for name in schema.names:
+            for v in view_cols:
+                if name.startswith(v + "_"):
+                    view_cols[v] += 1
+                    break
+        for v, count in view_cols.items():
+            assert count == 12, f"{v} has {count} columns, expected 12"
+
+    def test_fixed_fields_are_present(self):
+        """bar_index and bar_timestamp are always the first two columns."""
+        schema = self._build_expected_schema(n_views=4)
+        assert schema.names[0] == "bar_index"
+        assert schema.names[1] == "bar_timestamp"
+
+    # ── load_parquet ───────────────────────────────────────────────────
+
+    def test_load_parquet_valid_file(self, tmp_path):
+        """load_parquet loads and validates a correct file without error."""
+        from services.parquet_store import load_parquet
+
+        schema = self._build_expected_schema()
+        table = self._build_valid_table()
+
+        path = tmp_path / "valid.parquet"
+        pq.write_table(table, str(path))
+
+        loaded = load_parquet(str(path), schema)
+        assert loaded.num_rows == table.num_rows
+        assert loaded.num_columns == table.num_columns
+
+    def test_load_parquet_invalid_file_raises(self, tmp_path):
+        """load_parquet raises ValueError when schema does not match."""
+        from services.parquet_store import load_parquet
+
+        schema = self._build_expected_schema()
+        table = self._build_valid_table()
+        # Remove a column before writing
+        trimmed = table.select([c for c in table.column_names if c != "v0_sig"])
+
+        path = tmp_path / "invalid.parquet"
+        pq.write_table(trimmed, str(path))
+
+        with pytest.raises(ValueError, match="Schema validation failed"):
+            load_parquet(str(path), schema)
+
+    # ── flush integration ─────────────────────────────────────────────
+
+    def test_flush_completes_with_valid_data(self, tmp_path):
+        """flush() with valid data completes and produces a part file."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+
+        # Build a valid row matching the schema
+        row = {}
+        for field in store._full_schema:
+            if field.name == "bar_index":
+                row[field.name] = 0
+            elif field.name == "bar_timestamp":
+                row[field.name] = np.datetime64("2024-01-01T00:00:00", "ns")
+            elif pa.types.is_int8(field.type) or pa.types.is_int32(field.type):
+                row[field.name] = 0
+            elif pa.types.is_float32(field.type):
+                row[field.name] = 0.0
+            elif pa.types.is_boolean(field.type):
+                row[field.name] = False
+            elif pa.types.is_string(field.type) or pa.types.is_large_string(field.type):
+                row[field.name] = ""
+            else:
+                row[field.name] = 0
+
+        store._buffer = [row]
+        store.flush()
+
+        assert store._total_row_count == 1
+        part_files = list(store._session_dir.glob("part_*.parquet"))
+        assert len(part_files) == 1
+
+    def test_end_session_validates_parts(self, tmp_path, capsys):
+        """end_session() validates part files during merge."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+
+        # Build valid rows, flush, then end
+        for i in range(3):
+            row = {}
+            for field in store._full_schema:
+                if field.name == "bar_index":
+                    row[field.name] = i
+                elif field.name == "bar_timestamp":
+                    row[field.name] = np.datetime64("2024-01-01T00:00:00", "ns")
+                elif pa.types.is_int8(field.type):
+                    row[field.name] = 0
+                elif pa.types.is_float32(field.type):
+                    row[field.name] = 0.0
+                elif pa.types.is_boolean(field.type):
+                    row[field.name] = False
+                elif pa.types.is_string(field.type) or pa.types.is_large_string(field.type):
+                    row[field.name] = ""
+                else:
+                    row[field.name] = 0
+            store._buffer.append(row)
+
+        store.flush()
+        store.end_session()
+
+        # Should complete without exception
+        assert (store._session_dir / "backtest_result.parquet").exists()
+
+    # ── column count edge cases ───────────────────────────────────────
+
+    def test_wrong_total_column_count(self):
+        """A table with a different column count triggers the count mismatch issue."""
+        from services.parquet_store import validate_schema
+
+        schema = self._build_expected_schema(n_views=4)
+        # Build a 4-view schema but validate against a 2-view one
+        table = self._build_valid_table(n_views=4)
+        smaller_schema = self._build_expected_schema(n_views=2)
+
+        issues = validate_schema(table, smaller_schema)
+        assert any("Column count mismatch" in i for i in issues)
+
+
+# ============================================================================
+# TestMultiTickerIsolation — 多 ticker 并发隔离端到端测试
+# ============================================================================
+
+
+class TestMultiTickerIsolation:
+    """多 ticker 并发隔离：确保并行回测完全独立，无文件碰撞或状态泄漏。
+
+    验证三个持久化服务的 ticker 隔离，以及 BacktestRunner 的独立性。
+    """
+
+    # ── ParquetStore ticker isolation ─────────────────────────────────────
+
+    def test_parquet_store_two_tickers_separate_dirs(self, tmp_path):
+        """两个不同 ticker 的 ParquetStore 写入不同 session 目录。"""
+        store_a = ParquetStore(str(tmp_path), "AAPL", [{"tf": "日线"}])
+        store_b = ParquetStore(str(tmp_path), "TSLA", [{"tf": "日线"}])
+
+        sid_a = store_a.start_session()
+        sid_b = store_b.start_session()
+
+        # 不同 session 目录
+        assert store_a._session_dir != store_b._session_dir
+        # session 目录名包含 ticker
+        assert "AAPL" in store_a._session_dir.name
+        assert "TSLA" in store_b._session_dir.name
+        # 不同 session ID
+        assert sid_a != sid_b
+
+        store_a.end_session()
+        store_b.end_session()
+
+    def test_parquet_store_data_independent(self, tmp_path):
+        """两个 ticker 写入的数据互不干扰。"""
+        configs = [{"tf": "日线"}]
+        store_a = ParquetStore(str(tmp_path), "AAPL", configs)
+        store_b = ParquetStore(str(tmp_path), "TSLA", configs)
+
+        store_a.start_session()
+        store_b.start_session()
+
+        # 每个 store 写入一行数据
+        for i in range(3):
+            row = _make_valid_row(i, store_a._full_schema)
+            store_a._buffer.append(row)
+            row_b = _make_valid_row(i + 100, store_b._full_schema)
+            store_b._buffer.append(row_b)
+
+        store_a.flush()
+        store_b.flush()
+        store_a.end_session()
+        store_b.end_session()
+
+        # 验证 AAPL 的 parquet 只有 3 行
+        aapl_pq = store_a._session_dir / "backtest_result.parquet"
+        assert aapl_pq.exists()
+        aapl_table = pq.read_table(str(aapl_pq))
+        assert aapl_table.num_rows == 3
+
+        # 验证 TSLA 的 parquet 也只有 3 行（互不干扰）
+        tsla_pq = store_b._session_dir / "backtest_result.parquet"
+        assert tsla_pq.exists()
+        tsla_table = pq.read_table(str(tsla_pq))
+        assert tsla_table.num_rows == 3
+
+        # 确认 AAPL 数据没泄漏到 TSLA 目录
+        assert not (store_b._session_dir / "AAPL").exists()
+        assert not (store_a._session_dir / "TSLA").exists()
+
+    def test_parquet_store_concurrent_tickers_independent_results(self, tmp_path):
+        """并行运行不同 ticker 产生独立结果，无交叉污染。"""
+        configs = [{"tf": "日线"}]
+        store_a = ParquetStore(str(tmp_path), "AAPL", configs)
+        store_b = ParquetStore(str(tmp_path), "TSLA", configs)
+
+        store_a.start_session()
+        store_b.start_session()
+
+        # 模拟并行写入：交替写入不同 ticker 的数据
+        for i in range(5):
+            store_a._buffer.append(_make_valid_row(i, store_a._full_schema))
+            store_b._buffer.append(_make_valid_row(i + 50, store_b._full_schema))
+
+        store_a.flush()
+        store_b.flush()
+        store_a.end_session()
+        store_b.end_session()
+
+        # 两个结果文件都存在且独立
+        aapl_result = store_a._session_dir / "backtest_result.parquet"
+        tsla_result = store_b._session_dir / "backtest_result.parquet"
+        assert aapl_result.exists()
+        assert tsla_result.exists()
+
+        # 验证目录不同
+        aapl_files = set(p.name for p in store_a._session_dir.iterdir())
+        tsla_files = set(p.name for p in store_b._session_dir.iterdir())
+        # 各自的 metadata 只包含自己的 ticker
+        import json
+        aapl_meta = json.loads((store_a._session_dir / "metadata.json").read_text())
+        tsla_meta = json.loads((store_b._session_dir / "metadata.json").read_text())
+        assert aapl_meta["ticker"] == "AAPL"
+        assert tsla_meta["ticker"] == "TSLA"
+
+    # ── EventRecorder ticker isolation ────────────────────────────────────
+
+    def test_event_recorder_two_tickers_separate_dirs(self, tmp_path):
+        """两个不同 ticker 的 EventRecorder 写入不同 session 目录。"""
+        from services.event_recorder import EventRecorder
+
+        rec_a = EventRecorder(str(tmp_path), "AAPL")
+        rec_b = EventRecorder(str(tmp_path), "TSLA")
+
+        sid_a = rec_a.start_session({"configs": [{"tf": "日线"}]})
+        sid_b = rec_b.start_session({"configs": [{"tf": "日线"}]})
+
+        assert rec_a._session_dir != rec_b._session_dir
+        assert "AAPL" in rec_a._session_dir.name
+        assert "TSLA" in rec_b._session_dir.name
+        assert sid_a != sid_b
+
+        rec_a.end_session()
+        rec_b.end_session()
+
+    def test_event_recorder_data_independent(self, tmp_path):
+        """两个 ticker 的 EventRecorder 数据互不干扰。"""
+        from services.event_recorder import EventRecorder
+
+        rec_a = EventRecorder(str(tmp_path), "AAPL")
+        rec_b = EventRecorder(str(tmp_path), "TSLA")
+
+        rec_a.start_session({"configs": [{"tf": "日线"}]})
+        rec_b.start_session({"configs": [{"tf": "日线"}]})
+
+        # 模拟记录步骤
+        mock_output_a = _make_mock_pipeline_output(42, "2024-06-15", "long")
+        mock_output_b = _make_mock_pipeline_output(100, "2024-06-15", "short")
+
+        rec_a.record_step(0, "2024-06-15", mock_output_a)
+        rec_b.record_step(0, "2024-06-15", mock_output_b)
+
+        rec_a.end_session()
+        rec_b.end_session()
+
+        # 各自的 metadata 只包含自己的 ticker
+        import json
+        aapl_meta = json.loads((rec_a._session_dir / "metadata.json").read_text())
+        tsla_meta = json.loads((rec_b._session_dir / "metadata.json").read_text())
+        assert aapl_meta["ticker"] == "AAPL"
+        assert tsla_meta["ticker"] == "TSLA"
+
+        # 各自的 events.jsonl 存在
+        assert (rec_a._session_dir / "events.jsonl").exists()
+        assert (rec_b._session_dir / "events.jsonl").exists()
+
+    # ── PipelineCapture ticker isolation ──────────────────────────────────
+
+    def test_pipeline_capture_two_tickers_separate_dirs(self, tmp_path, monkeypatch):
+        """两个不同 ticker 的 PipelineCapture 写入不同 session 目录。"""
+        monkeypatch.setenv("PIPELINE_CAPTURE", "1")
+        from services.pipeline_capture import PipelineCapture
+
+        cap_a = PipelineCapture(str(tmp_path), "AAPL", {})
+        cap_b = PipelineCapture(str(tmp_path), "TSLA", {})
+
+        sid_a = cap_a.start_session()
+        sid_b = cap_b.start_session()
+
+        assert cap_a._session_dir != cap_b._session_dir
+        assert "AAPL" in cap_a._session_dir.name
+        assert "TSLA" in cap_b._session_dir.name
+        assert sid_a != sid_b
+
+        cap_a.end_session()
+        cap_b.end_session()
+
+    def test_pipeline_capture_data_independent(self, tmp_path, monkeypatch):
+        """两个 ticker 的 PipelineCapture 数据互不干扰。"""
+        monkeypatch.setenv("PIPELINE_CAPTURE", "1")
+        from services.pipeline_capture import PipelineCapture, PipelineStageData
+
+        cap_a = PipelineCapture(str(tmp_path), "AAPL", {})
+        cap_b = PipelineCapture(str(tmp_path), "TSLA", {})
+
+        cap_a.start_session()
+        cap_b.start_session()
+
+        # 模拟捕获步骤
+        sd_a = PipelineStageData(view_name="v0_日线", tf="日线",
+                                 t=np.arange(50, dtype=float),
+                                 filtered=np.ones(50))
+        sd_b = PipelineStageData(view_name="v0_日线", tf="日线",
+                                 t=np.arange(50, dtype=float),
+                                 filtered=np.ones(50) * 2)
+
+        cap_a.capture_step(0, "2024-06-15", {"v0_日线": sd_a})
+        cap_b.capture_step(0, "2024-06-15", {"v0_日线": sd_b})
+
+        cap_a.end_session()
+        cap_b.end_session()
+
+        # 各自的 metadata 只包含自己的 ticker
+        import json
+        aapl_meta = json.loads((cap_a._session_dir / "metadata.json").read_text())
+        tsla_meta = json.loads((cap_b._session_dir / "metadata.json").read_text())
+        assert aapl_meta["ticker"] == "AAPL"
+        assert tsla_meta["ticker"] == "TSLA"
+
+        # 各自的步骤目录存在
+        assert (cap_a._session_dir / "steps" / "000000").exists()
+        assert (cap_b._session_dir / "steps" / "000000").exists()
+
+    # ── 路径格式回归防护 ─────────────────────────────────────────────────
+
+    def test_output_dirs_never_overlap_across_tickers(self, tmp_path):
+        """跨 ticker 的输出目录永远不会重叠（同一服务类型内）。"""
+        import time
+        from services.event_recorder import EventRecorder
+
+        # ParquetStore: AAPL vs TSLA → 不同目录
+        ps_a = ParquetStore(str(tmp_path), "AAPL", [{"tf": "日线"}])
+        ps_t = ParquetStore(str(tmp_path), "TSLA", [{"tf": "日线"}])
+        ps_a.start_session()
+        time.sleep(0.01)  # ensure different timestamp
+        ps_t.start_session()
+        assert ps_a._session_dir != ps_t._session_dir
+        assert "AAPL" in ps_a._session_dir.name
+        assert "TSLA" in ps_t._session_dir.name
+        ps_a.end_session()
+        ps_t.end_session()
+
+        # EventRecorder: AAPL vs TSLA → 不同目录
+        er_a = EventRecorder(str(tmp_path), "AAPL")
+        er_t = EventRecorder(str(tmp_path), "TSLA")
+        er_a.start_session({"configs": [{"tf": "日线"}]})
+        time.sleep(0.01)
+        er_t.start_session({"configs": [{"tf": "日线"}]})
+        assert er_a._session_dir != er_t._session_dir
+        assert "AAPL" in er_a._session_dir.name
+        assert "TSLA" in er_t._session_dir.name
+        er_a.end_session()
+        er_t.end_session()
+
+
+# ============================================================================
+# Helpers for TestMultiTickerIsolation
+# ============================================================================
+
+
+def _make_valid_row(bar_index: int, schema: pa.Schema) -> dict:
+    """Build a single row dict matching the given schema with valid typed values."""
+    import pyarrow as pa
+    row = {}
+    for field in schema:
+        if field.name == "bar_index":
+            row[field.name] = bar_index
+        elif field.name == "bar_timestamp":
+            row[field.name] = np.datetime64("2024-01-01T00:00:00", "ns")
+        elif pa.types.is_int8(field.type):
+            row[field.name] = 0
+        elif pa.types.is_float32(field.type):
+            row[field.name] = 0.0
+        elif pa.types.is_boolean(field.type):
+            row[field.name] = False
+        elif pa.types.is_string(field.type) or pa.types.is_large_string(field.type):
+            row[field.name] = ""
+        else:
+            row[field.name] = 0
+    return row
+
+
+def _make_mock_pipeline_output(bar_index: int, cutoff_date: str, trade_type: str) -> dict:
+    """Build a minimal mock pipeline output for EventRecorder.record_step."""
+    n = 50
+    t = np.arange(n, dtype=float)
+    sig = np.zeros(n, dtype=int)
+    sig[-1] = 1 if trade_type == "long" else -1
+    filtered = np.random.RandomState(bar_index).randn(n).cumsum() * 0.01 + 100
+
+    view_data = {
+        "t": t,
+        "schmitt": {
+            "sig": sig,
+            "eps": np.full(n, 0.1),
+        },
+        "filtered": filtered,
+        "long_pnl": np.linspace(100, 110, n),
+        "short_pnl": np.linspace(100, 105, n),
+        "long_mask": np.ones(n, dtype=bool) if trade_type == "long" else np.zeros(n, dtype=bool),
+        "short_mask": np.ones(n, dtype=bool) if trade_type == "short" else np.zeros(n, dtype=bool),
+        "trade_records": [],
+        "bs_markers": {"entry_markers": [], "exit_markers": []},
+        "all_pairs": [],
+        "noisy": np.random.randn(n) * 0.5 + 100,
+    }
+
+    return {
+        "bar_index": bar_index,
+        "bar_timestamp": cutoff_date,
+        "cutoff_date": cutoff_date,
+        "views": {"v0_日线": view_data},
+        "ohlcv": {
+            "close": float(filtered[-1]),
+            "open": float(filtered[-1]) - 0.1,
+            "high": float(filtered[-1]) + 0.3,
+            "low": float(filtered[-1]) - 0.3,
+            "volume": 10000.0,
+        },
+    }
