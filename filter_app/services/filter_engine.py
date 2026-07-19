@@ -432,7 +432,9 @@ def compute_metrics(clean: np.ndarray, noisy: np.ndarray, filtered: np.ndarray) 
 # Inputs: v (velocity = d(filtered)/dt) as momentum, a (d²/dt²) as acceleration
 # ---------------------------------------------------------------------------
 def _schmitt_trigger(v: np.ndarray, a: np.ndarray, ewma_span: int = 60,
-                     k_eps: float = 0.15, sigma_min: float = 0.05) -> Optional[Dict[str, Any]]:
+                     k_eps: float = 0.15, sigma_min: float = 0.05,
+                     init_mu: Optional[float] = None,
+                     init_sigma: Optional[float] = None) -> Optional[Dict[str, Any]]:
     """Schmitt trigger: adaptive deadband on acceleration (a),
     with velocity (v) as direction constraint.
 
@@ -453,12 +455,17 @@ def _schmitt_trigger(v: np.ndarray, a: np.ndarray, ewma_span: int = 60,
         自适应死区系数（默认 0.15）。
     sigma_min : float, optional
         死区下限，防止死区过小（默认 0.05）。
+    init_mu : Optional[float], optional
+        跨窗口 EWMA 均值初始值；为 None 则用 v[0] 初始化。
+    init_sigma : Optional[float], optional
+        跨窗口 EWMA 标准差初始值；为 None 则用 0.0 初始化。
 
     Returns
     -------
     Optional[Dict[str, Any]]
         包含 "mu_v"（EWMA均值）、"sigma_v"（EWMA标准差）、
-        "eps"（自适应阈值）、"sig"（±1/0 信号）、"dur"（持续期数）的字典。
+        "eps"（自适应阈值）、"sig"（±1/0 信号）、"dur"（持续期数）、
+        "final_mu"（末态均值）、"final_sigma"（末态标准差）的字典。
         数据不足时返回 None。
     """
     n = len(v)
@@ -469,8 +476,8 @@ def _schmitt_trigger(v: np.ndarray, a: np.ndarray, ewma_span: int = 60,
     alpha = 2.0 / (ewma_span + 1)
     mu_v = np.full(n, np.nan)
     sigma_v = np.full(n, np.nan)
-    mu_v[0] = v[0]
-    sigma_v[0] = 0.0
+    mu_v[0] = init_mu if init_mu is not None and init_sigma is not None else v[0]
+    sigma_v[0] = init_sigma if init_mu is not None and init_sigma is not None else 0.0
     for i in range(1, n):
         mu_v[i] = alpha * v[i] + (1 - alpha) * mu_v[i - 1]
         sigma_v[i] = np.sqrt(
@@ -514,7 +521,9 @@ def _schmitt_trigger(v: np.ndarray, a: np.ndarray, ewma_span: int = 60,
         dur_t[i] = current_dur
 
     return {"mu_v": mu_v, "sigma_v": sigma_v,
-            "eps": eps_t, "sig": sig_t, "dur": dur_t}
+            "eps": eps_t, "sig": sig_t, "dur": dur_t,
+            "final_mu": float(mu_v[-1]),
+            "final_sigma": float(sigma_v[-1])}
 
 
 def _find_all_pairs(sig_t: np.ndarray) -> List[Tuple[int, int]]:

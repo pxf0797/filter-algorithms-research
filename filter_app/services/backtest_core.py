@@ -89,6 +89,10 @@ class BacktestRunner:
         # bar 总数
         self._bar_count: int = self._query_bar_count()
 
+        # 跨窗口 EWMA 状态（回测连续模式用，避免信号跳变）
+        # {view_key: {"init_mu": float, "init_sigma": float}}
+        self._ewma_state: dict[str, dict[str, float]] = {}
+
         logger.info(
             "BacktestRunner 初始化: ticker={}, min_tf={}, tfs={}, bar_count={}, views={}",
             self.ticker, self._min_tf, self._tfs_in_use, self._bar_count, len(configs),
@@ -185,8 +189,21 @@ class BacktestRunner:
                     logger.warning("视图 {} 窗口数据为空，跳过", view_key)
                     continue
 
+                # 跨窗口 EWMA 初始状态（首次为 None → 正常初始化）
+                ewma_init = self._ewma_state.get(view_key)
+
                 # 运行管道
-                stage_output = self._compute_pipeline_for_view(view_cfg, window_data)
+                stage_output = self._compute_pipeline_for_view(
+                    view_cfg, window_data, ewma_init=ewma_init,
+                )
+
+                # 保存本窗口 EWMA 末态，供下一窗口使用
+                schmitt = stage_output.get("schmitt")
+                if schmitt is not None:
+                    self._ewma_state[view_key] = {
+                        "init_mu": schmitt.get("final_mu", 0.0),
+                        "init_sigma": schmitt.get("final_sigma", 0.0),
+                    }
 
                 # 跨周期 PnL 对齐：检查是否有高周期 PnL 可用
                 higher_tf = TF_HIERARCHY.get(tf)
@@ -372,6 +389,7 @@ class BacktestRunner:
 
     def _compute_pipeline_for_view(
         self, view_cfg: dict, window_data: tuple,
+        ewma_init: Optional[dict] = None,
     ) -> dict:
         """对单个视图运行完整管道计算（步骤 1–6）。
 
@@ -391,6 +409,9 @@ class BacktestRunner:
             ``show_pred``, ``stop_loss_pct``, ``n_ext``, ``fit_mode`` 等字段。
         window_data : tuple
             ``(t, noisy, ohlc, dates)`` 来自 ``_load_window_data``。
+        ewma_init : Optional[dict], optional
+            跨窗口 EWMA 初始状态 ``{"init_mu": float, "init_sigma": float}``；
+            用于回测连续模式下跨窗口传递 EWMA 状态，避免信号跳变。
 
         Returns
         -------
@@ -407,7 +428,12 @@ class BacktestRunner:
         filtered, filtered2 = self._compute_filters(noisy, t, view_cfg)
 
         # ── Step 2: 施密特触发器 ──
-        schmitt = self._compute_schmitt_trigger(filtered, t, view_cfg)
+        init_mu = ewma_init.get("init_mu") if ewma_init else None
+        init_sigma = ewma_init.get("init_sigma") if ewma_init else None
+        schmitt = self._compute_schmitt_trigger(
+            filtered, t, view_cfg,
+            init_mu=init_mu, init_sigma=init_sigma,
+        )
 
         # ── Step 3: 查找多空切换对 ──
         all_pairs: list = []
@@ -504,6 +530,8 @@ class BacktestRunner:
     @staticmethod
     def _compute_schmitt_trigger(
         filtered: np.ndarray, t: np.ndarray, cfg: dict,
+        init_mu: Optional[float] = None,
+        init_sigma: Optional[float] = None,
     ) -> Optional[dict]:
         """计算施密特触发器信号。
 
@@ -517,6 +545,10 @@ class BacktestRunner:
             时间索引。
         cfg : dict
             视图配置，需含 ``show_sch``, ``ew``, ``ke``, ``sm``。
+        init_mu : Optional[float], optional
+            跨窗口 EWMA 均值初始值（回测连续模式用）。
+        init_sigma : Optional[float], optional
+            跨窗口 EWMA 标准差初始值（回测连续模式用）。
 
         Returns
         -------
@@ -533,6 +565,8 @@ class BacktestRunner:
             ewma_span=cfg.get("ew", 60),
             k_eps=cfg.get("ke", 0.15),
             sigma_min=cfg.get("sm", 0.05),
+            init_mu=init_mu,
+            init_sigma=init_sigma,
         )
         if result is not None:
             result["v"] = v
