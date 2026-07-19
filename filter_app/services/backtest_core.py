@@ -89,9 +89,9 @@ class BacktestRunner:
         # bar 总数
         self._bar_count: int = self._query_bar_count()
 
-        # 跨窗口 EWMA 状态（回测连续模式用，避免信号跳变）
-        # {view_key: {"init_mu": float, "init_sigma": float}}
-        self._ewma_state: dict[str, dict[str, float]] = {}
+        # 跨窗口 EWMA + 施密特状态（回测连续模式用，避免信号跳变）
+        # {view_key: {"init_mu": float, "init_sigma": float, "state": int, "dur": int}}
+        self._ewma_state: dict[str, dict] = {}
 
         logger.info(
             "BacktestRunner 初始化: ticker={}, min_tf={}, tfs={}, bar_count={}, views={}",
@@ -197,12 +197,14 @@ class BacktestRunner:
                     view_cfg, window_data, ewma_init=ewma_init,
                 )
 
-                # 保存本窗口 EWMA 末态，供下一窗口使用
+                # 保存本窗口 EWMA + 施密特末态，供下一窗口使用
                 schmitt = stage_output.get("schmitt")
                 if schmitt is not None:
                     self._ewma_state[view_key] = {
                         "init_mu": schmitt.get("final_mu", 0.0),
                         "init_sigma": schmitt.get("final_sigma", 0.0),
+                        "state": schmitt.get("final_state", 0),
+                        "dur": schmitt.get("final_dur", 0),
                     }
 
                 # 跨周期 PnL 对齐：检查是否有高周期 PnL 可用
@@ -430,9 +432,12 @@ class BacktestRunner:
         # ── Step 2: 施密特触发器 ──
         init_mu = ewma_init.get("init_mu") if ewma_init else None
         init_sigma = ewma_init.get("init_sigma") if ewma_init else None
+        init_state = ewma_init.get("state", 0) if ewma_init else 0
+        init_dur = ewma_init.get("dur", 0) if ewma_init else 0
         schmitt = self._compute_schmitt_trigger(
             filtered, t, view_cfg,
             init_mu=init_mu, init_sigma=init_sigma,
+            init_state=init_state, init_dur=init_dur,
         )
 
         # ── Step 3: 查找多空切换对 ──
@@ -532,6 +537,8 @@ class BacktestRunner:
         filtered: np.ndarray, t: np.ndarray, cfg: dict,
         init_mu: Optional[float] = None,
         init_sigma: Optional[float] = None,
+        init_state: int = 0,
+        init_dur: int = 0,
     ) -> Optional[dict]:
         """计算施密特触发器信号。
 
@@ -549,6 +556,10 @@ class BacktestRunner:
             跨窗口 EWMA 均值初始值（回测连续模式用）。
         init_sigma : Optional[float], optional
             跨窗口 EWMA 标准差初始值（回测连续模式用）。
+        init_state : int, optional
+            跨窗口施密特状态初始值（回测连续模式用，默认 0）。
+        init_dur : int, optional
+            跨窗口施密特持续期数初始值（回测连续模式用，默认 0）。
 
         Returns
         -------
@@ -567,6 +578,8 @@ class BacktestRunner:
             sigma_min=cfg.get("sm", 0.05),
             init_mu=init_mu,
             init_sigma=init_sigma,
+            init_state=init_state,
+            init_dur=init_dur,
         )
         if result is not None:
             result["v"] = v
