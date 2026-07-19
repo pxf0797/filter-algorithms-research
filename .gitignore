@@ -25,6 +25,7 @@ htmlcov/
 config/
 data/backtest_logs/
 data/backtest_output/
+backtest_output/
 test_backtest_output/
 test_output/
 debug_output/

@@ -24,7 +24,7 @@ if _pkg_dir not in sys.path:
 from services.backtest_core import BacktestRunner, ALL_TFS
 from services.event_recorder import EventRecorder
 from services.filter_engine import FILTERS
-from filter_app.services.parquet_store import ParquetStore
+from services.parquet_store import ParquetStore
 from config_db import apply_preset, list_presets
 from db import has_data, get_conn
 

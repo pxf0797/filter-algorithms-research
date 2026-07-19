@@ -56,7 +56,7 @@ from components.sidebar import (
 from state import AppState
 from services.pipeline_capture import PipelineCapture, PipelineStageData
 from backtest_logger import log_bar_navigation, log_data_load, log_error
-from filter_app.components.backtest_panel import render_backtest_panel, run_backtest_play
+from components.backtest_panel import render_backtest_panel, run_backtest_play
 
 # ---------------------------------------------------------------------------
 # Page config (must be the first Streamlit command)
