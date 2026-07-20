@@ -8,6 +8,7 @@ All tests use mock view_data — no real backtest or DB required.
 
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -2925,3 +2926,255 @@ class TestPredPairsFallback:
         )
         assert len(trades) == 0
         assert np.all(long_pnl == 100.0)
+
+
+# ============================================================================
+# TestBSDateBasedMatching — P9: BS marker date-based matching via bar_date
+# ============================================================================
+
+
+class TestBSDateBasedMatching:
+    """P9 fix: BS marker 通过 bar_date 进行日期匹配。
+
+    原始 index-based matching 在某些场景下失效（BS marker 的 bar_idx
+    可能 < view_last_idx），新增 bar_date 参数作为主要匹配方式，
+    回退到 _current_bar_date，最后回退到 index-based matching。
+    """
+
+    @staticmethod
+    def _extract(view_data: dict, prefix: str = "v0",
+                 bar_date: Any = None) -> dict:
+        return ParquetStore._extract_view_columns(prefix, view_data,
+                                                   bar_date=bar_date)
+
+    def test_bs_entry_via_bar_date(self):
+        """通过 bar_date 匹配 BS entry marker（非 index-based）。"""
+        # marker at bar 50, but we're processing bar 99
+        # index-based matching (view_last_idx=99, bar_idx=50) would fail
+        # date-based matching should succeed because bar_date matches marker date
+        view_data = make_mock_view_data(n_pts=100, has_entry=False)
+        d = view_data["dates"]
+        # Place marker at bar 50
+        view_data["bs_markers"]["entry_markers"] = [
+            (50, "B", "green", d[50]),
+        ]
+        # Pass bar_date=d[50] so date matching finds the marker even though
+        # view_last_idx=99 and bar_idx=50
+        cols = self._extract(view_data, bar_date=pd.Timestamp(d[50]))
+        assert cols["v0_bs_entry"] == "B", (
+            "date-based matching should find marker at bar 50 via bar_date"
+        )
+
+    def test_bs_exit_via_bar_date(self):
+        """通过 bar_date 匹配 BS exit marker。"""
+        view_data = make_mock_view_data(n_pts=100, has_entry=False)
+        d = view_data["dates"]
+        view_data["bs_markers"]["exit_markers"] = [
+            (30, "S", "red", "stop_loss", d[30]),
+        ]
+        cols = self._extract(view_data, bar_date=pd.Timestamp(d[30]))
+        assert cols["v0_bs_exit"] == "S"
+
+    def test_bs_entry_not_matched_when_bar_date_mismatch(self):
+        """bar_date 与 marker date 不匹配时不应找到 marker。"""
+        view_data = make_mock_view_data(n_pts=100, has_entry=False)
+        d = view_data["dates"]
+        view_data["bs_markers"]["entry_markers"] = [
+            (50, "B", "green", d[50]),
+        ]
+        # bar_date is d[99], marker is at d[50] → no match
+        cols = self._extract(view_data, bar_date=pd.Timestamp(d[99]))
+        assert cols["v0_bs_entry"] == ""
+
+    def test_bs_entry_bar_date_none_falls_back_to_current_bar_date(self):
+        """bar_date=None 时回退到 _current_bar_date(view_data) 进行匹配。"""
+        view_data = make_mock_view_data(n_pts=51, has_entry=True)
+        # has_entry=True → marker at bar 50, date = dates[50]
+        # _current_bar_date returns dates[-1] = dates[50] → should match
+        cols = self._extract(view_data, bar_date=None)
+        assert cols["v0_bs_entry"] == "B", (
+            "None bar_date should fall back to _current_bar_date"
+        )
+
+    def test_bs_entry_bar_date_none_falls_back_to_index_matching(self):
+        """无 bar_date 且无 dates 时回退到 index-based matching。"""
+        view_data = make_mock_view_data(n_pts=51, has_entry=False)
+        # Remove dates so _current_bar_date returns None
+        del view_data["dates"]
+        view_data["bs_markers"]["entry_markers"] = [
+            (50, "B", "green", "2024-01-01"),  # date won't be used (no dates)
+        ]
+        # Index-based matching: bar_idx=50, view_last_idx=50 → match
+        cols = self._extract(view_data, bar_date=None)
+        assert cols["v0_bs_entry"] == "B", (
+            "should fall back to index matching when no dates available"
+        )
+
+    def test_date_matching_handles_none_marker_date(self):
+        """_date_matches 在 marker_date=None 时返回 False（不抛异常）。"""
+        from services.parquet_store import _date_matches
+        assert _date_matches(None, pd.Timestamp("2024-01-01")) is False
+        assert _date_matches(pd.Timestamp("2024-01-01"), None) is False
+        assert _date_matches(None, None) is False
+
+    def test_date_matching_handles_mismatched_formats(self):
+        """_date_matches 能处理不同格式的日期输入。"""
+        from services.parquet_store import _date_matches
+
+        # Timestamp vs string
+        assert _date_matches(
+            pd.Timestamp("2024-01-15"), "2024-01-15"
+        ) is True
+        # Timestamp vs datetime
+        from datetime import datetime
+        assert _date_matches(
+            pd.Timestamp("2024-06-15 10:30:00"),
+            datetime(2024, 6, 15, 10, 30, 0)
+        ) is True
+        # numpy datetime64 vs Timestamp
+        assert _date_matches(
+            np.datetime64("2024-03-20"),
+            pd.Timestamp("2024-03-20")
+        ) is True
+        # Different dates → False
+        assert _date_matches(
+            pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-02")
+        ) is False
+        # Invalid string → False (no exception)
+        assert _date_matches("not-a-date", pd.Timestamp("2024-01-01")) is False
+
+    def test_current_bar_date_returns_none_for_missing_dates(self):
+        """_current_bar_date 在 view_data 无 dates 时返回 None。"""
+        from services.parquet_store import _current_bar_date
+        assert _current_bar_date({}) is None
+        assert _current_bar_date({"dates": None}) is None
+        assert _current_bar_date({"dates": []}) is None
+
+    def test_current_bar_date_returns_last_timestamp(self):
+        """_current_bar_date 返回 dates 数组的最后一个元素作为 pd.Timestamp。"""
+        from services.parquet_store import _current_bar_date
+        dates = pd.DatetimeIndex([
+            "2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04",
+        ])
+        result = _current_bar_date({"dates": dates})
+        assert result == pd.Timestamp("2024-01-04")
+
+
+# ============================================================================
+# TestTradeDateBasedMatching — P9: trade exit date-based matching via bar_date
+# ============================================================================
+
+
+class TestTradeDateBasedMatching:
+    """P9 fix: trade exit 通过 bar_date 进行日期匹配。
+
+    原先仅支持 index-based matching（exit_idx == view_last_idx），
+    但当 exit bar 不在窗口末尾时（如标记延迟），日期匹配提供了
+    精确的 bar 级定位。
+    """
+
+    @staticmethod
+    def _extract(view_data: dict, prefix: str = "v0",
+                 bar_date: Any = None) -> dict:
+        return ParquetStore._extract_view_columns(prefix, view_data,
+                                                   bar_date=bar_date)
+
+    def test_trade_exit_via_bar_date(self):
+        """exit_idx != view_last_idx 但 bar_date 匹配 exit_date 时仍识别为 exit。"""
+        view_data = make_mock_view_data(n_pts=100, has_entry=False, has_exit=False)
+        d = view_data["dates"]
+        # Trade exits at bar 50, but view_last_idx=99
+        # bar_date=d[50] should trigger date-based matching
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 20, "exit_idx": 50,
+             "return_pct": 3.5, "exit_reason": "take_profit"}
+        ]
+        cols = self._extract(view_data, bar_date=pd.Timestamp(d[50]))
+        assert cols["v0_trade"] == "exit_long"
+        assert cols["v0_trade_return"] == pytest.approx(3.5)
+        assert cols["v0_trade_reason"] == "take_profit"
+
+    def test_trade_exit_date_mismatch_not_matched(self):
+        """bar_date 与 exit_date 不匹配时不识别为 exit。"""
+        view_data = make_mock_view_data(n_pts=100, has_entry=False, has_exit=False)
+        d = view_data["dates"]
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 20, "exit_idx": 50,
+             "return_pct": 3.5, "exit_reason": "take_profit"}
+        ]
+        # bar_date=d[99] != exit_date=d[50] → no match as exit
+        # But entry_idx=20 <= view_last_idx=99 → it's an active position
+        # Wait, actually with exit_idx=50 < view_last_idx=99, the trade is completed.
+        # The code checks for exit first, then for entry. Since bar_date doesn't
+        # match, is_exit_at_current is False. Then it checks entry: entry_idx=20
+        # <= 99 is True, but exit_idx=50 <= 99 also True → trade is done.
+        # So trade_val should stay as "" (completed trade).
+        cols = self._extract(view_data, bar_date=pd.Timestamp(d[99]))
+        assert cols["v0_trade"] == "", "completed trade should show empty"
+
+    def test_trade_return_populated_on_exit_via_date_match(self):
+        """通过日期匹配的 exit 也应正确填充 trade_return。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
+        d = view_data["dates"]
+        view_data["trade_records"] = [
+            {"type": "short", "entry_idx": 10, "exit_idx": 80,
+             "return_pct": -2.5, "exit_reason": "stop_loss"}
+        ]
+        cols = self._extract(view_data, bar_date=pd.Timestamp(d[80]))
+        assert cols["v0_trade"] == "exit_short"
+        assert cols["v0_trade_return"] == pytest.approx(-2.5)
+        assert cols["v0_trade_reason"] == "stop_loss"
+
+    def test_trade_reason_populated_on_exit_via_date_match(self):
+        """通过日期匹配的 exit 也应正确填充 trade_reason。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
+        d = view_data["dates"]
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 30, "exit_idx": 70,
+             "return_pct": 1.2, "exit_reason": "take_profit"}
+        ]
+        cols = self._extract(view_data, bar_date=pd.Timestamp(d[70]))
+        assert cols["v0_trade"] == "exit_long"
+        assert cols["v0_trade_return"] == pytest.approx(1.2)
+        assert cols["v0_trade_reason"] == "take_profit"
+
+    def test_eod_exit_not_matched_even_with_date_match(self):
+        """eod 退出的 trade 即使 bar_date 匹配也不应标记为 exit。"""
+        view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
+        d = view_data["dates"]
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 30, "exit_idx": 70,
+             "return_pct": 2.0, "exit_reason": "eod"}
+        ]
+        cols = self._extract(view_data, bar_date=pd.Timestamp(d[70]))
+        # eod exit → still treated as active position, shows entry
+        assert cols["v0_trade"] == "entry_long"
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
+
+    def test_date_matching_handles_none_dates_gracefully(self):
+        """dates 为 None 时日期匹配不崩溃，回退到 index-based。"""
+        view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
+        # Remove dates so date-based matching is skipped
+        del view_data["dates"]
+        # Trade exits at view_last_idx=49 via index matching
+        view_data["trade_records"] = [
+            {"type": "short", "entry_idx": 20, "exit_idx": 49,
+             "return_pct": -1.0, "exit_reason": "stop_loss"}
+        ]
+        # bar_date passed but no dates array → index-based should still work
+        cols = self._extract(view_data, bar_date=pd.Timestamp("2024-06-15"))
+        assert cols["v0_trade"] == "exit_short"
+
+    def test_date_matching_handles_exit_idx_out_of_bounds(self):
+        """exit_idx 超出 dates 长度时日期匹配不崩溃。"""
+        view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
+        d = view_data["dates"]
+        view_data["trade_records"] = [
+            {"type": "short", "entry_idx": 10, "exit_idx": 999,
+             "return_pct": 1.0, "exit_reason": "take_profit"}
+        ]
+        # exit_idx=999 >> len(dates)=50 → date lookup skipped, index match fails
+        # entry_idx=10 <= 49, exit_idx=999 > 49 → still active → entry_short
+        cols = self._extract(view_data, bar_date=pd.Timestamp(d[49]))
+        assert cols["v0_trade"] == "entry_short"

@@ -77,3 +77,91 @@ class TestHtmlPositionOverlay:
         count = html.count("addPosOverlay(")
         assert count >= 2, \
             f"addPosOverlay should be called at least 2 times (long+short), got {count}"
+
+
+class TestHtmlViewLabels:
+    """P9 fix: DEFAULT_VIEW_LABELS 修正与 metadata 优先级。
+
+    验证 HTML 中 DEFAULT_VIEW_LABELS 映射正确（v0=日线, v1=60分钟,
+    v2=15分钟, v3=5分钟），以及 renderAll 中的优先级逻辑：
+    metadata.view_labels 优先于默认值，缺失时回退到默认值。
+    """
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    @staticmethod
+    def _simulate_viewlabels_init(metadata):
+        """模拟 renderAll 中 viewLabels 初始化逻辑。"""
+        defaults = {"v0": "日线", "v1": "60分钟", "v2": "15分钟", "v3": "5分钟"}
+        if metadata and metadata.get("view_labels"):
+            return {**defaults, **metadata["view_labels"]}
+        return {**defaults}
+
+    def test_default_view_labels_exist_in_html(self):
+        """HTML 中包含 DEFAULT_VIEW_LABELS 定义。"""
+        html = self._read_html()
+        assert "DEFAULT_VIEW_LABELS" in html, \
+            "HTML must contain DEFAULT_VIEW_LABELS definition"
+
+    def test_default_view_labels_correct_mapping(self):
+        """DEFAULT_VIEW_LABELS 映射正确：v0=日线, v1=60分钟, v2=15分钟, v3=5分钟。"""
+        html = self._read_html()
+        # 验证修复后的正确映射
+        assert "v0: '日线'" in html, "v0 should map to 日线"
+        assert "v1: '60分钟'" in html, "v1 should map to 60分钟"
+        assert "v2: '15分钟'" in html, "v2 should map to 15分钟"
+        assert "v3: '5分钟'" in html, "v3 should map to 5分钟"
+
+    def test_default_view_labels_not_swapped(self):
+        """DEFAULT_VIEW_LABELS 不应包含交换后的错误值（P9 回归防护）。"""
+        html = self._read_html()
+        # 回归防护：确保没有把 日线 放到 v2 且把 15分钟 放到 v0
+        assert "v0: '15分钟'" not in html.replace(" ", ""), \
+            "v0 should NOT be 15分钟 (was the bug)"
+        assert "v2: '日线'" not in html.replace(" ", ""), \
+            "v2 should NOT be 日线 (was the bug)"
+
+    def test_metadata_view_labels_takes_priority(self):
+        """metadata.view_labels 优先于 DEFAULT_VIEW_LABELS。"""
+        metadata = {"view_labels": {"v0": "周线", "v2": "自定义"}}
+        labels = self._simulate_viewlabels_init(metadata)
+        # metadata 中的值覆盖默认值
+        assert labels["v0"] == "周线"
+        assert labels["v2"] == "自定义"
+        # metadata 中未指定的保持默认值
+        assert labels["v1"] == "60分钟"
+        assert labels["v3"] == "5分钟"
+
+    def test_missing_metadata_falls_back_to_defaults(self):
+        """metadata 缺失时回退到 DEFAULT_VIEW_LABELS。"""
+        # metadata 为 None
+        labels_none = self._simulate_viewlabels_init(None)
+        assert labels_none == {"v0": "日线", "v1": "60分钟", "v2": "15分钟", "v3": "5分钟"}
+
+        # metadata 无 view_labels 字段
+        labels_empty = self._simulate_viewlabels_init({"other": "data"})
+        assert labels_empty == {"v0": "日线", "v1": "60分钟", "v2": "15分钟", "v3": "5分钟"}
+
+        # metadata.view_labels 为空 dict
+        labels_no_labels = self._simulate_viewlabels_init({"view_labels": {}})
+        assert labels_no_labels == {"v0": "日线", "v1": "60分钟", "v2": "15分钟", "v3": "5分钟"}
+
+    def test_partial_metadata_only_overrides_specified(self):
+        """metadata 只覆盖指定的 view，其余保持默认。"""
+        metadata = {"view_labels": {"v0": "自定义日线"}}
+        labels = self._simulate_viewlabels_init(metadata)
+        assert labels["v0"] == "自定义日线"
+        assert labels["v1"] == "60分钟"
+        assert labels["v2"] == "15分钟"
+        assert labels["v3"] == "5分钟"
+
+    def test_render_all_priority_pattern_in_html(self):
+        """HTML 中 renderAll 的优先级逻辑模式正确。"""
+        html = self._read_html()
+        # 验证使用 spread 语法：先展开默认值，再用 metadata 覆盖
+        assert "{ ...DEFAULT_VIEW_LABELS" in html, \
+            "renderAll must spread DEFAULT_VIEW_LABELS first, then overlay metadata"
+        assert "metadata.view_labels" in html, \
+            "renderAll must check metadata.view_labels"

@@ -166,6 +166,7 @@ def load_multi_parquet(paths: list[str]) -> dict:
 class BacktestHandler(BaseHTTPRequestHandler):
     """HTTP 请求处理器：GET 返回 HTML 页面，POST /api/parse 解析上传的 parquet 文件。"""
     html_template = None  # 由 start_server() 设置
+    embedded_html = None  # 预处理的 HTML（含嵌入数据）
 
     def do_GET(self):
         if self.path == "/api/health":
@@ -183,8 +184,11 @@ class BacktestHandler(BaseHTTPRequestHandler):
 
     def _serve_html(self):
         try:
-            with open(self.html_template, encoding="utf-8") as f:
-                html = f.read()
+            if self.embedded_html is not None:
+                html = self.embedded_html
+            else:
+                with open(self.html_template, encoding="utf-8") as f:
+                    html = f.read()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
@@ -260,9 +264,35 @@ class BacktestHandler(BaseHTTPRequestHandler):
             print(f"[server] {args[0]}")
 
 
-def start_server(port: int, html_template: str):
-    """启动本地 HTTP 服务器，支持拖入 Parquet 文件可视化。"""
+def start_server(port: int, html_template: str, metadata: dict | None = None):
+    """启动本地 HTTP 服务器，支持拖入 Parquet 文件可视化。
+
+    Parameters
+    ----------
+    port : int
+        服务器端口。
+    html_template : str
+        HTML 模板路径。
+    metadata : dict or None
+        可选的 metadata，会嵌入到 HTML 中供前端读取 view_labels 等。
+    """
     BacktestHandler.html_template = html_template
+
+    # Pre-embed metadata into HTML if available
+    if metadata is not None:
+        try:
+            with open(html_template, encoding="utf-8") as f:
+                html = f.read()
+            embed_script = "<script>\n"
+            embed_script += "window.BACKTEST_METADATA = " + json.dumps(metadata, ensure_ascii=False) + ";\n"
+            embed_script += "</script>\n"
+            html = html.replace("</head>", embed_script + "</head>", 1)
+            BacktestHandler.embedded_html = html
+        except Exception as e:
+            print(f"警告：嵌入 metadata 失败: {e}", file=sys.stderr)
+            BacktestHandler.embedded_html = None
+    else:
+        BacktestHandler.embedded_html = None
 
     try:
         server = HTTPServer(("127.0.0.1", port), BacktestHandler)
@@ -392,7 +422,33 @@ def main():
 
     # --serve 模式
     if args.serve:
-        start_server(args.port, args.template)
+        # Try to auto-detect metadata from parquet paths if provided
+        serve_metadata = None
+        parquet_for_meta = args.parquet or []
+        if args.all:
+            parquet_for_meta = find_all_parquet_dirs(args.all)
+        elif args.latest:
+            p = find_latest_parquet(args.latest)
+            if p:
+                parquet_for_meta = [p]
+
+        if parquet_for_meta:
+            first_path = parquet_for_meta[0]
+            auto_meta_dir = Path(first_path).parent if not Path(first_path).is_dir() else Path(first_path)
+            auto_meta = auto_meta_dir / "metadata.json"
+            if auto_meta.exists():
+                meta = load_metadata(str(auto_meta))
+                if meta:
+                    serve_metadata = meta
+                    print(f"加载 Metadata: {auto_meta}")
+                    print(f"    view_labels: {meta.get('view_labels', {})}")
+
+        if metadata_path:
+            serve_metadata = load_metadata(metadata_path)
+            if serve_metadata:
+                print(f"加载 Metadata: {metadata_path}")
+
+        start_server(args.port, args.template, serve_metadata)
         return
 
     # 确定 parquet 路径列表

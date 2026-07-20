@@ -335,6 +335,13 @@ class ParquetStore:
             "bar_timestamp": _to_timestamp_ns(bar_timestamp),
         }
 
+        # Compute the current bar's date for date-based BS/trade matching
+        bar_date: Any = None
+        try:
+            bar_date = pd.Timestamp(bar_timestamp)
+        except Exception:
+            pass
+
         views: dict[str, dict] = stage_outputs.get("views", {})
 
         # Iterate views in deterministic order (v0, v1, v2, v3)
@@ -349,7 +356,7 @@ class ParquetStore:
                     row[f"{prefix}_{col}"] = _COL_DEFAULTS[col]
             else:
                 try:
-                    extracted = self._extract_view_columns(prefix, view_data)
+                    extracted = self._extract_view_columns(prefix, view_data, bar_date=bar_date)
                     row.update(extracted)
                 except Exception:
                     print(
@@ -375,6 +382,7 @@ class ParquetStore:
     @staticmethod
     def _extract_view_columns(
         prefix: str, view_data: dict,
+        bar_date: Any = None,
     ) -> dict[str, Any]:
         """Extract the 12 per-view columns from a single view's pipeline output.
 
@@ -385,7 +393,10 @@ class ParquetStore:
         view_data : dict
             View pipeline output.  Expected keys: ``schmitt``, ``filtered``,
             ``long_pnl``, ``short_pnl``, ``long_mask``, ``short_mask``,
-            ``trade_records``, ``bs_markers``, ``t``.
+            ``trade_records``, ``bs_markers``, ``t``, ``dates``.
+        bar_date : pd.Timestamp or None
+            The current bar's date (from the backtest loop's bar_timestamp).
+            Used for date-based BS marker and trade exit matching.
 
         Returns
         -------
@@ -469,30 +480,37 @@ class ParquetStore:
         trade_val = _STR_NA
         trade_return = _FLOAT_NA
         trade_reason = _STR_NA
+        dates = view_data.get("dates")
 
         # Trade matching strategy:
         # - "exit_*"  → trade exited at current bar (exit_idx == view_last_idx,
-        #                but not eod forced exits — those mean the trade is still
-        #                active beyond this window).
+        #                or exit_date matches bar_date; but not eod forced exits).
         # - "entry_*" → trade entered before or at current bar and is still
         #                active (no exit, exit after current bar, or eod exit).
         # - ""        → no current trade.
-        #
-        # Previous code used ``<=`` for both, which caused every bar after the
-        # first completed trade to forever show "exit_*" — making the column
-        # useless (200 consecutive "exit" values, 0 "entry").
         for trade in trade_records:
             exit_idx = trade.get("exit_idx")
             entry_idx = trade.get("entry_idx")
             tt = trade.get("type", "")
             reason = str(trade.get("exit_reason", ""))
 
-            # Genuine exit at current bar (not eod forced exit)
-            if (
-                exit_idx is not None
-                and int(exit_idx) == view_last_idx
-                and reason != "eod"
-            ):
+            # Determine if this trade exited at the current bar
+            is_exit_at_current = False
+            if exit_idx is not None and reason != "eod":
+                # Primary: index-based matching (exit_idx == view_last_idx)
+                if int(exit_idx) == view_last_idx:
+                    is_exit_at_current = True
+                # Secondary: date-based matching via bar_date
+                elif bar_date is not None and dates is not None:
+                    try:
+                        if int(exit_idx) < len(dates):
+                            exit_date = dates[int(exit_idx)]
+                            if _date_matches(exit_date, bar_date):
+                                is_exit_at_current = True
+                    except Exception:
+                        pass
+
+            if is_exit_at_current:
                 trade_val = f"exit_{tt}"
                 trade_return = float(trade.get("return_pct", _FLOAT_NA))
                 trade_reason = reason
@@ -519,24 +537,21 @@ class ParquetStore:
         bs_exit = _STR_NA
 
         if bs_markers is not None:
-            # P5 fix (regression): date-based matching.
-            # BS markers use bar indices within the view window, but
-            # _find_all_pairs delays pair creation by ≥1 bar — the
-            # marker's bar_idx is always < view_last_idx, so index-based
-            # ``== view_last_idx`` matching always fails on real data.
-            # Match by date instead: each marker stores the bar's date
-            # (from ``dates[entry_idx]``), and we compare against the
-            # current bar's date from the view's ``dates`` array.
-            #
-            # entry_markers: (bar_idx, label, color, date)
-            # exit_markers:  (bar_idx, label, color, exit_reason, date)
-            current_date = _current_bar_date(view_data)
-            if current_date is not None:
+            # Use bar_date (the actual bar being stored) for date-based matching.
+            # Falls back to _current_bar_date(view_data) for tests without bar_date,
+            # then falls back to index-based matching for tests without dates.
+            match_date = bar_date
+            if match_date is None:
+                match_date = _current_bar_date(view_data)
+
+            if match_date is not None:
+                # entry_markers: (bar_idx, label, color, date)
+                # exit_markers:  (bar_idx, label, color, exit_reason, date)
                 for m in bs_markers.get("entry_markers", []):
-                    if _date_matches(m[3] if len(m) > 3 else None, current_date):
+                    if _date_matches(m[3] if len(m) > 3 else None, match_date):
                         bs_entry = str(m[1])
                 for m in bs_markers.get("exit_markers", []):
-                    if _date_matches(m[4] if len(m) > 4 else None, current_date):
+                    if _date_matches(m[4] if len(m) > 4 else None, match_date):
                         bs_exit = str(m[1])
             else:
                 # Fallback: index-based matching (for tests without dates)
@@ -895,12 +910,18 @@ def _date_matches(marker_date: Any, current_date: Any) -> bool:
     """Compare a BS marker's date against the current bar's date.
 
     Both are normalised to ``pd.Timestamp`` for comparison.
+    Normalised to **day** granularity so that intra-day min_tf bars
+    match daily-view BS markers correctly (e.g. a 15-min bar at
+    ``2026-04-01T17:40`` matches a daily marker at ``2026-04-01``).
+
     Returns ``False`` on any parse failure — a missing date never
     produces a false-positive match.
     """
     if marker_date is None or current_date is None:
         return False
     try:
-        return pd.Timestamp(marker_date) == pd.Timestamp(current_date)
+        m = pd.Timestamp(marker_date)
+        c = pd.Timestamp(current_date)
+        return m.date() == c.date()
     except Exception:
         return False

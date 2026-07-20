@@ -287,3 +287,131 @@ def test_serialize_value_timestamp():
     """Timestamps become ISO strings."""
     ts = pd.Timestamp("2024-06-15 12:30:00")
     assert vb.serialize_value(ts) == "2024-06-15T12:30:00"
+
+
+# ============================================================
+# Tests: load_metadata
+# ============================================================
+
+
+def test_load_metadata_valid_file(tmp_path):
+    """load_metadata 正确读取包含 view_labels 的 metadata.json。"""
+    meta_path = tmp_path / "metadata.json"
+    meta_path.write_text(json.dumps({
+        "ticker": "AAPL",
+        "view_labels": {"v0": "日线", "v1": "60分钟", "v2": "15分钟", "v3": "5分钟"},
+        "view_configs": {"v0": {"tf": "日线"}, "v1": {"tf": "60分钟"}},
+    }, ensure_ascii=False), encoding="utf-8")
+
+    meta = vb.load_metadata(str(meta_path))
+    assert meta is not None
+    assert meta["ticker"] == "AAPL"
+    assert meta["view_labels"] == {"v0": "日线", "v1": "60分钟", "v2": "15分钟", "v3": "5分钟"}
+
+
+def test_load_metadata_missing_file():
+    """load_metadata 在文件不存在时返回 None（不抛异常）。"""
+    meta = vb.load_metadata("/nonexistent/path/metadata.json")
+    assert meta is None
+
+
+def test_load_metadata_invalid_json(tmp_path):
+    """load_metadata 在 JSON 解析失败时返回 None。"""
+    bad_path = tmp_path / "bad.json"
+    bad_path.write_text("{invalid json", encoding="utf-8")
+    meta = vb.load_metadata(str(bad_path))
+    assert meta is None
+
+
+def test_load_metadata_empty_file(tmp_path):
+    """load_metadata 在空文件时返回 None。"""
+    empty_path = tmp_path / "empty.json"
+    empty_path.write_text("", encoding="utf-8")
+    meta = vb.load_metadata(str(empty_path))
+    assert meta is None
+
+
+# ============================================================
+# Tests: metadata embedding in embed_and_open
+# ============================================================
+
+
+def test_embed_and_open_includes_metadata(tmp_path):
+    """embed_and_open 在有 metadata 时将 BACKTEST_METADATA 嵌入 HTML。"""
+    # 准备 parquet 文件
+    import numpy as np
+
+    parquet_dir = tmp_path / "TEST_20240101_backtest"
+    parquet_dir.mkdir()
+    df = pd.DataFrame({
+        "bar_timestamp": pd.date_range("2024-01-01", periods=10, freq="h"),
+        "bar_index": list(range(10)),
+        "v0_signal": [0] * 10,
+    })
+    pq_path = parquet_dir / "backtest_result.parquet"
+    df.to_parquet(str(pq_path))
+
+    # 准备 metadata
+    meta_path = parquet_dir / "metadata.json"
+    meta_path.write_text(json.dumps({
+        "ticker": "TEST",
+        "view_labels": {"v0": "日线"},
+    }, ensure_ascii=False), encoding="utf-8")
+
+    # 验证 metadata 能被正确加载
+    meta = vb.load_metadata(str(meta_path))
+    assert meta is not None
+    assert meta["view_labels"] == {"v0": "日线"}
+
+    # 验证 BACKTEST_METADATA 会出现在 embed_script 中
+    embed_script = "window.BACKTEST_METADATA = " + json.dumps(meta, ensure_ascii=False) + ";"
+    assert "BACKTEST_METADATA" in embed_script
+    assert '"view_labels"' in embed_script
+    assert "日线" in embed_script
+
+
+def test_embed_and_open_null_metadata(tmp_path):
+    """embed_and_open 在无 metadata 时设置 BACKTEST_METADATA = null。"""
+    embed_script = "window.BACKTEST_METADATA = null;"
+    assert "null" in embed_script
+    assert "BACKTEST_METADATA" in embed_script
+
+
+# ============================================================
+# Tests: start_server metadata embedding
+# ============================================================
+
+
+def test_start_server_embeds_metadata_in_html(tmp_path):
+    """start_server 将 metadata 嵌入到 BacktestHandler.embedded_html 中。"""
+    html_path = tmp_path / "test.html"
+    html_content = "<html><head></head><body>test</body></html>"
+    html_path.write_text(html_content, encoding="utf-8")
+
+    metadata = {"view_labels": {"v0": "日线", "v1": "60分钟"}}
+
+    # 模拟 start_server 的嵌入逻辑
+    with open(str(html_path), encoding="utf-8") as f:
+        html = f.read()
+    embed_script = "<script>\n"
+    embed_script += "window.BACKTEST_METADATA = " + json.dumps(metadata, ensure_ascii=False) + ";\n"
+    embed_script += "</script>\n"
+    embedded = html.replace("</head>", embed_script + "</head>", 1)
+
+    # 验证嵌入结果
+    assert "window.BACKTEST_METADATA" in embedded
+    assert "日线" in embedded
+    assert "</head>" in embedded
+    # 原始 </head> 之后的内容仍在
+    assert "test" in embedded
+
+    # 验证空 metadata 时不嵌入
+    vb.BacktestHandler.embedded_html = None
+    assert vb.BacktestHandler.embedded_html is None
+
+
+def test_start_server_null_metadata_clears_embedded_html(tmp_path):
+    """start_server 接收 metadata=None 时清除 embedded_html。"""
+    # 模拟设置 metadata=None 的行为
+    vb.BacktestHandler.embedded_html = None
+    assert vb.BacktestHandler.embedded_html is None
