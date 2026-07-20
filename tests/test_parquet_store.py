@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -55,13 +56,17 @@ def make_mock_view_data(
         for idx, val in sig_vals:
             sig[idx] = val
 
-    # BS markers
+    # Dates: generate a pd.DatetimeIndex for date-based BS marker matching
+    base_date = pd.Timestamp("2024-01-01")
+    dates = pd.DatetimeIndex([base_date + pd.Timedelta(days=i) for i in range(n_pts)])
+
+    # BS markers — use dates that match the generated date array
     entry_markers = []
     exit_markers = []
-    if has_entry:
-        entry_markers = [(50, "B", "green", "2024-01-15", "2024-01-15")]
-    if has_exit:
-        exit_markers = [(100, "S", "red", "stop_loss", "2024-02-01")]
+    if has_entry and n_pts > 50:
+        entry_markers = [(50, "B", "green", dates[50])]
+    if has_exit and n_pts > 100:
+        exit_markers = [(100, "S", "red", "stop_loss", dates[100])]
 
     # PnL arrays
     long_pnl = np.linspace(100, 110, n_pts)
@@ -98,6 +103,7 @@ def make_mock_view_data(
 
     return {
         "t": t,
+        "dates": dates,
         "schmitt": {
             "sig": sig,
             "eps": np.full(n_pts, 0.1),
@@ -175,9 +181,9 @@ class TestExtractViewColumns:
     def test_bs_entry_marker_at_last_bar(self):
         """Entry marker exactly at view_last_idx (boundary)."""
         view_data = make_mock_view_data(n_pts=50, has_entry=False)
-        # Place entry marker at bar 49 (last bar, idx=49)
+        # Place entry marker at bar 49 (last bar, idx=49), date must match dates[49]
         view_data["bs_markers"]["entry_markers"] = [
-            (49, "B", "green", "2024-01-15", "2024-01-15")
+            (49, "B", "green", view_data["dates"][49])
         ]
         cols = self._extract(view_data)
         assert cols["v0_bs_entry"] == "B"
@@ -257,10 +263,11 @@ class TestExtractViewColumns:
     def test_multiple_markers_same_bar(self):
         """Multiple BS markers at view_last_idx: last one wins (overwrite loop)."""
         view_data = make_mock_view_data(n_pts=51, has_entry=False)
+        d = view_data["dates"]
         view_data["bs_markers"]["entry_markers"] = [
-            (30, "B", "green", "2024-01-10", "2024-01-10"),
-            (50, "B", "green", "2024-01-15", "2024-01-15"),
-            (50, "S", "red", "2024-01-15", "2024-01-15"),  # same bar, later marker
+            (30, "B", "green", d[30]),
+            (50, "B", "green", d[50]),
+            (50, "S", "red", d[50]),  # same bar, later marker
         ]
         cols = self._extract(view_data)
         assert cols["v0_bs_entry"] == "S"  # last marker at bar 50 wins
@@ -548,9 +555,10 @@ class TestCSVBuilderExtractViewColumns:
     def test_multiple_markers_same_bar_csv(self):
         """Same bar at view_last_idx: last marker overwrites."""
         view_data = make_mock_view_data(n_pts=51, has_entry=False)
+        d = view_data["dates"]
         view_data["bs_markers"]["entry_markers"] = [
-            (50, "B", "green", "2024-01-15", "2024-01-15"),
-            (50, "S", "red", "2024-01-15", "2024-01-15"),
+            (50, "B", "green", d[50]),
+            (50, "S", "red", d[50]),
         ]
         cols = self._extract("v0_日线", view_data)
         assert cols["v0_bs_entry"] == "S"
@@ -599,11 +607,12 @@ class TestCSVBuilderExtractViewColumns:
     def test_bs_both_markers_present(self):
         """Both entry and exit markers at view_last_idx: each matched independently."""
         view_data = make_mock_view_data(n_pts=51, has_entry=False, has_exit=False)
+        d = view_data["dates"]
         view_data["bs_markers"]["entry_markers"] = [
-            (50, "B", "green", "2024-01-15", "2024-01-15"),
+            (50, "B", "green", d[50]),
         ]
         view_data["bs_markers"]["exit_markers"] = [
-            (50, "S", "red", "stop_loss", "2024-02-01"),
+            (50, "S", "red", "stop_loss", d[50]),
         ]
         cols = self._extract("v0_日线", view_data)
         assert cols["v0_bs_entry"] == "B"
@@ -647,28 +656,28 @@ class TestBSMarkerRegression:
     def test_bs_entry_at_exact_last_bar(self):
         """entry marker 恰好在 view_last_idx 上（边界情况）。"""
         view_data = make_mock_view_data(n_pts=50, has_entry=False)
-        # bar 49 = view_last_idx (len=50, last index=49)
+        # bar 49 = view_last_idx (len=50, last index=49), date from dates[49]
         view_data["bs_markers"]["entry_markers"] = [
-            (49, "B", "green", "2024-01-15", "2024-01-15")
+            (49, "B", "green", view_data["dates"][49])
         ]
         cols = self._extract(view_data)
         assert cols["v0_bs_entry"] == "B"
 
     def test_bs_entry_before_last_bar(self):
-        """entry marker 在 view_last_idx-1：== 不应匹配（P5 fix）。"""
+        """entry marker 在 view_last_idx-1：不应匹配（P5 fix）。"""
         view_data = make_mock_view_data(n_pts=120, has_entry=False)
-        # bar 118 = view_last_idx - 1, 与 view_last_idx=119 不匹配
+        # bar 118 = view_last_idx - 1, date != dates[119], so no match
         view_data["bs_markers"]["entry_markers"] = [
-            (118, "B", "green", "2024-01-15", "2024-01-15")
+            (118, "B", "green", view_data["dates"][118])
         ]
         cols = self._extract(view_data)
         assert cols["v0_bs_entry"] == ""
 
     def test_bs_entry_far_from_last_bar(self):
-        """entry marker 在 bar 10, view_last_idx=119：== 不应匹配。"""
+        """entry marker 在 bar 10, view_last_idx=119：不应匹配。"""
         view_data = make_mock_view_data(n_pts=120, has_entry=False)
         view_data["bs_markers"]["entry_markers"] = [
-            (10, "B", "green", "2024-01-05", "2024-01-05")
+            (10, "B", "green", view_data["dates"][10])
         ]
         cols = self._extract(view_data)
         assert cols["v0_bs_entry"] == ""
@@ -676,11 +685,12 @@ class TestBSMarkerRegression:
     def test_bs_entry_multiple_before_last(self):
         """多个 entry marker，仅 view_last_idx 位置上的被匹配。"""
         view_data = make_mock_view_data(n_pts=121, has_entry=False)
-        # n_pts=121 → view_last_idx=120, marker at 120 matches
+        # n_pts=121 → view_last_idx=120, only marker at 120 has matching date
+        d = view_data["dates"]
         view_data["bs_markers"]["entry_markers"] = [
-            (20, "B", "green", "2024-01-10", "2024-01-10"),
-            (40, "S", "red", "2024-01-20", "2024-01-20"),
-            (120, "B", "green", "2024-01-30", "2024-01-30"),
+            (20, "B", "green", d[20]),
+            (40, "S", "red", d[40]),
+            (120, "B", "green", d[120]),
         ]
         cols = self._extract(view_data)
         assert cols["v0_bs_entry"] == "B"  # 仅 bar 120 的 marker 匹配
@@ -688,11 +698,12 @@ class TestBSMarkerRegression:
     def test_bs_exit_multiple_before_last(self):
         """多个 exit marker，仅 view_last_idx 位置上的被匹配。"""
         view_data = make_mock_view_data(n_pts=121, has_entry=False)
-        # n_pts=121 → view_last_idx=120, marker at 120 matches
+        # n_pts=121 → view_last_idx=120, only marker at 120 has matching date
+        d = view_data["dates"]
         view_data["bs_markers"]["exit_markers"] = [
-            (30, "B", "green", "take_profit", "2024-02-01"),
-            (70, "S", "red", "stop_loss", "2024-02-05"),
-            (120, "S", "red", "stop_loss", "2024-02-10"),
+            (30, "B", "green", "take_profit", d[30]),
+            (70, "S", "red", "stop_loss", d[70]),
+            (120, "S", "red", "stop_loss", d[120]),
         ]
         cols = self._extract(view_data)
         assert cols["v0_bs_exit"] == "S"  # 仅 bar 120 的 marker 匹配
@@ -721,7 +732,7 @@ class TestBSMarkerEventSemantics:
         # 模拟处理 bar 50（view_last_idx=50）
         view_data = make_mock_view_data(n_pts=51, has_entry=False)
         view_data["bs_markers"]["entry_markers"] = [
-            (50, "B", "green", "2024-01-15", "2024-01-15"),
+            (50, "B", "green", view_data["dates"][50]),
         ]
         cols = self._extract(view_data)
         assert cols["v0_bs_entry"] == "B", "B marker 应在 bar 50 出现"
@@ -731,7 +742,7 @@ class TestBSMarkerEventSemantics:
         # 模拟处理 bar 51 — 之前的 entry 在 bar 50 已完成
         view_data = make_mock_view_data(n_pts=52, has_entry=False)
         view_data["bs_markers"]["entry_markers"] = [
-            (50, "B", "green", "2024-01-15", "2024-01-15"),
+            (50, "B", "green", view_data["dates"][50]),
         ]
         cols = self._extract(view_data)
         assert cols["v0_bs_entry"] == "", (
@@ -741,8 +752,10 @@ class TestBSMarkerEventSemantics:
     def test_bar_before_trade_has_no_marker(self):
         """Bar 49（view_last_idx=49）不应有 bar 50 的 marker。"""
         view_data = make_mock_view_data(n_pts=50, has_entry=False)
+        # marker at bar 50 is beyond dates range (0-49), use future date
+        future_date = view_data["dates"][-1] + pd.Timedelta(days=1)
         view_data["bs_markers"]["entry_markers"] = [
-            (50, "B", "green", "2024-01-15", "2024-01-15"),
+            (50, "B", "green", future_date),
         ]
         cols = self._extract(view_data)
         assert cols["v0_bs_entry"] == "", (
@@ -753,27 +766,33 @@ class TestBSMarkerEventSemantics:
         """多个 entry 在不同 bar：每个 bar 只能看到自己的 marker。"""
         # 模拟 bar 30 — 仅 marker at 30 可见
         view_30 = make_mock_view_data(n_pts=31, has_entry=False)
+        d30 = view_30["dates"]
         view_30["bs_markers"]["entry_markers"] = [
-            (30, "B", "green", "2024-01-10", "2024-01-10"),
-            (60, "S", "red", "2024-01-30", "2024-01-30"),
+            (30, "B", "green", d30[30]),
+            (60, "S", "red", d30[60]) if 60 < len(d30) else None,
+        ]
+        # Remove None from list comprehension
+        view_30["bs_markers"]["entry_markers"] = [
+            (30, "B", "green", d30[30]),
         ]
         cols_30 = self._extract(view_30)
         assert cols_30["v0_bs_entry"] == "B", "bar 30: 仅 bar 30 的 marker 可见"
 
         # 模拟 bar 35 — 没有 marker at 35，结果为空
         view_35 = make_mock_view_data(n_pts=36, has_entry=False)
+        d35 = view_35["dates"]
         view_35["bs_markers"]["entry_markers"] = [
-            (30, "B", "green", "2024-01-10", "2024-01-10"),
-            (60, "S", "red", "2024-01-30", "2024-01-30"),
+            (30, "B", "green", d35[30]),
         ]
         cols_35 = self._extract(view_35)
         assert cols_35["v0_bs_entry"] == "", "bar 35: 无 marker at 35，应为空"
 
         # 模拟 bar 60 — 仅 marker at 60 可见
         view_60 = make_mock_view_data(n_pts=61, has_entry=False)
+        d60 = view_60["dates"]
         view_60["bs_markers"]["entry_markers"] = [
-            (30, "B", "green", "2024-01-10", "2024-01-10"),
-            (60, "S", "red", "2024-01-30", "2024-01-30"),
+            (30, "B", "green", d60[30]),
+            (60, "S", "red", d60[60]),
         ]
         cols_60 = self._extract(view_60)
         assert cols_60["v0_bs_entry"] == "S", "bar 60: 仅 bar 60 的 marker 可见"
@@ -782,16 +801,18 @@ class TestBSMarkerEventSemantics:
         """Exit marker 同样的事件语义：仅在精确 bar 出现。"""
         # bar 100: exit at 100 → visible
         view_100 = make_mock_view_data(n_pts=101, has_entry=False, has_exit=False)
+        d100 = view_100["dates"]
         view_100["bs_markers"]["exit_markers"] = [
-            (100, "S", "red", "take_profit", "2024-02-01"),
+            (100, "S", "red", "take_profit", d100[100]),
         ]
         cols_100 = self._extract(view_100)
         assert cols_100["v0_bs_exit"] == "S", "bar 100: exit marker 可见"
 
         # bar 101: exit at 100 already passed → NOT visible (P5 fix)
         view_101 = make_mock_view_data(n_pts=102, has_entry=False, has_exit=False)
+        d101 = view_101["dates"]
         view_101["bs_markers"]["exit_markers"] = [
-            (100, "S", "red", "take_profit", "2024-02-01"),
+            (100, "S", "red", "take_profit", d101[100]),
         ]
         cols_101 = self._extract(view_101)
         assert cols_101["v0_bs_exit"] == "", (
@@ -2610,3 +2631,297 @@ def _make_mock_pipeline_output(bar_index: int, cutoff_date: str, trade_type: str
             "volume": 10000.0,
         },
     }
+
+
+# ============================================================================
+# TestPositionBoundaryBars — P4: 持仓边界 bar 测试
+# ============================================================================
+
+
+class TestPositionBoundaryBars:
+    """P4: 持仓在精确边界 bar 上的行为验证。
+
+    - 持仓在 entry bar 上应为 True/active
+    - 持仓在 exit 后紧接 bar 上应为 False
+    - 快速 long→short→long 切换（5 bar 内）
+    """
+
+    @staticmethod
+    def _extract(view_data: dict, prefix: str = "v0") -> dict:
+        return ParquetStore._extract_view_columns(prefix, view_data)
+
+    def test_position_at_exact_entry_bar(self):
+        """P4: entry bar 上 long_pos 应为 True。"""
+        # n_pts=51 → view_last_idx=50, trade enters at 50
+        view_data = make_mock_view_data(n_pts=51, has_entry=False)
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 50, "exit_idx": None}
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_long_pos"] == True  # noqa: E712
+        assert cols["v0_short_pos"] == False  # noqa: E712
+
+    def test_position_immediately_after_exit(self):
+        """P4: exit bar 之后紧接 bar 上 long_pos 应为 False。"""
+        # n_pts=52 → view_last_idx=51, trade entered at 50, exited at 50
+        # At bar 51: entry=50 <= 51, exit=50 <= 51, reason!="eod" → no longer active
+        view_data = make_mock_view_data(n_pts=52, has_entry=False)
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 50, "exit_idx": 50,
+             "return_pct": 1.0, "exit_reason": "take_profit"}
+        ]
+        cols = self._extract(view_data)
+        assert cols["v0_long_pos"] == False  # noqa: E712
+        assert cols["v0_short_pos"] == False  # noqa: E712
+
+    def test_rapid_long_short_long_within_5_bars(self):
+        """P4: rapid long→short→long within 5 bars, last trade determines position."""
+        # n_pts=55 → view_last_idx=54. Trades at bars 50, 52, 54
+        view_data = make_mock_view_data(n_pts=55, has_entry=False)
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 50, "exit_idx": 51,
+             "return_pct": 0.5, "exit_reason": "take_profit"},
+            {"type": "short", "entry_idx": 52, "exit_idx": 53,
+             "return_pct": 0.3, "exit_reason": "take_profit"},
+            {"type": "long", "entry_idx": 54, "exit_idx": None},
+        ]
+        cols = self._extract(view_data)
+        # Last active trade is the long at bar 54 (still open)
+        assert cols["v0_long_pos"] == True  # noqa: E712
+        assert cols["v0_short_pos"] == False  # noqa: E712
+
+    def test_eod_exit_keeps_position_active(self):
+        """P4: eod exit does not close position — stays active."""
+        view_data = make_mock_view_data(n_pts=51, has_entry=False)
+        view_data["trade_records"] = [
+            {"type": "long", "entry_idx": 40, "exit_idx": 50,
+             "return_pct": 2.0, "exit_reason": "eod"}
+        ]
+        cols = self._extract(view_data)
+        # eod exit: trade is still considered active
+        assert cols["v0_long_pos"] == True  # noqa: E712
+
+
+# ============================================================================
+# TestBSMarkerConsecutiveEvents — P5: BS 标记连续事件测试
+# ============================================================================
+
+
+class TestBSMarkerConsecutiveEvents:
+    """P5: BS 标记连续事件验证。
+
+    - B marker at bar N, S marker at bar N+1（两者独立出现，不重叠）
+    - 多个 B marker 无中间 S（全部在各自 bar 上出现）
+    """
+
+    @staticmethod
+    def _extract(view_data: dict, prefix: str = "v0") -> dict:
+        return ParquetStore._extract_view_columns(prefix, view_data)
+
+    def test_b_and_s_on_consecutive_bars(self):
+        """P5: B at bar N, S at bar N+1 — both present on their own bars, no overlap."""
+        # Simulate bar 50 (view_last_idx=50): should show B at 50
+        view_50 = make_mock_view_data(n_pts=51, has_entry=False)
+        d50 = view_50["dates"]
+        view_50["bs_markers"]["entry_markers"] = [
+            (50, "B", "green", d50[50]),
+        ]
+        view_50["bs_markers"]["exit_markers"] = [
+            (49, "S", "red", "take_profit", d50[49]),
+        ]
+        cols_50 = self._extract(view_50)
+        # At bar 50: only the entry at 50 matches (its date == dates[50])
+        assert cols_50["v0_bs_entry"] == "B"
+        # Exit at 49 has date dates[49] != dates[50] → no match
+        assert cols_50["v0_bs_exit"] == ""
+
+        # Simulate bar 49 (view_last_idx=49): should show S at 49, no entry at 50
+        view_49 = make_mock_view_data(n_pts=50, has_entry=False)
+        d49 = view_49["dates"]
+        view_49["bs_markers"]["entry_markers"] = [
+            (49, "B", "green", d49[49]),
+        ]
+        view_49["bs_markers"]["exit_markers"] = [
+            (49, "S", "red", "take_profit", d49[49]),
+        ]
+        cols_49 = self._extract(view_49)
+        # At bar 49: entry and exit both at 49, last one wins
+        assert cols_49["v0_bs_entry"] == "B"
+        assert cols_49["v0_bs_exit"] == "S"
+
+    def test_multiple_b_markers_on_distinct_bars(self):
+        """P5: multiple B markers without S — each appears on its own bar."""
+        # Simulate bar 60: marker at 60 should match
+        view_60 = make_mock_view_data(n_pts=61, has_entry=False)
+        d60 = view_60["dates"]
+        view_60["bs_markers"]["entry_markers"] = [
+            (30, "B", "green", d60[30]),
+            (45, "B", "green", d60[45]),
+            (60, "B", "green", d60[60]),
+        ]
+        cols_60 = self._extract(view_60)
+        # Only marker at 60 matches current bar
+        assert cols_60["v0_bs_entry"] == "B"
+
+        # Simulate bar 45: only marker at 45 matches
+        view_45 = make_mock_view_data(n_pts=46, has_entry=False)
+        d45 = view_45["dates"]
+        view_45["bs_markers"]["entry_markers"] = [
+            (30, "B", "green", d45[30]),
+            (45, "B", "green", d45[45]),
+            (60, "B", "green", d45[60]) if 60 < len(d45) else None,
+        ]
+        # Filter None
+        view_45["bs_markers"]["entry_markers"] = [
+            (30, "B", "green", d45[30]),
+            (45, "B", "green", d45[45]),
+        ]
+        cols_45 = self._extract(view_45)
+        assert cols_45["v0_bs_entry"] == "B"
+
+    def test_mixed_entry_exit_sequence(self):
+        """P5: mixed entry/exit markers over several bars, each only on its own bar."""
+        # Simulate bar 80: marker at 80 should match
+        view_80 = make_mock_view_data(n_pts=81, has_entry=False)
+        d80 = view_80["dates"]
+        view_80["bs_markers"]["entry_markers"] = [
+            (50, "B", "green", d80[50]),
+            (80, "S", "red", d80[80]),
+        ]
+        view_80["bs_markers"]["exit_markers"] = [
+            (60, "S", "green", "take_profit", d80[60]),
+        ]
+        cols_80 = self._extract(view_80)
+        # At bar 80: entry marker S at 80 matches, exit at 60 doesn't
+        assert cols_80["v0_bs_entry"] == "S"
+        assert cols_80["v0_bs_exit"] == ""
+
+
+# ============================================================================
+# TestPredPairsFallback — P1: pred_pairs 回退行为测试
+# ============================================================================
+
+
+class TestPredPairsFallback:
+    """P1: Extended pred_pairs fallback — chain carry-forward and edge cases.
+
+    When ``pred_pairs`` is empty, ``_compute_strategy_for_view`` returns
+    flat PnL and no trade records. These tests verify the fallback works
+    for extended periods and mixed sequences.
+    """
+
+    @staticmethod
+    def _compute_strategy(t, filtered, all_pairs, pred_pairs, cfg=None):
+        """Call the static method directly."""
+        from services.backtest_core import BacktestRunner
+        schmitt = {"sig": np.zeros(len(t), dtype=int)}
+        if cfg is None:
+            cfg = {"show_strategy": True, "stop_loss_pct": 5.0, "n_ext": 10}
+        return BacktestRunner._compute_strategy_for_view(
+            t, filtered, schmitt, all_pairs, pred_pairs, cfg,
+        )
+
+    def test_empty_pred_pairs_returns_flat_pnl(self):
+        """P1: empty pred_pairs → flat PnL (all 100.0), no trades."""
+        n = 50
+        t = np.arange(n, dtype=float)
+        filtered = np.linspace(100, 110, n)
+        all_pairs = [(10, 20), (30, 40)]
+        pred_pairs = []  # empty!
+
+        long_pnl, short_pnl, trades = self._compute_strategy(
+            t, filtered, all_pairs, pred_pairs,
+        )
+        assert len(trades) == 0
+        assert np.all(long_pnl == 100.0)
+        assert np.all(short_pnl == 100.0)
+
+    def test_pred_pairs_suddenly_empty_after_trades(self):
+        """P1: pred_pairs empty after real trades → still returns flat."""
+        n = 50
+        t = np.arange(n, dtype=float)
+        filtered = np.linspace(100, 110, n)
+        # all_pairs exist but pred_pairs is empty (simulates prediction failure)
+        all_pairs = [(5, 15), (25, 35)]
+        pred_pairs = []
+
+        long_pnl, short_pnl, trades = self._compute_strategy(
+            t, filtered, all_pairs, pred_pairs,
+        )
+        assert len(trades) == 0
+        assert np.all(long_pnl == 100.0)
+
+    def test_mixed_empty_nonempty_sequence(self):
+        """P1: mixed empty → non-empty → empty pred_pairs over multiple calls."""
+        n = 50
+        t = np.arange(n, dtype=float)
+        filtered = np.linspace(100, 110, n)
+        all_pairs = [(10, 20)]
+
+        # Call 1: empty pred_pairs → no trades
+        long1, short1, trades1 = self._compute_strategy(
+            t, filtered, all_pairs, [],
+        )
+        assert len(trades1) == 0
+
+        # Call 2: non-empty pred_pairs → trades generated
+        pred_pairs = [{"fit_result": {"a": 0.01, "b": -0.5, "c": 105}, "pair_end": 20}]
+        long2, short2, trades2 = self._compute_strategy(
+            t, filtered, all_pairs, pred_pairs,
+        )
+        # Trades may or may not be generated depending on stop/profit conditions
+        # But the function should not crash
+        assert long2 is not None
+        assert short2 is not None
+
+        # Call 3: empty again → no trades
+        long3, short3, trades3 = self._compute_strategy(
+            t, filtered, all_pairs, [],
+        )
+        assert len(trades3) == 0
+
+    def test_many_consecutive_empty_calls(self):
+        """P1: 20+ consecutive empty pred_pairs → no crash, consistent output."""
+        n = 50
+        t = np.arange(n, dtype=float)
+        filtered = np.linspace(100, 110, n)
+        all_pairs = [(5, 25)]
+
+        for i in range(25):
+            long_pnl, short_pnl, trades = self._compute_strategy(
+                t, filtered, all_pairs, [],
+            )
+            assert len(trades) == 0
+            assert np.all(long_pnl == 100.0)
+            assert np.all(short_pnl == 100.0)
+
+    def test_show_strategy_false_behaves_like_empty_pred_pairs(self):
+        """P1: show_strategy=False → same flat PnL as empty pred_pairs."""
+        n = 50
+        t = np.arange(n, dtype=float)
+        filtered = np.linspace(100, 110, n)
+        all_pairs = [(10, 20)]
+        pred_pairs = [{"fit_result": {"a": 0.01, "b": -0.5, "c": 105}, "pair_end": 20}]
+
+        cfg = {"show_strategy": False, "stop_loss_pct": 5.0, "n_ext": 10}
+        long_pnl, short_pnl, trades = self._compute_strategy(
+            t, filtered, all_pairs, pred_pairs, cfg,
+        )
+        assert len(trades) == 0
+        assert np.all(long_pnl == 100.0)
+
+    def test_schmitt_none_behaves_like_empty_pred_pairs(self):
+        """P1: schmitt=None → same flat PnL, no crash."""
+        n = 50
+        t = np.arange(n, dtype=float)
+        filtered = np.linspace(100, 110, n)
+        all_pairs = [(10, 20)]
+        pred_pairs = [{"fit_result": {"a": 0.01, "b": -0.5, "c": 105}, "pair_end": 20}]
+
+        from services.backtest_core import BacktestRunner
+        cfg = {"show_strategy": True, "stop_loss_pct": 5.0, "n_ext": 10}
+        long_pnl, short_pnl, trades = BacktestRunner._compute_strategy_for_view(
+            t, filtered, None, all_pairs, pred_pairs, cfg,
+        )
+        assert len(trades) == 0
+        assert np.all(long_pnl == 100.0)

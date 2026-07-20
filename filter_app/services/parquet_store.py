@@ -512,23 +512,40 @@ class ParquetStore:
         result[f"{prefix}_trade_return"] = trade_return
         result[f"{prefix}_trade_reason"] = trade_reason
 
-        # ── BS marker columns: traverse, match bar_idx ────────────
+        # ── BS marker columns: match by date ─────────────────────
 
         bs_markers: Optional[dict] = view_data.get("bs_markers")
         bs_entry = _STR_NA
         bs_exit = _STR_NA
 
         if bs_markers is not None:
+            # P5 fix (regression): date-based matching.
+            # BS markers use bar indices within the view window, but
+            # _find_all_pairs delays pair creation by ≥1 bar — the
+            # marker's bar_idx is always < view_last_idx, so index-based
+            # ``== view_last_idx`` matching always fails on real data.
+            # Match by date instead: each marker stores the bar's date
+            # (from ``dates[entry_idx]``), and we compare against the
+            # current bar's date from the view's ``dates`` array.
+            #
             # entry_markers: (bar_idx, label, color, date)
-            # Use == for event-based matching: a B/S marker only appears
-            # on the exact bar where the event occurred (P5 fix).
-            for m in bs_markers.get("entry_markers", []):
-                if int(m[0]) == view_last_idx:
-                    bs_entry = str(m[1])
-            # exit_markers: (bar_idx, label, color, exit_reason, date)
-            for m in bs_markers.get("exit_markers", []):
-                if int(m[0]) == view_last_idx:
-                    bs_exit = str(m[1])
+            # exit_markers:  (bar_idx, label, color, exit_reason, date)
+            current_date = _current_bar_date(view_data)
+            if current_date is not None:
+                for m in bs_markers.get("entry_markers", []):
+                    if _date_matches(m[3] if len(m) > 3 else None, current_date):
+                        bs_entry = str(m[1])
+                for m in bs_markers.get("exit_markers", []):
+                    if _date_matches(m[4] if len(m) > 4 else None, current_date):
+                        bs_exit = str(m[1])
+            else:
+                # Fallback: index-based matching (for tests without dates)
+                for m in bs_markers.get("entry_markers", []):
+                    if int(m[0]) == view_last_idx:
+                        bs_entry = str(m[1])
+                for m in bs_markers.get("exit_markers", []):
+                    if int(m[0]) == view_last_idx:
+                        bs_exit = str(m[1])
 
         result[f"{prefix}_bs_entry"] = bs_entry
         result[f"{prefix}_bs_exit"] = bs_exit
@@ -849,3 +866,41 @@ def _last_int(arr: Any) -> int:
         return int(val)
     except (ValueError, TypeError):
         return 0
+
+
+def _current_bar_date(view_data: dict) -> Any:
+    """Extract the current bar's date from the view's ``dates`` array.
+
+    Returns the last element of ``dates`` as a ``pd.Timestamp``, or
+    ``None`` if ``dates`` is missing / empty / unparseable.
+
+    Used by BS marker date-based matching.
+    """
+    dates = view_data.get("dates")
+    if dates is None:
+        return None
+    try:
+        if hasattr(dates, "iloc"):
+            val = dates.iloc[-1]
+        elif hasattr(dates, "__getitem__"):
+            val = dates[-1]
+        else:
+            return None
+        return pd.Timestamp(val)
+    except Exception:
+        return None
+
+
+def _date_matches(marker_date: Any, current_date: Any) -> bool:
+    """Compare a BS marker's date against the current bar's date.
+
+    Both are normalised to ``pd.Timestamp`` for comparison.
+    Returns ``False`` on any parse failure — a missing date never
+    produces a false-positive match.
+    """
+    if marker_date is None or current_date is None:
+        return False
+    try:
+        return pd.Timestamp(marker_date) == pd.Timestamp(current_date)
+    except Exception:
+        return False
