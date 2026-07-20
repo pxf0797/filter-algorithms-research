@@ -1,8 +1,0 @@
-{"event": "schmitt_snapshot", "step": 0, "view": "v0_日线", "pair_count": 7}
-{"event": "schmitt_snapshot", "step": 0, "view": "v1_60分钟", "pair_count": 6}
-{"event": "schmitt_snapshot", "step": 0, "view": "v2_15分钟", "pair_count": 0}
-{"event": "schmitt_snapshot", "step": 0, "view": "v3_5分钟", "pair_count": 0}
-{"event": "schmitt_snapshot", "step": 1, "view": "v0_日线", "pair_count": 7}
-{"event": "schmitt_snapshot", "step": 1, "view": "v1_60分钟", "pair_count": 6}
-{"event": "schmitt_snapshot", "step": 1, "view": "v2_15分钟", "pair_count": 0}
-{"event": "schmitt_snapshot", "step": 1, "view": "v3_5分钟", "pair_count": 0}
