@@ -174,20 +174,19 @@ class TestExtractViewColumns:
     # ── BS entry markers ───────────────────────────────────────────────
 
     def test_bs_entry_marker_present(self):
-        """Entry marker at view_last_idx: == should find B."""
+        """BS entry markers now use post-hoc join; _extract_view_columns returns NA."""
         view_data = make_mock_view_data(n_pts=51, has_entry=True)
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == "B"
+        assert cols["v0_bs_entry"] == ""  # per-bar matching removed
 
     def test_bs_entry_marker_at_last_bar(self):
-        """Entry marker exactly at view_last_idx (boundary)."""
+        """BS markers filled by post-hoc join; per-bar returns NA."""
         view_data = make_mock_view_data(n_pts=50, has_entry=False)
-        # Place entry marker at bar 49 (last bar, idx=49), date must match dates[49]
         view_data["bs_markers"]["entry_markers"] = [
             (49, "B", "green", view_data["dates"][49])
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == "B"
+        assert cols["v0_bs_entry"] == ""
 
     def test_bs_entry_marker_none(self):
         """No entry markers: default to empty string."""
@@ -207,15 +206,15 @@ class TestExtractViewColumns:
     # ── BS exit markers ────────────────────────────────────────────────
 
     def test_bs_exit_marker_found(self):
-        """Exit marker at view_last_idx: == should find S."""
+        """BS exit markers now use post-hoc join; per-bar returns NA."""
         view_data = make_mock_view_data(n_pts=101, has_exit=True)
         cols = self._extract(view_data)
-        assert cols["v0_bs_exit"] == "S"
+        assert cols["v0_bs_exit"] == ""
 
     # ── trade matching ─────────────────────────────────────────────────
 
     def test_trade_exit_at_current_bar(self):
-        """Trade 恰好在当前 bar 退出（exit_idx == view_last_idx, 非 eod）→ exit。"""
+        """Trade exits now filled by post-hoc join; per-bar returns NA."""
         view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
         # n_pts=50 → view_last_idx=49
         view_data["trade_records"] = [
@@ -223,20 +222,19 @@ class TestExtractViewColumns:
              "return_pct": 5.0, "exit_reason": "take_profit"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "exit_long"
-        assert cols["v0_trade_return"] == pytest.approx(5.0)
-        assert cols["v0_trade_reason"] == "take_profit"
+        assert cols["v0_trade"] == ""
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
 
     def test_trade_entry_matching(self):
-        """Trade with entry_idx=50 <= view_last_idx=119, no exit yet: match entry."""
+        """Trade entries now filled by post-hoc join; per-bar returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=True, has_exit=False)
         # Add a trade that has entry but no exit yet
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 50, "exit_idx": None}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "entry_long"
-        # entry has no realised return
+        assert cols["v0_trade"] == ""
         assert np.isnan(cols["v0_trade_return"])
         assert cols["v0_trade_reason"] == ""
 
@@ -262,7 +260,7 @@ class TestExtractViewColumns:
     # ── multiple markers ───────────────────────────────────────────────
 
     def test_multiple_markers_same_bar(self):
-        """Multiple BS markers at view_last_idx: last one wins (overwrite loop)."""
+        """Multiple BS markers now handled by post-hoc join; per-bar returns NA."""
         view_data = make_mock_view_data(n_pts=51, has_entry=False)
         d = view_data["dates"]
         view_data["bs_markers"]["entry_markers"] = [
@@ -271,10 +269,10 @@ class TestExtractViewColumns:
             (50, "S", "red", d[50]),  # same bar, later marker
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == "S"  # last marker at bar 50 wins
+        assert cols["v0_bs_entry"] == ""  # per-bar matching removed
 
     def test_multiple_trades_last_active_wins(self):
-        """Multiple trades: last active trade wins, completed trades ignored."""
+        """Multiple trades: active state computed by post-hoc join; per-bar returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 10, "exit_idx": 30,
@@ -282,8 +280,7 @@ class TestExtractViewColumns:
             {"type": "short", "entry_idx": 40, "exit_idx": None},
         ]
         cols = self._extract(view_data)
-        # First trade completed (10→30), second active (40, no exit)
-        assert cols["v0_trade"] == "entry_short"
+        assert cols["v0_trade"] == ""
         assert np.isnan(cols["v0_trade_return"])
         assert cols["v0_trade_reason"] == ""
 
@@ -641,13 +638,11 @@ class TestCSVBuilderExtractViewColumns:
 
 
 class TestBSMarkerRegression:
-    """回归测试：P5 fix — BS marker 使用 == 精确匹配（事件驱动），不再用 <=。
+    """回归测试：BS marker 匹配已改为 post-hoc join。
 
-    Background: 此前 ``<=`` 导致标记在事件发生后永久保持（P5 bug），
-    现改为 ``==`` 确保标记仅在事件发生的精确 bar 上出现。
-    同时修复了原始 ``==`` 实现中因 view_last_idx 语义不清导致的
-    "始终为空" bug —— 正确的修复是在调用方保证 view_last_idx 为当前 bar，
-    而非在匹配代码中用 ``<=`` 补偿。
+    Per-bar matching 已从 ``_extract_view_columns`` 移除。
+    所有 BS 标记现在通过 ``end_session`` 中的后处理匹配。
+    这些测试验证 per-bar 方法始终返回默认值（不再尝试匹配）。
     """
 
     @staticmethod
@@ -655,19 +650,17 @@ class TestBSMarkerRegression:
         return ParquetStore._extract_view_columns(prefix, view_data)
 
     def test_bs_entry_at_exact_last_bar(self):
-        """entry marker 恰好在 view_last_idx 上（边界情况）。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=50, has_entry=False)
-        # bar 49 = view_last_idx (len=50, last index=49), date from dates[49]
         view_data["bs_markers"]["entry_markers"] = [
             (49, "B", "green", view_data["dates"][49])
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == "B"
+        assert cols["v0_bs_entry"] == ""
 
     def test_bs_entry_before_last_bar(self):
-        """entry marker 在 view_last_idx-1：不应匹配（P5 fix）。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False)
-        # bar 118 = view_last_idx - 1, date != dates[119], so no match
         view_data["bs_markers"]["entry_markers"] = [
             (118, "B", "green", view_data["dates"][118])
         ]
@@ -675,7 +668,7 @@ class TestBSMarkerRegression:
         assert cols["v0_bs_entry"] == ""
 
     def test_bs_entry_far_from_last_bar(self):
-        """entry marker 在 bar 10, view_last_idx=119：不应匹配。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False)
         view_data["bs_markers"]["entry_markers"] = [
             (10, "B", "green", view_data["dates"][10])
@@ -684,9 +677,8 @@ class TestBSMarkerRegression:
         assert cols["v0_bs_entry"] == ""
 
     def test_bs_entry_multiple_before_last(self):
-        """多个 entry marker，仅 view_last_idx 位置上的被匹配。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=121, has_entry=False)
-        # n_pts=121 → view_last_idx=120, only marker at 120 has matching date
         d = view_data["dates"]
         view_data["bs_markers"]["entry_markers"] = [
             (20, "B", "green", d[20]),
@@ -694,12 +686,11 @@ class TestBSMarkerRegression:
             (120, "B", "green", d[120]),
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == "B"  # 仅 bar 120 的 marker 匹配
+        assert cols["v0_bs_entry"] == ""
 
     def test_bs_exit_multiple_before_last(self):
-        """多个 exit marker，仅 view_last_idx 位置上的被匹配。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=121, has_entry=False)
-        # n_pts=121 → view_last_idx=120, only marker at 120 has matching date
         d = view_data["dates"]
         view_data["bs_markers"]["exit_markers"] = [
             (30, "B", "green", "take_profit", d[30]),
@@ -707,7 +698,7 @@ class TestBSMarkerRegression:
             (120, "S", "red", "stop_loss", d[120]),
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_exit"] == "S"  # 仅 bar 120 的 marker 匹配
+        assert cols["v0_bs_exit"] == ""
 
 
 # ============================================================================
@@ -716,12 +707,10 @@ class TestBSMarkerRegression:
 
 
 class TestBSMarkerEventSemantics:
-    """验证 P5 fix：BS 标记仅在事件发生的精确 bar 上出现，不会持久化。
+    """验证：BS 标记匹配已改为 post-hoc join。
 
-    核心断言：
-    - 标记在事件 bar（== view_last_idx）显示
-    - 标记在事件 bar 之后（> view_last_idx）不显示
-    - 标记在事件 bar 之前（< view_last_idx）不显示（P5 回归）
+    Per-bar matching 已从 ``_extract_view_columns`` 移除。
+    这些测试现在验证 per-bar 方法始终返回默认值。
     """
 
     @staticmethod
@@ -729,66 +718,54 @@ class TestBSMarkerEventSemantics:
         return ParquetStore._extract_view_columns(prefix, view_data)
 
     def test_b_marker_only_on_exact_trade_bar(self):
-        """B marker 仅在 view_last_idx == entry bar 时出现。"""
-        # 模拟处理 bar 50（view_last_idx=50）
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=51, has_entry=False)
         view_data["bs_markers"]["entry_markers"] = [
             (50, "B", "green", view_data["dates"][50]),
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == "B", "B marker 应在 bar 50 出现"
+        assert cols["v0_bs_entry"] == ""
 
     def test_bar_after_trade_has_no_marker(self):
-        """Bar 51（view_last_idx=51）不应有 bar 50 的 marker（P5 验证）。"""
-        # 模拟处理 bar 51 — 之前的 entry 在 bar 50 已完成
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=52, has_entry=False)
         view_data["bs_markers"]["entry_markers"] = [
             (50, "B", "green", view_data["dates"][50]),
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == "", (
-            "P5 regression: bar 51 不应显示 bar 50 的 B marker"
-        )
+        assert cols["v0_bs_entry"] == ""
 
     def test_bar_before_trade_has_no_marker(self):
-        """Bar 49（view_last_idx=49）不应有 bar 50 的 marker。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=50, has_entry=False)
-        # marker at bar 50 is beyond dates range (0-49), use future date
         future_date = view_data["dates"][-1] + pd.Timedelta(days=1)
         view_data["bs_markers"]["entry_markers"] = [
             (50, "B", "green", future_date),
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == "", (
-            "bar 49 不应显示 bar 50 的 marker（尚未发生）"
-        )
+        assert cols["v0_bs_entry"] == ""
 
     def test_multiple_trades_markers_on_distinct_bars(self):
-        """多个 entry 在不同 bar：每个 bar 只能看到自己的 marker。"""
-        # 模拟 bar 30 — 仅 marker at 30 可见
+        """Per-bar matching removed; always returns NA."""
+        # bar 30
         view_30 = make_mock_view_data(n_pts=31, has_entry=False)
         d30 = view_30["dates"]
         view_30["bs_markers"]["entry_markers"] = [
             (30, "B", "green", d30[30]),
-            (60, "S", "red", d30[60]) if 60 < len(d30) else None,
-        ]
-        # Remove None from list comprehension
-        view_30["bs_markers"]["entry_markers"] = [
-            (30, "B", "green", d30[30]),
         ]
         cols_30 = self._extract(view_30)
-        assert cols_30["v0_bs_entry"] == "B", "bar 30: 仅 bar 30 的 marker 可见"
+        assert cols_30["v0_bs_entry"] == ""
 
-        # 模拟 bar 35 — 没有 marker at 35，结果为空
+        # bar 35
         view_35 = make_mock_view_data(n_pts=36, has_entry=False)
         d35 = view_35["dates"]
         view_35["bs_markers"]["entry_markers"] = [
             (30, "B", "green", d35[30]),
         ]
         cols_35 = self._extract(view_35)
-        assert cols_35["v0_bs_entry"] == "", "bar 35: 无 marker at 35，应为空"
+        assert cols_35["v0_bs_entry"] == ""
 
-        # 模拟 bar 60 — 仅 marker at 60 可见
+        # bar 60
         view_60 = make_mock_view_data(n_pts=61, has_entry=False)
         d60 = view_60["dates"]
         view_60["bs_markers"]["entry_markers"] = [
@@ -796,108 +773,89 @@ class TestBSMarkerEventSemantics:
             (60, "S", "red", d60[60]),
         ]
         cols_60 = self._extract(view_60)
-        assert cols_60["v0_bs_entry"] == "S", "bar 60: 仅 bar 60 的 marker 可见"
+        assert cols_60["v0_bs_entry"] == ""
 
     def test_exit_marker_event_semantics(self):
-        """Exit marker 同样的事件语义：仅在精确 bar 出现。"""
-        # bar 100: exit at 100 → visible
+        """Per-bar matching removed; always returns NA."""
+        # bar 100
         view_100 = make_mock_view_data(n_pts=101, has_entry=False, has_exit=False)
         d100 = view_100["dates"]
         view_100["bs_markers"]["exit_markers"] = [
             (100, "S", "red", "take_profit", d100[100]),
         ]
         cols_100 = self._extract(view_100)
-        assert cols_100["v0_bs_exit"] == "S", "bar 100: exit marker 可见"
+        assert cols_100["v0_bs_exit"] == ""
 
-        # bar 101: exit at 100 already passed → NOT visible (P5 fix)
+        # bar 101
         view_101 = make_mock_view_data(n_pts=102, has_entry=False, has_exit=False)
         d101 = view_101["dates"]
         view_101["bs_markers"]["exit_markers"] = [
             (100, "S", "red", "take_profit", d101[100]),
         ]
         cols_101 = self._extract(view_101)
-        assert cols_101["v0_bs_exit"] == "", (
-            "P5 regression: bar 101 不应显示 bar 100 的 exit marker"
-        )
-
-
-# ============================================================================
-# TestTradeMatchingRegression — Trade 匹配回归测试
-# ============================================================================
+        assert cols_101["v0_bs_exit"] == ""
 
 
 class TestTradeMatchingRegression:
-    """回归测试：trade 事件在窗口的正确匹配。
+    """回归测试：trade 事件匹配已改为 post-hoc join。
 
-    两轮 Bug 修复：
-    1. 原始代码用 ``==`` → entry 永远匹配不到（pair_end 几乎不落在最后 bar）。
-    2. 改用 ``<=``   → 一旦有任何已完成的 trade，所有后续 bar 都显示 ``exit_*``，
-       导致 200 行数据出现 0 个 entry、200 个 exit（列失去意义）。
-    3. 最终方案：exit 仅在 ``== view_last_idx`` 且非 eod 时才显示 "exit_*"；
-       entry 在 ``<= view_last_idx`` 且未退出（exit > last 或 eod 退出）时显示。
+    Per-bar matching 已从 ``_extract_view_columns`` 移除。
+    这些测试现在验证 per-bar 方法始终返回默认值。
     """
 
     @staticmethod
     def _extract(view_data: dict, prefix: str = "v0") -> dict:
         return ParquetStore._extract_view_columns(prefix, view_data)
 
-    # ── 当前持仓：entry active ─────────────────────────────────────────
-
     def test_trade_entry_active_no_exit(self):
-        """trade 进入了（entry <= view_last_idx）但还没退出 → entry。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 114, "exit_idx": None}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "entry_long"
+        assert cols["v0_trade"] == ""
         assert np.isnan(cols["v0_trade_return"])
         assert cols["v0_trade_reason"] == ""
 
     def test_trade_entry_active_eod_exit(self):
-        """trade 在窗口内以 eod 退出（数据结束）→ 仍视作 active，显示 entry。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
-        # view_last_idx = 49, entry at 40, eod exit at 49
         view_data["trade_records"] = [
             {"type": "short", "entry_idx": 40, "exit_idx": 49,
              "return_pct": 1.0, "exit_reason": "eod"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "entry_short"
+        assert cols["v0_trade"] == ""
         assert np.isnan(cols["v0_trade_return"])
         assert cols["v0_trade_reason"] == ""
 
-    # ── 当前退出：exit at current bar ──────────────────────────────────
-
     def test_trade_exit_at_current_bar(self):
-        """trade 恰好在当前 bar 退出（非 eod）→ exit。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
-        # view_last_idx = 49, exit at 49 with genuine reason
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 30, "exit_idx": 49,
              "return_pct": 3.5, "exit_reason": "take_profit"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "exit_long"
-        assert cols["v0_trade_return"] == pytest.approx(3.5)
-        assert cols["v0_trade_reason"] == "take_profit"
+        assert cols["v0_trade"] == ""
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
 
     def test_trade_exit_at_current_bar_stop_loss(self):
-        """止损退出在 current bar → exit_short + return_pct。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "short", "entry_idx": 20, "exit_idx": 49,
              "return_pct": -2.0, "exit_reason": "stop_loss"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "exit_short"
-        assert cols["v0_trade_return"] == pytest.approx(-2.0)
-        assert cols["v0_trade_reason"] == "stop_loss"
-
-    # ── 历史已完成 trade → "" ─────────────────────────────────────────
+        assert cols["v0_trade"] == ""
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
 
     def test_trade_completed_before_current_bar(self):
-        """trade 在当前 bar 之前已完成 → 列应为空。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 50, "exit_idx": 100,
@@ -909,7 +867,7 @@ class TestTradeMatchingRegression:
         assert cols["v0_trade_reason"] == ""
 
     def test_trade_same_bar_entry_exit_past(self):
-        """同 bar entry/exit 发生在更早的 bar（非当前）→ ""。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "short", "entry_idx": 80, "exit_idx": 80,
@@ -918,23 +876,20 @@ class TestTradeMatchingRegression:
         cols = self._extract(view_data)
         assert cols["v0_trade"] == ""
 
-    # ── 优先级：exit at current bar > entry active ────────────────────
-
     def test_trade_exit_priority_at_current_bar(self):
-        """同一 bar 有 entry 和 exit（同 bar entry/exit at view_last_idx）→ exit 优先。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
-        # n_pts=50 → view_last_idx=49
         view_data["trade_records"] = [
             {"type": "short", "entry_idx": 49, "exit_idx": 49,
              "return_pct": -1.0, "exit_reason": "stop_loss"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "exit_short"
-        assert cols["v0_trade_return"] == pytest.approx(-1.0)
-        assert cols["v0_trade_reason"] == "stop_loss"
+        assert cols["v0_trade"] == ""
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
 
     def test_multiple_trades_active_last_wins(self):
-        """多个 trade 都 active，最后一个决定 trade 列。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 10, "exit_idx": 130,
@@ -942,7 +897,7 @@ class TestTradeMatchingRegression:
             {"type": "short", "entry_idx": 40, "exit_idx": None},
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "entry_short"  # 最后一个 active trade 胜出
+        assert cols["v0_trade"] == ""
 
 
 # ============================================================================
@@ -1424,92 +1379,81 @@ class TestLabelNullSafety:
 
 
 class TestTradeFixRegression:
-    """回归测试：trade 列 entry/exit 修复。
+    """回归测试：trade 列匹配已改为 post-hoc join。
 
-    两轮 Bug 修复验证：
-    1. 原始代码用 ``==`` → entry 永远匹配不到
-    2. 改用 ``<=``  → 已完成 trade 的后续 bar 全显示 exit（列失去意义）
-    3. 最终方案：exit 仅在 ``== view_last_idx`` 且非 eod 时显示；
-       entry 在 ``<= view_last_idx`` 且未退出时显示。
+    Per-bar matching 已从 ``_extract_view_columns`` 移除。
+    这些测试现在验证 per-bar 方法始终返回默认值。
     """
 
     @staticmethod
     def _extract(view_data: dict, prefix: str = "v0") -> dict:
         return ParquetStore._extract_view_columns(prefix, view_data)
 
-    # ── 活跃持仓时 trade 应显示 entry ────────────────────────────────────
-
     def test_trade_entry_when_active_position(self):
-        """活跃持仓期间 trade 应为 entry_long/entry_short。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 80, "exit_idx": None}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "entry_long"
+        assert cols["v0_trade"] == ""
         assert np.isnan(cols["v0_trade_return"])
         assert cols["v0_trade_reason"] == ""
 
     def test_trade_entry_short_when_active_short(self):
-        """活跃做空持仓期间 trade 应为 entry_short。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "short", "entry_idx": 60, "exit_idx": None}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "entry_short"
-
-    # ── exit 仅在精确退出 bar 显示 ──────────────────────────────────────
+        assert cols["v0_trade"] == ""
 
     def test_trade_exit_only_at_exact_exit_bar(self):
-        """只有 exit_idx==view_last_idx 且非 eod 才显示 exit。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
-        # n_pts=50 → view_last_idx=49, exit at 49, not eod
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 20, "exit_idx": 49,
              "return_pct": 3.0, "exit_reason": "take_profit"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "exit_long"
-        assert cols["v0_trade_return"] == pytest.approx(3.0)
-        assert cols["v0_trade_reason"] == "take_profit"
+        assert cols["v0_trade"] == ""
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
 
     def test_trade_exit_not_shown_when_eod(self):
-        """eod 退出的 bar 应显示 entry（仍在持仓中），而非 exit。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "short", "entry_idx": 30, "exit_idx": 49,
              "return_pct": 1.5, "exit_reason": "eod"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "entry_short"
+        assert cols["v0_trade"] == ""
         assert np.isnan(cols["v0_trade_return"])
         assert cols["v0_trade_reason"] == ""
 
     def test_trade_exit_not_shown_before_exact_bar(self):
-        """exit bar 之前的续持 bar 不应显示 exit。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 50, "exit_idx": 100,
              "return_pct": 2.0, "exit_reason": "stop_loss"}
         ]
         cols = self._extract(view_data)
-        # view_last_idx=119, exit at 100 → 不匹配当前 bar → 已完成 trade
         assert cols["v0_trade"] == ""
 
-    # ── 无活跃交易时 trade 应为空 ────────────────────────────────────────
-
     def test_trade_empty_when_no_active_trade(self):
-        """无活跃交易时 trade 应为空。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
-        view_data["trade_records"] = []  # no trades at all
+        view_data["trade_records"] = []
         cols = self._extract(view_data)
         assert cols["v0_trade"] == ""
         assert np.isnan(cols["v0_trade_return"])
         assert cols["v0_trade_reason"] == ""
 
     def test_trade_empty_when_all_completed(self):
-        """所有 trade 已完成时 trade 应为空。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 10, "exit_idx": 50,
@@ -1523,7 +1467,7 @@ class TestTradeFixRegression:
         assert cols["v0_trade_reason"] == ""
 
     def test_trade_entry_past_view_last_idx_not_matched(self):
-        """entry_idx > view_last_idx 时不应匹配。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "short", "entry_idx": 200, "exit_idx": None}
@@ -1532,16 +1476,16 @@ class TestTradeFixRegression:
         assert cols["v0_trade"] == ""
 
     def test_exit_priority_over_entry_at_current_bar(self):
-        """同 bar entry/exit 时，exit 优先（非 eod 退出）。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 49, "exit_idx": 49,
              "return_pct": -1.0, "exit_reason": "stop_loss"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == "exit_long"
-        assert cols["v0_trade_return"] == pytest.approx(-1.0)
-        assert cols["v0_trade_reason"] == "stop_loss"
+        assert cols["v0_trade"] == ""
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
 
 
 # ============================================================================
@@ -2709,10 +2653,10 @@ class TestPositionBoundaryBars:
 
 
 class TestBSMarkerConsecutiveEvents:
-    """P5: BS 标记连续事件验证。
+    """P5: BS marker matching now uses post-hoc join.
 
-    - B marker at bar N, S marker at bar N+1（两者独立出现，不重叠）
-    - 多个 B marker 无中间 S（全部在各自 bar 上出现）
+    Per-bar matching has been removed from ``_extract_view_columns``.
+    These tests verify per-bar always returns NA.
     """
 
     @staticmethod
@@ -2720,8 +2664,7 @@ class TestBSMarkerConsecutiveEvents:
         return ParquetStore._extract_view_columns(prefix, view_data)
 
     def test_b_and_s_on_consecutive_bars(self):
-        """P5: B at bar N, S at bar N+1 — both present on their own bars, no overlap."""
-        # Simulate bar 50 (view_last_idx=50): should show B at 50
+        """Per-bar matching removed; always returns NA."""
         view_50 = make_mock_view_data(n_pts=51, has_entry=False)
         d50 = view_50["dates"]
         view_50["bs_markers"]["entry_markers"] = [
@@ -2731,12 +2674,9 @@ class TestBSMarkerConsecutiveEvents:
             (49, "S", "red", "take_profit", d50[49]),
         ]
         cols_50 = self._extract(view_50)
-        # At bar 50: only the entry at 50 matches (its date == dates[50])
-        assert cols_50["v0_bs_entry"] == "B"
-        # Exit at 49 has date dates[49] != dates[50] → no match
+        assert cols_50["v0_bs_entry"] == ""
         assert cols_50["v0_bs_exit"] == ""
 
-        # Simulate bar 49 (view_last_idx=49): should show S at 49, no entry at 50
         view_49 = make_mock_view_data(n_pts=50, has_entry=False)
         d49 = view_49["dates"]
         view_49["bs_markers"]["entry_markers"] = [
@@ -2746,13 +2686,11 @@ class TestBSMarkerConsecutiveEvents:
             (49, "S", "red", "take_profit", d49[49]),
         ]
         cols_49 = self._extract(view_49)
-        # At bar 49: entry and exit both at 49, last one wins
-        assert cols_49["v0_bs_entry"] == "B"
-        assert cols_49["v0_bs_exit"] == "S"
+        assert cols_49["v0_bs_entry"] == ""
+        assert cols_49["v0_bs_exit"] == ""
 
     def test_multiple_b_markers_on_distinct_bars(self):
-        """P5: multiple B markers without S — each appears on its own bar."""
-        # Simulate bar 60: marker at 60 should match
+        """Per-bar matching removed; always returns NA."""
         view_60 = make_mock_view_data(n_pts=61, has_entry=False)
         d60 = view_60["dates"]
         view_60["bs_markers"]["entry_markers"] = [
@@ -2761,28 +2699,19 @@ class TestBSMarkerConsecutiveEvents:
             (60, "B", "green", d60[60]),
         ]
         cols_60 = self._extract(view_60)
-        # Only marker at 60 matches current bar
-        assert cols_60["v0_bs_entry"] == "B"
+        assert cols_60["v0_bs_entry"] == ""
 
-        # Simulate bar 45: only marker at 45 matches
         view_45 = make_mock_view_data(n_pts=46, has_entry=False)
         d45 = view_45["dates"]
         view_45["bs_markers"]["entry_markers"] = [
             (30, "B", "green", d45[30]),
             (45, "B", "green", d45[45]),
-            (60, "B", "green", d45[60]) if 60 < len(d45) else None,
-        ]
-        # Filter None
-        view_45["bs_markers"]["entry_markers"] = [
-            (30, "B", "green", d45[30]),
-            (45, "B", "green", d45[45]),
         ]
         cols_45 = self._extract(view_45)
-        assert cols_45["v0_bs_entry"] == "B"
+        assert cols_45["v0_bs_entry"] == ""
 
     def test_mixed_entry_exit_sequence(self):
-        """P5: mixed entry/exit markers over several bars, each only on its own bar."""
-        # Simulate bar 80: marker at 80 should match
+        """Per-bar matching removed; always returns NA."""
         view_80 = make_mock_view_data(n_pts=81, has_entry=False)
         d80 = view_80["dates"]
         view_80["bs_markers"]["entry_markers"] = [
@@ -2793,8 +2722,7 @@ class TestBSMarkerConsecutiveEvents:
             (60, "S", "green", "take_profit", d80[60]),
         ]
         cols_80 = self._extract(view_80)
-        # At bar 80: entry marker S at 80 matches, exit at 60 doesn't
-        assert cols_80["v0_bs_entry"] == "S"
+        assert cols_80["v0_bs_entry"] == ""
         assert cols_80["v0_bs_exit"] == ""
 
 
@@ -2961,9 +2889,7 @@ class TestBSDateBasedMatching:
         # Pass bar_date=d[50] so date matching finds the marker even though
         # view_last_idx=99 and bar_idx=50
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[50]))
-        assert cols["v0_bs_entry"] == "B", (
-            "date-based matching should find marker at bar 50 via bar_date"
-        )
+        assert cols["v0_bs_entry"] == ""  # per-bar matching removed
 
     def test_bs_exit_via_bar_date(self):
         """通过 bar_date 匹配 BS exit marker。"""
@@ -2973,7 +2899,7 @@ class TestBSDateBasedMatching:
             (30, "S", "red", "stop_loss", d[30]),
         ]
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[30]))
-        assert cols["v0_bs_exit"] == "S"
+        assert cols["v0_bs_exit"] == ""  # per-bar matching removed
 
     def test_bs_entry_not_matched_when_bar_date_mismatch(self):
         """bar_date 与 marker date 不匹配时不应找到 marker。"""
@@ -2989,26 +2915,18 @@ class TestBSDateBasedMatching:
     def test_bs_entry_bar_date_none_falls_back_to_current_bar_date(self):
         """bar_date=None 时回退到 _current_bar_date(view_data) 进行匹配。"""
         view_data = make_mock_view_data(n_pts=51, has_entry=True)
-        # has_entry=True → marker at bar 50, date = dates[50]
-        # _current_bar_date returns dates[-1] = dates[50] → should match
         cols = self._extract(view_data, bar_date=None)
-        assert cols["v0_bs_entry"] == "B", (
-            "None bar_date should fall back to _current_bar_date"
-        )
+        assert cols["v0_bs_entry"] == ""  # per-bar matching removed
 
     def test_bs_entry_bar_date_none_falls_back_to_index_matching(self):
-        """无 bar_date 且无 dates 时回退到 index-based matching。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=51, has_entry=False)
-        # Remove dates so _current_bar_date returns None
         del view_data["dates"]
         view_data["bs_markers"]["entry_markers"] = [
-            (50, "B", "green", "2024-01-01"),  # date won't be used (no dates)
+            (50, "B", "green", "2024-01-01"),
         ]
-        # Index-based matching: bar_idx=50, view_last_idx=50 → match
         cols = self._extract(view_data, bar_date=None)
-        assert cols["v0_bs_entry"] == "B", (
-            "should fall back to index matching when no dates available"
-        )
+        assert cols["v0_bs_entry"] == ""  # per-bar matching removed
 
     def test_date_matching_handles_none_marker_date(self):
         """_date_matches 在 marker_date=None 时返回 False（不抛异常）。"""
@@ -3066,11 +2984,11 @@ class TestBSDateBasedMatching:
 
 
 class TestTradeDateBasedMatching:
-    """P9 fix: trade exit 通过 bar_date 进行日期匹配。
+    """P9 fix tests: trade date-based matching now uses post-hoc join.
 
-    原先仅支持 index-based matching（exit_idx == view_last_idx），
-    但当 exit bar 不在窗口末尾时（如标记延迟），日期匹配提供了
-    精确的 bar 级定位。
+    Per-bar matching (including bar_date fallback) has been removed.
+    Trade events are now filled via ``end_session`` post-processing.
+    These tests verify per-bar always returns NA.
     """
 
     @staticmethod
@@ -3080,40 +2998,31 @@ class TestTradeDateBasedMatching:
                                                    bar_date=bar_date)
 
     def test_trade_exit_via_bar_date(self):
-        """exit_idx != view_last_idx 但 bar_date 匹配 exit_date 时仍识别为 exit。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=100, has_entry=False, has_exit=False)
         d = view_data["dates"]
-        # Trade exits at bar 50, but view_last_idx=99
-        # bar_date=d[50] should trigger date-based matching
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 20, "exit_idx": 50,
              "return_pct": 3.5, "exit_reason": "take_profit"}
         ]
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[50]))
-        assert cols["v0_trade"] == "exit_long"
-        assert cols["v0_trade_return"] == pytest.approx(3.5)
-        assert cols["v0_trade_reason"] == "take_profit"
+        assert cols["v0_trade"] == ""
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
 
     def test_trade_exit_date_mismatch_not_matched(self):
-        """bar_date 与 exit_date 不匹配时不识别为 exit。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=100, has_entry=False, has_exit=False)
         d = view_data["dates"]
         view_data["trade_records"] = [
             {"type": "long", "entry_idx": 20, "exit_idx": 50,
              "return_pct": 3.5, "exit_reason": "take_profit"}
         ]
-        # bar_date=d[99] != exit_date=d[50] → no match as exit
-        # But entry_idx=20 <= view_last_idx=99 → it's an active position
-        # Wait, actually with exit_idx=50 < view_last_idx=99, the trade is completed.
-        # The code checks for exit first, then for entry. Since bar_date doesn't
-        # match, is_exit_at_current is False. Then it checks entry: entry_idx=20
-        # <= 99 is True, but exit_idx=50 <= 99 also True → trade is done.
-        # So trade_val should stay as "" (completed trade).
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[99]))
-        assert cols["v0_trade"] == "", "completed trade should show empty"
+        assert cols["v0_trade"] == ""
 
     def test_trade_return_populated_on_exit_via_date_match(self):
-        """通过日期匹配的 exit 也应正确填充 trade_return。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         d = view_data["dates"]
         view_data["trade_records"] = [
@@ -3121,12 +3030,12 @@ class TestTradeDateBasedMatching:
              "return_pct": -2.5, "exit_reason": "stop_loss"}
         ]
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[80]))
-        assert cols["v0_trade"] == "exit_short"
-        assert cols["v0_trade_return"] == pytest.approx(-2.5)
-        assert cols["v0_trade_reason"] == "stop_loss"
+        assert cols["v0_trade"] == ""
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
 
     def test_trade_reason_populated_on_exit_via_date_match(self):
-        """通过日期匹配的 exit 也应正确填充 trade_reason。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         d = view_data["dates"]
         view_data["trade_records"] = [
@@ -3134,12 +3043,12 @@ class TestTradeDateBasedMatching:
              "return_pct": 1.2, "exit_reason": "take_profit"}
         ]
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[70]))
-        assert cols["v0_trade"] == "exit_long"
-        assert cols["v0_trade_return"] == pytest.approx(1.2)
-        assert cols["v0_trade_reason"] == "take_profit"
+        assert cols["v0_trade"] == ""
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
 
     def test_eod_exit_not_matched_even_with_date_match(self):
-        """eod 退出的 trade 即使 bar_date 匹配也不应标记为 exit。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         d = view_data["dates"]
         view_data["trade_records"] = [
@@ -3147,34 +3056,32 @@ class TestTradeDateBasedMatching:
              "return_pct": 2.0, "exit_reason": "eod"}
         ]
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[70]))
-        # eod exit → still treated as active position, shows entry
-        assert cols["v0_trade"] == "entry_long"
+        assert cols["v0_trade"] == ""
         assert np.isnan(cols["v0_trade_return"])
         assert cols["v0_trade_reason"] == ""
 
     def test_date_matching_handles_none_dates_gracefully(self):
-        """dates 为 None 时日期匹配不崩溃，回退到 index-based。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
-        # Remove dates so date-based matching is skipped
         del view_data["dates"]
-        # Trade exits at view_last_idx=49 via index matching
         view_data["trade_records"] = [
             {"type": "short", "entry_idx": 20, "exit_idx": 49,
              "return_pct": -1.0, "exit_reason": "stop_loss"}
         ]
-        # bar_date passed but no dates array → index-based should still work
         cols = self._extract(view_data, bar_date=pd.Timestamp("2024-06-15"))
-        assert cols["v0_trade"] == "exit_short"
+        assert cols["v0_trade"] == ""
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""
 
     def test_date_matching_handles_exit_idx_out_of_bounds(self):
-        """exit_idx 超出 dates 长度时日期匹配不崩溃。"""
+        """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=50, has_entry=False, has_exit=False)
         d = view_data["dates"]
         view_data["trade_records"] = [
             {"type": "short", "entry_idx": 10, "exit_idx": 999,
              "return_pct": 1.0, "exit_reason": "take_profit"}
         ]
-        # exit_idx=999 >> len(dates)=50 → date lookup skipped, index match fails
-        # entry_idx=10 <= 49, exit_idx=999 > 49 → still active → entry_short
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[49]))
-        assert cols["v0_trade"] == "entry_short"
+        assert cols["v0_trade"] == ""
+        assert np.isnan(cols["v0_trade_return"])
+        assert cols["v0_trade_reason"] == ""

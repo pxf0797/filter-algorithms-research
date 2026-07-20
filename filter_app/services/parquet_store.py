@@ -177,6 +177,14 @@ class ParquetStore:
         self._total_row_count = 0
         self._last_pnl: dict[str, float] = {}
 
+        # ── Pending events for post-hoc trade/BS matching ──
+        # Key: "v0:2026-04-01", Value: {"v0_trade": "exit_long", ...}
+        self._pending_events: dict[str, dict[str, Any]] = {}
+
+        # Disable auto-flush so all rows stay in buffer until end_session
+        self._saved_buffer_size = self._buffer_size
+        self._buffer_size = 10_000_000  # effectively infinite
+
         self._write_metadata(status="running")
         return self._session_id
 
@@ -237,6 +245,7 @@ class ParquetStore:
         try:
             row = self._extract_row(bar_index, bar_timestamp, stage_outputs)
             self._buffer.append(row)
+            self._accumulate_events(stage_outputs)
             self._maybe_flush()
         except Exception:
             print(
@@ -290,11 +299,18 @@ class ParquetStore:
         self._last_flush_time = time.time()
 
     def end_session(self) -> None:
-        """Finalise the session: flush remaining rows, merge segments,
-        export CSV, and update metadata with final statistics.
+        """Finalise the session: apply pending trade/BS events, flush
+        remaining rows, merge segments, export CSV, and update metadata
+        with final statistics.
         """
         if self._session_dir is None:
             return
+
+        # Apply pending trade/BS events to buffered rows before flushing
+        self._apply_pending_events()
+
+        # Restore original buffer size before final flush
+        self._buffer_size = getattr(self, "_saved_buffer_size", 100)
 
         # Final flush of anything still in the buffer
         self.flush()
@@ -474,98 +490,156 @@ class ParquetStore:
         result[f"{prefix}_long_pos"] = long_pos
         result[f"{prefix}_short_pos"] = short_pos
 
-        # ── Trade columns: match exit/entry at current bar ─────────
+        # ── Trade & BS columns: filled by post-hoc join in end_session ──
+        # Per-bar matching (exit_idx==view_last_idx, date matching) fails
+        # because trade/BS events at earlier bars in the sliding window
+        # never match the current bar's index or date.  Instead, events are
+        # accumulated in append_row and applied to the buffer in end_session.
 
-        trade_records: list[dict] = view_data.get("trade_records") or []
-        trade_val = _STR_NA
-        trade_return = _FLOAT_NA
-        trade_reason = _STR_NA
-        dates = view_data.get("dates")
+        result[f"{prefix}_trade"] = _STR_NA
+        result[f"{prefix}_trade_return"] = _FLOAT_NA
+        result[f"{prefix}_trade_reason"] = _STR_NA
+        result[f"{prefix}_bs_entry"] = _STR_NA
+        result[f"{prefix}_bs_exit"] = _STR_NA
 
-        # Trade matching strategy:
-        # - "exit_*"  → trade exited at current bar (exit_idx == view_last_idx,
-        #                or exit_date matches bar_date; but not eod forced exits).
-        # - "entry_*" → trade entered before or at current bar and is still
-        #                active (no exit, exit after current bar, or eod exit).
-        # - ""        → no current trade.
-        for trade in trade_records:
-            exit_idx = trade.get("exit_idx")
-            entry_idx = trade.get("entry_idx")
-            tt = trade.get("type", "")
-            reason = str(trade.get("exit_reason", ""))
+        return result
 
-            # Determine if this trade exited at the current bar
-            is_exit_at_current = False
-            if exit_idx is not None and reason != "eod":
-                # Primary: index-based matching (exit_idx == view_last_idx)
-                if int(exit_idx) == view_last_idx:
-                    is_exit_at_current = True
-                # Secondary: date-based matching via bar_date
-                elif bar_date is not None and dates is not None:
+    # ── Event accumulation & post-hoc join ─────────────────────────────
+
+    def _accumulate_events(self, stage_outputs: dict) -> None:
+        """Accumulate trade exit/entry and BS marker events keyed by date.
+
+        Called from ``append_row`` after extracting the row.  Events are
+        stored in ``self._pending_events`` keyed by ``"v0:2026-04-01"``
+        and applied to the buffer in ``end_session``.
+
+        Trade exits take precedence over entries (last exit on a date
+        wins).  BS markers overwrite earlier values for the same date.
+        """
+        views: dict[str, dict] = stage_outputs.get("views", {})
+        for view_key, view_data in views.items():
+            prefix = view_key.split("_", 1)[0]
+            dates = view_data.get("dates")
+            if dates is None or len(dates) == 0:
+                continue
+
+            # ── Trade events ──────────────────────────────────────
+            for trade in view_data.get("trade_records", []):
+                exit_idx = trade.get("exit_idx")
+                entry_idx = trade.get("entry_idx")
+                tt = trade.get("type", "")
+                reason = str(trade.get("exit_reason", ""))
+
+                # Exit event (non-eod only)
+                if exit_idx is not None and reason != "eod":
                     try:
-                        if int(exit_idx) < len(dates):
-                            exit_date = dates[int(exit_idx)]
-                            if _date_matches(exit_date, bar_date):
-                                is_exit_at_current = True
+                        exit_date = _normalize_date(dates[int(exit_idx)])
+                        if exit_date:
+                            key = f"{prefix}:{exit_date}"
+                            existing = self._pending_events.get(key, {})
+                            existing[f"{prefix}_trade"] = f"exit_{tt}"
+                            existing[f"{prefix}_trade_return"] = float(
+                                trade.get("return_pct", _FLOAT_NA)
+                            )
+                            existing[f"{prefix}_trade_reason"] = reason
+                            self._pending_events[key] = existing
                     except Exception:
                         pass
 
-            if is_exit_at_current:
-                trade_val = f"exit_{tt}"
-                trade_return = float(trade.get("return_pct", _FLOAT_NA))
-                trade_reason = reason
-            # Active trade at current bar
-            elif entry_idx is not None and int(entry_idx) <= view_last_idx:
-                if (
-                    exit_idx is None
-                    or int(exit_idx) > view_last_idx
-                    or reason == "eod"
-                ):
-                    trade_val = f"entry_{tt}"
-                    # entry has no realised return yet
-                    trade_return = _FLOAT_NA
-                    trade_reason = _STR_NA
+                # Entry event (only if entry_idx is set and
+                # no exit has been recorded for this date yet)
+                if entry_idx is not None:
+                    try:
+                        entry_date = _normalize_date(dates[int(entry_idx)])
+                        if entry_date:
+                            key = f"{prefix}:{entry_date}"
+                            existing = self._pending_events.get(key, {})
+                            trade_col = existing.get(f"{prefix}_trade", "")
+                            if not trade_col:
+                                existing[f"{prefix}_trade"] = f"entry_{tt}"
+                                existing.setdefault(
+                                    f"{prefix}_trade_return", _FLOAT_NA
+                                )
+                                existing.setdefault(
+                                    f"{prefix}_trade_reason", _STR_NA
+                                )
+                                self._pending_events[key] = existing
+                    except Exception:
+                        pass
 
-        result[f"{prefix}_trade"] = trade_val
-        result[f"{prefix}_trade_return"] = trade_return
-        result[f"{prefix}_trade_reason"] = trade_reason
+            # ── BS marker events ───────────────────────────────────
+            bs_markers = view_data.get("bs_markers")
+            if not bs_markers:
+                continue
 
-        # ── BS marker columns: match by date ─────────────────────
+            for m in bs_markers.get("entry_markers", []):
+                marker_date = m[3] if len(m) > 3 else None
+                if marker_date is None:
+                    continue
+                try:
+                    md = _normalize_date(marker_date)
+                    if md:
+                        key = f"{prefix}:{md}"
+                        existing = self._pending_events.get(key, {})
+                        existing[f"{prefix}_bs_entry"] = str(m[1])
+                        self._pending_events[key] = existing
+                except Exception:
+                    pass
 
-        bs_markers: Optional[dict] = view_data.get("bs_markers")
-        bs_entry = _STR_NA
-        bs_exit = _STR_NA
+            for m in bs_markers.get("exit_markers", []):
+                marker_date = m[4] if len(m) > 4 else None
+                if marker_date is None:
+                    continue
+                try:
+                    md = _normalize_date(marker_date)
+                    if md:
+                        key = f"{prefix}:{md}"
+                        existing = self._pending_events.get(key, {})
+                        existing[f"{prefix}_bs_exit"] = str(m[1])
+                        self._pending_events[key] = existing
+                except Exception:
+                    pass
 
-        if bs_markers is not None:
-            # Use bar_date (the actual bar being stored) for date-based matching.
-            # Falls back to _current_bar_date(view_data) for tests without bar_date,
-            # then falls back to index-based matching for tests without dates.
-            match_date = bar_date
-            if match_date is None:
-                match_date = _current_bar_date(view_data)
+    def _apply_pending_events(self) -> None:
+        """Apply accumulated trade/BS events to the in-memory buffer.
 
-            if match_date is not None:
-                # entry_markers: (bar_idx, label, color, date)
-                # exit_markers:  (bar_idx, label, color, exit_reason, date)
-                for m in bs_markers.get("entry_markers", []):
-                    if _date_matches(m[3] if len(m) > 3 else None, match_date):
-                        bs_entry = str(m[1])
-                for m in bs_markers.get("exit_markers", []):
-                    if _date_matches(m[4] if len(m) > 4 else None, match_date):
-                        bs_exit = str(m[1])
-            else:
-                # Fallback: index-based matching (for tests without dates)
-                for m in bs_markers.get("entry_markers", []):
-                    if int(m[0]) == view_last_idx:
-                        bs_entry = str(m[1])
-                for m in bs_markers.get("exit_markers", []):
-                    if int(m[0]) == view_last_idx:
-                        bs_exit = str(m[1])
+        For each row in ``self._buffer``, the ``bar_timestamp`` is
+        converted to a date string and looked up in
+        ``self._pending_events`` per view prefix.  Matching columns
+        are overwritten in-place.
+        """
+        if not self._pending_events:
+            return
 
-        result[f"{prefix}_bs_entry"] = bs_entry
-        result[f"{prefix}_bs_exit"] = bs_exit
+        for row in self._buffer:
+            bar_ts = row.get("bar_timestamp")
+            if bar_ts is None:
+                continue
+            bar_date = _normalize_date(bar_ts)
+            if not bar_date:
+                continue
 
-        return result
+            for prefix in self._view_prefixes:
+                key = f"{prefix}:{bar_date}"
+                events = self._pending_events.get(key)
+                if events is None:
+                    continue
+
+                trade_col = f"{prefix}_trade"
+                if trade_col in events:
+                    row[trade_col] = events[trade_col]
+                trade_ret_col = f"{prefix}_trade_return"
+                if trade_ret_col in events:
+                    row[trade_ret_col] = events[trade_ret_col]
+                trade_reason_col = f"{prefix}_trade_reason"
+                if trade_reason_col in events:
+                    row[trade_reason_col] = events[trade_reason_col]
+                bs_entry_col = f"{prefix}_bs_entry"
+                if bs_entry_col in events:
+                    row[bs_entry_col] = events[bs_entry_col]
+                bs_exit_col = f"{prefix}_bs_exit"
+                if bs_exit_col in events:
+                    row[bs_exit_col] = events[bs_exit_col]
 
     # ── Flush helpers ───────────────────────────────────────────────
 
@@ -925,3 +999,18 @@ def _date_matches(marker_date: Any, current_date: Any) -> bool:
         return m.date() == c.date()
     except Exception:
         return False
+
+
+def _normalize_date(val: Any) -> Optional[str]:
+    """Convert any date-like value to a ``"YYYY-MM-DD"`` string.
+
+    Returns ``None`` on parse failure.  Used by the post-hoc event
+    join to build stable dict keys across data sources.
+    """
+    if val is None:
+        return None
+    try:
+        ts = pd.Timestamp(val)
+        return ts.strftime("%Y-%m-%d")
+    except Exception:
+        return None
