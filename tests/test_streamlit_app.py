@@ -286,3 +286,29 @@ class TestDetermineSubplotLayout:
         )
         assert ar == 4
         assert sar is None and ssr is None
+
+
+# ====================================================================
+# Import path regression tests (backtest_panel import fix)
+# ====================================================================
+
+class TestBacktestPanelImport:
+    """Verify the import path fix for backtest_panel in streamlit_app.py."""
+
+    def test_new_import_succeeds(self):
+        """`from components.backtest_panel import ...` succeeds (new path)."""
+        from components.backtest_panel import render_backtest_panel, run_backtest_play
+        assert callable(render_backtest_panel)
+        assert callable(run_backtest_play)
+
+    def test_new_import_path_in_source(self):
+        """streamlit_app.py uses the correct `from components.backtest_panel` import."""
+        from pathlib import Path
+        source = Path(streamlit_app.__file__).read_text()
+        assert "from components.backtest_panel import" in source, (
+            "streamlit_app.py should import from components.backtest_panel"
+        )
+        assert "from filter_app.components.backtest_panel import" not in source, (
+            "streamlit_app.py should NOT use old import path "
+            "filter_app.components.backtest_panel"
+        )
