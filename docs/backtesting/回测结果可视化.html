@@ -1745,10 +1745,10 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
     function _applyCrosshair(xv) {
       _pending = false;
-      Plotly.relayout('chart-dash-' + v, {
-        'shapes[' + cursorShapeIdx + '].x0': xv,
-        'shapes[' + cursorShapeIdx + '].x1': xv,
-      });
+      var _update = {};
+      _update['shapes[' + cursorShapeIdx + '].x0'] = xv;
+      _update['shapes[' + cursorShapeIdx + '].x1'] = xv;
+      Plotly.relayout('chart-dash-' + v, _update);
       _lastXv = xv;
       if (_tip && barTs && barTs.length > 0) {
         var idx = _nearestIdx(barIdx, xv);
@@ -1775,10 +1775,10 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
     dashChartEl.on('plotly_unhover', function() {
       _pending = false; _pendingXv = null; _lastXv = -Infinity;
-      Plotly.relayout('chart-dash-' + v, {
-        'shapes[' + cursorShapeIdx + '].x0': -1,
-        'shapes[' + cursorShapeIdx + '].x1': -1,
-      });
+      var _update2 = {};
+      _update2['shapes[' + cursorShapeIdx + '].x0'] = -1;
+      _update2['shapes[' + cursorShapeIdx + '].x1'] = -1;
+      Plotly.relayout('chart-dash-' + v, _update2);
       if (_tip) _tip.style.display = 'none';
     });
 
