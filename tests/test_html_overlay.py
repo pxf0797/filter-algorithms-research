@@ -314,3 +314,84 @@ class TestMultiTickerSupport:
         html = self._read_html()
         assert "dash: 'dash'" in html, \
             "Short PnL line must use dashed style for visual distinction"
+
+
+class TestPeriodDashboardRowHeights:
+    """period-dashboard 中 4 行的 yaxis domain 高度分配。
+
+    Row 1 (滤波) 占 36%, Row 2 (信号) 占 12%,
+    Row 3 (做多做空) 占 12%, Row 4 (PnL) 占 40%.
+    """
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_row1_filtered_price_domain(self):
+        """yaxis (滤波, row1) domain 为 [0.64, 1.0]。"""
+        html = self._read_html()
+        assert "yaxis: { domain: [0.64, 1.0]" in html, \
+            "yaxis (row1 滤波) must have domain [0.64, 1.0]"
+
+    def test_row2_signal_domain(self):
+        """yaxis3 (信号, row2) domain 为 [0.52, 0.64] — half height。"""
+        html = self._read_html()
+        assert "yaxis3: { domain: [0.52, 0.64]" in html, \
+            "yaxis3 (row2 信号) must have domain [0.52, 0.64]"
+
+    def test_row3_position_domain(self):
+        """yaxis2 (做多做空, row3) domain 为 [0.4, 0.52] — half height。"""
+        html = self._read_html()
+        assert "yaxis2: { domain: [0.4, 0.52]" in html, \
+            "yaxis2 (row3 做多做空) must have domain [0.4, 0.52]"
+
+    def test_row4_pnl_domain(self):
+        """yaxis4 (PnL, row4) domain 为 [0.0, 0.4]。"""
+        html = self._read_html()
+        assert "yaxis4: { domain: [0.0, 0.4]" in html, \
+            "yaxis4 (row4 PnL) must have domain [0.0, 0.4]"
+
+
+class TestPeriodDashboardRowOrdering:
+    """period-dashboard 行顺序回归测试：验证 yaxis 到行的映射（交换正确）。"""
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_row1_filtered_uses_yaxis(self):
+        """滤波 使用 yaxis（索引 1 的默认 axis）。"""
+        html = self._read_html()
+        assert "yaxis: { domain: [0.64, 1.0]" in html, \
+            "滤波 (row1) must use yaxis"
+        assert "'滤波价格'" in html
+
+    def test_row2_signal_uses_yaxis3(self):
+        """信号 使用 yaxis3（索引 3，交换后）。"""
+        html = self._read_html()
+        assert "yaxis3: { domain: [0.52, 0.64]" in html, \
+            "信号 (row2) must use yaxis3"
+        assert "'信号'" in html
+
+    def test_row3_position_uses_yaxis2(self):
+        """做多做空 使用 yaxis2（索引 2，交换后）。"""
+        html = self._read_html()
+        assert "yaxis2: { domain: [0.4, 0.52]" in html, \
+            "做多做空 (row3) must use yaxis2"
+        assert "做多做空" in html
+
+    def test_row4_pnl_uses_yaxis4(self):
+        """PnL 使用 yaxis4。"""
+        html = self._read_html()
+        assert "yaxis4: { domain: [0.0, 0.4]" in html, \
+            "PnL (row4) must use yaxis4"
+        assert "'PnL (累计)'" in html
+
+    def test_axis_swap_not_reversed(self):
+        """回归防护：确保 axis 交换没有反转（yaxis2 不是信号, yaxis3 不是做多做空）。"""
+        html = self._read_html()
+        # 做多做空 注释在 yaxis2 附近
+        assert "Row 3: 做多做空" in html, \
+            "Row 3 comment must label 做多做空 (not 信号)"
+        assert "Row 2: Signal" in html, \
+            "Row 2 comment must label Signal (not 做多做空)"
