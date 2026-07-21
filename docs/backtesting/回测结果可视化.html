@@ -1676,20 +1676,20 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       shapes: shapes,
       annotations: annotations,
 
-      // Row 1 (top): Filtered — anchor with tick labels
-      xaxis: { domain: [0.0, 1.0], title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, tickvals: tickVals, ticktext: tickTexts, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
+      // Row 1 (top): Filtered — no tick labels, matches bottom x4
+      xaxis: { matches: 'x4', domain: [0.0, 1.0], showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
       yaxis: { domain: [0.64, 1.0], title: { text: '滤波价格', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
 
-      // Row 3: 做多做空 (half height), matches row1 x
-      xaxis2: { matches: 'x', domain: [0.0, 1.0], showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
+      // Row 3: 做多做空 (half height), matches bottom x4
+      xaxis2: { matches: 'x4', domain: [0.0, 1.0], showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
       yaxis2: { domain: [0.4, 0.52], automargin: true, showgrid: true, gridcolor: gridColor },
 
-      // Row 2: Signal (half height), matches row1 x
-      xaxis3: { matches: 'x', domain: [0.0, 1.0], showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
+      // Row 2: Signal (half height), matches bottom x4
+      xaxis3: { matches: 'x4', domain: [0.0, 1.0], showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
       yaxis3: { domain: [0.52, 0.64], title: { text: '信号', font: { size: 10, color: '#8b949e' } }, tickvals: [-1, 0, 1], ticktext: ['空头(-1)', '中性(0)', '多头(+1)'], range: [-1.2, 1.2], showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
 
-      // Row 4 (bottom): PnL — no tick labels, matches row1 x
-      xaxis4: { matches: 'x', domain: [0.0, 1.0], showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
+      // Row 4 (bottom): PnL — shows tick labels, NOT matching (anchor)
+      xaxis4: { domain: [0.0, 1.0], title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, tickvals: tickVals, ticktext: tickTexts, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
       yaxis4: { domain: [0.0, 0.4], title: { text: 'PnL (累计)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
     };
 
