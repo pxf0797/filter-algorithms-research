@@ -218,6 +218,12 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 }
 .embedded-banner.hidden { display: none; }
 
+/* Period dashboards */
+.period-dashboard { margin: 24px 0; }
+.period-dashboard .chart-row { display: flex; gap: 12px; margin-bottom: 12px; }
+.period-dashboard .chart-row .plot-wrap { flex: 1; min-width: 0; height: 280px; }
+.period-dashboard .chart-row .plot-wrap.heatmap-plot { height: 200px; }
+
 /* Schema table */
 .schema-table-wrap { overflow-x: auto; }
 .schema-table {
@@ -317,11 +323,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 	  <div class="section">
 	    <div class="section-title"><span class="num">2</span> Filtered 价格总览 + eps 阈值带（4 线叠加 + v2 eps 带）</div>
 	    <div class="plot-wrap-overview" id="chart-filtered-overview"></div>
-	    <p class="annotation">4 条滤波价格线叠加（颜色+线宽分层），半透明带=v2(日线) ±eps 阈值参考。已合并原板块4内容。</p>
-	    <div class="plot-wrap-filtered-individual" id="chart-filtered-v0"></div>
-	    <div class="plot-wrap-filtered-individual" id="chart-filtered-v1"></div>
-	    <div class="plot-wrap-filtered-individual" id="chart-filtered-v2"></div>
-	    <div class="plot-wrap-filtered-individual" id="chart-filtered-v3"></div>
+	    <p class="annotation">4 条滤波价格线叠加（颜色+线宽分层），半透明带=v2(日线) ±eps 阈值参考。</p>
 	  </div>
 
   <!-- Section 3: Signal Comparison -->
@@ -329,10 +331,6 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     <div class="section-title"><span class="num">3</span> 信号对比（4 视图独立子图，共享 x 轴）</div>
     <div class="plot-wrap-signals" id="chart-signals"></div>
     <p class="annotation">4 个子图垂直堆叠，共享 x 轴，各自独立 y 轴固定 [-1, +1]。绿(+1)/红(-1)/灰(0) 背景着色，阶梯信号线。</p>
-    <div class="plot-wrap-signal-individual" id="chart-signal-v0"></div>
-    <div class="plot-wrap-signal-individual" id="chart-signal-v1"></div>
-    <div class="plot-wrap-signal-individual" id="chart-signal-v2"></div>
-    <div class="plot-wrap-signal-individual" id="chart-signal-v3"></div>
   </div>
 
   <!-- Section 4: PnL Curves -->
@@ -340,10 +338,6 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     <div class="section-title"><span class="num">4</span> PnL 曲线（4 视图 x 做多+做空）</div>
     <div class="plot-wrap-pnl" id="chart-pnl"></div>
     <p class="annotation">实线=做多 PnL，虚线=做空 PnL。标注为各曲线终值。</p>
-    <div class="plot-wrap-pnl-individual" id="chart-pnl-v0"></div>
-    <div class="plot-wrap-pnl-individual" id="chart-pnl-v1"></div>
-    <div class="plot-wrap-pnl-individual" id="chart-pnl-v2"></div>
-    <div class="plot-wrap-pnl-individual" id="chart-pnl-v3"></div>
   </div>
 
   <!-- Section 4b: Multi-Ticker PnL Overlay (仅多 ticker 时显示) -->
@@ -364,12 +358,56 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     <div class="section-title"><span class="num">5</span> 持仓状态热力图（4 视图 x long_pos + short_pos）</div>
     <div class="plot-wrap-heatmap" id="chart-heatmap"></div>
     <p class="annotation">行=视图，列=时间（采样 100 点）。绿色=做多持仓，红色=做空持仓，灰色=空仓。</p>
-    <div class="plot-wrap-heatmap-individual" id="chart-heatmap-v0"></div>
-    <div class="plot-wrap-heatmap-individual" id="chart-heatmap-v1"></div>
-    <div class="plot-wrap-heatmap-individual" id="chart-heatmap-v2"></div>
-    <div class="plot-wrap-heatmap-individual" id="chart-heatmap-v3"></div>
   </div>
 
+  <!-- Period Dashboards -->
+  <div class="section period-dashboard">
+    <div class="section-title"><span class="num">D1</span> 日线 完整视图</div>
+    <div class="chart-row">
+      <div class="plot-wrap"><div id="chart-filtered-v0"></div></div>
+      <div class="plot-wrap"><div id="chart-signal-v0"></div></div>
+    </div>
+    <div class="chart-row">
+      <div class="plot-wrap"><div id="chart-pnl-v0"></div></div>
+      <div class="plot-wrap heatmap-plot"><div id="chart-heatmap-v0"></div></div>
+    </div>
+  </div>
+
+  <div class="section period-dashboard">
+    <div class="section-title"><span class="num">D2</span> 60分钟 完整视图</div>
+    <div class="chart-row">
+      <div class="plot-wrap"><div id="chart-filtered-v1"></div></div>
+      <div class="plot-wrap"><div id="chart-signal-v1"></div></div>
+    </div>
+    <div class="chart-row">
+      <div class="plot-wrap"><div id="chart-pnl-v1"></div></div>
+      <div class="plot-wrap heatmap-plot"><div id="chart-heatmap-v1"></div></div>
+    </div>
+  </div>
+
+  <div class="section period-dashboard">
+    <div class="section-title"><span class="num">D3</span> 15分钟 完整视图</div>
+    <div class="chart-row">
+      <div class="plot-wrap"><div id="chart-filtered-v2"></div></div>
+      <div class="plot-wrap"><div id="chart-signal-v2"></div></div>
+    </div>
+    <div class="chart-row">
+      <div class="plot-wrap"><div id="chart-pnl-v2"></div></div>
+      <div class="plot-wrap heatmap-plot"><div id="chart-heatmap-v2"></div></div>
+    </div>
+  </div>
+
+  <div class="section period-dashboard">
+    <div class="section-title"><span class="num">D4</span> 5分钟 完整视图</div>
+    <div class="chart-row">
+      <div class="plot-wrap"><div id="chart-filtered-v3"></div></div>
+      <div class="plot-wrap"><div id="chart-signal-v3"></div></div>
+    </div>
+    <div class="chart-row">
+      <div class="plot-wrap"><div id="chart-pnl-v3"></div></div>
+      <div class="plot-wrap heatmap-plot"><div id="chart-heatmap-v3"></div></div>
+    </div>
+  </div>
   <!-- Section 6: Trade Events -->
   <div class="section">
     <div class="section-title"><span class="num">6</span> 交易事件 &amp; BS 标记统计</div>
@@ -1705,14 +1743,18 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     buildOverview(data);
     buildSchemaTable();
     buildFilteredOverview(data);
-    VIEWS.forEach(function(v) { buildFilteredOverviewIndividual(data, v); });
     buildSignals(data);
-    VIEWS.forEach(function(v) { buildSignalIndividual(data, v); });
     buildPnl(data);
-    VIEWS.forEach(function(v) { buildPnlIndividual(data, v); });
     buildMultiTickerPnl();
     buildHeatmap(data);
-    VIEWS.forEach(function(v) { buildHeatmapIndividual(data, v); });
+
+    // Per-period dashboards
+    VIEWS.forEach(function(v) {
+      buildFilteredOverviewIndividual(data, v);
+      buildSignalIndividual(data, v);
+      buildPnlIndividual(data, v);
+      buildHeatmapIndividual(data, v);
+    });
     buildTrades(data);
     buildTable(data);
   }
