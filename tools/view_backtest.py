@@ -443,6 +443,7 @@ def main():
                     print(f"加载 Metadata: {auto_meta}")
                     print(f"    view_labels: {meta.get('view_labels', {})}")
 
+        metadata_path = args.metadata
         if metadata_path:
             serve_metadata = load_metadata(metadata_path)
             if serve_metadata:
