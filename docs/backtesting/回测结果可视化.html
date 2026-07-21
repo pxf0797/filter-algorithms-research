@@ -1662,6 +1662,19 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       xaxis: 'x2', yaxis: 'y2',
     });
 
+    // ===== Cross-subplot cursor line (paper coordinates, spans all 4 rows) =====
+    // Plotly's spikemode:'across' only works within a single subplot's yaxis domain.
+    // We use a layout shape with yref:'paper' (0-1 across entire chart height) and
+    // update its x position via plotly_hover/unhover events to simulate a unified cursor.
+    var cursorShapeIdx = shapes.length;
+    shapes.push({
+      type: 'line',
+      x0: -1, x1: -1,       // off-screen initially
+      y0: 0, y1: 1,         // full chart height
+      yref: 'paper',        // paper coordinates — spans all subplot rows
+      line: { color: '#8b949e', width: 1, dash: 'dot' },
+    });
+
     // ===== Layout =====
     const layout = {
       template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
@@ -1694,6 +1707,21 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     };
 
     Plotly.newPlot('chart-dash-' + v, traces, layout, plotConfig);
+
+    // Cross-subplot cursor line: update shape on hover, hide on unhover
+    var dashChartEl = document.getElementById('chart-dash-' + v);
+    dashChartEl.on('plotly_hover', function(eventData) {
+      Plotly.relayout('chart-dash-' + v, {
+        'shapes[' + cursorShapeIdx + '].x0': eventData.xvals[0],
+        'shapes[' + cursorShapeIdx + '].x1': eventData.xvals[0],
+      });
+    });
+    dashChartEl.on('plotly_unhover', function() {
+      Plotly.relayout('chart-dash-' + v, {
+        'shapes[' + cursorShapeIdx + '].x0': -1,
+        'shapes[' + cursorShapeIdx + '].x1': -1,
+      });
+    });
   }
 
   // --- Section 6: Trade Events & BS Markers ---
