@@ -109,6 +109,10 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 .plot-wrap-pnl { width: 100%; height: 550px; }
 .plot-wrap-heatmap { width: 100%; height: 280px; }
 .plot-wrap-trades { width: 100%; height: 500px; }
+.plot-wrap-filtered-individual { width: 100%; height: 280px; }
+.plot-wrap-signal-individual { width: 100%; height: 300px; }
+.plot-wrap-pnl-individual { width: 100%; height: 300px; }
+.plot-wrap-heatmap-individual { width: 100%; height: 150px; }
 
 /* Data table */
 .table-wrap { overflow-x: auto; max-height: 560px; overflow-y: auto; }
@@ -314,6 +318,10 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 	    <div class="section-title"><span class="num">2</span> Filtered 价格总览 + eps 阈值带（4 线叠加 + v2 eps 带）</div>
 	    <div class="plot-wrap-overview" id="chart-filtered-overview"></div>
 	    <p class="annotation">4 条滤波价格线叠加（颜色+线宽分层），半透明带=v2(日线) ±eps 阈值参考。已合并原板块4内容。</p>
+	    <div class="plot-wrap-filtered-individual" id="chart-filtered-v0"></div>
+	    <div class="plot-wrap-filtered-individual" id="chart-filtered-v1"></div>
+	    <div class="plot-wrap-filtered-individual" id="chart-filtered-v2"></div>
+	    <div class="plot-wrap-filtered-individual" id="chart-filtered-v3"></div>
 	  </div>
 
   <!-- Section 3: Signal Comparison -->
@@ -321,6 +329,10 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     <div class="section-title"><span class="num">3</span> 信号对比（4 视图独立子图，共享 x 轴）</div>
     <div class="plot-wrap-signals" id="chart-signals"></div>
     <p class="annotation">4 个子图垂直堆叠，共享 x 轴，各自独立 y 轴固定 [-1, +1]。绿(+1)/红(-1)/灰(0) 背景着色，阶梯信号线。</p>
+    <div class="plot-wrap-signal-individual" id="chart-signal-v0"></div>
+    <div class="plot-wrap-signal-individual" id="chart-signal-v1"></div>
+    <div class="plot-wrap-signal-individual" id="chart-signal-v2"></div>
+    <div class="plot-wrap-signal-individual" id="chart-signal-v3"></div>
   </div>
 
   <!-- Section 4: PnL Curves -->
@@ -328,6 +340,10 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     <div class="section-title"><span class="num">4</span> PnL 曲线（4 视图 x 做多+做空）</div>
     <div class="plot-wrap-pnl" id="chart-pnl"></div>
     <p class="annotation">实线=做多 PnL，虚线=做空 PnL。标注为各曲线终值。</p>
+    <div class="plot-wrap-pnl-individual" id="chart-pnl-v0"></div>
+    <div class="plot-wrap-pnl-individual" id="chart-pnl-v1"></div>
+    <div class="plot-wrap-pnl-individual" id="chart-pnl-v2"></div>
+    <div class="plot-wrap-pnl-individual" id="chart-pnl-v3"></div>
   </div>
 
   <!-- Section 4b: Multi-Ticker PnL Overlay (仅多 ticker 时显示) -->
@@ -348,6 +364,10 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     <div class="section-title"><span class="num">5</span> 持仓状态热力图（4 视图 x long_pos + short_pos）</div>
     <div class="plot-wrap-heatmap" id="chart-heatmap"></div>
     <p class="annotation">行=视图，列=时间（采样 100 点）。绿色=做多持仓，红色=做空持仓，灰色=空仓。</p>
+    <div class="plot-wrap-heatmap-individual" id="chart-heatmap-v0"></div>
+    <div class="plot-wrap-heatmap-individual" id="chart-heatmap-v1"></div>
+    <div class="plot-wrap-heatmap-individual" id="chart-heatmap-v2"></div>
+    <div class="plot-wrap-heatmap-individual" id="chart-heatmap-v3"></div>
   </div>
 
   <!-- Section 6: Trade Events -->
@@ -625,6 +645,69 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     Plotly.newPlot('chart-filtered-overview', traces, layout, plotConfig);
   }
 
+  // --- Section 2b: Individual Filtered Price per Period ---
+  function buildFilteredOverviewIndividual(data, v) {
+    const { columns, N } = data;
+    const barIdx = col(data, 'bar_index');
+    const barTs = col(data, 'bar_timestamp');
+    const traces = [];
+
+    // Filtered price line (single period)
+    const filtered = col(data, v + '_filtered');
+    traces.push({
+      x: barIdx, y: filtered,
+      type: 'scatter', mode: 'lines',
+      name: viewLabel(v),
+      line: { width: 2, color: VIEW_COLORS[v] },
+      showlegend: true,
+    });
+
+    // EPS band for this period
+    const eps = col(data, v + '_eps');
+    const epsUpper = filtered.map(function(f, i) { return toNum(f) + toNum(eps[i]); });
+    const epsLower = filtered.map(function(f, i) { return toNum(f) - toNum(eps[i]); });
+
+    traces.push({
+      x: barIdx, y: epsUpper,
+      type: 'scatter', mode: 'lines',
+      name: v + ' +eps',
+      line: { width: 0 },
+      showlegend: false,
+    });
+
+    traces.push({
+      x: barIdx, y: epsLower,
+      type: 'scatter', mode: 'lines',
+      name: v + ' ±eps',
+      line: { width: 0 },
+      fill: 'tonexty',
+      fillcolor: hexToRgba(VIEW_COLORS[v], 0.10),
+      showlegend: true,
+    });
+
+    var tickStep = Math.max(1, Math.floor(N / 10));
+    var tickVals = [], tickTexts = [];
+    for (var i = 0; i < N; i += tickStep) {
+      tickVals.push(barIdx[i]);
+      tickTexts.push(barTs[i] ? barTs[i].substring(0, 16) : '');
+    }
+
+    var layout = {
+      template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
+      font: baseFont, displayModeBar: false,
+      margin: { l: 70, r: 40, t: 30, b: 40 },
+      title: { text: viewLabel(v), font: { size: 12, color: '#8b949e' } },
+      showlegend: true,
+      legend: { orientation: 'h', y: 1.15, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
+      hovermode: 'x unified',
+      hoverlabel: hoverLabelStyle,
+      xaxis: { title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, tickvals: tickVals, ticktext: tickTexts, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
+      yaxis: { title: { text: '滤波价格', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
+    };
+
+    Plotly.newPlot('chart-filtered-' + v, traces, layout, plotConfig);
+  }
+
   // --- Section 3: Signals (4 subplots with shared x-axis) ---
   function buildSignals(data) {
     const { columns, N } = data;
@@ -794,6 +877,126 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   }
 
 
+  // --- Section 3b: Individual Signal per Period ---
+  function buildSignalIndividual(data, v) {
+    const { columns, N } = data;
+    const barTs = col(data, 'bar_timestamp');
+    const barIdx = col(data, 'bar_index');
+    const sig = col(data, v + '_sig');
+    const traces = [];
+    const shapes = [];
+
+    // Background colors for signal values: green=+1, red=-1, gray=0
+    var sigBgColors = {
+      '1': 'rgba(63,185,80,0.10)',
+      '-1': 'rgba(248,81,73,0.10)',
+      '0': 'rgba(139,148,158,0.03)',
+    };
+
+    // Build background rectangles for consecutive same-signal segments
+    function buildBgShapes(sigArr) {
+      var rects = [];
+      var segStart = 0;
+      var segVal = sigArr[0];
+      for (var i = 1; i <= sigArr.length; i++) {
+        if (i === sigArr.length || sigArr[i] !== segVal) {
+          var key = String(segVal);
+          if (sigBgColors[key]) {
+            var x0 = barIdx[segStart];
+            var x1 = i < sigArr.length ? barIdx[i] : barIdx[barIdx.length - 1];
+            rects.push({
+              type: 'rect',
+              x0: x0, x1: x1,
+              y0: -1.2, y1: 1.2,
+              fillcolor: sigBgColors[key],
+              line: { width: 0 },
+              layer: 'below',
+              xref: 'x', yref: 'y',
+            });
+          }
+          if (i < sigArr.length) {
+            segStart = i;
+            segVal = sigArr[i];
+          }
+        }
+      }
+      return rects;
+    }
+
+    // Build background shapes
+    var bgShapes = buildBgShapes(sig);
+    for (var s = 0; s < bgShapes.length; s++) shapes.push(bgShapes[s]);
+
+    // Position overlay helper
+    function addPosOverlay(posArr, color) {
+      var segStart = -1;
+      for (var i = 0; i <= posArr.length; i++) {
+        var inPos = i < posArr.length && (posArr[i] === true || posArr[i] === 1);
+        if (inPos && segStart === -1) {
+          segStart = i;
+        } else if (!inPos && segStart !== -1) {
+          shapes.push({
+            type: 'rect',
+            x0: barIdx[segStart], x1: barIdx[i],
+            y0: -1.2, y1: 1.2,
+            fillcolor: color,
+            line: { width: 0 },
+            layer: 'below',
+            xref: 'x', yref: 'y',
+          });
+          segStart = -1;
+        }
+      }
+      if (segStart !== -1) {
+        shapes.push({
+          type: 'rect',
+          x0: barIdx[segStart], x1: barIdx[barIdx.length - 1],
+          y0: -1.2, y1: 1.2,
+          fillcolor: color,
+          line: { width: 0 },
+          layer: 'below',
+          xref: 'x', yref: 'y',
+        });
+      }
+    }
+
+    // Position overlays
+    addPosOverlay(col(data, v + '_long_pos'), 'rgba(0,255,0,0.08)');
+    addPosOverlay(col(data, v + '_short_pos'), 'rgba(255,0,0,0.08)');
+
+    // Signal line (stepped)
+    var rgbaColor = hexToRgba(VIEW_COLORS[v], 1.0);
+    traces.push({
+      x: barIdx, y: sig,
+      type: 'scatter', mode: 'lines',
+      name: viewLabel(v) + ' 信号',
+      line: { shape: 'hv', width: 2.5, color: rgbaColor },
+      showlegend: true,
+    });
+
+    var tickStep = Math.max(1, Math.floor(N / 10));
+    var tickVals = [], tickTexts = [];
+    for (var i = 0; i < N; i += tickStep) {
+      tickVals.push(barIdx[i]);
+      tickTexts.push(barTs[i] ? barTs[i].substring(0, 16) : '');
+    }
+
+    var layout = {
+      template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
+      font: baseFont, displayModeBar: false,
+      margin: { l: 60, r: 40, t: 30, b: 40 },
+      title: { text: viewLabel(v), font: { size: 12, color: '#8b949e' } },
+      showlegend: true, shapes: shapes,
+      hovermode: 'x unified',
+      hoverlabel: hoverLabelStyle,
+      legend: { orientation: 'h', y: 1.10, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
+      xaxis: { title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, tickvals: tickVals, ticktext: tickTexts, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
+      yaxis: { tickvals: [-1, 0, 1], ticktext: ['空头(-1)', '中性(0)', '多头(+1)'], range: [-1.2, 1.2], showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
+    };
+
+    Plotly.newPlot('chart-signal-' + v, traces, layout, plotConfig);
+  }
+
   // --- Section 4: PnL Curves ---
   function buildPnl(data) {
     const { columns, N } = data;
@@ -871,6 +1074,80 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     };
 
     Plotly.newPlot('chart-pnl', traces, layout, plotConfig);
+  }
+
+  // --- Section 4d: Individual PnL per Period ---
+  function buildPnlIndividual(data, v) {
+    const { columns, N } = data;
+    const barTs = col(data, 'bar_timestamp');
+    const barIdx = col(data, 'bar_index');
+    const traces = [];
+
+    const pnlLong = col(data, v + '_pnl_long');
+    const pnlShort = col(data, v + '_pnl_short');
+
+    traces.push({
+      x: barIdx, y: pnlLong,
+      type: 'scatter', mode: 'lines',
+      name: '做多',
+      line: { width: 2, color: VIEW_COLORS[v], dash: 'solid' },
+      showlegend: true,
+    });
+    traces.push({
+      x: barIdx, y: pnlShort,
+      type: 'scatter', mode: 'lines',
+      name: '做空',
+      line: { width: 2, color: VIEW_COLORS[v], dash: 'dash' },
+      showlegend: true,
+    });
+
+    const annotations = [];
+    const lastL = toNum(pnlLong[N - 1]);
+    const lastS = toNum(pnlShort[N - 1]);
+    if (!isNaN(lastL)) {
+      annotations.push({
+        x: barIdx[N - 1], y: lastL,
+        text: '<b>' + (lastL - 100).toFixed(2) + '%</b>',
+        showarrow: false, font: { size: 10, color: VIEW_COLORS[v] },
+        xanchor: 'left', xshift: 5,
+      });
+    }
+    if (!isNaN(lastS)) {
+      annotations.push({
+        x: barIdx[N - 1], y: lastS,
+        text: '<b>' + (lastS - 100).toFixed(2) + '%</b>',
+        showarrow: false, font: { size: 10, color: VIEW_COLORS[v] },
+        xanchor: 'left', xshift: 5,
+      });
+    }
+
+    const shapes = [{
+      type: 'line', x0: barIdx[0], x1: barIdx[N - 1], y0: 100, y1: 100,
+      line: { color: '#30363d', width: 1, dash: 'dot' },
+    }];
+
+    var tickStepPnl = Math.max(1, Math.floor(N / 10));
+    var tickValsPnl = [], tickTextsPnl = [];
+    for (var i = 0; i < N; i += tickStepPnl) {
+      tickValsPnl.push(barIdx[i]);
+      tickTextsPnl.push(barTs[i] ? barTs[i].substring(0, 16) : '');
+    }
+
+    var layout = {
+      template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
+      font: baseFont, displayModeBar: false,
+      margin: { l: 70, r: 80, t: 30, b: 40 },
+      title: { text: viewLabel(v), font: { size: 12, color: '#8b949e' } },
+      showlegend: true,
+      hovermode: 'x unified',
+      hoverlabel: hoverLabelStyle,
+      legend: { orientation: 'h', y: 1.10, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
+      xaxis: { title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, tickvals: tickValsPnl, ticktext: tickTextsPnl, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
+      yaxis: { title: { text: 'PnL (累计)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
+      shapes: shapes, annotations: annotations,
+    };
+
+    Plotly.newPlot('chart-pnl-' + v, traces, layout, plotConfig);
   }
 
   // --- Section 4b: Multi-Ticker PnL Overlay ---
@@ -1070,6 +1347,72 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     };
 
     Plotly.newPlot('chart-heatmap', [trace], layout, plotConfig);
+  }
+
+  // --- Section 5b: Individual Heatmap per Period ---
+  function buildHeatmapIndividual(data, v) {
+    const { columns, N } = data;
+    const barTs = col(data, 'bar_timestamp');
+    const sampleN = Math.min(100, N);
+    const step = Math.max(1, Math.floor(N / sampleN));
+    const sampledIndices = [];
+    const sampledTs = [];
+    for (let i = 0; i < N; i += step) {
+      sampledIndices.push(i);
+      sampledTs.push(barTs[i]);
+    }
+    if (sampledIndices.length > sampleN) sampledIndices.length = sampleN;
+
+    const colorMap = [
+      [0, 'rgba(13,17,23,0.9)'],
+      [1, 'rgba(63,185,80,0.85)'],
+      [2, 'rgba(248,81,73,0.85)'],
+    ];
+
+    const labelMap = { 0: '<span style="color:#8b949e">空仓</span>', 1: '<span style="color:#3fb950">做多持仓</span>', 2: '<span style="color:#f85149">做空持仓</span>' };
+    const rows = [];
+    const textRows = [];
+    const rowLabels = [];
+    const posTypes = ['long_pos', 'short_pos'];
+    const posLabels = ['做多', '做空'];
+
+    posTypes.forEach(function(posType, pi) {
+      const arr = col(data, v + '_' + posType);
+      const sampled = sampledIndices.map(function(i) {
+        const val = arr[i];
+        return (val === true || val === 1) ? (posType === 'long_pos' ? 1 : 2) : 0;
+      });
+      rows.push(sampled);
+      textRows.push(sampled.map(function(val) { return labelMap[val] || ''; }));
+      rowLabels.push(posLabels[pi]);
+    });
+
+    const tickFormat = getTimeTickFormat(barTs);
+
+    const trace = {
+      z: rows, type: 'heatmap',
+      colorscale: colorMap,
+      showscale: false,
+      x: sampledTs,
+      y: rowLabels,
+      text: textRows,
+      xgap: 1, ygap: 2,
+      hoverongaps: false,
+      hoverlabel: { bgcolor: '#21262d', bordercolor: '#30363d', font: { color: '#f0f6fc', size: 11 } },
+      hovertemplate: '<b>%{y}</b><br>时间=%{x}<br>%{text}<extra></extra>',
+    };
+
+    var layout = {
+      template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
+      font: { color: '#c9d1d9', size: 11 },
+      displayModeBar: false,
+      margin: { l: 60, r: 40, t: 30, b: 40 },
+      title: { text: viewLabel(v), font: { size: 12, color: '#8b949e' } },
+      xaxis: { title: { text: '时间', font: { size: 10, color: '#8b949e' } }, type: 'date', tickformat: tickFormat, showgrid: true, gridcolor: gridColor, side: 'top' },
+      yaxis: { automargin: true },
+    };
+
+    Plotly.newPlot('chart-heatmap-' + v, [trace], layout, plotConfig);
   }
 
   // --- Section 6: Trade Events & BS Markers ---
@@ -1362,10 +1705,14 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     buildOverview(data);
     buildSchemaTable();
     buildFilteredOverview(data);
+    VIEWS.forEach(function(v) { buildFilteredOverviewIndividual(data, v); });
     buildSignals(data);
+    VIEWS.forEach(function(v) { buildSignalIndividual(data, v); });
     buildPnl(data);
+    VIEWS.forEach(function(v) { buildPnlIndividual(data, v); });
     buildMultiTickerPnl();
     buildHeatmap(data);
+    VIEWS.forEach(function(v) { buildHeatmapIndividual(data, v); });
     buildTrades(data);
     buildTable(data);
   }
