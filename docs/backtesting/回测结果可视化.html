@@ -363,50 +363,22 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   <!-- Period Dashboards -->
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D1</span> 日线 完整视图</div>
-    <div class="chart-row">
-      <div class="plot-wrap"><div id="chart-filtered-v0"></div></div>
-      <div class="plot-wrap"><div id="chart-signal-v0"></div></div>
-    </div>
-    <div class="chart-row">
-      <div class="plot-wrap"><div id="chart-pnl-v0"></div></div>
-      <div class="plot-wrap heatmap-plot"><div id="chart-heatmap-v0"></div></div>
-    </div>
+    <div class="plot-wrap" style="height:900px"><div id="chart-dash-v0"></div></div>
   </div>
 
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D2</span> 60分钟 完整视图</div>
-    <div class="chart-row">
-      <div class="plot-wrap"><div id="chart-filtered-v1"></div></div>
-      <div class="plot-wrap"><div id="chart-signal-v1"></div></div>
-    </div>
-    <div class="chart-row">
-      <div class="plot-wrap"><div id="chart-pnl-v1"></div></div>
-      <div class="plot-wrap heatmap-plot"><div id="chart-heatmap-v1"></div></div>
-    </div>
+    <div class="plot-wrap" style="height:900px"><div id="chart-dash-v1"></div></div>
   </div>
 
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D3</span> 15分钟 完整视图</div>
-    <div class="chart-row">
-      <div class="plot-wrap"><div id="chart-filtered-v2"></div></div>
-      <div class="plot-wrap"><div id="chart-signal-v2"></div></div>
-    </div>
-    <div class="chart-row">
-      <div class="plot-wrap"><div id="chart-pnl-v2"></div></div>
-      <div class="plot-wrap heatmap-plot"><div id="chart-heatmap-v2"></div></div>
-    </div>
+    <div class="plot-wrap" style="height:900px"><div id="chart-dash-v2"></div></div>
   </div>
 
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D4</span> 5分钟 完整视图</div>
-    <div class="chart-row">
-      <div class="plot-wrap"><div id="chart-filtered-v3"></div></div>
-      <div class="plot-wrap"><div id="chart-signal-v3"></div></div>
-    </div>
-    <div class="chart-row">
-      <div class="plot-wrap"><div id="chart-pnl-v3"></div></div>
-      <div class="plot-wrap heatmap-plot"><div id="chart-heatmap-v3"></div></div>
-    </div>
+    <div class="plot-wrap" style="height:900px"><div id="chart-dash-v3"></div></div>
   </div>
   <!-- Section 6: Trade Events -->
   <div class="section">
@@ -1453,6 +1425,277 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     Plotly.newPlot('chart-heatmap-' + v, [trace], layout, plotConfig);
   }
 
+
+  // --- Section 5c: Unified Period Dashboard (4 subplot rows, shared x-axis) ---
+  function buildPeriodDashboard(data, v, label) {
+    const { columns, N } = data;
+    const barIdx = col(data, 'bar_index');
+    const barTs = col(data, 'bar_timestamp');
+    const traces = [];
+    const shapes = [];
+    const annotations = [];
+    const color = VIEW_COLORS[v];
+
+    // ===== Shared tick values (displayed on bottom x-axis only) =====
+    const tickStep = Math.max(1, Math.floor(N / 10));
+    const tickVals = [], tickTexts = [];
+    for (let i = 0; i < N; i += tickStep) {
+      tickVals.push(barIdx[i]);
+      tickTexts.push(barTs[i] ? barTs[i].substring(0, 16) : '');
+    }
+
+    // ===== Row 1 (top): Filtered Price + EPS Band (yaxis4/xaxis4) =====
+    const filtered = col(data, v + '_filtered');
+    const eps = col(data, v + '_eps');
+    const epsUpper = filtered.map(function(f, i) { return toNum(f) + toNum(eps[i]); });
+    const epsLower = filtered.map(function(f, i) { return toNum(f) - toNum(eps[i]); });
+
+    traces.push({
+      x: barIdx, y: filtered,
+      type: 'scatter', mode: 'lines',
+      name: label + ' 滤波',
+      line: { width: 2, color: color },
+      xaxis: 'x4', yaxis: 'y4',
+      showlegend: true,
+    });
+
+    traces.push({
+      x: barIdx, y: epsUpper,
+      type: 'scatter', mode: 'lines',
+      name: v + ' +eps',
+      line: { width: 0 },
+      xaxis: 'x4', yaxis: 'y4',
+      showlegend: false,
+    });
+
+    traces.push({
+      x: barIdx, y: epsLower,
+      type: 'scatter', mode: 'lines',
+      name: v + ' ±eps',
+      line: { width: 0 },
+      fill: 'tonexty',
+      fillcolor: hexToRgba(color, 0.10),
+      xaxis: 'x4', yaxis: 'y4',
+      showlegend: true,
+    });
+
+    // ===== Row 2: Signal + Position Bands (yaxis3/xaxis3) =====
+    const sig = col(data, v + '_sig');
+    const sigBgColors = {
+      '1': 'rgba(63,185,80,0.10)',
+      '-1': 'rgba(248,81,73,0.10)',
+      '0': 'rgba(139,148,158,0.03)',
+    };
+
+    // Signal background shapes
+    (function() {
+      let segStart = 0;
+      let segVal = sig[0];
+      for (let i = 1; i <= N; i++) {
+        if (i === N || sig[i] !== segVal) {
+          const key = String(segVal);
+          if (sigBgColors[key]) {
+            shapes.push({
+              type: 'rect',
+              x0: barIdx[segStart], x1: i < N ? barIdx[i] : barIdx[N - 1],
+              y0: -1.2, y1: 1.2,
+              fillcolor: sigBgColors[key],
+              line: { width: 0 },
+              layer: 'below',
+              xref: 'x3', yref: 'y3',
+            });
+          }
+          if (i < N) { segStart = i; segVal = sig[i]; }
+        }
+      }
+    })();
+
+    // Position overlay helper
+    function addPosOverlay(posArr, posColor) {
+      let s = -1;
+      for (let i = 0; i <= posArr.length; i++) {
+        const inPos = i < posArr.length && (posArr[i] === true || posArr[i] === 1);
+        if (inPos && s === -1) {
+          s = i;
+        } else if (!inPos && s !== -1) {
+          shapes.push({
+            type: 'rect',
+            x0: barIdx[s], x1: barIdx[i],
+            y0: -1.2, y1: 1.2,
+            fillcolor: posColor,
+            line: { width: 0 },
+            layer: 'below',
+            xref: 'x3', yref: 'y3',
+          });
+          s = -1;
+        }
+      }
+      if (s !== -1) {
+        shapes.push({
+          type: 'rect',
+          x0: barIdx[s], x1: barIdx[N - 1],
+          y0: -1.2, y1: 1.2,
+          fillcolor: posColor,
+          line: { width: 0 },
+          layer: 'below',
+          xref: 'x3', yref: 'y3',
+        });
+      }
+    }
+
+    addPosOverlay(col(data, v + '_long_pos'), 'rgba(0,255,0,0.08)');
+    addPosOverlay(col(data, v + '_short_pos'), 'rgba(255,0,0,0.08)');
+
+    // Signal line (stepped)
+    traces.push({
+      x: barIdx, y: sig,
+      type: 'scatter', mode: 'lines',
+      name: label + ' 信号',
+      line: { shape: 'hv', width: 2.5, color: hexToRgba(color, 1.0) },
+      xaxis: 'x3', yaxis: 'y3',
+      showlegend: true,
+    });
+
+    // ===== Row 3: PnL Curves (yaxis2/xaxis2) =====
+    const pnlLong = col(data, v + '_pnl_long');
+    const pnlShort = col(data, v + '_pnl_short');
+
+    traces.push({
+      x: barIdx, y: pnlLong,
+      type: 'scatter', mode: 'lines',
+      name: '做多',
+      line: { width: 2, color: color, dash: 'solid' },
+      xaxis: 'x2', yaxis: 'y2',
+      showlegend: true,
+    });
+
+    traces.push({
+      x: barIdx, y: pnlShort,
+      type: 'scatter', mode: 'lines',
+      name: '做空',
+      line: { width: 2, color: color, dash: 'dash' },
+      xaxis: 'x2', yaxis: 'y2',
+      showlegend: true,
+    });
+
+    // PnL end-value annotations
+    const lastL = toNum(pnlLong[N - 1]);
+    const lastS = toNum(pnlShort[N - 1]);
+    if (!isNaN(lastL)) {
+      annotations.push({
+        x: barIdx[N - 1], y: lastL,
+        text: '<b>' + (lastL - 100).toFixed(2) + '%</b>',
+        showarrow: false, font: { size: 10, color: color },
+        xanchor: 'left', xshift: 5,
+        xref: 'x2', yref: 'y2',
+      });
+    }
+    if (!isNaN(lastS)) {
+      annotations.push({
+        x: barIdx[N - 1], y: lastS,
+        text: '<b>' + (lastS - 100).toFixed(2) + '%</b>',
+        showarrow: false, font: { size: 10, color: color },
+        xanchor: 'left', xshift: 5,
+        xref: 'x2', yref: 'y2',
+      });
+    }
+
+    // Baseline (PnL = 100)
+    shapes.push({
+      type: 'line',
+      x0: barIdx[0], x1: barIdx[N - 1],
+      y0: 100, y1: 100,
+      line: { color: '#30363d', width: 1, dash: 'dot' },
+      xref: 'x2', yref: 'y2',
+    });
+
+    // ===== Row 4 (bottom): Position Heatmap (yaxis/xaxis) =====
+    const sampleN = Math.min(100, N);
+    const sampleStep = Math.max(1, Math.floor(N / sampleN));
+    const sampledIndices = [];
+    for (let i = 0; i < N; i += sampleStep) {
+      sampledIndices.push(i);
+    }
+    if (sampledIndices.length > sampleN) sampledIndices.length = sampleN;
+
+    const sampledBarIdx = sampledIndices.map(function(i) { return barIdx[i]; });
+
+    const heatmapColorMap = [
+      [0, 'rgba(13,17,23,0.9)'],
+      [1, 'rgba(63,185,80,0.85)'],
+      [2, 'rgba(248,81,73,0.85)'],
+    ];
+
+    const labelMap = {
+      0: '<span style="color:#8b949e">空仓</span>',
+      1: '<span style="color:#3fb950">做多持仓</span>',
+      2: '<span style="color:#f85149">做空持仓</span>'
+    };
+    const posTypes = ['long_pos', 'short_pos'];
+    const posLabels = ['做多', '做空'];
+
+    const hRows = [];
+    const hTextRows = [];
+
+    posTypes.forEach(function(posType) {
+      const arr = col(data, v + '_' + posType);
+      const sampled = sampledIndices.map(function(i) {
+        const val = arr[i];
+        return (val === true || val === 1) ? (posType === 'long_pos' ? 1 : 2) : 0;
+      });
+      hRows.push(sampled);
+      hTextRows.push(sampled.map(function(val) { return labelMap[val] || ''; }));
+    });
+
+    traces.push({
+      z: hRows,
+      type: 'heatmap',
+      colorscale: heatmapColorMap,
+      showscale: false,
+      x: sampledBarIdx,
+      y: posLabels,
+      text: hTextRows,
+      xgap: 1, ygap: 2,
+      hoverongaps: false,
+      hoverlabel: { bgcolor: '#21262d', bordercolor: '#30363d', font: { color: '#f0f6fc', size: 11 } },
+      hovertemplate: '<b>%{y}</b><br>bar_index=%{x}<br>%{text}<extra></extra>',
+      xaxis: 'x', yaxis: 'y',
+    });
+
+    // ===== Layout =====
+    const layout = {
+      template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
+      font: baseFont, displayModeBar: false,
+      grid: { rows: 4, columns: 1, pattern: 'independent', roworder: 'top to bottom' },
+      margin: { l: 90, r: 90, t: 20, b: 50 },
+      height: 900,
+      hovermode: 'x unified',
+      hoverlabel: hoverLabelStyle,
+      showlegend: true,
+      legend: { orientation: 'h', y: 1.02, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
+      shapes: shapes,
+      annotations: annotations,
+
+      // Row 4 (bottom): Heatmap — shows tick labels
+      xaxis: { title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, tickvals: tickVals, ticktext: tickTexts, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
+      yaxis: { automargin: true, showgrid: true, gridcolor: gridColor },
+
+      // Row 3: PnL
+      xaxis2: { matches: 'x', showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false },
+      yaxis2: { title: { text: 'PnL (累计)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
+
+      // Row 2: Signal
+      xaxis3: { matches: 'x', showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false },
+      yaxis3: { title: { text: '信号', font: { size: 10, color: '#8b949e' } }, tickvals: [-1, 0, 1], ticktext: ['空头(-1)', '中性(0)', '多头(+1)'], range: [-1.2, 1.2], showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
+
+      // Row 1 (top): Filtered
+      xaxis4: { matches: 'x', showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false },
+      yaxis4: { title: { text: '滤波价格', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
+    };
+
+    Plotly.newPlot('chart-dash-' + v, traces, layout, plotConfig);
+  }
+
   // --- Section 6: Trade Events & BS Markers ---
   function buildTrades(data) {
     const { columns, N } = data;
@@ -1748,12 +1991,9 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     buildMultiTickerPnl();
     buildHeatmap(data);
 
-    // Per-period dashboards
+    // Per-period dashboards (unified subplot: 4 rows, shared x-axis)
     VIEWS.forEach(function(v) {
-      buildFilteredOverviewIndividual(data, v);
-      buildSignalIndividual(data, v);
-      buildPnlIndividual(data, v);
-      buildHeatmapIndividual(data, v);
+      buildPeriodDashboard(data, v, viewLabels[v]);
     });
     buildTrades(data);
     buildTable(data);
