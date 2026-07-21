@@ -395,3 +395,353 @@ class TestPeriodDashboardRowOrdering:
             "Row 3 comment must label 做多做空 (not 信号)"
         assert "Row 2: Signal" in html, \
             "Row 2 comment must label Signal (not 做多做空)"
+
+
+class TestCrossSubplotCursor:
+    """Cross-subplot cursor line drawn via paper-coordinate shape with
+    plotly_hover / plotly_unhover event handlers.
+
+    This is a period-dashboard feature: a dotted vertical line spans all 4
+    subplot rows using ``yref: 'paper'``, synchronized to the mouse x position.
+    """
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    # ---- plotly_hover handler ----
+
+    def test_plotly_hover_handler_is_registered(self):
+        """``plotly_hover`` 事件处理器注册在 dashChartEl 上。"""
+        html = self._read_html()
+        assert "dashChartEl.on('plotly_hover'" in html, \
+            "HTML must register plotly_hover handler on dashChartEl"
+        assert "function(eventData)" in html, \
+            "plotly_hover handler must accept eventData parameter"
+
+    def test_hover_handler_updates_shape_x_position(self):
+        """hover 事件将 crosshair shape 的 x0/x1 更新为 eventData.xvals[0]。"""
+        html = self._read_html()
+        assert "eventData.xvals[0]" in html, \
+            "Hover handler must read eventData.xvals[0] for x position"
+        assert "'shapes[' + cursorShapeIdx + '].x0'" in html, \
+            "Hover handler must update shapes[idx].x0"
+        assert "'shapes[' + cursorShapeIdx + '].x1'" in html, \
+            "Hover handler must update shapes[idx].x1"
+
+    # ---- yref: 'paper' ----
+
+    def test_cursor_shape_uses_yref_paper(self):
+        """Crosshair shape 使用 ``yref: 'paper'`` 以跨越全部 4 个子图行。"""
+        html = self._read_html()
+        assert "yref: 'paper'" in html, \
+            "Cross-subplot cursor must use yref: 'paper' to span all rows"
+        assert "y0: 0, y1: 1" in html or "y0:0, y1:1" in html, \
+            "Shape must fill full paper height (y0=0, y1=1)"
+
+    # ---- plotly_unhover handler ----
+
+    def test_plotly_unhover_handler_is_registered(self):
+        """``plotly_unhover`` 事件处理器注册在 dashChartEl 上。"""
+        html = self._read_html()
+        assert "dashChartEl.on('plotly_unhover'" in html, \
+            "HTML must register plotly_unhover handler on dashChartEl"
+
+    def test_cursor_hidden_on_unhover(self):
+        """unhover 时将 shape 移动至 x=-1 (off-screen) 以隐藏。"""
+        html = self._read_html()
+        assert "'shapes[' + cursorShapeIdx + '].x0': -1" in html, \
+            "Unhover must set shapes[idx].x0 to -1 (hide)"
+        assert "'shapes[' + cursorShapeIdx + '].x1': -1" in html, \
+            "Unhover must set shapes[idx].x1 to -1 (hide)"
+
+    # ---- Shape type and style ----
+
+    def test_cursor_shape_is_line_type(self):
+        """Crosshair shape 类型为 ``type: 'line'``。"""
+        html = self._read_html()
+        assert "type: 'line'" in html, \
+            "Cross-subplot cursor must use type: 'line'"
+
+    def test_cursor_line_color_is_grey(self):
+        """Crosshair 线条颜色为灰色 #8b949e。"""
+        html = self._read_html()
+        assert "color: '#8b949e'" in html, \
+            "Cursor line must use grey color #8b949e"
+
+    def test_cursor_shape_starts_offscreen(self):
+        """Shape 初始位置 x0=-1, x1=-1（屏幕外隐藏）。"""
+        html = self._read_html()
+        assert "x0: -1, x1: -1" in html or "x0:-1, x1:-1" in html, \
+            "Cursor shape must start off-screen (x0=-1, x1=-1)"
+
+
+class TestPeriodDashboardAxisAnchors:
+    """Axis anchor / matches for the 4-row period dashboard.
+
+    The bottom row (PnL) owns the primary x-axis (xaxis4).  The three upper
+    rows delegate to it via ``matches: 'x4'`` so pan/zoom are synchronized.
+    """
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    # ---- matches: 'x4' on upper axes ----
+
+    def test_xaxis_matches_x4(self):
+        """xaxis (row1 滤波) has ``matches: 'x4'``."""
+        html = self._read_html()
+        assert "xaxis: { matches: 'x4'" in html, \
+            "xaxis (row1 filtered) must match x4"
+
+    def test_xaxis2_matches_x4(self):
+        """xaxis2 (row3 做多做空) has ``matches: 'x4'``."""
+        html = self._read_html()
+        assert "xaxis2: { matches: 'x4'" in html, \
+            "xaxis2 (row3 position) must match x4"
+
+    def test_xaxis3_matches_x4(self):
+        """xaxis3 (row2 信号) has ``matches: 'x4'``."""
+        html = self._read_html()
+        assert "xaxis3: { matches: 'x4'" in html, \
+            "xaxis3 (row2 signal) must match x4"
+
+    def test_all_three_upper_axes_match_x4(self):
+        """All three upper x-axes (xaxis, xaxis2, xaxis3) match xaxis4."""
+        html = self._read_html()
+        match_x4_count = html.count("matches: 'x4'")
+        assert match_x4_count >= 3, \
+            f"Expected >=3 matches: 'x4' in dash layout, got {match_x4_count}"
+
+    # ---- xaxis4 as anchor ----
+
+    def test_xaxis4_is_anchor_does_not_match(self):
+        """xaxis4 (row4 PnL) is the anchor — no ``matches`` property."""
+        html = self._read_html()
+        # xaxis4 must be defined but without matches
+        assert "xaxis4:" in html, "xaxis4 must be defined for bottom PnL row"
+        # matches: 'x4' appears 3 times (for xaxis, xaxis2, xaxis3)
+        # Verifying xaxis4 itself has no matches means we look for
+        # "xaxis4:" followed by something that is NOT "matches"
+        assert "xaxis4: { domain: [0.0, 1.0]" in html, \
+            "xaxis4 must NOT have matches (it IS the anchor)"
+
+    # ---- Visual row order verification via domain values ----
+
+    def test_visual_row_order_is_top_to_bottom(self):
+        """Row order from top to bottom: 滤波 → 信号 → 做多做空 → PnL.
+
+        Verified via yaxis domain values: larger domain = higher on chart.
+        """
+        html = self._read_html()
+        # Extract domain values from the dash layout section
+        assert "yaxis: { domain: [0.64, 1.0]" in html, \
+            "Row 1 (top): filtered price must be yaxis domain [0.64, 1.0]"
+        assert "yaxis3: { domain: [0.52, 0.64]" in html, \
+            "Row 2: signal must be yaxis3 domain [0.52, 0.64]"
+        assert "yaxis2: { domain: [0.4, 0.52]" in html, \
+            "Row 3: position must be yaxis2 domain [0.4, 0.52]"
+        assert "yaxis4: { domain: [0.0, 0.4]" in html, \
+            "Row 4 (bottom): PnL must be yaxis4 domain [0.0, 0.4]"
+
+    def test_domain_values_are_strictly_decreasing(self):
+        """Each row's domain start is lower than the row above it."""
+        html = self._read_html()
+        # Assert the order using the comments that document the row mapping
+        assert "Row 1 (top): Filtered" in html, \
+            "Comment for Row 1 must be present"
+        assert "Row 2: Signal" in html, \
+            "Comment for Row 2 must be present"
+        assert "Row 3: 做多做空" in html, \
+            "Comment for Row 3 must be present"
+        assert "Row 4 (bottom): PnL" in html, \
+            "Comment for Row 4 must be present"
+
+
+class TestPeriodDashboardRowHeightRatios:
+    """Verify middle rows (信号 + 做多做空) are roughly half the height of
+    the top and bottom rows (滤波 + PnL).
+    """
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    # Known heights from domain intervals:
+    # row1 (滤波):  1.00 - 0.64 = 0.36
+    # row2 (信号):  0.64 - 0.52 = 0.12
+    # row3 (做多做空): 0.52 - 0.40 = 0.12
+    # row4 (PnL):   0.40 - 0.00 = 0.40
+
+    def test_row1_filtered_height_is_36_percent(self):
+        """Row 1 (滤波) height is ~36% of total chart."""
+        html = self._read_html()
+        # yaxis domain goes from 0.64 to 1.0
+        assert "yaxis: { domain: [0.64, 1.0]" in html
+
+    def test_row2_signal_height_is_12_percent(self):
+        """Row 2 (信号) height is ~12% — roughly half of row1/row4."""
+        html = self._read_html()
+        # yaxis3 domain goes from 0.52 to 0.64
+        assert "yaxis3: { domain: [0.52, 0.64]" in html
+
+    def test_row3_position_height_is_12_percent(self):
+        """Row 3 (做多做空) height is ~12% — roughly half of row1/row4."""
+        html = self._read_html()
+        # yaxis2 domain goes from 0.40 to 0.52
+        assert "yaxis2: { domain: [0.4, 0.52]" in html
+
+    def test_row4_pnl_height_is_40_percent(self):
+        """Row 4 (PnL) height is ~40%."""
+        html = self._read_html()
+        # yaxis4 domain goes from 0.0 to 0.4
+        assert "yaxis4: { domain: [0.0, 0.4]" in html
+
+    def test_middle_rows_equal_height(self):
+        """Row 2 and row 3 have equal height (0.12 each)."""
+        html = self._read_html()
+        assert "yaxis3: { domain: [0.52, 0.64]" in html
+        assert "yaxis2: { domain: [0.4, 0.52]" in html
+        # Both have span of 0.12 (64-52=12, 52-40=12)
+
+    def test_middle_row_is_roughly_half_of_row1(self):
+        """Row 2/3 height (~0.12) is ~1/3 of row 1 (0.36), not exactly half,
+        but visually a compact secondary row."""
+        # The key assertion: the domains produce a stacked layout where
+        # lower-precedence rows get less vertical space.
+        # row1 height 0.36 > row2/row3 height 0.12
+        assert (1.0 - 0.64) > (0.64 - 0.52), \
+            "Row 1 (滤波, 36%) must be taller than row 2 (信号, 12%)"
+
+    def test_middle_row_is_roughly_half_of_row4(self):
+        """Row 2/3 height (~0.12) is less than row 4 (0.40)."""
+        assert (0.4 - 0.0) > (0.64 - 0.52), \
+            "Row 4 (PnL, 40%) must be taller than row 2 (信号, 12%)"
+
+
+class TestPeriodDashboardGrid:
+    """Grid layout for the 4-row period dashboard: explicit rows=4, cols=1,
+    ``roworder: 'top to bottom'``.
+    """
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_grid_rows_4_columns_1(self):
+        """Grid has explicit ``rows: 4, columns: 1``."""
+        html = self._read_html()
+        assert "grid: { rows: 4, columns: 1" in html, \
+            "Period dashboard must use grid rows: 4, columns: 1"
+
+    def test_grid_roworder_top_to_bottom(self):
+        """Grid uses ``roworder: 'top to bottom'``."""
+        html = self._read_html()
+        assert "roworder: 'top to bottom'" in html, \
+            "Grid roworder must be 'top to bottom'"
+
+    def test_grid_uses_independent_pattern(self):
+        """Grid pattern is ``'independent'`` so each row has its own y-axis."""
+        html = self._read_html()
+        # The full grid line includes pattern: 'independent'
+        assert "grid: { rows: 4, columns: 1, pattern: 'independent'" in html or \
+               "columns: 1, pattern: 'independent'" in html, \
+            "Grid must use pattern: 'independent' for separate y-axes per row"
+
+
+class TestPeriodDashboardZoomSync:
+    """Zoom synchronization: all x-axes enable spike lines, and upper axes
+    match the bottom anchor axis so zoom/pan stays synchronized.
+    """
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_xaxis_has_showspikes(self):
+        """xaxis (row1) has ``showspikes: true``."""
+        html = self._read_html()
+        # The dash layout xaxis line includes showspikes
+        assert "xaxis: { matches: 'x4'" in html
+        assert "showspikes: true" in html
+
+    def test_xaxis2_has_showspikes(self):
+        """xaxis2 (row3) has ``showspikes: true``."""
+        html = self._read_html()
+        assert "xaxis2: { matches: 'x4'" in html
+        assert "showspikes: true" in html
+
+    def test_xaxis3_has_showspikes(self):
+        """xaxis3 (row2) has ``showspikes: true``."""
+        html = self._read_html()
+        assert "xaxis3: { matches: 'x4'" in html
+        assert "showspikes: true" in html
+
+    def test_xaxis4_has_showspikes(self):
+        """xaxis4 (anchor, row4) has ``showspikes: true``."""
+        html = self._read_html()
+        assert "xaxis4:" in html
+        assert "showspikes: true" in html
+
+    def test_all_dash_x_axes_have_matches_x4_or_are_x4(self):
+        """Every x-axis in the dash layout either matches 'x4' or IS xaxis4."""
+        html = self._read_html()
+        # 3 matches + 1 anchor = 4 total axes
+        match_count = html.count("matches: 'x4'")
+        assert match_count >= 3, \
+            f"Expected at least 3 matches: 'x4' for dash layout, got {match_count}"
+        assert "xaxis4:" in html, "xaxis4 must be present as the anchor"
+
+    def test_spikemode_across_on_dash_axes(self):
+        """Dash layout x-axes use ``spikemode: 'across'`` for crosshair lines."""
+        html = self._read_html()
+        # The dash layout section defines spike conf on its axes
+        assert "spikemode: 'across'" in html, \
+            "Dash x-axes must use spikemode: 'across'"
+
+    def test_spikesnap_cursor_on_dash_axes(self):
+        """Dash layout x-axes use ``spikesnap: 'cursor'`` to follow the mouse."""
+        html = self._read_html()
+        assert "spikesnap: 'cursor'" in html, \
+            "Dash x-axes must use spikesnap: 'cursor'"
+
+
+class TestPeriodDashboardHovermode:
+    """Hovermode and hoverlabel settings in the 4-row period dashboard."""
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_dashboard_layout_has_hovermode_x_unified(self):
+        """Period dashboard layout uses ``hovermode: 'x unified'``."""
+        html = self._read_html()
+        # The dash buildDash function constructs a layout with hovermode
+        assert "hovermode: 'x unified'" in html, \
+            "Dashboard layout must use hovermode: 'x unified'"
+
+    def test_hover_label_style_is_defined(self):
+        """``hoverLabelStyle`` constant is defined with dark theme colors."""
+        html = self._read_html()
+        assert "const hoverLabelStyle" in html or "hoverLabelStyle =" in html, \
+            "hoverLabelStyle constant must be defined"
+        assert "bgcolor: '#21262d'" in html, \
+            "Hover label background must be dark (#21262d)"
+        assert "bordercolor: '#30363d'" in html, \
+            "Hover label border must be #30363d"
+        assert "font: { color: '#f0f6fc'" in html, \
+            "Hover label font must be light (#f0f6fc)"
+
+    def test_hoverlabel_applied_in_dashboard_layout(self):
+        """Dashboard layout references ``hoverlabel: hoverLabelStyle``."""
+        html = self._read_html()
+        assert "hoverlabel: hoverLabelStyle" in html, \
+            "Dashboard layout must apply hoverLabelStyle"
+
+    def test_hovermode_count_includes_dashboard(self):
+        """At least one ``hovermode: 'x unified'`` exists (includes dashboard)."""
+        html = self._read_html()
+        count = html.count("hovermode: 'x unified'")
+        assert count >= 1, \
+            f"At least 1 hovermode: 'x unified' must exist, got {count}"

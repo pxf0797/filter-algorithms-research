@@ -224,6 +224,26 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 .period-dashboard .chart-row .plot-wrap { flex: 1; min-width: 0; height: 280px; }
 .period-dashboard .chart-row .plot-wrap.heatmap-plot { height: 200px; }
 
+/* Crosshair: hide Plotly native hover tooltips & spike lines in period dashboards.
+   A custom paper-coordinate vertical line + date tooltip replaces them. */
+.period-dashboard .js-plotly-plot .hovertext { visibility: hidden !important; }
+.period-dashboard .js-plotly-plot .spikeline { visibility: hidden !important; }
+
+/* Date tooltip for period dashboards (fixed-position, follows cursor) */
+.date-tip {
+  display: none;
+  position: fixed;
+  z-index: 9999;
+  background: rgba(30,30,44,0.94);
+  color: #c0c0c0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
 /* Schema table */
 .schema-table-wrap { overflow-x: auto; }
 .schema-table {
@@ -364,21 +384,25 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D1</span> 日线 完整视图</div>
     <div class="plot-wrap" style="height:900px"><div id="chart-dash-v0"></div></div>
+    <div id="date-tip-v0" class="date-tip"></div>
   </div>
 
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D2</span> 60分钟 完整视图</div>
     <div class="plot-wrap" style="height:900px"><div id="chart-dash-v1"></div></div>
+    <div id="date-tip-v1" class="date-tip"></div>
   </div>
 
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D3</span> 15分钟 完整视图</div>
     <div class="plot-wrap" style="height:900px"><div id="chart-dash-v2"></div></div>
+    <div id="date-tip-v2" class="date-tip"></div>
   </div>
 
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D4</span> 5分钟 完整视图</div>
     <div class="plot-wrap" style="height:900px"><div id="chart-dash-v3"></div></div>
+    <div id="date-tip-v3" class="date-tip"></div>
   </div>
   <!-- Section 6: Trade Events -->
   <div class="section">
@@ -1708,19 +1732,65 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
     Plotly.newPlot('chart-dash-' + v, traces, layout, plotConfig);
 
-    // Cross-subplot cursor line: update shape on hover, hide on unhover
+    // ── Cross-subplot cursor line + date tooltip (throttled, per Streamlit pattern) ──
+    var _lastXv = -Infinity, _pending = false, _pendingXv = null, _THROTTLE = 45;
+    function _nearestIdx(arr, xv) {
+      var lo = 0, hi = arr.length - 1;
+      if (xv <= arr[lo]) return lo;
+      if (xv >= arr[hi]) return hi;
+      while (lo < hi - 1) { var mid = (lo + hi) >> 1; if (arr[mid] <= xv) lo = mid; else hi = mid; }
+      return (xv - arr[lo] <= arr[hi] - xv) ? lo : hi;
+    }
+    var _tip = document.getElementById('date-tip-' + v);
+
+    function _applyCrosshair(xv) {
+      _pending = false;
+      Plotly.relayout('chart-dash-' + v, {
+        'shapes[' + cursorShapeIdx + '].x0': xv,
+        'shapes[' + cursorShapeIdx + '].x1': xv,
+      });
+      _lastXv = xv;
+      if (_tip && barTs && barTs.length > 0) {
+        var idx = _nearestIdx(barIdx, xv);
+        _tip.textContent = (idx < barTs.length) ? barTs[idx] : '';
+        if (_tip.textContent) _tip.style.display = 'block';
+        else _tip.style.display = 'none';
+      }
+    }
+
     var dashChartEl = document.getElementById('chart-dash-' + v);
     dashChartEl.on('plotly_hover', function(eventData) {
-      Plotly.relayout('chart-dash-' + v, {
-        'shapes[' + cursorShapeIdx + '].x0': eventData.xvals[0],
-        'shapes[' + cursorShapeIdx + '].x1': eventData.xvals[0],
-      });
+      var xv = eventData.xvals[0];
+      if (xv === _lastXv) return;
+      if (_pending) { _pendingXv = xv; }
+      else {
+        _pending = true; _pendingXv = null;
+        _applyCrosshair(xv);
+        setTimeout(function() {
+          if (_pendingXv !== null && _pendingXv !== _lastXv) _applyCrosshair(_pendingXv);
+          else _pending = false;
+        }, _THROTTLE);
+      }
     });
+
     dashChartEl.on('plotly_unhover', function() {
+      _pending = false; _pendingXv = null; _lastXv = -Infinity;
       Plotly.relayout('chart-dash-' + v, {
         'shapes[' + cursorShapeIdx + '].x0': -1,
         'shapes[' + cursorShapeIdx + '].x1': -1,
       });
+      if (_tip) _tip.style.display = 'none';
+    });
+
+    document.getElementById('chart-dash-' + v).addEventListener('mousemove', function(e) {
+      if (_tip && _tip.style.display === 'block') {
+        var tx = e.clientX + 16;
+        var tw = _tip.offsetWidth || 100;
+        if (tx + tw > window.innerWidth - 10) tx = e.clientX - tw - 16;
+        if (tx < 5) tx = 5;
+        _tip.style.left = tx + 'px';
+        _tip.style.top = (e.clientY - 28) + 'px';
+      }
     });
   }
 
