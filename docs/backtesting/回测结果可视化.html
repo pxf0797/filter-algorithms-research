@@ -70,8 +70,8 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   border-radius: 8px; padding: 24px 28px; margin-bottom: 24px;
 }
 .section-title {
-  font-size: 17px; font-weight: 600; color: var(--text-hl);
-  margin-bottom: 18px; padding-bottom: 10px;
+  font-size: 16px; font-weight: 600; color: var(--text-hl);
+  margin: 12px 0 8px 0; padding-bottom: 10px;
   border-bottom: 1px solid var(--border);
   display: flex; align-items: center; gap: 10px;
 }
@@ -219,7 +219,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 .embedded-banner.hidden { display: none; }
 
 /* Period dashboards */
-.period-dashboard { margin: 24px 0; }
+.period-dashboard { margin: 16px 0; }
 .period-dashboard .chart-row { display: flex; gap: 12px; margin-bottom: 12px; }
 .period-dashboard .chart-row .plot-wrap { flex: 1; min-width: 0; height: 280px; }
 .period-dashboard .chart-row .plot-wrap.heatmap-plot { height: 200px; }
@@ -1556,7 +1556,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       showlegend: true,
     });
 
-    // ===== Row 3: PnL Curves (yaxis2/xaxis2) =====
+    // ===== Row 4 (bottom): PnL Curves (yaxis/xaxis) =====
     const pnlLong = col(data, v + '_pnl_long');
     const pnlShort = col(data, v + '_pnl_short');
 
@@ -1565,7 +1565,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       type: 'scatter', mode: 'lines',
       name: '做多',
       line: { width: 2, color: color, dash: 'solid' },
-      xaxis: 'x2', yaxis: 'y2',
+      xaxis: 'x', yaxis: 'y',
       showlegend: true,
     });
 
@@ -1574,7 +1574,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       type: 'scatter', mode: 'lines',
       name: '做空',
       line: { width: 2, color: color, dash: 'dash' },
-      xaxis: 'x2', yaxis: 'y2',
+      xaxis: 'x', yaxis: 'y',
       showlegend: true,
     });
 
@@ -1587,7 +1587,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         text: '<b>' + (lastL - 100).toFixed(2) + '%</b>',
         showarrow: false, font: { size: 10, color: color },
         xanchor: 'left', xshift: 5,
-        xref: 'x2', yref: 'y2',
+        xref: 'x', yref: 'y',
       });
     }
     if (!isNaN(lastS)) {
@@ -1596,7 +1596,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         text: '<b>' + (lastS - 100).toFixed(2) + '%</b>',
         showarrow: false, font: { size: 10, color: color },
         xanchor: 'left', xshift: 5,
-        xref: 'x2', yref: 'y2',
+        xref: 'x', yref: 'y',
       });
     }
 
@@ -1606,10 +1606,10 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       x0: barIdx[0], x1: barIdx[N - 1],
       y0: 100, y1: 100,
       line: { color: '#30363d', width: 1, dash: 'dot' },
-      xref: 'x2', yref: 'y2',
+      xref: 'x', yref: 'y',
     });
 
-    // ===== Row 4 (bottom): Position Heatmap (yaxis/xaxis) =====
+    // ===== Row 3: Position Heatmap (yaxis2/xaxis2) =====
     const sampleN = Math.min(100, N);
     const sampleStep = Math.max(1, Math.floor(N / sampleN));
     const sampledIndices = [];
@@ -1659,16 +1659,16 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       hoverongaps: false,
       hoverlabel: { bgcolor: '#21262d', bordercolor: '#30363d', font: { color: '#f0f6fc', size: 11 } },
       hovertemplate: '<b>%{y}</b><br>bar_index=%{x}<br>%{text}<extra></extra>',
-      xaxis: 'x', yaxis: 'y',
+      xaxis: 'x2', yaxis: 'y2',
     });
 
     // ===== Layout =====
     const layout = {
       template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
       font: baseFont, displayModeBar: false,
-      grid: { rows: 4, columns: 1, pattern: 'independent', roworder: 'top to bottom' },
-      margin: { l: 90, r: 90, t: 20, b: 50 },
-      height: 900,
+      grid: { rows: 4, columns: 1, pattern: 'independent', roworder: 'top to bottom', ygap: 0.02 },
+      margin: { l: 60, r: 20, t: 40, b: 40 },
+      height: 700,
       hovermode: 'x unified',
       hoverlabel: hoverLabelStyle,
       showlegend: true,
@@ -1676,13 +1676,13 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       shapes: shapes,
       annotations: annotations,
 
-      // Row 4 (bottom): Heatmap — shows tick labels
+      // Row 4 (bottom): PnL — shows tick labels
       xaxis: { title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, tickvals: tickVals, ticktext: tickTexts, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
-      yaxis: { automargin: true, showgrid: true, gridcolor: gridColor },
+      yaxis: { title: { text: 'PnL (累计)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
 
-      // Row 3: PnL
+      // Row 3: 做多做空 (Heatmap)
       xaxis2: { matches: 'x', showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false },
-      yaxis2: { title: { text: 'PnL (累计)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
+      yaxis2: { automargin: true, showgrid: true, gridcolor: gridColor },
 
       // Row 2: Signal
       xaxis3: { matches: 'x', showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false },
