@@ -1444,7 +1444,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       tickTexts.push(barTs[i] ? barTs[i].substring(0, 16) : '');
     }
 
-    // ===== Row 1 (top): Filtered Price + EPS Band (yaxis4/xaxis4) =====
+    // ===== Row 1 (top): Filtered Price + EPS Band (yaxis/xaxis) =====
     const filtered = col(data, v + '_filtered');
     const eps = col(data, v + '_eps');
     const epsUpper = filtered.map(function(f, i) { return toNum(f) + toNum(eps[i]); });
@@ -1455,7 +1455,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       type: 'scatter', mode: 'lines',
       name: label + ' 滤波',
       line: { width: 2, color: color },
-      xaxis: 'x4', yaxis: 'y4',
+      xaxis: 'x', yaxis: 'y',
       showlegend: true,
     });
 
@@ -1464,7 +1464,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       type: 'scatter', mode: 'lines',
       name: v + ' +eps',
       line: { width: 0 },
-      xaxis: 'x4', yaxis: 'y4',
+      xaxis: 'x', yaxis: 'y',
       showlegend: false,
     });
 
@@ -1475,7 +1475,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       line: { width: 0 },
       fill: 'tonexty',
       fillcolor: hexToRgba(color, 0.10),
-      xaxis: 'x4', yaxis: 'y4',
+      xaxis: 'x', yaxis: 'y',
       showlegend: true,
     });
 
@@ -1556,7 +1556,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       showlegend: true,
     });
 
-    // ===== Row 4 (bottom): PnL Curves (yaxis/xaxis) =====
+    // ===== Row 4 (bottom): PnL Curves (yaxis4/xaxis4) =====
     const pnlLong = col(data, v + '_pnl_long');
     const pnlShort = col(data, v + '_pnl_short');
 
@@ -1565,7 +1565,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       type: 'scatter', mode: 'lines',
       name: '做多',
       line: { width: 2, color: color, dash: 'solid' },
-      xaxis: 'x', yaxis: 'y',
+      xaxis: 'x4', yaxis: 'y4',
       showlegend: true,
     });
 
@@ -1574,7 +1574,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       type: 'scatter', mode: 'lines',
       name: '做空',
       line: { width: 2, color: color, dash: 'dash' },
-      xaxis: 'x', yaxis: 'y',
+      xaxis: 'x4', yaxis: 'y4',
       showlegend: true,
     });
 
@@ -1587,7 +1587,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         text: '<b>' + (lastL - 100).toFixed(2) + '%</b>',
         showarrow: false, font: { size: 10, color: color },
         xanchor: 'left', xshift: 5,
-        xref: 'x', yref: 'y',
+        xref: 'x4', yref: 'y4',
       });
     }
     if (!isNaN(lastS)) {
@@ -1596,7 +1596,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         text: '<b>' + (lastS - 100).toFixed(2) + '%</b>',
         showarrow: false, font: { size: 10, color: color },
         xanchor: 'left', xshift: 5,
-        xref: 'x', yref: 'y',
+        xref: 'x4', yref: 'y4',
       });
     }
 
@@ -1606,7 +1606,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       x0: barIdx[0], x1: barIdx[N - 1],
       y0: 100, y1: 100,
       line: { color: '#30363d', width: 1, dash: 'dot' },
-      xref: 'x', yref: 'y',
+      xref: 'x4', yref: 'y4',
     });
 
     // ===== Row 3: Position Heatmap (yaxis2/xaxis2) =====
@@ -1676,9 +1676,9 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       shapes: shapes,
       annotations: annotations,
 
-      // Row 4 (bottom): PnL — shows tick labels
-      xaxis: { title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, tickvals: tickVals, ticktext: tickTexts, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
-      yaxis: { title: { text: 'PnL (累计)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
+      // Row 1 (top): Filtered — no tick labels
+      xaxis: { showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false },
+      yaxis: { title: { text: '滤波价格', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
 
       // Row 3: 做多做空 (Heatmap)
       xaxis2: { matches: 'x', showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false },
@@ -1688,9 +1688,9 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       xaxis3: { matches: 'x', showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false },
       yaxis3: { title: { text: '信号', font: { size: 10, color: '#8b949e' } }, tickvals: [-1, 0, 1], ticktext: ['空头(-1)', '中性(0)', '多头(+1)'], range: [-1.2, 1.2], showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
 
-      // Row 1 (top): Filtered
-      xaxis4: { matches: 'x', showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false },
-      yaxis4: { title: { text: '滤波价格', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
+      // Row 4 (bottom): PnL — shows tick labels
+      xaxis4: { title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, tickvals: tickVals, ticktext: tickTexts, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
+      yaxis4: { title: { text: 'PnL (累计)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
     };
 
     Plotly.newPlot('chart-dash-' + v, traces, layout, plotConfig);
