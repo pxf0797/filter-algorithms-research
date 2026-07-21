@@ -165,3 +165,152 @@ class TestHtmlViewLabels:
             "renderAll must spread DEFAULT_VIEW_LABELS first, then overlay metadata"
         assert "metadata.view_labels" in html, \
             "renderAll must check metadata.view_labels"
+
+
+class TestPeriodDashboardStructure:
+    """HTML 中包含 4 个 period-dashboard 分区，使用共享 x 轴子图布局。"""
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_four_period_dashboard_sections_exist(self):
+        """HTML 中包含 4 个 period-dashboard 分区（v0-v3）。"""
+        html = self._read_html()
+        # period-dashboard 在 CSS 中定义 1 次，在 HTML 中出现 4 次（每个周期一个分区）
+        assert 'class="section period-dashboard"' in html, \
+            "HTML must contain period-dashboard section divs"
+        # 验证 4 个周期分区的标题都存在
+        assert "日线 完整视图" in html, "Period dashboard for 日线 must exist"
+        assert "60分钟 完整视图" in html, "Period dashboard for 60分钟 must exist"
+        assert "15分钟 完整视图" in html, "Period dashboard for 15分钟 must exist"
+        assert "5分钟 完整视图" in html, "Period dashboard for 5分钟 must exist"
+
+    def test_period_dashboard_chart_ids_for_all_views(self):
+        """每个 period-dashboard 包含正确的 chart div ID（filtered/signal/pnl/heatmap × 4 views）。"""
+        html = self._read_html()
+        for v in ("v0", "v1", "v2", "v3"):
+            for chart_type in ("chart-filtered", "chart-signal", "chart-pnl", "chart-heatmap"):
+                chart_id = f'{chart_type}-{v}'
+                assert f'id="{chart_id}"' in html, \
+                    f"HTML must contain chart div with id={chart_id}"
+
+    def test_shared_x_axis_grid_layout(self):
+        """共享 x 轴使用 grid rows=nViews, columns=1 子图布局。"""
+        html = self._read_html()
+        # grid 布局：行数 = 视图数量，列数 = 1（垂直堆叠，共享 x 轴）
+        assert "grid: { rows: nViews, columns: 1" in html, \
+            "Shared x-axis layout must use grid with rows=nViews, columns=1"
+        assert "roworder: 'top to bottom'" in html, \
+            "Grid must use top-to-bottom row ordering"
+
+    def test_subplot_yaxis_definitions_exist(self):
+        """子图 y 轴通过动态 key yaxis/yaxis2/yaxis3/yaxis4 定义。"""
+        html = self._read_html()
+        # 动态生成 yaxis key: yaxis (vi=0), yaxis2 (vi=1), yaxis3 (vi=2), yaxis4 (vi=3)
+        assert "var ykey = 'yaxis' + (vi === 0 ? '' : (vi + 1))" in html or \
+               "ykey = 'yaxis' + (vi === 0 ? '' : (vi + 1))" in html or \
+               "'yaxis' + (vi === 0 ? '' : (vi + 1))" in html, \
+            "HTML must dynamically generate yaxis keys for subplots"
+
+    def test_shared_x_axis_matches_last_subplot(self):
+        """非底部子图的 x 轴通过 matches 共享底部子图的 x 轴。"""
+        html = self._read_html()
+        assert "matches = 'x' + nViews" in html or \
+               "layout[xkey].matches = 'x' + nViews" in html, \
+            "Upper subplots must match the bottom x-axis via matches property"
+
+    def test_views_constant_is_4_periods(self):
+        """VIEWS 常量包含 4 个周期：v0, v1, v2, v3。"""
+        html = self._read_html()
+        assert "const VIEWS = ['v0', 'v1', 'v2', 'v3']" in html, \
+            "VIEWS constant must define all 4 periods"
+        assert "VIEWS.length" in html, \
+            "HTML must reference VIEWS.length for dynamic layout"
+
+
+class TestHoverTooltipFeatures:
+    """悬停提示特性：hovermode unified、hoverlabel 样式、spike 辅助线。"""
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_hovermode_x_unified_present(self):
+        """图表布局中包含 hovermode: 'x unified'。"""
+        html = self._read_html()
+        assert "hovermode: 'x unified'" in html, \
+            "HTML must use hovermode x unified for synchronized crosshairs"
+
+    def test_hoverlabel_style_defined(self):
+        """hoverLabelStyle 常量定义了悬停标签样式。"""
+        html = self._read_html()
+        assert "hoverLabelStyle" in html, \
+            "HTML must define hoverLabelStyle constant"
+        assert "bgcolor: '#21262d'" in html, \
+            "hoverlabel must have dark background"
+        assert "bordercolor: '#30363d'" in html, \
+            "hoverlabel must have border color"
+
+    def test_spike_settings_exist(self):
+        """x 轴和布局中包含 spike 辅助线设置。"""
+        html = self._read_html()
+        assert "showspikes: true" in html, \
+            "HTML must enable showspikes for crosshair lines"
+        assert "spikemode: 'across'" in html, \
+            "Spike mode must be 'across' for full-chart crosshairs"
+        assert "spikecolor: '#8b949e'" in html, \
+            "Spike line color must be defined"
+        assert "spikesnap: 'cursor'" in html, \
+            "Spike must snap to cursor position"
+
+    def test_multiple_layouts_use_hovermode(self):
+        """多个图表（至少 5 个布局）使用 x unified hovermode。"""
+        html = self._read_html()
+        count = html.count("hovermode: 'x unified'")
+        assert count >= 5, \
+            f"At least 5 layouts should use x unified hovermode, got {count}"
+
+
+class TestMultiTickerSupport:
+    """多 Ticker 叠加图支持：buildMultiTickerPnl 函数与全局变量。"""
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_multi_ticker_function_exists(self):
+        """buildMultiTickerPnl 多 Ticker PnL 叠加函数存在。"""
+        html = self._read_html()
+        assert "function buildMultiTickerPnl" in html, \
+            "HTML must define buildMultiTickerPnl function for multi-ticker overlay"
+
+    def test_multi_ticker_backtest_globals_referenced(self):
+        """buildMultiTickerPnl 使用 BACKTEST_IS_MULTI / BACKTEST_ALL_DATA / BACKTEST_TICKERS。"""
+        html = self._read_html()
+        assert "window.BACKTEST_IS_MULTI" in html, \
+            "Multi-ticker code must check BACKTEST_IS_MULTI flag"
+        assert "window.BACKTEST_ALL_DATA" in html, \
+            "Multi-ticker code must access BACKTEST_ALL_DATA"
+        assert "window.BACKTEST_TICKERS" in html, \
+            "Multi-ticker code must iterate BACKTEST_TICKERS"
+
+    def test_multi_ticker_uses_ticker_color(self):
+        """多 Ticker PnL 线使用 tk.color 作为每个 ticker 的专属颜色。"""
+        html = self._read_html()
+        assert "tk.color" in html, \
+            "Multi-ticker must use per-ticker color from tk.color"
+
+    def test_multi_pnl_section_in_html(self):
+        """HTML 包含多 Ticker PnL 叠加图的容器 div。"""
+        html = self._read_html()
+        assert 'id="chart-multi-pnl"' in html, \
+            "HTML must contain chart-multi-pnl div for multi-ticker overlay"
+        assert 'id="section-multi-pnl"' in html, \
+            "HTML must contain section-multi-pnl wrapper"
+
+    def test_multi_ticker_renders_short_pnl_dashed(self):
+        """多 Ticker 做空 PnL 使用虚线（dash）区分。"""
+        html = self._read_html()
+        assert "dash: 'dash'" in html, \
+            "Short PnL line must use dashed style for visual distinction"
