@@ -746,6 +746,120 @@ class TestPeriodDashboardHovermode:
             f"At least 1 hovermode: 'x unified' must exist, got {count}"
 
 
+class TestJsComputedKeyRegression:
+    """JS 计算属性 Key 回归防护：验证 relayout 不使用对象字面量计算属性 key。
+
+    回归防护 commit 3f64586 的 bug：在对象字面量中使用 computed property keys
+    (``{ [expr]: val }``) 传递给 relayout。修复后改为 bracket assignment 模式。
+    """
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_no_computed_property_keys_in_object_literals(self):
+        """对象字面量中不使用计算属性 key（``{ ['shapes[`` 反模式）。"""
+        html = self._read_html()
+        assert "{ ['shapes[" not in html, \
+            "Must NOT use computed property keys with shapes in object literals"
+
+    def test_bracket_assignment_used_for_dynamic_keys(self):
+        """动态 key 使用 bracket assignment（``obj[key] = val``）而非对象字面量计算属性。"""
+        html = self._read_html()
+        assert "_update['shapes[' + cursorShapeIdx + '].x0'] = xv" in html, \
+            "Hover handler must use bracket assignment for shapes[idx].x0"
+        assert "_update['shapes[' + cursorShapeIdx + '].x1'] = xv" in html, \
+            "Hover handler must use bracket assignment for shapes[idx].x1"
+        assert "_update2['shapes[' + cursorShapeIdx + '].x0'] = -1" in html, \
+            "Unhover handler must use bracket assignment for shapes[idx].x0"
+        assert "_update2['shapes[' + cursorShapeIdx + '].x1'] = -1" in html, \
+            "Unhover handler must use bracket assignment for shapes[idx].x1"
+
+    def test_relayout_uses_variable_not_inline_object(self):
+        """relayout 调用时传入预构建变量（_update / _update2），而非内联对象字面量。"""
+        html = self._read_html()
+        assert "relayout('chart-dash-' + v, _update)" in html, \
+            "Hover relayout must pass _update variable, not inline object"
+        assert "relayout('chart-dash-' + v, _update2)" in html, \
+            "Unhover relayout must pass _update2 variable, not inline object"
+
+    def test_update_objects_initialized_as_empty(self):
+        """_update 和 _update2 初始化为空对象 ``{}``。"""
+        html = self._read_html()
+        assert "_update = {}" in html, \
+            "_update must be initialized as empty object"
+        assert "_update2 = {}" in html, \
+            "_update2 must be initialized as empty object"
+
+
+class TestCssClasses:
+    """G3: CSS 类存在性验证。"""
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_period_dashboard_class_in_css(self):
+        """.period-dashboard CSS 类存在于样式表中。"""
+        html = self._read_html()
+        assert ".period-dashboard {" in html, \
+            "CSS must define .period-dashboard class"
+
+    def test_date_tip_class_in_css_with_position_fixed(self):
+        """.date-tip CSS 类存在且包含 ``position: fixed``。"""
+        html = self._read_html()
+        assert ".date-tip {" in html, \
+            "CSS must define .date-tip class"
+        assert "position: fixed" in html, \
+            ".date-tip must use position: fixed"
+
+    def test_plot_wrap_class_in_css(self):
+        """.plot-wrap CSS 类存在于样式表中。"""
+        html = self._read_html()
+        assert ".plot-wrap {" in html, \
+            "CSS must define .plot-wrap class"
+
+    def test_hovertext_hidden_rule_exists(self):
+        """.hovertext 隐藏规则存在。"""
+        html = self._read_html()
+        assert ".hovertext { visibility: hidden" in html, \
+            ".hovertext must have visibility: hidden rule"
+
+    def test_spikeline_hidden_rule_exists(self):
+        """.spikeline 隐藏规则存在。"""
+        html = self._read_html()
+        assert ".spikeline { visibility: hidden" in html, \
+            ".spikeline must have visibility: hidden rule"
+
+
+class TestDateTipDivs:
+    """G4: date-tip div 元素存在性验证。"""
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_four_date_tip_divs_exist(self):
+        """4 个 date-tip div 存在：date-tip-v0 到 date-tip-v3。"""
+        html = self._read_html()
+        for v in ("v0", "v1", "v2", "v3"):
+            assert f'id="date-tip-{v}"' in html, \
+                f"HTML must contain date-tip div with id=date-tip-{v}"
+
+    def test_each_date_tip_has_class(self):
+        """每个 date-tip div 包含 ``class="date-tip"``。"""
+        html = self._read_html()
+        for v in ("v0", "v1", "v2", "v3"):
+            assert f'id="date-tip-{v}" class="date-tip"' in html, \
+                f"date-tip-{v} must have class='date-tip'"
+
+    def test_date_tip_display_none_via_css(self):
+        """.date-tip CSS 类包含 ``display: none``。"""
+        html = self._read_html()
+        assert "display: none" in html, \
+            ".date-tip CSS must set display: none to hide tips initially"
+
+
 class TestHtmlDomStructure:
     """G6: DOM 结构验证 — 各 section 的 chart/tab 容器 div 存在性。"""
 
