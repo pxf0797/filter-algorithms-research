@@ -2126,19 +2126,19 @@ class TestSchemaValidation:
     # ── cross-view column count ───────────────────────────────────────
 
     def test_cross_view_column_count_4_views(self):
-        """4-view schema has 2 fixed + 4*12 = 50 columns."""
+        """4-view schema has 3 fixed + 4*12 = 51 columns."""
         schema = self._build_expected_schema(n_views=4)
-        assert len(schema.names) == 50
+        assert len(schema.names) == 51
 
     def test_cross_view_column_count_2_views(self):
-        """2-view schema has 2 + 2*12 = 26 columns."""
+        """2-view schema has 3 + 2*12 = 27 columns."""
         schema = self._build_expected_schema(n_views=2)
-        assert len(schema.names) == 26
+        assert len(schema.names) == 27
 
     def test_cross_view_column_count_1_view(self):
-        """1-view schema has 2 + 12 = 14 columns."""
+        """1-view schema has 3 + 12 = 15 columns."""
         schema = self._build_expected_schema(n_views=1)
-        assert len(schema.names) == 14
+        assert len(schema.names) == 15
 
     def test_each_view_has_12_columns(self):
         """Every view prefix contributes exactly 12 columns."""

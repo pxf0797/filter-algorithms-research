@@ -82,7 +82,11 @@ _COL_DEFAULTS: dict[str, Any] = {
 
 
 def _build_full_schema(view_prefixes: list[str]) -> pa.Schema:
-    """Build the full 50-column Parquet schema for the given view prefixes."""
+    """Build the full Parquet schema for the given view prefixes.
+
+    The schema has 3 fixed columns (bar_index, bar_timestamp, close) plus
+    12 columns per view (信号层 3 + PnL层 2 + 持仓层 2 + 交易层 3 + BS层 2),
+    for a total of 3 + (4 * 12) = 51 columns."""
     fields: list[pa.Field] = [pa.field(name, dtype) for name, dtype in _FIXED_FIELDS]
     for prefix in view_prefixes:
         for col in _VIEW_COLUMNS:
@@ -196,7 +200,7 @@ class ParquetStore:
         cutoff_date: str,
         stage_outputs: dict,
     ) -> None:
-        """Extract one 50-column row from pipeline output and buffer it.
+        """Extract one row from pipeline output and buffer it.
 
         All exceptions inside this method are caught and logged — a single
         malformed row **never** crashes the backtest loop.  Columns for a
@@ -331,7 +335,7 @@ class ParquetStore:
         bar_timestamp: Any,
         stage_outputs: dict,
     ) -> dict[str, Any]:
-        """Build a flat 50-column dict for one pipeline step.
+        """Build a flat dict for one pipeline step.
 
         Parameters
         ----------
@@ -345,7 +349,7 @@ class ParquetStore:
         Returns
         -------
         dict
-            Mapping of column name → scalar value for all 50 columns.
+            Mapping of column name → scalar value for all columns.
         """
         row: dict[str, Any] = {
             "bar_index": bar_index,
@@ -781,7 +785,7 @@ class ParquetStore:
         meta: dict[str, Any] = {
             **existing,
             "format_version": "1.0",
-            "schema_version": "3.3",
+            "schema_version": "3.4",
             "status": status,
             "session_id": self._session_id,
             "ticker": self._ticker,

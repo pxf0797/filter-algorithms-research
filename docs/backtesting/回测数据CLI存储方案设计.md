@@ -73,12 +73,13 @@ if int(marker[0]) == view_last_idx:    # 非 bar_index
 
 ### 4.2 Schema 定义
 
-**固定列（每行 2 列）**：
+**固定列（每行 3 列）**：
 
 | 列名 | 类型 | 说明 |
 |------|------|------|
 | `bar_index` | int32 | min_tf 上的 bar 索引，从 0 开始 |
 | `bar_timestamp` | timestamp[ns] | bar 的纳秒精度时间戳（原生 Parquet TIMESTAMP 类型，DuckDB 下推过滤性能优于字符串） |
+| `close` | float32 | 原始收盘价（来自 OHLC 数据），供图表复现价格基准线 |
 
 **每视图列（4 个视图 v0-v3，每视图 12 列，共 48 列）**：
 
@@ -100,6 +101,7 @@ if int(marker[0]) == view_last_idx:    # 非 bar_index
 > **数据来源说明**：
 > - `[-1]`：直接取数组最后一个元素（7 列），对应 `_last_float()`/`_last_int()`/`_last_scalar()` helper
 > - `view_last_idx`：`len(t_arr) - 1`，即视图窗口内的最后一个索引（0-based），用于 BS marker 和 trade 记录的精确匹配（5 列）。详见 4.1.1 坐标系说明。
+> - `close` 列从 `stage_outputs["ohlcv"]["close"]` 提取，为 min_tf 周期的原始收盘价
 > - Parquet 类型使用 pyarrow 原生类型：`pa.int8()`, `pa.float32()`, `pa.bool_()`, `pa.string()`，确保跨工具兼容
 
 > **列名设计决策**：列名使用纯 ASCII（如 `v0_sig` 而非 `v0_日线_sig`），确保 Parquet、pandas、DuckDB、BI 工具的最大兼容性。中文周期标签通过 `metadata.json` 中的 `view_labels` 字段映射（见 9.2 节）。
@@ -113,7 +115,7 @@ if int(marker[0]) == view_last_idx:    # 非 bar_index
 | v2 | 15分钟 | `v2` | `v2_sig`, `v2_trade` |
 | v3 | 5分钟（min_tf） | `v3` | `v3_sig`, `v3_bs_entry` |
 
-总计：2 + 4 x 12 = **50 列**。
+总计：3 + 4 x 12 = **51 列**。
 
 ### 4.3 目录结构
 
@@ -171,19 +173,24 @@ python -m filter_app.backtest_cli --help
 | `--start-bar` | int | 最小 n_pts | 起始 bar 索引（min_tf 周期），用于跳过预热期 | `--start-bar 500` |
 | `--end-bar` | int | 总 bar 数 | 结束 bar 索引（不包含），用于限制回测范围 | `--end-bar 1000` |
 | `--output-dir` | str | `./backtest_output/` | EventRecorder 和 ParquetStore 的输出根目录 | `--output-dir ./my_results` |
-| `--save-data` | flag | `False` | 启用 Parquet + CSV 全量数据存储（调用 ParquetStore） | `--save-data` |
+| `--no-save-data` | flag | `False` | **禁用** Parquet + CSV 全量数据存储（v3.4 起 Parquet 输出默认启用，此 flag 用于关闭） | `--no-save-data` |
 | `--step-interval` | int | `1` | 步进间隔，>1 时跳 bar 运行（加速调试） | `--step-interval 5` |
+| `--checkpoint-interval` | int | `100` | 断点自动保存间隔（bar 数），设为 `0` 禁用 | `--checkpoint-interval 200` |
+| `--resume` | str | 无 | 从指定断点文件恢复回测（路径为 checkpoint JSON 文件） | `--resume backtest_output/AAPL_checkpoint.json` |
 | `--view-filter` | str | 无 | 只运行指定视图（格式 `v{i}_{周期}`），默认运行全部 4 个视图 | `--view-filter v0_日线` |
 | `--quiet` | flag | `False` | 静默模式，只打印开始和结束信息，不逐 bar 输出进度 | `--quiet` |
 
 ### 5.2 使用示例
 
 ```bash
-# 基础用法：用预设配置回测并保存全量数据
-python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP --save-data
+# 基础用法：用预设配置回测（Parquet 数据默认保存）
+python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP
 
 # 用 JSON 配置文件回测
-python -m filter_app.backtest_cli --ticker AAPL --config-file my_config.json --save-data
+python -m filter_app.backtest_cli --ticker AAPL --config-file my_config.json
+
+# 不保存 Parquet/CSV（仅 JSONL 事件流）
+python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP --no-save-data
 
 # 限制 bar 范围（跳过预热期，加速调试）
 python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP \
@@ -191,15 +198,23 @@ python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP \
 
 # 只运行单个视图
 python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP \
-  --view-filter v0_日线 --save-data
+  --view-filter v0_日线
 
 # 指定输出目录 + 跳 bar 加速
 python -m filter_app.backtest_cli --ticker AAPL --preset 3690_HK_DP \
-  --save-data --output-dir ./my_results --step-interval 5
+  --output-dir ./my_results --step-interval 5
+
+# 启用断点自动保存（每 200 bar 保存一次，崩溃后可恢复）
+python -m filter_app.backtest_cli --ticker AAPL --preset 3690_HK_DP \
+  --checkpoint-interval 200
+
+# 从断点恢复回测
+python -m filter_app.backtest_cli --ticker AAPL --preset 3690_HK_DP \
+  --resume backtest_output/AAPL_checkpoint.json
 
 # 批量回测（shell 循环）
 for ticker in AAPL GOOGL MSFT; do
-  python -m filter_app.backtest_cli --ticker $ticker --config-file my_config.json --save-data --quiet
+  python -m filter_app.backtest_cli --ticker $ticker --config-file my_config.json --quiet
 done
 ```
 
@@ -306,27 +321,27 @@ store.end_session()
 
 ```python
 # backtest_cli.py main() 中
-store = None
-if args.save_data:
-    store = ParquetStore(args.output_dir, args.ticker, configs)
-    store.start_session()
+parquet_store = None
+if not args.no_save_data:
+    parquet_store = ParquetStore(args.output_dir, args.ticker, configs)
+    parquet_store.start_session()
 
 try:
     results = runner.run(start, end, args.step_interval)
     for step_idx, output in enumerate(results):
         recorder.record_step(step_idx, output["cutoff_date"], output)
-        if store is not None:
-            store.append_row(output)
+        if parquet_store:
+            parquet_store.append_row(output)
 finally:
     recorder.end_session()
-    if store is not None:
-        store.end_session()
+    if parquet_store:
+        parquet_store.end_session()
 ```
 
 **设计理由**：
 - **开闭原则**：`run()` 是纯计算函数，不引入存储依赖
 - **对称设计**：`EventRecorder` 和 `ParquetStore` 都是 CLI 层的"消费者"，地位平等
-- **可选启用**：通过 `--save-data` flag 控制，不启用时零开销
+- **默认启用**：v3.4 起 Parquet 输出默认开启（回测结果持久化是核心需求），通过 `--no-save-data` flag 关闭
 
 ### 6.5 依赖
 
@@ -342,8 +357,8 @@ finally:
 
 | 文件 | 改动 | 状态 |
 |------|------|------|
-| 新增 `parquet_store.py` | 实现 `ParquetStore` 类（分段写入、原子 flush、CSV 导出、metadata 管理） | ✅ 已实现 |
-| 修改 `backtest_cli.py` | 新增 `--save-data` 参数，run 循环中集成 `ParquetStore.append_row()` | ✅ 已实现 |
+| 新增 `parquet_store.py` | 实现 `ParquetStore` 类（分段写入、原子 flush、CSV 导出、metadata 管理、事件累积 + 后置 join） | ✅ 已实现 |
+| 修改 `backtest_cli.py` | 新增 `--no-save-data`、`--checkpoint-interval`、`--resume` 参数，默认启用 Parquet 存储，run 循环中集成 `ParquetStore.append_row()` | ✅ 已实现 |
 | 新增 `view_backtest.py` | 可视化工具：Parquet 读取 + HTML 嵌入 + 浏览器打开（含 HTTP 服务器模式） | ✅ 已实现 |
 | `event_recorder.py` | CSVBuilder 扩展：新增 pnl/long_pos/short_pos/trade/trade_return/trade_reason 列 | ✅ 已实现 |
 
@@ -379,7 +394,7 @@ if self.parquet_store:
 
 假设一个回测 session 有 10,000 个 min_tf bar（约 2 个月 5min 数据）：
 
-- Parquet（ZSTD level=3）：50 列 x 10000 行，大量重复值（粗周期 + bool 列），预计 **~800KB-3MB**
+- Parquet（ZSTD level=3）：51 列 x 10000 行，大量重复值（粗周期 + bool 列），预计 **~800KB-3MB**
 - CSV：相同数据无压缩，预计 **~5-8MB**
 
 ### 7.5 验证标准
@@ -493,7 +508,50 @@ v3.3 中对 `EventRecorder.CSVBuilder` 进行了以下修复和扩展：
 
 **CSV 列数变化**：每视图从 11 列增至 17 列，总列数从 47 增至 73（含 5 列 OHLCV 基础数据 + 4 视图 x 17 列）。
 
-> **注意**：CSVBuilder（EventRecorder 产出）与 ParquetStore 的列集不完全一致。CSVBuilder 额外包含 OHLCV 基础列（`close`/`open`/`high`/`low`/`volume`）和 Schmitt 内部状态列（`mu_v`/`sigma_v`/`sig_dur`/`pair_count`/`trade_count`），而 ParquetStore 只存储 50 列核心分析数据。两者定位不同：CSV 为人眼观察设计（包含行情上下文和调试信息），Parquet 为程序分析设计（只含必要的决策数据）。
+> **注意**：CSVBuilder（EventRecorder 产出）与 ParquetStore 的列集不完全一致。CSVBuilder 额外包含 OHLCV 基础列（`close`/`open`/`high`/`low`/`volume`）和 Schmitt 内部状态列（`mu_v`/`sigma_v`/`sig_dur`/`pair_count`/`trade_count`），而 ParquetStore 只存储 51 列核心分析数据。两者定位不同：CSV 为人眼观察设计（包含行情上下文和调试信息），Parquet 为程序分析设计（只含必要的决策数据）。
+
+### 8.9 Backtest 管线修复（P0-P5, v3.4）
+
+v3.4 中修复了 6 个回测算法的关键缺陷：
+
+| 编号 | 优先级 | 问题 | 根因 | 修复 |
+|------|--------|------|------|------|
+| P0 | 阻塞 | 第一个信号段的 BS 标记对缺失 | `pair_end` 逻辑在信号段开头未触发 | 改为 `pair_start` 逻辑，信号段起始即生成配对 |
+| P1 | 高 | 空 pred_pairs 时 PnL 不向前传播 | 空预测对列表导致 PnL 更新被跳过 | 空 pred_pairs 时仍执行 PnL 前向传播（持仓继承上一 bar） |
+| P2 | 中 | 前端信号图缺少持仓状态叠加带 | 仅显示信号值，无持仓可视化 | 在信号子图上叠加 `long_pos`/`short_pos` 半透明矩形带（绿/红） |
+| P3 | 中 | 时间维度未在设计中文档化 | 设计时遗漏了 bar_timestamp 的坐标系说明 | 在 4.1.1 节补充了全局 bar_index 与视图窗口索引的坐标系说明 |
+| P4 | 中 | 持仓状态与自己的 PnL 方向矛盾 | `long_pos`/`short_pos` 从跨周期对齐的 mask 派生 | 改为从视图自身的 `trade_records` 独立计算持仓状态（`entry_idx`/`exit_idx` 匹配），保证与 `_pnl_long`/`_pnl_short` 一致 |
+| P5 | 低 | BS marker 事件语义不精确 | BS marker 的 bar_idx 无法与全局 bar_index 直接匹配 | 改为日期匹配（date-based matching）：BS marker 的 date 字段与 bar_timestamp 的日期部分比较，支持跨周期匹配 |
+
+### 8.10 统一的 BS/Trade 后置 Join（v3.4）
+
+**问题**：早期实现中，`_extract_view_columns()` 在每 bar 提取时直接匹配 BS marker 和 trade 记录。由于 trade 的 `exit_idx` 和 BS marker 的 `bar_idx` 相对于视图窗口索引（而非全局 bar_index），且同一 bar 上可能出现多个事件（entry + exit 同时发生），逐 bar 匹配存在严重遗漏——大量事件被丢失。
+
+**方案**：改为两阶段后置 join（post-hoc join），在 `end_session()` 中统一应用。
+
+**阶段 1 -- 累积事件（`_accumulate_events()`）**：
+- 在 `append_row()` 中调用，从 `stage_outputs` 提取每个视图的 trade_records 和 BS markers
+- 事件按 `"日期"` 去重键（`f"{prefix}:{date}"`）存入 `self._pending_events` dict
+- Trade exit 优先于 entry（同一日期上 exit 覆盖 entry）
+- BS marker 直接覆盖同日期已有值
+
+**阶段 2 -- 应用事件（`_apply_pending_events()`）**：
+- 在 `end_session()` 中，遍历缓冲区所有行
+- 每行的 `bar_timestamp` 转换为日期字符串，查找 `self._pending_events`
+- 匹配到的 trade/BS 列被覆盖写入（trade、trade_return、trade_reason、bs_entry、bs_exit）
+
+**优势**：
+- **零遗漏**：所有事件都被累积并匹配，不依赖逐 bar 的视图窗口索引对齐
+- **日期粒度匹配**：使用 day 粒度（`_normalize_date()`），支持日线视图的 BS marker 正确匹配到 min_tf 周期上的对应 bar
+- **确定性**：同一天的事件，trade exit 优先于 entry，BS marker 最后写入为准
+
+**实现细节**（`parquet_store.py`）：
+- `_extract_view_columns()` 不再尝试匹配 trade/BS 列——这些 5 列（trade、trade_return、trade_reason、bs_entry、bs_exit）统一填默认值（空字符串或 NaN）
+- `_accumulate_events()` 在 `append_row()` 中每次调用，累积事件到 `_pending_events`
+- `_apply_pending_events()` 在 `end_session()` 开始时调用，将累积事件应用到缓冲区
+- 缓冲区设为无限大（`_buffer_size = 10_000_000`），确保所有行都在内存中供后置 join
+
+
 
 ---
 
@@ -510,7 +568,7 @@ v3.3 中对 `EventRecorder.CSVBuilder` 进行了以下修复和扩展：
 ```json
 {
   "format_version": "1.0",
-  "schema_version": "3.3",
+  "schema_version": "3.4",
   "status": "completed",
   "session_id": "20240716-143052",
   "ticker": "AAPL",
@@ -578,9 +636,10 @@ v3.3 中对 `EventRecorder.CSVBuilder` 进行了以下修复和扩展：
 
 ### 9.4 向后兼容
 
-- `--save-data` 默认 `False`，不影响现有 CLI 使用方式
+- Parquet 输出 **默认启用**（v3.4 起），通过 `--no-save-data` flag 关闭
 - `EventRecorder` 保持不变，不修改其接口或行为
 - 两个输出文件 + metadata.json 是纯增量，不覆盖任何已有文件
+- `close` 列为新增固定列，不影响现有列名和列序——依赖列索引的代码需适配（列数 50→51）
 
 ---
 
@@ -637,7 +696,79 @@ column-major 格式使前端 JavaScript 可以直接按列访问数据（如绘�
 
 ### 10.3 前端依赖
 
-HTML 模板（`docs/backtesting/回测结果可视化.html`）自行管理前端依赖（如 Plotly.js、数据表格库等），`view_backtest.py` 只负责数据提取和注入，不引入额外 Python 依赖。
+HTML 模板（`docs/backtesting/回测结果可视化.html`）自行管理前端依赖（Plotly.js 2.35.2，通过 CDN 加载），`view_backtest.py` 只负责数据提取和注入，不引入额外 Python 依赖。
+
+### 10.4 HTML 仪表面板功能（v3.4）
+
+`回测结果可视化.html` 是一个完整的单页仪表盘，支持嵌入模式（数据预注入）和服务器模式（浏览器拖入 Parquet 文件实时解析）。
+
+**10.4.1 时段仪表盘（Period Dashboards）**
+
+4 个时段各自一个 4 行子图布局（日线/60分钟/15分钟/5分钟），共享 x 轴：
+
+| 行 | 名称 | 内容 | Y 轴域 |
+|----|------|------|--------|
+| Row 1 (顶) | 滤波价格 + EPS 带 | `{v}_filtered` 线 + `{v}_eps` 上下带 + 半透明收盘价参考线 | [0.64, 1.0] |
+| Row 2 | 信号 + 持仓叠加 | 阶梯信号线（hv shape）+ 半透明做多/做空持仓矩形带 | [0.52, 0.64] |
+| Row 3 | 做多做空热力图 | sampled 100 点 `{v}_long_pos` / `{v}_short_pos` 热力图 | [0.40, 0.52] |
+| Row 4 (底) | PnL 曲线 | 做多（实线）+ 做空（虚线）PnL 曲线 + 终值标注 + 100 基线 | [0.0, 0.40] |
+
+- **收盘价参考线**：所有仪表盘包含 `close` 列的半透明灰色线（`rgba(200,200,200,0.3)`），供价格基准参考
+- **视图标签**：从 `metadata.json` 的 `view_labels` 字段加载中文周期名称，fallback 到硬编码的 `DEFAULT_VIEW_LABELS`
+
+**10.4.2 跨子图光标（Cross-subplot Cursor）**
+
+Plotly 的 `spikemode:'across'` 仅在同一 yaxis 域内生效。为实现在 4 行子图间的统一垂直光标线：
+
+- 使用 `paper` 坐标系（yref='paper', y0=0, y1=1）的 layout shape 作为光标线
+- 通过 `plotly_hover` 事件获取 hover 的 x 值，更新 shape 的 x0/x1 位置
+- 节流（throttle）机制：45ms 间隔，通过 `_pending` / `_pendingXv` 状态避免过多的 `Plotly.relayout()` 调用
+- `plotly_unhover` 时将光标线移出屏幕（x=-1），并隐藏日期提示
+
+**10.4.3 冻结防护（Freeze Prevention）**
+
+`Plotly.relayout()` 在 hover 回调中调用时，如果 relayout 本身触发了新的 hover 事件，会导致无限递归（页面冻结）。防护措施：
+
+- `_inRelayout` 守卫：relayout 执行期间设为 `true`，阻止嵌套的 hover 回调触发新的 relayout
+- 监听器清理：每个仪表盘在 rebuild 前通过 `removeAllListeners('plotly_hover')` / `removeAllListeners('plotly_unhover')` 清理旧监听器
+- `Plotly.purge()`：在 `renderAll()` 重建所有仪表盘前，先 purge 旧图表实例（防止文件重新上传时的 DOM 冲突）
+
+**10.4.4 缩放控制**
+
+- `scrollZoom: true`：Plotly config 中启用滚轮缩放
+- 重置按钮：每个仪表盘下方有 "↺ 重置缩放" 按钮，调用 `Plotly.relayout({xaxis.autorange: true, ...})` 重置所有 4 个 xaxis
+- modebar：启用 Plotly 原生 modebar（含缩放、平移、重置等），移除了 lasso/select/sendDataToCloud 按钮
+
+**10.4.5 悬停提示（Hover Tooltips）**
+
+- **主题**：暗色主题 hoverlabel（`bgcolor: '#21262d'`, `bordercolor: '#30363d'`）
+- **模式**：所有图表使用 `hovermode: 'x unified'`，同时显示该 x 位置所有 trace 的值
+- **跨子图日期提示**：仪表盘使用固定定位的 `<div class="date-tip">` 元素，通过 `mousemove` 事件跟随鼠标显示当前光标位置的日期
+
+**10.4.6 暗色主题与样式**
+
+- GitHub 灵感暗色主题（`--bg: #0d1117` / `--card: #161b22`）
+- 4 视图颜色体系：v0 蓝色 `#58a6ff`、v1 绿色 `#3fb950`、v2 黄色 `#d2991d`、v3 橙色 `#f78166`
+- 响应式 KPI 卡片网格（4 列 → 2 列 @<900px）
+- 数据表使用等宽字体 + 粘性表头 + 横向滚动
+- 视图标签 badge 样式（`.view-tag.v0` / `.v1` / `.v2` / `.v3`）
+
+### 10.5 测试覆盖
+
+v3.4 的 HTML 仪表盘拥有全面的自动化测试（111 测试用例，位于 `tests/test_html_overlay.py`）：
+
+| 测试类别 | 覆盖内容 |
+|----------|----------|
+| DOM 结构 | 所有 `<div>` 容器存在性、CSS 类名验证、section 编号正确性 |
+| 图表构建 | 每个 `build*()` 函数被 `renderAll()` 调用、Plotly.newPlot 调用参数验证 |
+| 时段仪表盘 | 4 行高度比例、行序正确性、共享 x 轴配置、yaxis 域范围 |
+| 跨子图光标 | paper-coordinate shape 创建、hover/unhover 事件绑定、throttle 逻辑、日期提示位置 |
+| 冻结防护 | `_inRelayout` 守卫逻辑、`removeAllListeners` 清理、`Plotly.purge()` 调用 |
+| 数据表与 Schema | 列头 class 分配（`col-fixed`/`col-v0-3`）、行数截断、类型着色 |
+| 列引用完整性 | 所有 `col(data, ...)` 调用中引用的列名在 schema 中存在 |
+| 多 ticker | `BACKTEST_IS_MULTI` / `BACKTEST_ALL_DATA` 分支逻辑 |
+
+Parquet 存储管线也有独立测试（174 测试用例，位于 `tests/test_parquet_store.py`）：schema 构建、列提取、事件累积、后置 join、分段合并、CSV 导出、metadata 读写、崩溃恢复等。
 
 ---
 
@@ -648,3 +779,4 @@ HTML 模板（`docs/backtesting/回测结果可视化.html`）自行管理前端
 | v3.1 | 2024-07 | 初始设计：Parquet + CSV 双输出、分段写入、原子 flush |
 | v3.2 | 2024-07 | 新增 `view_labels`、`status`、`column_names` 到 metadata.json；细化边缘情况 |
 | v3.3 | 2024-07 | **实现完成**。修复 BS 坐标系 bug（bar_index → view_last_idx）；CSVBuilder 新增 6 列/视图（47→73 列）；补全 CLI 参数文档；新增可视化工具章节；新增坐标系说明；目录结构从两级嵌套简化为单级平铺；buffer_size 从设计 1000 调整为实际 100；schema_version 更新到 3.3 |
+| v3.4 | 2025-07 | **重大迭代**。Schema 新增 `close` 固定列（2→3 固定列, 50→51 列）；Parquet 输出默认启用（`--no-save-data` 关闭）；新增 `--checkpoint-interval` 和 `--resume` 断点续跑；P0-P5 管线修复（首个信号段配对、PnL 前向传播、持仓叠加、时间维度文档、持仓状态独立计算、BS 日期匹配）；BS/Trade 统一后置 join（`_accumulate_events()` + `_apply_pending_events()`）；时段仪表盘（4 行子图 + 共享 x 轴）；跨子图光标（paper-coordinate shape）；收盘价参考线；冻结防护；暗色主题 hover 提示；缩放控制；111 测试覆盖 HTML 仪表盘 |

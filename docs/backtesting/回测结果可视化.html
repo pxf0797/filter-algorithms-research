@@ -437,7 +437,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   <div class="section">
     <div class="section-title"><span class="num">7</span> Schema 4.2 列定义</div>
     <div class="schema-table-wrap" id="schema-table-wrap"></div>
-    <p class="annotation">共 50 列：2 固定列 + 4 视图 x 12 列（信号 3 + PnL 2 + 持仓 2 + 交易 3 + BS 2）。背景色区分分组。</p>
+    <p class="annotation">共 51 列：3 固定列 + 4 视图 x 12 列（信号 3 + PnL 2 + 持仓 2 + 交易 3 + BS 2）。背景色区分分组。</p>
   </div>
 
   <!-- Section 8: Data Table -->
@@ -1687,6 +1687,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       { id: 'fixed', label: '固定列', cls: 'group-fixed', columns: [
         { name: 'bar_index', type: 'int32', meaning: 'min_tf bar序号', source: 'BacktestRunner' },
         { name: 'bar_timestamp', type: 'timestamp', meaning: 'bar UTC时间戳', source: 'BacktestRunner' },
+        { name: 'close', type: 'float32', meaning: '原始收盘价(OHLC)', source: 'stage_outputs["ohlcv"]["close"]' },
       ]},
       { id: 'signal', label: '信号层', cls: 'group-signal', views: VIEWS, columns: [
         { name: '{v}_sig', type: 'int8', meaning: '施密特信号(+1做多/-1做空/0空仓)', source: 'schmitt["sig"][-1]' },
