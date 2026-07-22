@@ -1,8 +1,8 @@
 # 测试文档 — filter_research
 
-**实际测试计数**：818 个测试 / 24 个测试文件
+**实际测试计数**：1272 个测试 / 35 个测试文件
 
-pytest 输出：`pytest tests/ --collect-only -q` 确认 801 个测试被收集。
+pytest 输出：`pytest tests/ --collect-only -q` 确认 1272 个测试被收集。
 
 ---
 
@@ -18,7 +18,8 @@ tests/
 ├── test_signals.py                  # Schmitt 触发器 + 信号配对（16 测试，2 类）
 ├── test_boundary.py                 # 边界条件（21 测试，9 类）
 ├── test_alignment.py                # 跨周期 PnL 对齐（6 测试，1 类）
-├── test_alignment_subplot.py        # 对齐子图 + 持仓掩码（14 测试，2 类）
+├── test_subplot_layout.py           # 对齐子图 + 持仓掩码（14 测试，2 类）
+├── test_bs_marker.py                # BS 仓位操作标识 — 单元测试（35 测试，6 类）
 ├── test_param_export_import.py      # 参数导入导出（13 测试，5 类）
 ├── test_config_db.py                # config_db 模块单元测试（46 测试，10 类）
 ├── test_preset_ui.py                # 预设管理集成测试 — 逻辑层（60 测试，16 类）
@@ -51,14 +52,15 @@ tests/
 | 3 | `test_signals.py` | 2 | 16 | 4.9% | `signal` |
 | 4 | `test_boundary.py` | 9 | 21 | 6.3% | — |
 | 5 | `test_alignment.py` | 1 | 6 | 1.8% | `alignment` |
-| 6 | `test_alignment_subplot.py` | 2 | 14 | 4.3% | — |
+| 6 | `test_subplot_layout.py` | 2 | 14 | 4.3% | — |
 | 7 | `test_param_export_import.py` | 5 | 13 | 4.0% | — |
 | 8 | `test_config_db.py` | 10 | 46 | 14.0% | — |
 | 9 | `test_preset_ui.py` | 16 | 60 | 18.3% | — |
 | 10 | `test_preset_ui_actions.py` | 8 | 45 | 13.5% | — |
 | 11 | `test_db.py` | 14 | 57 | 17.4% | — |
 | 12 | `test_integration.py` | 0 (6 函数) | 6 | 1.8% | — |
-| | **合计** | **66 类 + 6 函数** | **830** | **100%** | |
+| 13 | `test_bs_marker.py` | 6 | 35 | 10.8% | — |
+| | **合计** | **72 类 + 6 函数** | **1272** | **100%** | |
 
 ---
 
@@ -119,8 +121,8 @@ tests/
 |:--|:--|:--|:--|--:|:--|
 | `_align_pnl_to_current_tf` | 978 | test_alignment.py | TestAlignPnlToCurrentTf | 6 | ✅ |
 | `_align_pnl_to_current_tf` | 978 | test_boundary.py | TestAlignPnlBoundary | 1 | ✅ |
-| `_compute_holding_masks` | 1148 | test_alignment_subplot.py | TestComputeHoldingMasks | 7 | ✅ |
-| `_add_alignment_subplot` | 1186 | test_alignment_subplot.py | TestAlignmentSubplot | 7 | ✅ |
+| `_compute_holding_masks` | 1148 | test_subplot_layout.py | TestComputeHoldingMasks | 7 | ✅ |
+| `_add_alignment_subplot` | 1186 | test_subplot_layout.py | TestAlignmentSubplot | 7 | ✅ |
 
 **跨文件集成**：
 - `test_integration.py::test_cross_tf_pnl_alignment` 跨周期对齐端到端
@@ -211,7 +213,7 @@ tests/
 ### 基础用法
 
 ```bash
-# 运行全部 830 个测试
+# 运行全部 1272 个测试
 python -m pytest tests/ -v
 
 # 运行全部测试（含覆盖率报告）
@@ -254,7 +256,7 @@ python -m pytest tests/test_signals.py -v
 # 策略模块
 python -m pytest tests/test_strategy.py tests/test_boundary.py -v
 # 对齐模块
-python -m pytest tests/test_alignment.py tests/test_alignment_subplot.py -v
+python -m pytest tests/test_alignment.py tests/test_subplot_layout.py -v
 # 配置模块
 python -m pytest tests/test_config_db.py tests/test_param_export_import.py -v
 # 预设管理
@@ -299,7 +301,7 @@ open htmlcov/index.html
 
 ### 6.2 无法测试真实 UI 渲染
 
-- Plotly 图表的视觉效果无法在测试中验证，只能验证 trace 数量和数据值（参见 `test_alignment_subplot.py`）
+- Plotly 图表的视觉效果无法在测试中验证，只能验证 trace 数量和数据值（参见 `test_subplot_layout.py`）
 - Streamlit 的 layout（`st.columns`、`st.expander`、`st.sidebar`）不在测试范围内
 
 ### 6.3 数据库测试隔离
@@ -321,7 +323,7 @@ open htmlcov/index.html
 
 ### 6.6 文件计数说明
 
-- **24 个测试文件**：`tests/` 目录中所有 `test_*.py` 文件
-- **66+ 个测试类**：分布在 10+ 个类式测试文件中（`test_integration.py` 不含类）
+- **35 个测试文件**：`tests/` 目录中所有 `test_*.py` 文件
+- **72+ 个测试类**：分布在 10+ 个类式测试文件中（`test_integration.py` 不含类）
 - **6 个独立函数**：`test_integration.py` 的 6 个顶级函数
-- **818 个测试**：来自 `pytest --collect-only -q` 的精确计数
+- **1272 个测试**：来自 `pytest --collect-only -q` 的精确计数

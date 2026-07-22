@@ -12,8 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 from typing import Any, Dict, Optional, Tuple
 from db import upsert_kline, query_kline
-# 周期层级定义（与 components/sidebar.py 保持一致）
-ALL_TFS = ["1分钟", "5分钟", "15分钟", "60分钟", "日线", "周线", "月线", "季线"]
+from filter_app import ALL_TFS
 
 
 def _fetch_all_timeframes(market: str, code: str) -> Dict[str, Tuple[bool, Any]]:
@@ -243,7 +242,6 @@ def _stock_name_lookup(market: str, code: str) -> str:
         return ""
     try:
         if market == "A股(沪深)":
-            full = code + (".SS" if code[0] == "6" else ".SZ")
             full = code + (".SS" if code[0] == "6" else ".SZ")
         elif market == "港股 HK":
             full = code.zfill(4) + ".HK"

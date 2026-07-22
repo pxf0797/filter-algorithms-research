@@ -2,6 +2,7 @@
 """Generate sample signal data for the interactive filter visualization web tool."""
 
 import json
+from pathlib import Path
 import numpy as np
 
 FS = 100  # sample rate (Hz)
@@ -251,7 +252,7 @@ def main():
         "filters": FILTER_DEFINITIONS,
     }
 
-    out_path = "/Users/xfpan/claude/filter_research/web_tool/sample_data.json"
+    out_path = Path(__file__).parent / "sample_data.json"
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
 

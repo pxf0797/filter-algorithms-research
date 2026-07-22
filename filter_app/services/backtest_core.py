@@ -25,14 +25,7 @@ from .filter_engine import (
 from .data_loader import _sync_all_cascading
 from .bs_marker import compute_bs_markers
 from db import get_conn
-
-# 周期层级定义（与 components/sidebar.py 保持一致）
-ALL_TFS = ["1分钟", "5分钟", "15分钟", "60分钟", "日线", "周线", "月线", "季线"]
-TF_HIERARCHY = {
-    "1分钟": "5分钟", "5分钟": "15分钟", "15分钟": "60分钟",
-    "60分钟": "日线", "日线": "周线", "周线": "月线",
-    "月线": "季线", "季线": None,
-}
+from filter_app import ALL_TFS, TF_HIERARCHY
 
 
 class BacktestRunner:

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from datetime import datetime
 
-LOG_DIR = Path(__file__).parent.parent / "data" / "backtest_logs"
+LOG_DIR = Path(__file__).parent.parent.parent / "data" / "backtest_logs"
 
 
 def _ensure_dir():

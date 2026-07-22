@@ -21,36 +21,13 @@ if _pkg_dir not in sys.path:
     sys.path.insert(0, _pkg_dir)
 
 # ── 项目内导入（与现有模块导入风格一致） ──
-from services.backtest_core import BacktestRunner, ALL_TFS
+from services.backtest_core import BacktestRunner
 from services.event_recorder import EventRecorder
 from services.filter_engine import FILTERS
 from services.parquet_store import ParquetStore
-from config_db import apply_preset, list_presets
+from config_db import apply_preset, list_presets, VIEW_PARAM_SPECS as _VIEW_SPECS
 from db import has_data, get_conn
-
-# 默认视图周期（与 components/sidebar.py 中 DEFAULT_TFS 对齐）
-DEFAULT_TFS = ["日线", "60分钟", "15分钟", "5分钟"]
-
-# 视图参数映射（与 config_db.VIEW_PARAM_SPECS 对齐）
-# (preset_key_suffix, cfg_key, default)
-_VIEW_SPECS: List[tuple] = [
-    ("tf", "tf", None),
-    ("n", "n_pts", None),
-    ("sch", "show_sch", False),
-    ("pred", "show_pred", False),
-    ("ke", "ke", None),
-    ("sm", "sm", None),
-    ("ew", "ew", None),
-    ("fm", "fit_mode", None),
-    ("next", "n_ext", 8),
-    ("fc", "fc", None),
-    ("fc2", "fc2", None),
-    ("strat", "show_strategy", False),
-    ("sl", "stop_loss_pct", 2.0),
-    ("cross_pnl", "show_cross_pnl", False),
-    ("align", "show_alignment", False),
-    ("pnlfb", "show_pnl_feedback", False),
-]
+from filter_app import ALL_TFS, DEFAULT_TFS
 
 
 # ═══════════════════════════════════════════════════════════════

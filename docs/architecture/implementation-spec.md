@@ -5,7 +5,7 @@
 
 ---
 
-## 1. BacktestRunner (`filter_app/backtest_core.py`)
+## 1. BacktestRunner (`filter_app/services/backtest_core.py`)
 
 ### 1.1 模块职责
 
@@ -646,7 +646,7 @@ def resolve_bar_range(
 
 ## 4. `pipeline_capture.py` 修改清单
 
-> 现有文件: `/Users/xfpan/claude/filter_research/filter_app/services/pipeline_capture.py` (293 行)
+> 现有文件: `/Users/xfpan/claude/filter_research/filter_app/services/pipeline_capture.py` (299 行)
 
 ### 4.1 不变部分
 
@@ -709,7 +709,7 @@ def resolve_bar_range(
 
 | 文件 | 路径 | 预估行数 | 说明 |
 |------|------|---------|------|
-| `backtest_core.py` | `filter_app/backtest_core.py` | ~350 行 | BacktestRunner 类 + BacktestError 异常类 |
+| `backtest_core.py` | `filter_app/services/backtest_core.py` | ~350 行 | BacktestRunner 类 + BacktestError 异常类 |
 | `event_recorder.py` | `filter_app/services/event_recorder.py` | ~200 行 | EventRecorder 类 + JSONL 写入辅助函数 |
 | `backtest_cli.py` | `filter_app/backtest_cli.py` | ~180 行 | argparse + main() + 配置加载 + bar 范围解析 |
 

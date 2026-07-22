@@ -1,8 +1,8 @@
 # 测试耗时与CI策略
 
-> 最后更新: 2026-06-28
+> 最后更新: 2026-07-22
 > 测试环境: Python 3.12.6, macOS Darwin (Apple Silicon)
-> 总测试数: 637 个测试用例 (625 个测试函数，含 parametrize 展开) / 20 个测试文件
+> 总测试数: 1272 个测试用例 / 35 个测试文件
 > 总耗时: 约 2 分钟 (全量串行)
 
 ## 按文件耗时分级
@@ -27,7 +27,7 @@
 |------|--------|-------------|-------------|
 | test_filters.py | 22 | 1.04 | 0.84 |
 | test_signals.py | 16 | 1.05 | 0.85 |
-| test_alignment_subplot.py | 14 | 1.09 | 0.90 |
+| test_subplot_layout.py | 14 | 1.09 | 0.90 |
 | test_sidebar.py | 36 | 1.12 | 0.88 |
 | test_integration.py | 6 | 1.19 | 0.95 |
 | test_strategy.py | 18 | 1.19 | 0.98 |
@@ -95,7 +95,7 @@ jobs:
         file:
           - test_filters.py
           - test_signals.py
-          - test_alignment_subplot.py
+          - test_subplot_layout.py
           - test_sidebar.py
           - test_integration.py
           - test_strategy.py

@@ -15,7 +15,7 @@ import streamlit as st
 from loguru import logger
 
 from state import AppState
-from backtest_logger import log_mode_switch
+from services.backtest_logger import log_mode_switch
 from components.sidebar import ALL_TFS
 
 

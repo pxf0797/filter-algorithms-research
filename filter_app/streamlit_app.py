@@ -15,19 +15,19 @@ from loguru import logger
 import streamlit as st
 import numpy as np
 import pandas as pd
+import yfinance as yf
 
 
 def _hash_array(arr):
     """Hash numpy array for @st.cache_data hash_funcs (bytes of contiguous copy)."""
     return hashlib.md5(np.ascontiguousarray(arr).data.tobytes()).hexdigest()
-import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from config_db import (init_config_tables, list_presets, apply_preset,
                         save_preset, delete_preset, rename_preset,
                         get_history,
                         import_json_files_as_presets, VIEW_PARAM_SPECS)
-from db import (init_db, get_date_range, has_data,
+from db import (init_db, has_data,
                 check_data_health, get_db_size_mb, snapshot_db, list_snapshots,
                 restore_snapshot, prune_snapshots, clear_display_cache,
                 checkpoint_wal, validate_db, compare_with_db, force_update_kline,
@@ -55,7 +55,7 @@ from components.sidebar import (
 )
 from state import AppState
 from services.pipeline_capture import PipelineCapture, PipelineStageData
-from backtest_logger import log_bar_navigation, log_data_load, log_error
+from services.backtest_logger import log_bar_navigation, log_data_load, log_error
 from components.backtest_panel import render_backtest_panel, run_backtest_play
 
 # ---------------------------------------------------------------------------

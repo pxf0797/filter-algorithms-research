@@ -6,7 +6,7 @@ WORKDIR /app
 RUN groupadd -r streamlit && useradd -r -g streamlit -m -u 1000 streamlit
 
 # 安装依赖
-COPY filter_app/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码

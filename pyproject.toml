@@ -11,11 +11,45 @@ name = "filter-research"
 version = "10.5.0"
 description = "多周期股票滤波分析工具"
 requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.57.0",
+    "loguru>=0.7.3",
+    "numpy>=2.2",
+    "scipy>=1.17",
+    "plotly>=6.7",
+    "pandas>=2.3",
+    "statsmodels>=0.14",
+    "yfinance>=1.4",
+    "pyarrow>=14.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pip-audit>=2.7,<3",
+]
+
+[project.scripts]
+filter-backtest = "filter_app.backtest_cli:main"
+filter-view = "tools.view_backtest:main"
+filter-benchmark = "tools.benchmark_pipeline:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
 addopts = ["-v", "--tb=short", "--strict-markers"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "filter: filter algorithm tests",
+    "signal: Schmitt trigger and signal tests",
+    "strategy: PnL and strategy tests",
+    "alignment: time alignment tests",
+]
 
 [tool.coverage.run]
 source = ["filter_app"]
@@ -24,3 +58,7 @@ omit = ["tests/*"]
 [tool.coverage.report]
 fail_under = 55
 exclude_lines = ["pragma: no cover", "if __name__ == .__main__.:"]
+
+[tool.mypy]
+ignore_missing_imports = true
+follow_imports = "skip"

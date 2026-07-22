@@ -306,9 +306,9 @@ class TestBacktestLogger:
         """log_mode_switch 写入一条 JSONL 记录."""
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "filter_app"))
         import json
-        from backtest_logger import log_mode_switch
+        from services.backtest_logger import log_mode_switch
 
-        with patch("backtest_logger.LOG_DIR", tmp_path):
+        with patch("services.backtest_logger.LOG_DIR", tmp_path):
             log_mode_switch("AAPL", "enter", "60分钟", 500)
 
             log_files = list(tmp_path.glob("*.jsonl"))
@@ -324,9 +324,9 @@ class TestBacktestLogger:
     def test_log_bar_navigation_writes_jsonl(self, tmp_path):
         """log_bar_navigation 写入 JSONL."""
         import json
-        from backtest_logger import log_bar_navigation
+        from services.backtest_logger import log_bar_navigation
 
-        with patch("backtest_logger.LOG_DIR", tmp_path):
+        with patch("services.backtest_logger.LOG_DIR", tmp_path):
             log_bar_navigation("AAPL", "60分钟", 50, 500, "2026-06-15")
 
             record = json.loads(list(tmp_path.glob("*.jsonl"))[0].read_text().strip())
@@ -337,9 +337,9 @@ class TestBacktestLogger:
     def test_log_data_load_writes_jsonl(self, tmp_path):
         """log_data_load 写入 JSONL."""
         import json
-        from backtest_logger import log_data_load
+        from services.backtest_logger import log_data_load
 
-        with patch("backtest_logger.LOG_DIR", tmp_path):
+        with patch("services.backtest_logger.LOG_DIR", tmp_path):
             log_data_load("MSFT", "1d", 120, "2026-05-01", elapsed_ms=150.5)
 
             record = json.loads(list(tmp_path.glob("*.jsonl"))[0].read_text().strip())
@@ -351,9 +351,9 @@ class TestBacktestLogger:
     def test_log_error_writes_jsonl(self, tmp_path):
         """log_error 写入错误 JSONL."""
         import json
-        from backtest_logger import log_error
+        from services.backtest_logger import log_error
 
-        with patch("backtest_logger.LOG_DIR", tmp_path):
+        with patch("services.backtest_logger.LOG_DIR", tmp_path):
             log_error("TSLA", "_sync_to_display", "数据库连接超时")
 
             record = json.loads(list(tmp_path.glob("*.jsonl"))[0].read_text().strip())
@@ -363,10 +363,10 @@ class TestBacktestLogger:
 
     def test_log_dir_auto_created(self, tmp_path):
         """日志目录自动创建."""
-        from backtest_logger import _ensure_dir
+        from services.backtest_logger import _ensure_dir
 
         logs = tmp_path / "nested" / "backtest_logs"
-        with patch("backtest_logger.LOG_DIR", logs):
+        with patch("services.backtest_logger.LOG_DIR", logs):
             _ensure_dir()
             assert logs.exists()
             assert logs.is_dir()

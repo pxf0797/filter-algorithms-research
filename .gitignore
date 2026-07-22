@@ -16,13 +16,12 @@ data/*-wal
 data/snapshots/
 data/pipeline_captures/
 data/display/
-filter_app/data/display/
 .env
 .gstack/
 .coverage
 htmlcov/
 .pytest_cache/
-config/
+data/backtest_config.json
 data/backtest_logs/
 data/backtest_output/
 backtest_output/

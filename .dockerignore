@@ -8,3 +8,11 @@ __pycache__
 .env
 venv/
 *.egg-info/
+docs/
+tools/
+web_tool/
+tests/
+data/
+config/
+.github/
+*.md

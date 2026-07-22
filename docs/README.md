@@ -6,7 +6,7 @@
 |------|------|
 | [architecture/engineering-design-overview.md](architecture/engineering-design-overview.md) | **工程设计总览（据实）**：据当前代码实测撰写，标注函数名与文件行号 |
 | [strategy/strategy_documentation.md](strategy/strategy_documentation.md) | **策略体系总览 v1.4**：滤波算法、施密特触发器、预测曲线、交叉PnL分析 |
-| [test_cases.md](test_cases.md) | **测试用例参考**：按测试文件组织的用例索引（830+ 用例） |
+| [testing/test_cases.md](testing/test_cases.md) | **测试用例参考**：按测试文件组织的用例索引（830+ 用例） |
 
 ---
 
@@ -26,6 +26,9 @@
 | [data-freshness.md](architecture/data-freshness.md) | 数据新鲜度说明：日线最后一条bar NaN问题与修复 |
 | [config-param-persistence.md](architecture/config-param-persistence.md) | 配置参数持久化：单一真源机制，解决参数漏保存 |
 | [config-db-proposal.md](architecture/config-db-proposal.md) | 配置管理方案：DB + UI 预设选择器迁移设计 |
+| [backtest-capture-framework.md](architecture/backtest-capture-framework.md) | 回测数据采集框架设计 |
+| [implementation-spec.md](architecture/implementation-spec.md) | 实现规格 — 回测数据采集系统 MVP |
+| [gap-analysis.md](architecture/gap-analysis.md) | 缺口分析（2026-07-21） |
 
 ## 回测 (backtesting/)
 
@@ -33,23 +36,27 @@
 
 | 文档 | 说明 |
 |------|------|
-| [final-report.md](backtesting/final-report.md) | **回测最终状态报告**（2026-07-04） |
-| [half-pair-trading-strategy-v4.md](backtesting/half-pair-trading-strategy-v4.md) | **半边多空对交易策略 v4（最新）**：断续多空对质量甄别 |
-| [cascading-synthesis.md](backtesting/cascading-synthesis.md) | 回测数据级联合成方案 v2（合并版） |
-| [comparison-report.md](backtesting/comparison-report.md) | 浏览模式 vs 回测模式完整差异报告 |
-| [data-analysis.md](backtesting/data-analysis.md) | 回测数据加载流程完整分析（2026-07-05） |
-| [logic-change-analysis.md](backtesting/logic-change-analysis.md) | 回测模式变更前后逐行逻辑对比 |
-| [play-analysis.md](backtesting/play-analysis.md) | 前进下一个bar vs 播放逻辑差异分析 |
-| [redesign-v2.md](backtesting/redesign-v2.md) | 回测框架重构方案 v2 |
-| [before-after-comparison.md](backtesting/before-after-comparison.md) | 回测数据流变更前后完整对比 |
-| [pair-based-strategy-plan.md](backtesting/pair-based-strategy-plan.md) | 基于多空对的B周期交易策略（完善版） |
-| [b-cycle-gating-plan.md](backtesting/b-cycle-gating-plan.md) | B周期同向门控交易方案 |
-| [change-point-trading-plan.md](backtesting/change-point-trading-plan.md) | 周期变化点监测与交易方案（五层体系+六种模式） |
-| [strategy-improvement-plan.md](backtesting/strategy-improvement-plan.md) | 策略改进方案（2026-07-07） |
-| [pnl-design-doc.md](backtesting/pnl-design-doc.md) | PnL计算模块设计文档（As-Built，commit 1a4ecd7） |
-| [pnl-implementation-design-spec.md](backtesting/pnl-implementation-design-spec.md) | PnL实现设计说明书（基于1a4ecd7） |
-| [cross-period-position-state-design.md](backtesting/cross-period-position-state-design.md) | 高周期持仓状态色块设计（替代高周期PnL参考） |
-| [long-entry-drop-rootcause.md](backtesting/long-entry-drop-rootcause.md) | 根因分析：做多入场被静默丢弃（3690 60min复现） |
+| [final-report.md](archive/final-report.md) | **回测最终状态报告**（2026-07-04） |
+| [half-pair-trading-strategy-v4.md](archive/half-pair-trading-strategy-v4.md) | **半边多空对交易策略 v4（最新）**：断续多空对质量甄别 |
+| [cascading-synthesis.md](archive/cascading-synthesis.md) | 回测数据级联合成方案 v2（合并版） |
+| [comparison-report.md](archive/comparison-report.md) | 浏览模式 vs 回测模式完整差异报告 |
+| [data-analysis.md](archive/data-analysis.md) | 回测数据加载流程完整分析（2026-07-05） |
+| [logic-change-analysis.md](archive/logic-change-analysis.md) | 回测模式变更前后逐行逻辑对比 |
+| [play-analysis.md](archive/play-analysis.md) | 前进下一个bar vs 播放逻辑差异分析 |
+| [redesign-v2.md](archive/redesign-v2.md) | 回测框架重构方案 v2 |
+| [before-after-comparison.md](archive/before-after-comparison.md) | 回测数据流变更前后完整对比 |
+| [pair-based-strategy-plan.md](archive/pair-based-strategy-plan.md) | 基于多空对的B周期交易策略（完善版） |
+| [b-cycle-gating-plan.md](archive/b-cycle-gating-plan.md) | B周期同向门控交易方案 |
+| [change-point-trading-plan.md](archive/change-point-trading-plan.md) | 周期变化点监测与交易方案（五层体系+六种模式） |
+| [pnl-design-doc.md](archive/pnl-design-doc.md) | PnL计算模块设计文档（As-Built，commit 1a4ecd7） |
+| [pnl-implementation-design-spec.md](archive/pnl-implementation-design-spec.md) | PnL实现设计说明书（基于1a4ecd7） |
+| [cross-period-position-state-design.md](archive/cross-period-position-state-design.md) | 高周期持仓状态色块设计（替代高周期PnL参考） |
+| [long-entry-drop-rootcause.md](archive/long-entry-drop-rootcause.md) | 根因分析：做多入场被静默丢弃（3690 60min复现） |
+| [回测信号稳定性-行业研究.md](backtesting/回测信号稳定性-行业研究.md) | 回测信号稳定性行业研究 |
+| [回测数据CLI存储方案设计.md](backtesting/回测数据CLI存储方案设计.md) | 回测数据CLI存储方案设计 |
+| [回测数据分析示例.md](backtesting/回测数据分析示例.md) | 回测数据分析示例 |
+| [backtest-capture-guide.md](backtesting/backtest-capture-guide.md) | 回测数据采集使用指南 |
+| [example-run-results.md](backtesting/example-run-results.md) | 回测采集示例运行结果 |
 
 ## 策略 (strategy/)
 
@@ -93,6 +100,9 @@
 | [axis-diagnosis.md](testing/axis-diagnosis.md) | 价格子图定位bug诊断报告 |
 | [data_computation_test_cases.md](testing/data_computation_test_cases.md) | 数据计算测试用例 |
 | [ui_test_cases.md](testing/ui_test_cases.md) | UI交互测试用例 v1.1.0（6大交互域） |
+| [test_cases.md](testing/test_cases.md) | 测试用例参考（830+ 用例，按模块组织） |
+| [PnL与信号不一致根因分析.md](testing/PnL与信号不一致根因分析.md) | PnL与信号不一致根因分析 |
+| [版本对比信号差异分析.md](testing/版本对比信号差异分析.md) | 版本对比信号差异分析 |
 
 ## 券商接口 (broker/)
 
@@ -116,6 +126,8 @@
 |------|------|
 | [KNOWN_ISSUES.md](development/KNOWN_ISSUES.md) | 已知问题列表 |
 | [all-issues-tracker.md](development/all-issues-tracker.md) | 回测级联合成完整问题追踪清单（2026-07-05） |
+| [分支整理与优化路线图.md](development/分支整理与优化路线图.md) | 分支整理与优化路线图 |
+| [当前分支变更参考.md](development/当前分支变更参考.md) | 当前分支变更参考 |
 
 ## 归档 (archive/)
 
@@ -136,9 +148,14 @@
 | [half-pair-trading-strategy-v3.md](archive/half-pair-trading-strategy-v3.md) | 半边多空对交易策略 v3（已归档） |
 | [pnl-feedback-position-process-v0.md](archive/pnl-feedback-position-process-v0.md) | PnL反馈驱动持仓 v0骨架（已废弃） |
 | [pnl-feedback-position-process-v1.md](archive/pnl-feedback-position-process-v1.md) | PnL反馈驱动持仓 v1（已废弃，SUPERSEDED） |
+| [3690回测数据分析报告.md](archive/3690回测数据分析报告.md) | 3690回测数据分析报告 |
+| [BS点位跳跃深度分析报告.md](archive/BS点位跳跃深度分析报告.md) | BS点位跳跃深度分析报告 |
+| [Streamlit状态还原可行性分析.md](archive/Streamlit状态还原可行性分析.md) | Streamlit状态还原可行性分析 |
+| [今日工作总结与优化建议.md](archive/今日工作总结与优化建议.md) | 今日工作总结与优化建议 |
+| [research-20260707/final-report.md](archive/research-20260707/final-report.md) | 策略改进方案 (final-report.md) |
 | [research-20260707/](archive/research-20260707/) | 2026-07-07策略研究系列（17篇，见子目录） |
 | [superpowers/](archive/superpowers/) | Superpowers计划与规格（与项目代码无关） |
 
 ---
 
-*最后更新：2026-07-12*
+*最后更新：2026-07-22*
