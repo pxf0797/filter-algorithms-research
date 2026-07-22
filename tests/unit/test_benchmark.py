@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 # ── Ensure tools/ is importable ──────────────────────────────────────────────
-_TOOLS = Path(__file__).resolve().parent.parent / "tools"
+_TOOLS = Path(__file__).resolve().parents[2] / "tools"
 if str(_TOOLS) not in sys.path:
     sys.path.insert(0, str(_TOOLS))
 

@@ -25,7 +25,7 @@ def app():
     # 2. 延迟导入 AppTest (此时 streamlit 已恢复)
     from streamlit.testing.v1 import AppTest
 
-    _app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "filter_app"))
+    _app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../..", "filter_app"))
     _script = os.path.join(_app_dir, "streamlit_app.py")
     sys.path.insert(0, _app_dir)
     cwd = os.getcwd()
@@ -79,7 +79,7 @@ def _fresh_app():
     _fix_streamlit()
     from streamlit.testing.v1 import AppTest
 
-    _app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "filter_app"))
+    _app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../..", "filter_app"))
     _script = os.path.join(_app_dir, "streamlit_app.py")
     sys.path.insert(0, _app_dir)
     cwd = os.getcwd()

@@ -271,7 +271,7 @@ class TestGetBarDateFromDb:
 
     def test_returns_date_when_found(self):
         """查询到日期时返回字符串."""
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "filter_app"))
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "filter_app"))
         from filter_app.components.backtest_panel import _get_bar_date_from_db
 
         mock_conn = MagicMock()
@@ -304,7 +304,7 @@ class TestBacktestLogger:
 
     def test_log_mode_switch_writes_jsonl(self, tmp_path):
         """log_mode_switch 写入一条 JSONL 记录."""
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "filter_app"))
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "filter_app"))
         import json
         from services.backtest_logger import log_mode_switch
 

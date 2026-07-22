@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 # Ensure filter_app/ package is importable (conftest handles streamlit mock)
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+_src = Path(__file__).resolve().parents[2] / "filter_app"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 

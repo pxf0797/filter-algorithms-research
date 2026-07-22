@@ -10,7 +10,7 @@ Smoke tests for holding-state bands & layout insertion.
 
 import numpy as np
 from components.charts import _contiguous_runs, _draw_holding_bands
-from streamlit_app import _insert_feedback_row, _add_feedback_subplot
+from components.chart_builder import _insert_feedback_row, _add_feedback_subplot
 
 
 def test_contiguous_runs():

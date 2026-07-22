@@ -9,7 +9,7 @@ P2 fix: 前端持仓叠加带测试。
 from pathlib import Path
 
 
-HTML_PATH = Path(__file__).resolve().parent.parent / "docs" / "backtesting" / "回测结果可视化.html"
+HTML_PATH = Path(__file__).resolve().parents[2] / "docs" / "backtesting" / "回测结果可视化.html"
 
 
 class TestHtmlPositionOverlay:

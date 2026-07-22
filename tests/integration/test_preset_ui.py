@@ -18,7 +18,7 @@ import pytest
 # 这里手工补路径以确保模块级导入成功
 # ============================================================
 
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+_src = Path(__file__).resolve().parents[2] / "filter_app"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 

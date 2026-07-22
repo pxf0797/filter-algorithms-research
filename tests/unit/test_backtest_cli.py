@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch, ANY
 import pytest
 
 # Ensure filter_app is importable
-_filter_app = Path(__file__).resolve().parent.parent / "filter_app"
+_filter_app = Path(__file__).resolve().parents[2] / "filter_app"
 if str(_filter_app) not in sys.path:
     sys.path.insert(0, str(_filter_app))
 

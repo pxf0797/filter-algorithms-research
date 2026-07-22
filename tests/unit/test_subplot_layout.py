@@ -4,7 +4,7 @@
 import numpy as np
 import pandas as pd
 from plotly.subplots import make_subplots
-from streamlit_app import (
+from components.chart_builder import (
     _add_main_price_traces, _add_residual_traces, _add_schmitt_traces,
     _add_pnl_traces, _add_feedback_subplot, _determine_subplot_layout,
     _insert_feedback_row,

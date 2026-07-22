@@ -41,8 +41,11 @@ jobs:
     - name: Type check with mypy
       run: mypy filter_app/ --ignore-missing-imports --follow-imports=skip
 
-    - name: Run tests (with streamlit mock)
-      run: python -m pytest tests/ --ignore=tests/test_app_ui.py --ignore=tests/test_app_smoke.py --ignore=tests/test_streamlit_app.py --cov=filter_app --cov-report=term --cov-fail-under=55 --tb=short -q
+    - name: Run unit tests
+      run: python -m pytest tests/unit/ --cov=filter_app --cov-report=term --cov-fail-under=55 --tb=short -q
 
-    - name: Run AppTest UI tests (real streamlit)
-      run: python -m pytest tests/test_app_ui.py tests/test_app_smoke.py tests/test_streamlit_app.py --cov=filter_app --cov-append -q --tb=short
+    - name: Run integration tests
+      run: python -m pytest tests/integration/ --cov=filter_app --cov-append --tb=short -q
+
+    - name: Run E2E tests
+      run: python -m pytest tests/e2e/ --cov=filter_app --cov-append -q --tb=short

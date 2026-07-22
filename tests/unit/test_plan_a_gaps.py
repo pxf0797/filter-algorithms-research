@@ -24,7 +24,7 @@ from components.charts import (
     _draw_holding_bands, _add_cross_pnl_subplot,
     _add_alignment_subplot, _add_prediction_traces,
 )
-from streamlit_app import (
+from components.chart_builder import (
     _add_feedback_subplot, _add_schmitt_traces,
 )
 
@@ -429,7 +429,7 @@ class TestFigureMixedShapesAnnotations:
         ]
 
         # 从 _add_pnl_traces 获取 traces/shapes/annotations
-        from streamlit_app import _add_pnl_traces
+        from components.chart_builder import _add_pnl_traces
         pnl_traces, pnl_shapes, pnl_annotations, pnl_yaxes = _add_pnl_traces(
             t, long_pnl, short_pnl, trades, pnl_row=4)
 

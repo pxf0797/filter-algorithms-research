@@ -10,7 +10,7 @@ import pandas as pd
 import pytest
 
 # Ensure tools/ is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools"))
 import view_backtest as vb
 
 

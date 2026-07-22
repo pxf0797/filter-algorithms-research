@@ -1,9 +1,11 @@
 """参数导入导出测试：验证导出JSON完整性、_imp_备份覆盖、自动检测参数变更"""
 import json
+import sys
+from pathlib import Path
+
 import pytest
 import numpy as np
 from unittest.mock import MagicMock, patch
-import sys
 
 from config_db import VIEW_PARAM_SPECS
 
@@ -17,7 +19,7 @@ REQUIRED_PER_VIEW_KEYS = [suffix for suffix, _, _ in VIEW_PARAM_SPECS]
 
 REQUIRED_GLOBAL_KEYS = ["market", "ticker", "global_f", "global_dual", "global_f2"]
 
-CONFIG_PATH = "/Users/xfpan/claude/filter_research/config/3690_HK_DP.json"
+CONFIG_PATH = str(Path(__file__).resolve().parents[2] / "config" / "3690_HK_DP.json")
 
 
 class TestExportCompleteness:
@@ -25,7 +27,7 @@ class TestExportCompleteness:
 
     def test_all_per_view_keys_exported(self):
         """导出函数(registry 驱动)包含每个视图的全部参数(含新增 pnlfb)"""
-        from streamlit_app import _view_export_params
+        from components.presets import _view_export_params
         # 合成一个含全部 cfg 键的视图配置
         cfg = {cfg_key: (default if default is not None else "x")
                for _, cfg_key, default in VIEW_PARAM_SPECS}
@@ -368,8 +370,7 @@ class TestParamRegistryGuard:
         解析 sidebar.py 源码里的 cfg["..."]= 赋值；新增参数若忘了接入清单，此测试失败。
         """
         import re
-        from pathlib import Path
-        sidebar_src = (Path(__file__).resolve().parent.parent
+        sidebar_src = (Path(__file__).resolve().parents[2]
                        / "filter_app" / "components" / "sidebar.py")
         src = sidebar_src.read_text(encoding="utf-8")
         assigned = set(re.findall(r'cfg\["([a-z_0-9]+)"\]\s*=', src))
@@ -384,7 +385,7 @@ class TestParamRegistryGuard:
 
     def test_export_helper_covers_pnlfb(self):
         """JSON 导出函数包含 v{i}_pnlfb。"""
-        from streamlit_app import _view_export_params
+        from components.presets import _view_export_params
         out = _view_export_params({"show_pnl_feedback": True}, 2)
         assert out["v2_pnlfb"] is True
 
@@ -400,7 +401,7 @@ class TestParamRegistryGuard:
 
     def test_json_roundtrip_pnlfb(self):
         """JSON 导出→序列化→读回：pnlfb 值被保留。"""
-        from streamlit_app import _view_export_params
+        from components.presets import _view_export_params
         exported = _view_export_params({"show_pnl_feedback": True}, 0)
         blob = json.loads(json.dumps(exported))     # 模拟 download→upload
         assert blob["v0_pnlfb"] is True
