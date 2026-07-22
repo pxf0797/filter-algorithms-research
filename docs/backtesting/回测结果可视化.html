@@ -1409,7 +1409,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     Plotly.newPlot('chart-dash-' + v, traces, layout, plotConfig);
 
     // ── Cross-subplot cursor line + date tooltip (throttled, per Streamlit pattern) ──
-    var _lastXv = -Infinity, _pending = false, _pendingXv = null, _THROTTLE = 45;
+    var _lastXv = -Infinity, _pending = false, _pendingXv = null, _inRelayout = false, _THROTTLE = 45;
     function _nearestIdx(arr, xv) {
       var lo = 0, hi = arr.length - 1;
       if (xv <= arr[lo]) return lo;
@@ -1420,11 +1420,13 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     var _tip = document.getElementById('date-tip-' + v);
 
     function _applyCrosshair(xv) {
-      _pending = false;
+      if (_inRelayout) return;
+      _inRelayout = true;
       var _update = {};
       _update['shapes[' + cursorShapeIdx + '].x0'] = xv;
       _update['shapes[' + cursorShapeIdx + '].x1'] = xv;
       Plotly.relayout('chart-dash-' + v, _update);
+      _pending = false;
       _lastXv = xv;
       if (_tip && barTs && barTs.length > 0) {
         var idx = _nearestIdx(barIdx, xv);
@@ -1432,9 +1434,11 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         if (_tip.textContent) _tip.style.display = 'block';
         else _tip.style.display = 'none';
       }
+      _inRelayout = false;
     }
 
     var dashChartEl = document.getElementById('chart-dash-' + v);
+    dashChartEl.removeAllListeners('plotly_hover');
     dashChartEl.on('plotly_hover', function(eventData) {
       var xv = eventData.xvals[0];
       if (xv === _lastXv) return;
@@ -1449,6 +1453,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       }
     });
 
+    dashChartEl.removeAllListeners('plotly_unhover');
     dashChartEl.on('plotly_unhover', function() {
       _pending = false; _pendingXv = null; _lastXv = -Infinity;
       var _update2 = {};
@@ -1458,7 +1463,10 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       if (_tip) _tip.style.display = 'none';
     });
 
-    document.getElementById('chart-dash-' + v).addEventListener('mousemove', function(e) {
+    if (dashChartEl._mousemoveH) {
+      dashChartEl.removeEventListener('mousemove', dashChartEl._mousemoveH);
+    }
+    dashChartEl._mousemoveH = function(e) {
       if (_tip && _tip.style.display === 'block') {
         var tx = e.clientX + 16;
         var tw = _tip.offsetWidth || 100;
@@ -1467,7 +1475,8 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         _tip.style.left = tx + 'px';
         _tip.style.top = (e.clientY - 28) + 'px';
       }
-    });
+    };
+    dashChartEl.addEventListener('mousemove', dashChartEl._mousemoveH);
   }
 
   // --- Section 6: Trade Events & BS Markers ---
@@ -1766,6 +1775,10 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     buildHeatmap(data);
 
     // Per-period dashboards (unified subplot: 4 rows, shared x-axis)
+    // Purge old chart state before rebuilding (handles file re-upload scenario)
+    VIEWS.forEach(function(v) {
+      Plotly.purge('chart-dash-' + v);
+    });
     VIEWS.forEach(function(v) {
       buildPeriodDashboard(data, v, viewLabels[v]);
     });
