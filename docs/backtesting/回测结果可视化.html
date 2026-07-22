@@ -244,6 +244,25 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   white-space: nowrap;
 }
 
+/* Reset zoom button */
+.btn-reset-zoom {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 4px 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card);
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-reset-zoom:hover {
+  border-color: var(--blue);
+  color: var(--text-hl);
+  background: rgba(88,166,255,0.06);
+}
+
 /* Schema table */
 .schema-table-wrap { overflow-x: auto; }
 .schema-table {
@@ -384,24 +403,28 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D1</span> 日线 完整视图</div>
     <div class="plot-wrap" style="height:520px"><div id="chart-dash-v0"></div></div>
+    <button onclick="Plotly.relayout('chart-dash-v0', {'xaxis.autorange': true, 'xaxis2.autorange': true, 'xaxis3.autorange': true, 'xaxis4.autorange': true})" class="btn-reset-zoom">↺ 重置缩放</button>
     <div id="date-tip-v0" class="date-tip"></div>
   </div>
 
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D2</span> 60分钟 完整视图</div>
     <div class="plot-wrap" style="height:520px"><div id="chart-dash-v1"></div></div>
+    <button onclick="Plotly.relayout('chart-dash-v1', {'xaxis.autorange': true, 'xaxis2.autorange': true, 'xaxis3.autorange': true, 'xaxis4.autorange': true})" class="btn-reset-zoom">↺ 重置缩放</button>
     <div id="date-tip-v1" class="date-tip"></div>
   </div>
 
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D3</span> 15分钟 完整视图</div>
     <div class="plot-wrap" style="height:520px"><div id="chart-dash-v2"></div></div>
+    <button onclick="Plotly.relayout('chart-dash-v2', {'xaxis.autorange': true, 'xaxis2.autorange': true, 'xaxis3.autorange': true, 'xaxis4.autorange': true})" class="btn-reset-zoom">↺ 重置缩放</button>
     <div id="date-tip-v2" class="date-tip"></div>
   </div>
 
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D4</span> 5分钟 完整视图</div>
     <div class="plot-wrap" style="height:520px"><div id="chart-dash-v3"></div></div>
+    <button onclick="Plotly.relayout('chart-dash-v3', {'xaxis.autorange': true, 'xaxis2.autorange': true, 'xaxis3.autorange': true, 'xaxis4.autorange': true})" class="btn-reset-zoom">↺ 重置缩放</button>
     <div id="date-tip-v3" class="date-tip"></div>
   </div>
   <!-- Section 6: Trade Events -->
@@ -466,7 +489,13 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 	  }
 
   // ========== Plotly config ==========
-  const plotConfig = { displayModeBar: false, responsive: true };
+  const plotConfig = {
+    displayModeBar: true,
+    responsive: true,
+    modeBarButtonsToRemove: ['lasso2d', 'select2d', 'sendDataToCloud'],
+    displaylogo: false,
+    scrollZoom: true,
+  };
   const baseFont = { color: '#c9d1d9', size: 11 };
   const hoverLabelStyle = { bgcolor: '#21262d', bordercolor: '#30363d', font: { color: '#f0f6fc', size: 11 } };
   const spikeConf = { showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' };

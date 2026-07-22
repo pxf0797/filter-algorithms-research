@@ -1028,3 +1028,56 @@ class TestListenerCleanup:
             "Plotly.purge must be inside renderAll function"
         assert builddash_pos > purge_pos, \
             "Plotly.purge must be called BEFORE buildPeriodDashboard (purge then rebuild)"
+
+
+# ============================================================
+# Zoom controls tests
+# ============================================================
+
+
+class TestZoomControls:
+    """Zoom-in/out and reset-zoom functionality for period dashboards."""
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_reset_zoom_buttons_exist(self):
+        """4 个 .btn-reset-zoom 按钮存在，每个 period dashboard 一个。"""
+        html = self._read_html()
+        count = html.count('class="btn-reset-zoom"')
+        assert count == 4, \
+            f"Expected 4 .btn-reset-zoom buttons, got {count}"
+
+    def test_scroll_zoom_in_plot_config(self):
+        """plotConfig 包含 scrollZoom: true。"""
+        html = self._read_html()
+        assert "scrollZoom: true" in html, \
+            "plotConfig must include scrollZoom: true for scroll-to-zoom"
+
+    def test_autorange_in_reset_button(self):
+        """reset 按钮的 Plotly.relayout 调用使用 autorange 重置 zoom。"""
+        html = self._read_html()
+        assert "xaxis.autorange" in html, \
+            "Reset zoom button must use autorange on xaxes"
+        assert "xaxis2.autorange" in html, \
+            "Reset zoom button must auto-range xaxis2"
+        assert "xaxis3.autorange" in html, \
+            "Reset zoom button must auto-range xaxis3"
+        assert "xaxis4.autorange" in html, \
+            "Reset zoom button must auto-range xaxis4"
+
+    def test_reset_not_in_modebar_buttons_to_remove(self):
+        """reset 不在 modeBarButtonsToRemove 中（双击重置缩放可用）。"""
+        html = self._read_html()
+        assert "modeBarButtonsToRemove" in html, \
+            "plotConfig must define modeBarButtonsToRemove"
+        # 'reset' should NOT be in the remove list
+        modebar_line = None
+        for line in html.split("\n"):
+            if "modeBarButtonsToRemove" in line:
+                modebar_line = line
+                break
+        assert modebar_line is not None, "modeBarButtonsToRemove line not found"
+        assert "reset" not in modebar_line or "reset" in modebar_line and "'reset'" not in modebar_line, \
+            "'reset' must NOT be in modeBarButtonsToRemove (double-click reset should work)"
