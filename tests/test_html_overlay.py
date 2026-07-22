@@ -1081,3 +1081,47 @@ class TestZoomControls:
         assert modebar_line is not None, "modeBarButtonsToRemove line not found"
         assert "reset" not in modebar_line or "reset" in modebar_line and "'reset'" not in modebar_line, \
             "'reset' must NOT be in modeBarButtonsToRemove (double-click reset should work)"
+
+
+class TestClosePriceLine:
+    """Close price line additions: thin gray reference line in filtered
+    overview (Section 2) and each period dashboard Row 1.
+    """
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_close_price_trace_name_appears(self):
+        """收盘价 appears as a trace name in the HTML."""
+        html = self._read_html()
+        assert "name: '收盘价'" in html, \
+            "HTML must contain a trace named 收盘价"
+
+    def test_close_price_uses_semi_transparent_color(self):
+        """Close price trace uses a semi-transparent gray/white color with alpha."""
+        html = self._read_html()
+        assert "rgba(200,200,200,0.3)" in html, \
+            "Close price must use rgba(200,200,200,0.3) for semi-transparent gray"
+
+    def test_close_price_in_both_build_filtered_overview_and_period_dashboard(self):
+        """Close price appears in both buildFilteredOverview and buildPeriodDashboard."""
+        html = self._read_html()
+        # Count occurrences of the close price trace push
+        count = html.count("name: '收盘价'")
+        assert count >= 2, \
+            "Close price trace must appear in both buildFilteredOverview and " \
+            f"buildPeriodDashboard (expected >=2, got {count})"
+
+    def test_close_price_guarded_by_length_check(self):
+        """Close price trace is guarded by if (closePrice && closePrice.length > 0) check."""
+        html = self._read_html()
+        # Both occurrences have a guard pattern
+        assert "closePrice && closePrice.length > 0" in html, \
+            "Close price trace must be guarded by data existence check"
+
+    def test_close_price_line_width_is_1(self):
+        """Close price line has width: 1 for thin reference line."""
+        html = self._read_html()
+        assert "width: 1, color: 'rgba(200,200,200,0.3)'" in html, \
+            "Close price must have line width 1 with semi-transparent gray"

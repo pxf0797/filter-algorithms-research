@@ -42,6 +42,7 @@ _VIEW_COLUMNS: list[str] = [
 _FIXED_FIELDS: list[tuple[str, pa.DataType]] = [
     ("bar_index", pa.int32()),
     ("bar_timestamp", pa.timestamp("ns")),
+    ("close", pa.float32()),
 ]
 
 _VIEW_COLUMN_TYPES: dict[str, pa.DataType] = {
@@ -349,6 +350,7 @@ class ParquetStore:
         row: dict[str, Any] = {
             "bar_index": bar_index,
             "bar_timestamp": _to_timestamp_ns(bar_timestamp),
+            "close": float(stage_outputs.get("ohlcv", {}).get("close", float("nan"))),
         }
 
         # Compute the current bar's date for date-based BS/trade matching

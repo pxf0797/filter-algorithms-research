@@ -646,6 +646,18 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       v3: '#f85149', // red
     };
 
+    // Close price (raw, thin gray — background reference)
+    var closePrice = col(data, 'close');
+    if (closePrice && closePrice.length > 0) {
+      traces.push({
+        x: barIdx, y: closePrice,
+        type: 'scatter', mode: 'lines',
+        name: '收盘价',
+        line: { width: 1, color: 'rgba(200,200,200,0.3)' },
+        showlegend: true,
+      });
+    }
+
     // Add filtered price lines for all 4 views
     VIEWS.forEach(function(v) {
       var filtered = col(data, v + '_filtered');
@@ -1178,6 +1190,19 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     const eps = col(data, v + '_eps');
     const epsUpper = filtered.map(function(f, i) { return toNum(f) + toNum(eps[i]); });
     const epsLower = filtered.map(function(f, i) { return toNum(f) - toNum(eps[i]); });
+
+    // Close price (raw, thin gray — background reference)
+    var closePriceDash = col(data, 'close');
+    if (closePriceDash && closePriceDash.length > 0) {
+      traces.push({
+        x: barIdx, y: closePriceDash,
+        type: 'scatter', mode: 'lines',
+        name: '收盘价',
+        line: { width: 1, color: 'rgba(200,200,200,0.3)' },
+        xaxis: 'x', yaxis: 'y',
+        showlegend: true,
+      });
+    }
 
     traces.push({
       x: barIdx, y: filtered,
