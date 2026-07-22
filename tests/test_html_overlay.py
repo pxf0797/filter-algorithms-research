@@ -902,3 +902,129 @@ class TestHtmlDomStructure:
         html = self._read_html()
         assert 'id="table-wrap"' in html, \
             "Section 8 must contain table-wrap div for data table"
+
+
+# ============================================================
+# Freeze-prevention regression tests
+# ============================================================
+
+
+class TestRelayoutGuard:
+    """Freeze prevention: _inRelayout guard prevents recursive relayout calls.
+
+    Period dashboard hover/unhover handlers call Plotly.relayout to move the
+    cross-subplot cursor shape.  Without a guard, relayout callbacks could
+    re-trigger the hover handler and cause infinite recursion (freezing the tab).
+    """
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_in_relayout_flag_exists(self):
+        """``_inRelayout`` flag is declared in the crosshair handler variables."""
+        html = self._read_html()
+        assert "_inRelayout" in html, \
+            "JS must declare _inRelayout flag for relayout recursion guard"
+        # Verify it appears in the var declaration alongside other crosshair vars
+        assert "var _lastXv" in html and "_inRelayout" in html, \
+            "_inRelayout must be declared in the crosshair variable block"
+
+    def test_in_relayout_checked_before_relayout(self):
+        """``_inRelayout`` is checked with early return BEFORE calling relayout."""
+        html = self._read_html()
+        assert "if (_inRelayout) return" in html, \
+            "_inRelayout must be guarded with early return before relayout"
+
+    def test_pending_false_set_after_relayout(self):
+        """``_pending = false`` is set AFTER ``Plotly.relayout`` call (not before).
+
+        Setting _pending before relayout would prematurely clear the throttle
+        state, causing multiple concurrent relayout calls.
+        """
+        html = self._read_html()
+        # The relayout call and the _pending reset must both exist
+        assert "Plotly.relayout('chart-dash-' + v, _update)" in html, \
+            "relayout call must exist in _applyCrosshair"
+        assert "_pending = false" in html, \
+            "_pending reset must exist"
+        # Verify _pending = false appears after relayout in the _applyCrosshair function
+        relayout_pos = html.find("Plotly.relayout('chart-dash-' + v, _update)")
+        pending_pos_after = html.find("_pending = false", relayout_pos)
+        assert pending_pos_after > relayout_pos, \
+            "_pending = false must appear AFTER the relayout call, not before"
+
+    def test_in_relayout_reset_after_work(self):
+        """``_inRelayout = false`` reset exists to re-enable the guard.
+
+        After relayout completes (and date-tip is updated), the flag must be
+        cleared so subsequent mouse moves can trigger relayout again.
+        """
+        html = self._read_html()
+        assert "_inRelayout = false" in html, \
+            "_inRelayout must be reset to false after relayout completes"
+
+
+class TestListenerCleanup:
+    """Freeze prevention: listener cleanup before re-registering.
+
+    Without removing old listeners before adding new ones (e.g. on file
+    re-upload), stale event handlers accumulate and can fire concurrently,
+    causing race conditions and tab freezes.
+    """
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_remove_all_listeners_plotly_hover_before_on(self):
+        """``removeAllListeners('plotly_hover')`` called before ``.on('plotly_hover')``."""
+        html = self._read_html()
+        assert "removeAllListeners('plotly_hover')" in html, \
+            "Must remove old plotly_hover listeners before re-registering"
+        assert ".on('plotly_hover'" in html, \
+            "Must re-register plotly_hover handler"
+        # Verify removeAllListeners comes before .on in the source
+        rm_pos = html.find("removeAllListeners('plotly_hover'")
+        on_pos = html.find(".on('plotly_hover'", rm_pos)
+        assert on_pos > rm_pos, \
+            "removeAllListeners('plotly_hover') must appear before .on('plotly_hover')"
+
+    def test_remove_all_listeners_plotly_unhover_before_on(self):
+        """``removeAllListeners('plotly_unhover')`` called before ``.on('plotly_unhover')``."""
+        html = self._read_html()
+        assert "removeAllListeners('plotly_unhover')" in html, \
+            "Must remove old plotly_unhover listeners before re-registering"
+        assert ".on('plotly_unhover'" in html, \
+            "Must re-register plotly_unhover handler"
+        # Verify removeAllListeners comes before .on in the source
+        rm_pos = html.find("removeAllListeners('plotly_unhover'")
+        on_pos = html.find(".on('plotly_unhover'", rm_pos)
+        assert on_pos > rm_pos, \
+            "removeAllListeners('plotly_unhover') must appear before .on('plotly_unhover')"
+
+    def test_remove_event_listener_for_mousemove_cleanup(self):
+        """``removeEventListener`` used to clean up old mousemove handler before reassigning."""
+        html = self._read_html()
+        assert "removeEventListener('mousemove'" in html, \
+            "Must use removeEventListener to clean up old mousemove handler"
+        assert "dashChartEl._mousemoveH" in html, \
+            "Must reference dashChartEl._mousemoveH for handler cleanup"
+
+    def test_plotly_purge_called_in_render_all_before_rebuilding(self):
+        """``Plotly.purge`` called in renderAll before rebuilding dashboards.
+
+        On file re-upload, renderAll is called again.  Without purging, old
+        Plotly chart state leaks and can cause stale event handlers to fire.
+        """
+        html = self._read_html()
+        assert "Plotly.purge('chart-dash-' + v)" in html, \
+            "renderAll must call Plotly.purge on each chart-dash before rebuild"
+        # Verify purge appears within the renderAll function body
+        renderall_pos = html.find("function renderAll")
+        purge_pos = html.find("Plotly.purge('chart-dash-' + v)", renderall_pos)
+        builddash_pos = html.find("buildPeriodDashboard", purge_pos)
+        assert purge_pos > renderall_pos > 0, \
+            "Plotly.purge must be inside renderAll function"
+        assert builddash_pos > purge_pos, \
+            "Plotly.purge must be called BEFORE buildPeriodDashboard (purge then rebuild)"
