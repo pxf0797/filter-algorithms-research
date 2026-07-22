@@ -187,13 +187,12 @@ class TestPeriodDashboardStructure:
         assert "5分钟 完整视图" in html, "Period dashboard for 5分钟 must exist"
 
     def test_period_dashboard_chart_ids_for_all_views(self):
-        """每个 period-dashboard 包含正确的 chart div ID（filtered/signal/pnl/heatmap × 4 views）。"""
+        """每个 period-dashboard 包含正确的 chart div ID（chart-dash-v0 到 chart-dash-v3）。"""
         html = self._read_html()
         for v in ("v0", "v1", "v2", "v3"):
-            for chart_type in ("chart-filtered", "chart-signal", "chart-pnl", "chart-heatmap"):
-                chart_id = f'{chart_type}-{v}'
-                assert f'id="{chart_id}"' in html, \
-                    f"HTML must contain chart div with id={chart_id}"
+            chart_id = f"chart-dash-{v}"
+            assert f'id="{chart_id}"' in html, \
+                f"HTML must contain chart div with id={chart_id}"
 
     def test_shared_x_axis_grid_layout(self):
         """共享 x 轴使用 grid rows=nViews, columns=1 子图布局。"""
@@ -448,12 +447,12 @@ class TestCrossSubplotCursor:
             "HTML must register plotly_unhover handler on dashChartEl"
 
     def test_cursor_hidden_on_unhover(self):
-        """unhover 时将 shape 移动至 x=-1 (off-screen) 以隐藏。"""
+        """unhover 时将 shape 移动至 x=-1 (off-screen) 以隐藏（使用 bracket assignment）。"""
         html = self._read_html()
-        assert "'shapes[' + cursorShapeIdx + '].x0': -1" in html, \
-            "Unhover must set shapes[idx].x0 to -1 (hide)"
-        assert "'shapes[' + cursorShapeIdx + '].x1': -1" in html, \
-            "Unhover must set shapes[idx].x1 to -1 (hide)"
+        assert "_update2['shapes[' + cursorShapeIdx + '].x0'] = -1" in html, \
+            "Unhover must set shapes[idx].x0 to -1 via bracket assignment"
+        assert "_update2['shapes[' + cursorShapeIdx + '].x1'] = -1" in html, \
+            "Unhover must set shapes[idx].x1 to -1 via bracket assignment"
 
     # ---- Shape type and style ----
 
@@ -745,3 +744,47 @@ class TestPeriodDashboardHovermode:
         count = html.count("hovermode: 'x unified'")
         assert count >= 1, \
             f"At least 1 hovermode: 'x unified' must exist, got {count}"
+
+
+class TestHtmlDomStructure:
+    """G6: DOM 结构验证 — 各 section 的 chart/tab 容器 div 存在性。"""
+
+    @staticmethod
+    def _read_html():
+        return HTML_PATH.read_text(encoding="utf-8")
+
+    def test_section_2_filtered_overview_chart_exists(self):
+        """Section 2: Filtered Price Overview 的 chart div 存在。"""
+        html = self._read_html()
+        assert 'id="chart-filtered-overview"' in html, \
+            "Section 2 must contain chart-filtered-overview div"
+
+    def test_section_3_signal_chart_exists(self):
+        """Section 3: Signal Comparison 的 chart div 存在。"""
+        html = self._read_html()
+        assert 'id="chart-signals"' in html, \
+            "Section 3 must contain chart-signals div"
+
+    def test_section_4_pnl_chart_exists(self):
+        """Section 4: PnL Curves 的 chart div 存在。"""
+        html = self._read_html()
+        assert 'id="chart-pnl"' in html, \
+            "Section 4 must contain chart-pnl div"
+
+    def test_section_5_heatmap_chart_exists(self):
+        """Section 5: Position Heatmap 的 chart div 存在。"""
+        html = self._read_html()
+        assert 'id="chart-heatmap"' in html, \
+            "Section 5 must contain chart-heatmap div"
+
+    def test_section_6_trade_events_chart_exists(self):
+        """Section 6: Trade Events 的 chart div 存在。"""
+        html = self._read_html()
+        assert 'id="chart-trades"' in html, \
+            "Section 6 must contain chart-trades div"
+
+    def test_section_8_data_table_exists(self):
+        """Section 8: 完整数据表的 table-wrap div 存在。"""
+        html = self._read_html()
+        assert 'id="table-wrap"' in html, \
+            "Section 8 must contain table-wrap div for data table"
