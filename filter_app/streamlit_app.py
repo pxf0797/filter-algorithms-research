@@ -390,7 +390,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
             font=dict(size=9)))
     # axis customizations
     layout_dict.setdefault(f"xaxis{rows}", {}).update(title_text="",
-        tickvals=list(marker_positions), ticktext=list(marker_labels),
+        tickmode="array", tickvals=list(marker_positions), ticktext=list(marker_labels),
         tickfont=dict(size=9, color="#8b949e"))
     layout_dict.setdefault("xaxis", {}).update(rangeslider_visible=False)
     for _r, _t in [(mr,"价格"),(rr,"残差"),(vr,"速度")]:
@@ -399,7 +399,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
     if has_s:
         layout_dict.setdefault(f"yaxis{sar}", {}).update(title_text="a±ε")
         layout_dict.setdefault(f"yaxis{ssr}", {}).update(title_text="Sig",
-            tickvals=[-1,0,1], ticktext=["空","观","多"], range=[-1.5,1.5])
+            tickmode="array", tickvals=[-1,0,1], ticktext=["空","观","多"], range=[-1.5,1.5])
     if ar is not None:
         layout_dict.setdefault(f"yaxis{ar}", {}).update(title_text="加速度")
     # Merge yaxis updates from _add_* functions (e.g. PnL ticksuffix)

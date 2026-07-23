@@ -97,6 +97,29 @@ class TestDateMarkers:
         assert pos_q == pos_m
         assert labels_q == labels_m
 
+    def test_labels_are_strings_not_datetime(self):
+        """Regression: _date_markers labels must be strings, not Timestamp/number objects."""
+        dates = pd.date_range("2026-04-28", periods=90, freq="B")[:60]
+        for tf in ("60分钟", "日线", "周线", "月线", "季线"):
+            _, labels = _date_markers(dates, tf)
+            for lbl in labels:
+                assert isinstance(lbl, str), (
+                    f"tf={tf}: label {lbl!r} is {type(lbl).__name__}, expected str"
+                )
+                assert not isinstance(lbl, pd.Timestamp), (
+                    f"tf={tf}: label is Timestamp, expected str"
+                )
+
+    def test_monthly_and_quarterly_empty_for_april_july_range(self):
+        """月中/季线在4-7月范围内应返回空（无1月）。"""
+        dates = pd.date_range("2026-04-28", periods=90, freq="B")[:60]
+        pos_m, labels_m = _date_markers(dates, "月线")
+        pos_q, labels_q = _date_markers(dates, "季线")
+        assert pos_m == []
+        assert labels_m == []
+        assert pos_q == []
+        assert labels_q == []
+
 
 # ====================================================================
 # _compute_filters
@@ -281,6 +304,42 @@ class TestDetermineSubplotLayout:
         )
         assert ar == 4
         assert sar is None and ssr is None
+
+
+# ====================================================================
+# X-axis tickmode regression tests
+# ====================================================================
+
+class TestTickmodeArray:
+    """Verify `tickmode='array'` is set when `tickvals`/`ticktext` are used.
+
+    Regression: after the chart_builder/streamlit_app split, the x-axis
+    configuration set ``tickvals`` and ``ticktext`` but did not set
+    ``tickmode='array'``.  In Plotly.js the default ``tickmode='auto'``
+    ignores ``tickvals``/``ticktext`` and auto-generates numeric ticks,
+    causing dates to display as bar indices instead of date strings.
+    """
+
+    def test_streamlit_app_source_has_tickmode_array_for_xaxis(self):
+        """streamlit_app.py must include tickmode=\"array\" alongside tickvals."""
+        from pathlib import Path
+        import streamlit_app  # noqa: F401
+        source = Path(streamlit_app.__file__).read_text()
+        # Find the xaxis tick configuration block
+        assert 'tickmode="array"' in source or "tickmode='array'" in source, (
+            "streamlit_app.py must set tickmode='array' on the x-axis "
+            "alongside tickvals/ticktext"
+        )
+
+    def test_streamlit_app_source_has_tickmode_array_for_sig_axis(self):
+        """streamlit_app.py must include tickmode=\"array\" on Sig y-axis."""
+        from pathlib import Path
+        import streamlit_app  # noqa: F401
+        source = Path(streamlit_app.__file__).read_text()
+        assert 'tickmode="array"' in source or "tickmode='array'" in source, (
+            "streamlit_app.py must set tickmode='array' on the Sig y-axis "
+            "alongside tickvals/ticktext"
+        )
 
 
 # ====================================================================
