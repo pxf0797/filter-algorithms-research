@@ -705,12 +705,11 @@ class EventRecorder:
     # ------------------------------------------------------------------
 
     def _append_jsonl(self, fp, obj: dict) -> None:
-        """Append a JSON-encoded line to *fp* and flush immediately."""
+        """Append a JSON-encoded line to *fp*."""
         if fp is None:
             return
         line = json.dumps(obj, default=_json_default, ensure_ascii=False)
         fp.write(line + "\n")
-        fp.flush()
 
 
 # ----------------------------------------------------------------------

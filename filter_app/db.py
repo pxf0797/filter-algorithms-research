@@ -83,13 +83,14 @@ def upsert_kline(ticker: str, tf: str, df: pd.DataFrame):
     """
     logger.debug("Upserting kline: ticker={}, tf={}, rows={}", ticker, tf, len(df))
     records = []
-    for idx, row in df.iterrows():
-        ts = idx.isoformat() if hasattr(idx, "isoformat") else str(idx)
+    for row in df.itertuples():
+        ts = row.Index.isoformat() if hasattr(row.Index, "isoformat") else str(row.Index)
+        vol = float(getattr(row, "Volume", 0))
         records.append((
             ticker, tf, ts,
-            float(row["Open"]), float(row["High"]),
-            float(row["Low"]), float(row["Close"]),
-            float(row.get("Volume", 0)) if pd.notna(row.get("Volume", 0)) else 0.0,
+            float(row.Open), float(row.High),
+            float(row.Low), float(row.Close),
+            vol if pd.notna(vol) else 0.0,
         ))
     with get_conn() as conn:
         # 找到该周期最新日期：历史bar用IGNORE（已完成），最新bar用REPLACE（可能未完成需更新）
@@ -556,9 +557,9 @@ def compare_with_db(ticker, tf, df_fetched):
     db_ts = set(db_dict.keys())
 
     yf_dict = {}
-    for idx, row in df_fetched.iterrows():
-        ts = idx.isoformat() if hasattr(idx, "isoformat") else str(idx)
-        close_val = float(row["Close"].iloc[0]) if hasattr(row["Close"], "iloc") else float(row["Close"])
+    for row in df_fetched.itertuples():
+        ts = row.Index.isoformat() if hasattr(row.Index, "isoformat") else str(row.Index)
+        close_val = float(row.Close)
         yf_dict[ts] = close_val
     yf_ts = set(yf_dict.keys())
 
@@ -623,8 +624,8 @@ def force_update_kline(ticker, tf, df):
         包含 ``DatetimeIndex`` 及标准 OHLCV 列的 DataFrame。
     """
     records = []
-    for idx, row in df.iterrows():
-        ts = idx.isoformat() if hasattr(idx, "isoformat") else str(idx)
+    for row in df.itertuples():
+        ts = row.Index.isoformat() if hasattr(row.Index, "isoformat") else str(row.Index)
         records.append((ts,))
 
     with get_conn() as conn:
@@ -641,4 +642,4 @@ def force_update_kline(ticker, tf, df):
 
 if __name__ == "__main__":
     init_db()
-    print("DB initialized:", DB_PATH)
+    logger.info("DB initialized: {}", DB_PATH)

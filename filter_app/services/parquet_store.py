@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
+from loguru import logger
 
 # ── Schema constants ────────────────────────────────────────────────────
 
@@ -253,9 +254,10 @@ class ParquetStore:
             self._accumulate_events(stage_outputs)
             self._maybe_flush()
         except Exception:
-            print(
-                f"WARNING: ParquetStore.append_row failed for "
-                f"bar_index={bar_index}, cutoff_date={cutoff_date}"
+            logger.warning(
+                "ParquetStore.append_row failed for "
+                "bar_index={}, cutoff_date={}",
+                bar_index, cutoff_date,
             )
 
     def flush(self) -> None:
@@ -279,12 +281,13 @@ class ParquetStore:
             # Runtime schema validation before writing
             issues = validate_schema(table, self._full_schema)
             if issues:
-                print(
-                    f"WARNING: ParquetStore schema mismatch in "
-                    f"part_{self._part_index:04d}:"
+                logger.warning(
+                    "ParquetStore schema mismatch in "
+                    "part_{:04d}:",
+                    self._part_index,
                 )
                 for issue in issues:
-                    print(f"  - {issue}")
+                    logger.warning("  - {}", issue)
 
             pq.write_table(
                 table, str(tmp_path),
@@ -323,7 +326,7 @@ class ParquetStore:
         try:
             self._merge_parts_and_export_csv()
         except Exception:
-            print("WARNING: ParquetStore.end_session merge/export failed")
+            logger.warning("ParquetStore.end_session merge/export failed")
 
         self._write_metadata(status="completed")
 
@@ -381,9 +384,10 @@ class ParquetStore:
                     extracted = self._extract_view_columns(prefix, view_data, bar_date=bar_date)
                     row.update(extracted)
                 except Exception:
-                    print(
-                        f"WARNING: ParquetStore: failed to extract columns "
-                        f"for view {view_key} at bar_index={bar_index}"
+                    logger.warning(
+                        "ParquetStore: failed to extract columns "
+                        "for view {} at bar_index={}",
+                        view_key, bar_index,
                     )
                     for col in _VIEW_COLUMNS:
                         row[f"{prefix}_{col}"] = _COL_DEFAULTS[col]
@@ -704,12 +708,13 @@ class ParquetStore:
             table = pq.read_table(str(pf))
             issues = validate_schema(table, self._full_schema)
             if issues:
-                print(
-                    f"WARNING: ParquetStore schema mismatch in "
-                    f"part file {pf.name}:"
+                logger.warning(
+                    "ParquetStore schema mismatch in "
+                    "part file {}:",
+                    pf.name,
                 )
                 for issue in issues:
-                    print(f"  - {issue}")
+                    logger.warning("  - {}", issue)
             tables.append(table)
 
         merged = pa.concat_tables(tables)
@@ -717,9 +722,9 @@ class ParquetStore:
         # Validate merged table
         merged_issues = validate_schema(merged, self._full_schema)
         if merged_issues:
-            print("WARNING: ParquetStore schema mismatch in merged table:")
+            logger.warning("ParquetStore schema mismatch in merged table:")
             for issue in merged_issues:
-                print(f"  - {issue}")
+                logger.warning("  - {}", issue)
 
         # Atomic write of the merged Parquet
         merged_path = self._session_dir / "backtest_result.parquet"

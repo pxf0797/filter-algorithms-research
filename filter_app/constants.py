@@ -31,3 +31,26 @@ TF_INTERVAL = {
     "月线": ("1mo", "max"),
     "季线": ("3mo", "max"),
 }
+
+# ═══════════════════════════════════════════════════════════════
+# 默认值 / 通用字符串
+# ═══════════════════════════════════════════════════════════════
+
+# 默认时间周期（用于 ViewConfig 初始化、operating_tf 默认值等）
+DEFAULT_TF = "日线"
+
+# 视图键名前缀（用于构造 v0_ke、v1_tf 等 session_state key）
+VIEW_KEY_PREFIX = "v"
+
+# 视图参数后缀映射：内部后缀 → cfg dict 键名
+VIEW_SUFFIX_TO_CFG_KEY = {
+    "n": "n_pts",
+    "sch": "show_sch",
+    "pred": "show_pred",
+    "next": "n_ext",
+    "fm": "fit_mode",
+    "strat": "show_strategy",
+    "sl": "stop_loss_pct",
+    "cross_pnl": "show_cross_pnl",
+    "align": "show_alignment",
+}

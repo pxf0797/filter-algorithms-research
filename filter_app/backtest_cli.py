@@ -232,13 +232,13 @@ def _load_configs_from_file(path: str) -> list:
     """
     file_path = Path(path)
     if not file_path.exists():
-        print(f"错误: 配置文件不存在: {path}", file=sys.stderr)
+        logger.error("配置文件不存在: {}", path)
         sys.exit(1)
 
     try:
         data = json.loads(file_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
-        print(f"错误: JSON 解析失败: {e}", file=sys.stderr)
+        logger.error("JSON 解析失败: {}", e)
         sys.exit(1)
 
     # 格式 1: 包含 configs/view_configs 列表
@@ -246,8 +246,7 @@ def _load_configs_from_file(path: str) -> list:
         configs = data.get("configs") or data.get("view_configs")
         if configs is not None:
             if not isinstance(configs, list) or len(configs) == 0:
-                print("错误: configs/view_configs 字段为空或格式不正确",
-                      file=sys.stderr)
+                logger.error("configs/view_configs 字段为空或格式不正确")
                 sys.exit(1)
             return configs
 
@@ -255,7 +254,7 @@ def _load_configs_from_file(path: str) -> list:
     if isinstance(data, dict):
         return _build_configs_from_params(data)
 
-    print("错误: JSON 顶层必须是对象（dict）", file=sys.stderr)
+    logger.error("JSON 顶层必须是对象（dict）")
     sys.exit(1)
 
 
@@ -402,9 +401,8 @@ def main() -> None:
 
     # ── 1. 校验 ticker 存在 ──
     if not has_data(args.ticker):
-        print(f"错误: ticker '{args.ticker}' 无数据", file=sys.stderr)
-        print("提示: 请先在 Streamlit 中获取数据，或检查代码是否正确",
-              file=sys.stderr)
+        logger.error("ticker '{}' 无数据", args.ticker)
+        logger.error("提示: 请先在 Streamlit 中获取数据，或检查代码是否正确")
         sys.exit(1)
 
     # ── 2. 加载配置 ──
@@ -413,24 +411,24 @@ def main() -> None:
         match = next((p for p in presets if p["name"] == args.preset), None)
         if not match:
             available = [p["name"] for p in presets]
-            print(f"错误: 预设 '{args.preset}' 不存在", file=sys.stderr)
-            print(f"可用预设: {available}", file=sys.stderr)
+            logger.error("预设 '{}' 不存在", args.preset)
+            logger.error("可用预设: {}", available)
             sys.exit(1)
         params = apply_preset(match["preset_id"])
         if params is None:
-            print(f"错误: 预设 '{args.preset}' 参数解析失败", file=sys.stderr)
+            logger.error("预设 '{}' 参数解析失败", args.preset)
             sys.exit(1)
         configs = _build_configs_from_params(params)
         if not args.quiet:
-            print(f"已加载预设: {args.preset} ({len(configs)} 视图)")
+            logger.info("已加载预设: {} ({} 视图)", args.preset, len(configs))
     elif args.config_file:
         configs = _load_configs_from_file(args.config_file)
         if not args.quiet:
-            print(f"已加载配置文件: {args.config_file} ({len(configs)} 视图)")
+            logger.info("已加载配置文件: {} ({} 视图)", args.config_file, len(configs))
     else:
         configs = _build_default_configs(args.ticker)
         if not args.quiet:
-            print(f"使用默认配置 ({len(configs)} 视图)")
+            logger.info("使用默认配置 ({} 视图)", len(configs))
 
     # ── 视图过滤 ──
     if args.view_filter:
@@ -443,43 +441,42 @@ def main() -> None:
         if not filtered:
             available_views = [f"v{i}_{c.get('tf', '?')}"
                                for i, c in enumerate(configs)]
-            print(f"错误: 视图 '{target}' 不在配置中", file=sys.stderr)
-            print(f"可用视图: {available_views}", file=sys.stderr)
+            logger.error("视图 '{}' 不在配置中", target)
+            logger.error("可用视图: {}", available_views)
             sys.exit(1)
         configs = filtered
         if not args.quiet:
-            print(f"已过滤到视图: {target}")
+            logger.info("已过滤到视图: {}", target)
 
     # ── 3. 确定 bar 范围 ──
     total_bars = _get_total_bars(args.ticker, configs)
     if total_bars == 0:
-        print(f"错误: ticker '{args.ticker}' 在最小时间框上无 bar 数据",
-              file=sys.stderr)
+        logger.error("ticker '{}' 在最小时间框上无 bar 数据", args.ticker)
         sys.exit(1)
 
     start = args.start_bar if args.start_bar is not None else _get_min_window_size(configs)
     end = args.end_bar if args.end_bar is not None else total_bars
 
     if start < 0:
-        print(f"错误: start_bar={start} 不能为负数", file=sys.stderr)
+        logger.error("start_bar={} 不能为负数", start)
         sys.exit(1)
     if start >= end:
-        print(f"错误: bar 范围非法 (start={start}, end={end}, "
-              f"必须 start < end)", file=sys.stderr)
+        logger.error("bar 范围非法 (start={}, end={}, 必须 start < end)", start, end)
         sys.exit(1)
     if end > total_bars:
-        print(f"错误: end_bar={end} 超出总数 ({total_bars})", file=sys.stderr)
+        logger.error("end_bar={} 超出总数 ({})", end, total_bars)
         sys.exit(1)
 
     if not args.quiet:
-        print(f"Bar 范围: [{start}, {end}) 步进={args.step_interval}  "
-              f"总量={total_bars} 预计步数≈{(end - start) // args.step_interval}")
+        logger.info("Bar 范围: [{}, {}) 步进={} 总量={} 预计步数≈{}",
+                     start, end, args.step_interval, total_bars,
+                     (end - start) // args.step_interval)
 
     # ── 4. 创建 Runner + Recorder ──
     try:
         runner = BacktestRunner(args.ticker, configs)
     except ValueError as e:
-        print(f"错误: 初始化 BacktestRunner 失败: {e}", file=sys.stderr)
+        logger.error("初始化 BacktestRunner 失败: {}", e)
         sys.exit(1)
 
     # ── 断点恢复 ──
@@ -488,9 +485,9 @@ def main() -> None:
         try:
             resume_bar = runner._restore_checkpoint(args.resume, configs)
             if not args.quiet:
-                print(f"已从断点恢复: bar_index={resume_bar}, 文件={args.resume}")
+                logger.info("已从断点恢复: bar_index={}, 文件={}", resume_bar, args.resume)
         except ValueError as e:
-            print(f"错误: 断点恢复失败: {e}", file=sys.stderr)
+            logger.error("断点恢复失败: {}", e)
             sys.exit(1)
         # 如果 CLI 未显式指定 start_bar，使用断点中的进度
         if args.start_bar is None:
@@ -521,7 +518,7 @@ def main() -> None:
         parquet_store = ParquetStore(args.output_dir, args.ticker, configs)
         parquet_store.start_session()
         if not args.quiet:
-            print(f"数据存储已启用: {parquet_store.output_dir}")
+            logger.info("数据存储已启用: {}", parquet_store.output_dir)
 
     # ── 5. 运行回测循环 ──
     results = []
@@ -544,12 +541,12 @@ def main() -> None:
             step_count = step_idx + 1
             if not args.quiet:
                 bar_index = output["step_index"]
-                print(f"[{step_count}] bar={bar_index}/{end - 1}  "
-                      f"{output['cutoff_date']}")
+                logger.info("[{}] bar={}/{}  {}", step_count, bar_index, end - 1,
+                             output['cutoff_date'])
     except KeyboardInterrupt:
-        print("\n中断，正在保存...")
+        logger.warning("中断，正在保存...")
     except (ValueError, IndexError) as e:
-        print(f"错误: 回测运行失败: {e}", file=sys.stderr)
+        logger.error("回测运行失败: {}", e)
         recorder.end_session()
         sys.exit(1)
     finally:
@@ -557,18 +554,18 @@ def main() -> None:
         if parquet_store:
             parquet_store.end_session()
             if not args.quiet:
-                print(f"回测数据已保存到: {parquet_store.output_dir}")
+                logger.info("回测数据已保存到: {}", parquet_store.output_dir)
 
     # ── 6. 打印摘要 ──
     output_path = Path(args.output_dir) / f"{args.ticker}_{session_id}"
-    print(f"\n完成! {step_count} 步已保存到 {output_path}/")
+    logger.info("完成! {} 步已保存到 {}/", step_count, output_path)
     if not args.quiet:
-        print(f"  - events.jsonl")
-        print(f"  - bs_snapshot.jsonl")
-        print(f"  - filter_tail.jsonl")
-        print(f"  - schmitt_snapshot.jsonl")
-        print(f"  - trade_summary.jsonl")
-        print(f"  - metadata.json")
+        logger.info("  - events.jsonl")
+        logger.info("  - bs_snapshot.jsonl")
+        logger.info("  - filter_tail.jsonl")
+        logger.info("  - schmitt_snapshot.jsonl")
+        logger.info("  - trade_summary.jsonl")
+        logger.info("  - metadata.json")
 
 
 if __name__ == "__main__":
