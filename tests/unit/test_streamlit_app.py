@@ -120,6 +120,63 @@ class TestDateMarkers:
         assert pos_q == []
         assert labels_q == []
 
+    def test_timezone_aware_intraday_labels_are_strings(self):
+        """Regression: tz-aware intraday timestamps must NOT leak into labels."""
+        # Use enough data to span multiple calendar days (100 bars at 15-min = 25 hours)
+        dates = pd.date_range("2026-07-21 09:30", periods=100, freq="15min",
+                             tz="US/Eastern")
+        pos, labels = _date_markers(dates, "15分钟")
+        assert len(pos) > 0, "Need multi-day data to produce markers"
+        assert len(pos) == len(labels)
+        for lbl in labels:
+            assert isinstance(lbl, str), f"Expected str, got {type(lbl).__name__}: {lbl!r}"
+            # Critical: labels must NOT contain timezone info
+            assert "-04:00" not in lbl, f"Timezone offset leaked into label: {lbl!r}"
+            assert "+" not in lbl, f"Unexpected + in label: {lbl!r}"
+            # Format check: should be "MM/DD"
+            assert len(lbl) == 5, f"Expected MM/DD format, got: {lbl!r}"
+            assert lbl[2] == "/", f"Expected / delimiter, got: {lbl!r}"
+
+    def test_pandas_series_input_works(self):
+        """Regression: _date_markers must accept pandas Series (from _fetch_stock)."""
+        dates_series = pd.Series(
+            pd.date_range("2026-07-01", periods=60, freq="D", tz="US/Eastern"),
+            name="Date",
+        )
+        pos, labels = _date_markers(dates_series, "日线")
+        assert len(pos) > 0
+        assert len(pos) == len(labels)
+        for lbl in labels:
+            assert isinstance(lbl, str)
+            assert not isinstance(lbl, pd.Timestamp)
+
+    def test_all_minute_tfs_produce_string_labels(self):
+        """All four minute-level timeframes must produce string labels."""
+        dates = pd.date_range("2026-07-01 09:30", periods=200, freq="5min",
+                             tz="US/Eastern")
+        for tf in ("1分钟", "5分钟", "15分钟", "60分钟"):
+            _, labels = _date_markers(dates, tf)
+            for lbl in labels:
+                assert isinstance(lbl, str), f"tf={tf}: expected str, got {type(lbl).__name__}"
+                assert not isinstance(lbl, pd.Timestamp)
+
+    def test_single_day_data_returns_empty(self):
+        """Intraday data within a single calendar day produces no markers."""
+        dates = pd.date_range("2026-07-21 10:00", periods=26, freq="15min",
+                             tz="US/Eastern")
+        pos, labels = _date_markers(dates, "15分钟")
+        assert pos == []
+        assert labels == []
+
+    def test_marker_positions_are_valid_indices(self):
+        """All marker positions must be valid indices into the dates array."""
+        dates = pd.date_range("2026-07-01 09:30", periods=200, freq="15min",
+                             tz="US/Eastern")
+        for tf in ("1分钟", "5分钟", "15分钟", "60分钟", "日线", "周线", "月线", "季线"):
+            pos, labels = _date_markers(dates, tf)
+            for p in pos:
+                assert 0 <= p < len(dates), f"tf={tf}: position {p} out of range [0, {len(dates)})"
+
 
 # ====================================================================
 # _compute_filters
