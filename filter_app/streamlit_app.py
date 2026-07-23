@@ -58,6 +58,7 @@ from services.bs_marker import compute_bs_markers, get_lower_tfs
 from components.sidebar import (
     _render_params, ALL_TFS, DEFAULT_TFS, TF_HIERARCHY,
 )
+from constants import TF_INTERVAL
 from state import AppState
 from services.pipeline_capture import PipelineCapture, PipelineStageData
 from backtest_logger import log_bar_navigation, log_data_load, log_error
@@ -876,9 +877,6 @@ def _render_data_validation(market, ticker_code) -> None:
             rows = []
             has_conflict = False
             has_update = False
-            TF_INTERVAL = {"1分钟": ("1m", "7d"), "5分钟": ("5m", "60d"), "15分钟": ("15m", "60d"),
-                           "60分钟": ("1h", "730d"), "日线": ("1d", "max"), "周线": ("1wk", "max"),
-                           "月线": ("1mo", "max"), "季线": ("3mo", "max")}
             for tf in ALL_TFS:
                 interval, period = TF_INTERVAL[tf]
                 with st.spinner(f"校验 {tf} ..."):

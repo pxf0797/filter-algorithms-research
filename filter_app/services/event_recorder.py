@@ -441,10 +441,10 @@ class EventRecorder:
         for view_name, view_data in views.items():
             try:
                 self._record_view_step(step_index, cutoff_date, view_name, view_data)
-            except Exception:
+            except Exception as e:
                 logger.warning(
-                    "EventRecorder: failed to record step {} for view {}",
-                    step_index, view_name, exc_info=True,
+                    "EventRecorder: failed to record step {} for view {}: {}",
+                    step_index, view_name, e, exc_info=True,
                 )
 
         self._step_count = step_index + 1
@@ -462,10 +462,10 @@ class EventRecorder:
                 "volume": float(ohlcv_data.get("volume", float("nan"))),
             }
             self._csv_builder.accumulate(bar_index, bar_timestamp, ohlcv, views)
-        except Exception:
+        except Exception as e:
             logger.warning(
-                "EventRecorder: failed to accumulate CSV data for step %d",
-                step_index, exc_info=True,
+                "EventRecorder: failed to accumulate CSV data for step %d: %s",
+                step_index, e, exc_info=True,
             )
 
     def end_session(self) -> None:
@@ -481,8 +481,8 @@ class EventRecorder:
                     "timestamp": datetime.now().isoformat(),
                     "step_count": self._step_count,
                 })
-            except Exception:
-                logger.warning("EventRecorder: failed to write session_ended event", exc_info=True)
+            except Exception as e:
+                logger.warning(f"EventRecorder: failed to write session_ended event: {e}", exc_info=True)
 
         # Close all JSONL file handles
         for fp in (self._events_fp, self._filter_tail_fp,
@@ -491,7 +491,8 @@ class EventRecorder:
             if fp is not None:
                 try:
                     fp.close()
-                except Exception:
+                except Exception as e:
+                    logger.debug(f"EventRecorder: error closing file handle: {e}")
                     pass
         self._events_fp = None
         self._filter_tail_fp = None
@@ -515,8 +516,8 @@ class EventRecorder:
         try:
             csv_path: Path = self._session_dir / "backtest_data.csv"
             self._csv_builder.write(csv_path)
-        except Exception:
-            logger.warning("EventRecorder: failed to write CSV", exc_info=True)
+        except Exception as e:
+            logger.warning(f"EventRecorder: failed to write CSV: {e}", exc_info=True)
 
     # ------------------------------------------------------------------
     # BS Marker Comparison
@@ -876,7 +877,8 @@ def _csv_current_date(view_data: dict) -> Any:
         else:
             return None
         return pd.Timestamp(val)
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to parse last date from array: {e}")
         return None
 
 
@@ -886,5 +888,6 @@ def _csv_date_matches(marker_date: Any, current_date: Any) -> bool:
         return False
     try:
         return pd.Timestamp(marker_date) == pd.Timestamp(current_date)
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to compare BS marker dates: {e}")
         return False

@@ -12,8 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 from typing import Any, Dict, Optional, Tuple
 from db import upsert_kline, query_kline
-# 周期层级定义（与 components/sidebar.py 保持一致）
-ALL_TFS = ["1分钟", "5分钟", "15分钟", "60分钟", "日线", "周线", "月线", "季线"]
+from constants import ALL_TFS
 
 # 模块级缓存：避免逐 bar 重复写入相同的 parquet 数据
 # key = (ticker_code, cutoff_date, n_pts_hash) → last results dict
@@ -589,7 +588,8 @@ def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
             market_open = query_start.replace(hour=9, minute=30, second=0, microsecond=0)
             if query_start < market_open < cutoff_dt:
                 actual_start = market_open
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to determine market_open for {target_tf}/{finer_tf}: {e}")
             pass
 
     # ★ BUGFIX v3: Proper timezone conversion for cross-timezone synthesis.
@@ -637,7 +637,8 @@ def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
                             all_finer_bars.sort(key=lambda b: _ensure_tz_naive(pd.Timestamp(b["Date"])))
                 else:
                     all_finer_bars.append(finer_synth_bar)
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to merge synth_bar for {ticker_code}/{target_tf}: {e}")
             pass
 
     # ★ Cross-period filter: the query window [last_ts, cutoff] can span

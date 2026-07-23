@@ -16,7 +16,7 @@ from loguru import logger
 
 from state import AppState
 from backtest_logger import log_mode_switch
-from components.sidebar import ALL_TFS
+from components.sidebar import ALL_TFS  # keep for backward-compat; primary source is filter_app.constants
 
 
 # ============================================================================
@@ -77,7 +77,8 @@ def _load_backtest_config(ticker_code):
                 config = json.load(f)
             if config.get("ticker") == ticker_code:
                 return config
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to load backtest config for {ticker_code}: {e}")
             pass
     return None
 
@@ -119,7 +120,8 @@ def _get_min_tf_and_count(configs, ticker_code) -> tuple:
                 (ticker_code, min_tf),
             ).fetchone()
             bar_count = row[0] if row else 0
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to query bar count for {ticker_code}/{min_tf}: {e}")
         bar_count = 0
 
     return min_tf, bar_count

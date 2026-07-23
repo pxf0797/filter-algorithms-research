@@ -14,6 +14,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List
+from loguru import logger
 
 # ── 确保 filter_app 在 sys.path 上（支持 python -m filter_app.backtest_cli） ──
 _pkg_dir = os.path.dirname(os.path.abspath(__file__))
@@ -21,15 +22,13 @@ if _pkg_dir not in sys.path:
     sys.path.insert(0, _pkg_dir)
 
 # ── 项目内导入（与现有模块导入风格一致） ──
-from services.backtest_core import BacktestRunner, ALL_TFS
+from services.backtest_core import BacktestRunner
+from constants import ALL_TFS, DEFAULT_TFS
 from services.event_recorder import EventRecorder
 from services.filter_engine import FILTERS
 from services.parquet_store import ParquetStore
 from config_db import apply_preset, list_presets
 from db import has_data, get_conn
-
-# 默认视图周期（与 components/sidebar.py 中 DEFAULT_TFS 对齐）
-DEFAULT_TFS = ["日线", "60分钟", "15分钟", "5分钟"]
 
 # 视图参数映射（与 config_db.VIEW_PARAM_SPECS 对齐）
 # (preset_key_suffix, cfg_key, default)
@@ -335,7 +334,8 @@ def _get_total_bars(ticker: str, configs: list) -> int:
                 (ticker, min_tf),
             ).fetchone()
             return row[0] if row else 0
-    except Exception:
+    except Exception as e:
+        logger.error(f"get_total_bars failed for {ticker}/{min_tf}: {e}")
         return 0
 
 

@@ -38,8 +38,9 @@ def _get_conn() -> sqlite3.Connection:
     try:
         yield conn
         conn.commit()  # 显式提交，确保关闭前写入
-    except Exception:
+    except Exception as e:
         conn.rollback()
+        logger.error(f"Config DB connection error: {e}")
         raise
     finally:
         conn.close()  # P1-7: sqlite3 Connection 的 __exit__ 不关闭连接，必须显式 close()

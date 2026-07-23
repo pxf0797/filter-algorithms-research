@@ -9,9 +9,7 @@
 import streamlit as st
 from services.filter_engine import FILTERS
 from typing import Any, Dict, Optional
-
-ALL_TFS = ["1分钟","5分钟","15分钟","60分钟","日线","周线","月线","季线"]
-DEFAULT_TFS = ["日线", "60分钟", "15分钟", "5分钟"]
+from constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY
 
 
 def _compact_slider(label: str, pmin: float, pmax: float, pdefault: float,
@@ -96,12 +94,8 @@ def _render_param_slider(label: str, pmin: float, pmax: float, pstep: float,
     return ctx.slider(label, pmin, pmax, pdefault, pstep, format=fmt, key=key)
 
 
-# 紧邻高周期映射：本周期 → 高周期（用于跨周期PnL参考子图）
-TF_HIERARCHY = {
-    "1分钟": "5分钟", "5分钟": "15分钟", "15分钟": "60分钟",
-    "60分钟": "日线", "日线": "周线", "周线": "月线",
-    "月线": "季线", "季线": None,
-}
+
+
 
 
 def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[str],
