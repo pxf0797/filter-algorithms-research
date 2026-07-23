@@ -944,15 +944,11 @@ def _align_pnl_to_current_tf(
     cd = _normalize_dates(current_dates)
 
     # 对当前周期的每个bar，找 ≤ 该时间戳的最近高周期bar（前向填充）
-    for i in range(n):
-        mask = hd <= cd[i]
-        if not mask.any():
-            continue
-        j = int(np.argmax(mask))  # 最后一个True的位置...
-        # argmax on boolean array returns first True. We want last True.
-        j = np.max(np.where(mask)[0])
-        aligned_long[i] = higher_pnl_long[j]
-        aligned_short[i] = higher_pnl_short[j]
+    # P0-1: np.searchsorted 替代 O(n*m) 逐 bar 布尔扫描
+    j_indices = np.searchsorted(hd, cd, side="right") - 1
+    valid = (j_indices >= 0) & (j_indices < len(hd))
+    aligned_long[valid] = higher_pnl_long[j_indices[valid]]
+    aligned_short[valid] = higher_pnl_short[j_indices[valid]]
 
     # 映射交易事件到当前周期bar index
     for trade in higher_trades:
@@ -966,13 +962,13 @@ def _align_pnl_to_current_tf(
         # 找到当前周期中 ≤ entry_time 的最近bar
         # 若开仓在当前窗口起点之前，但仓位延续进窗口(exit ≥ 窗口起点)，则从
         # 窗口起点(bar0)开始显示，把当前周期起始点包含在内(与 eod 右延续镜像)。
-        entry_mask = cd <= entry_time
-        if entry_mask.any():
-            entry_bar = int(np.max(np.where(entry_mask)[0]))
-        elif n > 0 and exit_time >= cd[0]:
-            entry_bar = 0
-        else:
-            entry_bar = None
+        # P0-2: np.searchsorted 替代 np.where 布尔扫描
+        entry_bar = int(np.searchsorted(cd, entry_time, side="right")) - 1
+        if entry_bar < 0:
+            if n > 0 and exit_time >= cd[0]:
+                entry_bar = 0
+            else:
+                entry_bar = None
         if entry_bar is not None:
             pnl_at_entry = aligned_long[entry_bar] if trade["type"] == "long" else aligned_short[entry_bar]
             entry_markers.append((entry_bar, trade["type"], pnl_at_entry if not np.isnan(pnl_at_entry) else 100.0))
@@ -980,14 +976,14 @@ def _align_pnl_to_current_tf(
         # 离场：≤ exit_time 的最近bar
         # eod = 高周期该仓位未真正结束(跑到数据末端被强制平仓)，低周期应延续到
         #       最新bar(右边缘)，而非停在高周期末bar对应的较早位置(半边多空对)。
+        # P0-2: np.searchsorted 替代 np.where 布尔扫描
         exit_reason = trade.get("exit_reason", "")
-        exit_mask = cd <= exit_time
         if exit_reason == "eod":
             exit_bar = n - 1
-        elif exit_mask.any():
-            exit_bar = int(np.max(np.where(exit_mask)[0]))
         else:
-            exit_bar = None
+            exit_bar = int(np.searchsorted(cd, exit_time, side="right")) - 1
+            if exit_bar < 0:
+                exit_bar = None
         if exit_bar is not None:
             pnl_at_exit = aligned_long[exit_bar] if trade["type"] == "long" else aligned_short[exit_bar]
             exit_markers.append((exit_bar, trade["type"],

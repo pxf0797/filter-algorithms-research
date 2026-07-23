@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import json
+import numpy as np
 import pytest
 
 # ── 与 test_state.py 相同的方式导入 state 模块 ──────────────────────────────
@@ -1453,3 +1454,122 @@ class TestCheckpoint:
 
 # 注册 BacktestRunner（模块顶层引用，便于测试使用）
 from filter_app.services.backtest_core import BacktestRunner  # noqa: E402
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P0-6: 核心回测指标 — compute_backtest_metrics 测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestComputeBacktestMetrics:
+    """验证 backtest_metrics.compute_backtest_metrics 计算正确性。"""
+
+    def test_known_sharpe(self):
+        """构造确定性 PnL 曲线验证 Sharpe 计算。"""
+        from filter_app.services.backtest_metrics import compute_backtest_metrics
+
+        # 构造线性增长的 PnL: 每步涨 0.1%
+        n = 252  # 一年
+        long_pnl = 100.0 * np.cumprod(np.full(n, 1.001))
+        short_pnl = 100.0 * np.ones(n)
+
+        result = compute_backtest_metrics(
+            long_pnl, short_pnl, [], n, risk_free_rate=0.0,
+        )
+
+        # 正收益 → Sharpe > 0
+        assert result["sharpe_ratio"] > 0, f"Expected positive Sharpe, got {result['sharpe_ratio']}"
+        assert result["total_return_pct"] > 0
+        assert result["max_drawdown_pct"] == 0.0  # 无回撤
+
+    def test_max_drawdown_calculation(self):
+        """验证最大回撤计算。"""
+        from filter_app.services.backtest_metrics import compute_backtest_metrics
+
+        # 构造先涨后跌的 PnL: 100 → 120 → 80
+        long_pnl = np.array([100.0, 110.0, 120.0, 100.0, 80.0, 90.0])
+        short_pnl = np.array([100.0, 100.0, 100.0, 100.0, 100.0, 100.0])
+
+        result = compute_backtest_metrics(
+            long_pnl, short_pnl, [], len(long_pnl), risk_free_rate=0.0,
+        )
+
+        # 最大回撤: (80 - 120) / 120 = -16.67% (峰→谷)
+        assert result["max_drawdown_pct"] < -15, (
+            f"Expected drawdown < -15%, got {result['max_drawdown_pct']}"
+        )
+        assert result["max_drawdown_duration"] > 0
+
+    def test_zero_trades(self):
+        """空交易列表应返回合理默认值。"""
+        from filter_app.services.backtest_metrics import compute_backtest_metrics
+
+        long_pnl = np.array([100.0, 100.0, 100.0])
+        short_pnl = np.array([100.0, 100.0, 100.0])
+
+        result = compute_backtest_metrics(
+            long_pnl, short_pnl, [], len(long_pnl), risk_free_rate=0.03,
+        )
+
+        assert result["total_trades"] == 0
+        assert result["winning_trades"] == 0
+        assert result["losing_trades"] == 0
+        assert result["win_rate_pct"] == 0.0
+        import math
+        assert math.isinf(result["profit_factor"]) or result["profit_factor"] == 0.0
+
+    def test_all_wins(self):
+        """全部盈利的交易验证 profit_factor = inf。"""
+        from filter_app.services.backtest_metrics import compute_backtest_metrics
+
+        long_pnl = np.array([100.0, 105.0, 110.0])
+        short_pnl = np.array([100.0, 100.0, 100.0])
+        trades = [{"return_pct": 5.0}, {"return_pct": 3.0}]
+
+        result = compute_backtest_metrics(
+            long_pnl, short_pnl, trades, len(long_pnl), risk_free_rate=0.03,
+        )
+
+        assert result["total_trades"] == 2
+        assert result["winning_trades"] == 2
+        assert result["losing_trades"] == 0
+        # 全部盈利 → profit_factor = inf (转为字符串 "inf" 在 round 后...)
+        # 实际实现: sum(losses) = 0 → profit_factor = inf, round(inf, 2) = inf
+        import math
+        assert result["profit_factor"] == float("inf") or math.isinf(result["profit_factor"])
+
+    def test_empty_pnl_arrays(self):
+        """单元素 PnL 数组应返回 _empty_metrics 默认值。"""
+        from filter_app.services.backtest_metrics import compute_backtest_metrics
+
+        long_pnl = np.array([100.0])
+        short_pnl = np.array([100.0])
+
+        result = compute_backtest_metrics(
+            long_pnl, short_pnl, [], len(long_pnl), risk_free_rate=0.03,
+        )
+
+        assert result["sharpe_ratio"] == 0.0
+        assert result["sortino_ratio"] == 0.0
+        assert result["calmar_ratio"] == 0.0
+        assert result["total_return_pct"] == 0.0
+
+    def test_sortino_with_downside(self):
+        """有下行波动时应产生合理的 Sortino 值。"""
+        from filter_app.services.backtest_metrics import compute_backtest_metrics
+
+        np.random.seed(42)
+        n = 252
+        # 构造有正有负的收益率
+        returns = np.random.randn(n) * 0.02
+        combined = 100.0 * np.cumprod(1 + returns)
+        long_pnl = combined
+        short_pnl = np.full(n, 100.0)
+
+        result = compute_backtest_metrics(
+            long_pnl, short_pnl, [], n, risk_free_rate=0.0,
+        )
+
+        # Sortino 应是一个有限数值（不是 nan 或 inf）
+        import math
+        assert not math.isnan(result["sortino_ratio"])
+        assert not math.isinf(result["sortino_ratio"])

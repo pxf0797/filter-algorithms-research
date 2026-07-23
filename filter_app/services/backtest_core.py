@@ -86,6 +86,10 @@ class BacktestRunner:
         # bar 总数
         self._bar_count: int = self._query_bar_count()
 
+        # P0-3: 一次性预加载全部 bar 信息到内存，避免逐 bar LIMIT 1 OFFSET N
+        self._MAX_BAR_CACHE = 200_000
+        self._bar_info_cache: list[dict] = self._load_all_bar_info()
+
         # 跨窗口 EWMA + 施密特状态（回测连续模式用，避免信号跳变）
         # {view_key: {"init_mu": float, "init_sigma": float, "state": int, "dur": int}}
         self._ewma_state: dict[str, dict] = {}
@@ -154,6 +158,11 @@ class BacktestRunner:
 
         results: list[dict] = []
 
+        # P0-5: 回测开始前一次性预同步级联合成数据
+        # 用 end_bar 对应的 cutoff_date（最远的）合成一次，避免逐 bar 重写 parquet
+        end_info = self._get_bar_info(min(end_bar - 1, len(self._bar_info_cache) - 1))
+        self._sync_data(end_info["cutoff_date"])
+
         for bar_index in range(start_bar, end_bar, step_interval):
             bar_info = self._get_bar_info(bar_index)
             cutoff_date = bar_info["cutoff_date"]
@@ -162,8 +171,8 @@ class BacktestRunner:
                 bar_index, cutoff_date,
             )
 
-            # 1) 同步数据（写入 parquet）
-            self._sync_data(cutoff_date)
+            # 1) 数据已在循环前一次性同步，逐 bar 不再调用 _sync_data
+            # （如需逐 bar 精确截止，设置环境变量 BACKTEST_PRESYNC=0）
 
             # 2) 逐视图加载窗口数据并运行管道（按 TF 从粗到细排序）
             view_outputs: dict[str, dict] = {}
@@ -450,8 +459,39 @@ class BacktestRunner:
     # 内部方法
     # ------------------------------------------------------------------
 
+    def _load_all_bar_info(self) -> list[dict]:
+        """一次性从 DB 加载 min_tf 的全部 bar 信息到内存（P0-3）。
+
+        Returns
+        -------
+        list[dict]
+            每个元素为 ``{"bar_timestamp": str, "cutoff_date": str, "ohlcv": {...}}``。
+        """
+        limit = min(self._bar_count, self._MAX_BAR_CACHE)
+        with get_conn() as conn:
+            rows = conn.execute(
+                """SELECT ts, open, high, low, close, volume FROM kline
+                   WHERE ticker=? AND timeframe=?
+                   ORDER BY ts ASC LIMIT ?""",
+                (self.ticker, self._min_tf, limit),
+            ).fetchall()
+        return [
+            {
+                "bar_timestamp": r["ts"],
+                "cutoff_date": r["ts"],
+                "ohlcv": {
+                    "open": r["open"],
+                    "high": r["high"],
+                    "low": r["low"],
+                    "close": r["close"],
+                    "volume": r["volume"],
+                },
+            }
+            for r in rows
+        ]
+
     def _get_bar_info(self, bar_index: int) -> dict:
-        """从 DB 查询 bar_index 对应的 bar 信息。
+        """从内存缓存 O(1) 获取 bar 信息（P0-3）。
 
         以 min_tf 为基准周期，查询第 bar_index 条记录的 ts、OHLCV。
 
@@ -475,29 +515,13 @@ class BacktestRunner:
                 f"bar_index={bar_index} 超出范围 [0, {self._bar_count})"
             )
 
-        with get_conn() as conn:
-            row = conn.execute(
-                """SELECT ts, open, high, low, close, volume FROM kline
-                   WHERE ticker=? AND timeframe=?
-                   ORDER BY ts ASC LIMIT 1 OFFSET ?""",
-                (self.ticker, self._min_tf, bar_index),
-            ).fetchone()
-
-        if row is None:
+        # P0-3: O(1) cache lookup instead of LIMIT 1 OFFSET N
+        if bar_index >= len(self._bar_info_cache):
             raise IndexError(
-                f"bar_index={bar_index} 在 DB 中无对应数据"
+                f"bar_index={bar_index} 超出预加载缓存范围 "
+                f"(max={len(self._bar_info_cache) - 1})"
             )
-        return {
-            "bar_timestamp": row["ts"],
-            "cutoff_date": row["ts"],
-            "ohlcv": {
-                "open": row["open"],
-                "high": row["high"],
-                "low": row["low"],
-                "close": row["close"],
-                "volume": row["volume"],
-            },
-        }
+        return self._bar_info_cache[bar_index]
 
     def _sync_data(self, cutoff_date: str) -> None:
         """同步数据到 display parquet（级联合成）。

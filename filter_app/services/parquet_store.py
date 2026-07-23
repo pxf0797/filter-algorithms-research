@@ -19,6 +19,7 @@ Usage::
 
 import json
 import os
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -115,6 +116,8 @@ class ParquetStore:
         so downstream consumers can reproduce the backtest setup.
     """
 
+    _MAX_BUFFER_MB: int = 500  # hard memory limit for in-memory buffer (P0-7)
+
     def __init__(
         self,
         output_dir: str,
@@ -190,6 +193,7 @@ class ParquetStore:
         # Disable auto-flush so all rows stay in buffer until end_session
         self._saved_buffer_size = self._buffer_size
         self._buffer_size = 10_000_000  # effectively infinite
+        self._max_buffer_mb = self._MAX_BUFFER_MB  # P0-7: hard cap
 
         self._write_metadata(status="running")
         return self._session_id
@@ -252,6 +256,16 @@ class ParquetStore:
             row = self._extract_row(bar_index, bar_timestamp, stage_outputs)
             self._buffer.append(row)
             self._accumulate_events(stage_outputs)
+
+            # P0-7: defensively flush when estimated memory exceeds limit
+            est_mb = len(self._buffer) * sys.getsizeof(self._buffer[0]) / (1024 * 1024) if self._buffer else 0
+            if est_mb > self._max_buffer_mb:
+                logger.warning(
+                    "ParquetStore buffer 超过 {}MB，强制 flush ({} 行)",
+                    self._max_buffer_mb, len(self._buffer),
+                )
+                self.flush()
+
             self._maybe_flush()
         except Exception:
             logger.warning(

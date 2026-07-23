@@ -32,6 +32,9 @@ def get_conn() -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA mmap_size=268435456")      # 256MB mmap (P0-4)
+    conn.execute("PRAGMA temp_store=MEMORY")          # temp tables in memory (P0-4)
+    conn.execute("PRAGMA cache_size=-32768")          # 32MB page cache (P0-4)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -629,12 +632,11 @@ def force_update_kline(ticker, tf, df):
         records.append((ts,))
 
     with get_conn() as conn:
-        # Delete overlapping timestamps
-        for (ts,) in records:
-            conn.execute(
-                "DELETE FROM kline WHERE ticker=? AND timeframe=? AND ts=?",
-                (ticker, tf, ts),
-            )
+        # Delete overlapping timestamps — batch via executemany (P0-8)
+        conn.executemany(
+            "DELETE FROM kline WHERE ticker=? AND timeframe=? AND ts=?",
+            [(ticker, tf, ts) for (ts,) in records],
+        )
 
     # Now use normal upsert to insert all fetched rows
     upsert_kline(ticker, tf, df)
