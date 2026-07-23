@@ -320,10 +320,10 @@ class TestRenderPlotlyHtml:
         assert "(function()" in html.replace("{{", "{")
 
     # -----------------------------------------------------------------
-    # H5: timeout safety
+    # H5: polling safety — no one-shot early return
     # -----------------------------------------------------------------
-    def test_timeout_safety_check(self):
-        """H5: 输出包含 5秒 setTimeout 安全检查."""
+    def test_polling_mechanism_no_early_return(self):
+        """输出使用 setInterval 轮询等待 Plotly 加载，不含一次性 early-return."""
         from components.charts import _render_plotly
 
         fig = go.Figure()
@@ -343,8 +343,36 @@ class TestRenderPlotlyHtml:
         html = captured.get("html", "")
         assert html
 
-        assert "setTimeout" in html
-        assert "5000" in html
+        # 轮询机制 — setInterval 而非一次性 setTimeout
+        assert "setInterval" in html
+        assert "tryInit" in html
+        assert "_pollMax" in html or "maxAttempts" in html
+
+    def test_plotly_newplot_has_catch(self):
+        """Plotly.newPlot 调用必须有 .catch() 错误处理."""
+        from components.charts import _render_plotly
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[1, 2, 3], y=[1, 2, 3]))
+
+        import streamlit as st
+        captured = {}
+        def _capture_html(html, **kw):
+            captured["html"] = html
+            return MagicMock()
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr(st.components.v1, "html", _capture_html)
+
+        _render_plotly(fig, height=300)
+
+        monkeypatch.undo()
+        html = captured.get("html", "")
+        assert html
+
+        # .catch() 必须出现在 Plotly.newPlot 之后
+        import re
+        m = re.search(r"Plotly\.newPlot\(.+?\)\.then\(.+?\)\.catch\(function", html, re.DOTALL)
+        assert m is not None, "Plotly.newPlot 后面必须有 .catch() 错误处理"
 
     # -----------------------------------------------------------------
     # IIFE 配对验证

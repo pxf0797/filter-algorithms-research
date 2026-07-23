@@ -389,9 +389,10 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
             font=dict(size=9)))
     # axis customizations
-    layout_dict.setdefault(f"xaxis{rows}", {}).update(title_text="",
-        tickmode="array", tickvals=list(marker_positions), ticktext=list(marker_labels),
-        tickfont=dict(size=9, color="#8b949e"))
+    if marker_positions:
+        layout_dict.setdefault(f"xaxis{rows}", {}).update(title_text="",
+            tickmode="array", tickvals=list(marker_positions), ticktext=list(marker_labels),
+            tickfont=dict(size=9, color="#8b949e"))
     layout_dict.setdefault("xaxis", {}).update(rangeslider_visible=False)
     for _r, _t in [(mr,"价格"),(rr,"残差"),(vr,"速度")]:
         _yk = "yaxis" if _r == 1 else f"yaxis{_r}"
