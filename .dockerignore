@@ -8,3 +8,14 @@ __pycache__
 .env
 venv/
 *.egg-info/
+tests/
+docs/
+tools/
+web_tool/
+*.md
+.gitignore
+.python-version
+.ruff_cache
+.mypy_cache
+backtest_output/
+*.db

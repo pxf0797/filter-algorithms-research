@@ -95,6 +95,10 @@ class BacktestRunner:
         # {view_key: {"init_mu": float, "init_sigma": float, "state": int, "dur": int}}
         self._ewma_state: dict[str, dict] = {}
 
+        # P0-2: 增量计算缓存 — 避免相邻 bar 窗口 99% 重叠数据重算
+        # {(view_key, prev_window_hash): (filtered[:-1], filtered2[:-1])}
+        self._pipeline_cache: dict = {}
+
         logger.info(
             "BacktestRunner 初始化: ticker={}, min_tf={}, tfs={}, bar_count={}, views={}",
             self.ticker, self._min_tf, self._tfs_in_use, self._bar_count, len(configs),
@@ -547,8 +551,25 @@ class BacktestRunner:
         t, noisy, ohlc, dates = window_data
         tf = view_cfg["tf"]
 
+        # P0-2: construct cache key from previous window's noisy prefix hash
+        _cache_key = ""
+        if len(noisy) > 1:
+            _prev_n = len(noisy) - 1
+            _prefix_hash = hashlib.md5(np.ascontiguousarray(noisy[:_prev_n]).data.tobytes()).hexdigest()
+            _cache_key = f"{tf}_{_prev_n}_{_prefix_hash}"
+
         # ── Step 1: 计算滤波器 ──
-        filtered, filtered2 = self._compute_filters(noisy, t, view_cfg)
+        filtered, filtered2 = self._compute_filters(
+            noisy, t, view_cfg,
+            pipeline_cache=self._pipeline_cache,
+            cache_key=_cache_key,
+        )
+
+        # P0-2: update cache key for next bar (will use current noisy as prefix)
+        if _cache_key:
+            _next_hash = hashlib.md5(np.ascontiguousarray(noisy).data.tobytes()).hexdigest()
+            _next_n = len(noisy)
+            self._pipeline_cache[f"{tf}_{_next_n}_{_next_hash}"] = (filtered, filtered2)
 
         # ── Step 2: 施密特触发器 ──
         init_mu = ewma_init.get("init_mu") if ewma_init else None
@@ -605,10 +626,15 @@ class BacktestRunner:
     @staticmethod
     def _compute_filters(
         noisy: np.ndarray, t: np.ndarray, cfg: dict,
+        pipeline_cache: Optional[dict] = None,
+        cache_key: str = "",
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """计算主线滤波与可选的副线滤波。
 
         对齐 ``streamlit_app._compute_filters`` 的逻辑，去掉 ``@st.cache_data``。
+
+        P0-2: 增量计算支持 — 当 pipeline_cache 提供且 cache_key 命中时，
+        复用上一窗口的前 N-1 个滤波点，仅计算最后一个点。
 
         Parameters
         ----------
@@ -618,12 +644,27 @@ class BacktestRunner:
             时间索引。
         cfg : dict
             视图配置。
+        pipeline_cache : Optional[dict]
+            增量计算缓存字典，同一回测运行器的 ``_pipeline_cache``。
+        cache_key : str
+            缓存查找键，格式为 ``"{tf}_{prev_n_pts}_{hash}"``。
 
         Returns
         -------
         Tuple[np.ndarray, Optional[np.ndarray]]
             ``(filtered, filtered2)`` — 主线滤波结果与副线结果（可能为 None）。
         """
+        # P0-2: check incremental cache
+        prev_filtered = None
+        prev_filtered2 = None
+        if pipeline_cache is not None and cache_key:
+            cached = pipeline_cache.get(cache_key)
+            if cached is not None:
+                prev_filtered, prev_filtered2 = cached
+                if prev_filtered is not None and len(prev_filtered) == len(noisy) - 1:
+                    # Reuse prefix; only compute last point on the full noisy array
+                    logger.debug(f"[pipeline_cache] hit: {cache_key}, reusing {len(prev_filtered)} prefix points")
+
         sf = FILTERS.get(cfg["_fid"])
         if sf is None:
             logger.warning("未知 filter_id '{}', 使用 NaN", cfg["_fid"])
@@ -650,6 +691,10 @@ class BacktestRunner:
             except Exception as e:
                 logger.warning("副线滤波器 {} 失败: {}", cfg["_fid2"], e)
                 filtered2 = np.full_like(noisy, np.nan)
+
+        # P0-2: save to incremental cache for next bar
+        if pipeline_cache is not None and cache_key:
+            pipeline_cache[cache_key] = (filtered, filtered2)
 
         return filtered, filtered2
 

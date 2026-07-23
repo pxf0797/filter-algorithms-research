@@ -59,9 +59,12 @@ class TestAddResidualTraces:
         names = [d.get("name","") for d in traces]
         assert "残差" in names and "v" in names
     def test_short_t_returns_empty(self):
-        result = _add_residual_traces(np.array([0.0]), np.array([100.0]),
+        """P0-3: _add_residual_traces now returns (acc, traces, shapes) tuple even for short t."""
+        acc, traces, shapes = _add_residual_traces(np.array([0.0]), np.array([100.0]),
             np.array([100.0]), None, {"fc":"#00d4aa"}, 2, 3)
-        assert isinstance(result, np.ndarray) and len(result)==0
+        assert isinstance(acc, np.ndarray) and len(acc) == 0
+        assert traces == []
+        assert shapes == []
     def test_all_nan_filtered_no_traces(self):
         n=10; t=np.arange(n,dtype=float)
         acc, traces, shapes = _add_residual_traces(t, np.full(n,np.nan),

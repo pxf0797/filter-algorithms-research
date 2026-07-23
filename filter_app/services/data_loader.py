@@ -15,6 +15,10 @@ from db import upsert_kline, query_kline
 # 周期层级定义（与 components/sidebar.py 保持一致）
 ALL_TFS = ["1分钟", "5分钟", "15分钟", "60分钟", "日线", "周线", "月线", "季线"]
 
+# 模块级缓存：避免逐 bar 重复写入相同的 parquet 数据
+# key = (ticker_code, cutoff_date, n_pts_hash) → last results dict
+_synth_cache_state: dict = {}
+
 
 def _fetch_all_timeframes(market: str, code: str) -> Dict[str, Tuple[bool, Any]]:
     """获取某股票全部8个周期的数据，并行写入DB。返回成功/失败统计。
@@ -763,6 +767,14 @@ def _sync_all_cascading(ticker_code: str, tfs: list, cutoff_date: str,
     results: dict = {}
     synth_cache: dict = {}
 
+    # P0-1: module-level cache — skip re-synthesis when cutoff_date + n_pts unchanged
+    _n_pts_repr = tuple(n_pts[tf] if isinstance(n_pts, dict) else n_pts
+                        for tf in tfs) if isinstance(n_pts, dict) else str(n_pts)
+    cache_key = (ticker_code, cutoff_date, _n_pts_repr)
+    if cache_key == _synth_cache_state.get("last_key"):
+        logger.debug(f"[cascading] cache hit for {ticker_code} @ {cutoff_date}")
+        return dict(_synth_cache_state.get("last_result", {}))
+
     for tf in tfs:
         # Resolve per-TF n_pts
         tf_n_pts = n_pts[tf] if isinstance(n_pts, dict) else n_pts
@@ -815,4 +827,9 @@ def _sync_all_cascading(ticker_code: str, tfs: list, cutoff_date: str,
         logger.warning(f"[cascading] partial success: {success_count}/{len(tfs)} TFs written")
     else:
         logger.debug(f"[cascading] done: all {success_count} TFs written")
+
+    # P0-1: save cache state for next bar iteration
+    if success_count == len(tfs):
+        _synth_cache_state["last_key"] = cache_key
+        _synth_cache_state["last_result"] = dict(results)
     return results

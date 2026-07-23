@@ -41,10 +41,12 @@ class TestMainPriceAndResidualReturnDicts:
         assert all(isinstance(d, dict) for d in traces + shapes)
 
     def test_short_t_residual_returns_empty(self):
-        result = _add_residual_traces(np.array([0.0]), np.array([100.0]),
+        """P0-3: _add_residual_traces now always returns (acc, traces, shapes) tuple."""
+        acc, traces, shapes = _add_residual_traces(np.array([0.0]), np.array([100.0]),
             np.array([100.0]), None, {"fc":"#00d4aa"}, 2, 3)
-        # len(t) < 2: returns np.array([]) directly, not 3-tuple
-        assert isinstance(result, np.ndarray) and len(result) == 0
+        assert isinstance(acc, np.ndarray) and len(acc) == 0
+        assert traces == []
+        assert shapes == []
 
 
 # ==================== 2. schmitt / pnl / feedback ====================
