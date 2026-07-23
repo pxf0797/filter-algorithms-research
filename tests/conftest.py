@@ -11,9 +11,14 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
-# Ensure the filter_app/ package directory is importable
+# Ensure the project root is importable (so "from filter_app import ..." works)
+# AND the filter_app/ directory is importable (for bare imports like "from state import ...")
 # ---------------------------------------------------------------------------
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+_project_root = Path(__file__).resolve().parent.parent
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
+
+_src = _project_root / "filter_app"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 

@@ -4,6 +4,14 @@
 入口文件：页面布局 + session_state初始化 + st.fragment 包装
 """
 
+import os
+import sys
+# 确保项目根目录在 sys.path 上，使 `from filter_app import ...` 可用
+# streamlit run 只将脚本所在目录(filter_app/)加入 sys.path，需手动添加项目根目录
+_project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
+
 import sqlite3
 import time
 import streamlit as st

@@ -15,8 +15,11 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-# ── 确保 filter_app 在 sys.path 上（支持 python -m filter_app.backtest_cli） ──
+# ── 确保项目根目录和 filter_app 都在 sys.path 上 ──
 _pkg_dir = os.path.dirname(os.path.abspath(__file__))
+_project_root = os.path.dirname(_pkg_dir)
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 if _pkg_dir not in sys.path:
     sys.path.insert(0, _pkg_dir)
 
