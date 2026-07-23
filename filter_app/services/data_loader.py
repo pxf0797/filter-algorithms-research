@@ -266,7 +266,7 @@ import re as _re
 from typing import Optional as _Optional
 from datetime import timezone as _dt_timezone, timedelta as _dt_timedelta
 
-def _offset_to_tz(offset_str: str):
+def _offset_to_tz(offset_str: str) -> _dt_timezone:
     """将 UTC 偏移字符串转换为 datetime.timezone 对象。
 
     Parameters
@@ -285,7 +285,7 @@ def _offset_to_tz(offset_str: str):
     h, m = map(int, offset_str[1:].split(':'))
     return _dt_timezone(_dt_timedelta(hours=sign * h, minutes=sign * m))
 
-def _ensure_tz_naive(ts):
+def _ensure_tz_naive(ts) -> pd.Timestamp:
     """去除 pd.Timestamp 的时区信息，保持挂钟时间不变。
 
     Parameters
@@ -353,7 +353,7 @@ def _format_synth_date(cutoff_date: str, tf: str, db_rows: list) -> str:
             return base + tz
     return base
 
-def _get_period_start_ts(ts, tf: str):
+def _get_period_start_ts(ts, tf: str) -> pd.Timestamp:
     """计算上一个完整 K 线之后的下一个周期的起始时间。
 
     ts 必须是不带时区的 pd.Timestamp。

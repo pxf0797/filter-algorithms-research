@@ -7,9 +7,11 @@
 
 import hashlib
 import json
+import os
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 
@@ -174,62 +176,134 @@ class BacktestRunner:
                 reverse=True,  # 粗→细
             )
 
-            for view_index, view_cfg in sorted_views:
-                tf = view_cfg["tf"]
-                n_pts = view_cfg.get("n_pts", 120)
-                view_key = f"v{view_index}_{tf}"
+            # P3-2: 多视图并行计算 — 预加载窗口数据，然后并行运行管道
+            _use_parallel = os.environ.get("BACKTEST_PARALLEL_VIEWS", "1") == "1"
+            if _use_parallel and len(sorted_views) > 1:
+                # 阶段 1: 预加载所有窗口数据
+                preloaded: dict[str, tuple] = {}
+                ewma_inits: dict[str, Optional[dict]] = {}
+                for view_index, view_cfg in sorted_views:
+                    tf = view_cfg["tf"]
+                    n_pts = view_cfg.get("n_pts", 120)
+                    view_key = f"v{view_index}_{tf}"
+                    window_data = self._load_window_data(tf, n_pts)
+                    if window_data is None:
+                        logger.warning("视图 {} 窗口数据为空，跳过", view_key)
+                        continue
+                    preloaded[view_key] = window_data
+                    ewma_inits[view_key] = self._ewma_state.get(view_key)
 
-                # 加载窗口数据
-                window_data = self._load_window_data(tf, n_pts)
-                if window_data is None:
-                    logger.warning("视图 {} 窗口数据为空，跳过", view_key)
-                    continue
+                # 阶段 2: 并行运行管道计算（关闭 pipeline_cache 以确保线程安全）
+                n_views = len(preloaded)
+                if n_views > 0:
+                    pipeline_futures: dict = {}
+                    with ThreadPoolExecutor(max_workers=min(n_views, 4)) as executor:
+                        for view_index, view_cfg in sorted_views:
+                            view_key = f"v{view_index}_{view_cfg['tf']}"
+                            if view_key not in preloaded:
+                                continue
+                            future = executor.submit(
+                                self._compute_pipeline_for_view,
+                                view_cfg, preloaded[view_key],
+                                ewma_init=ewma_inits.get(view_key),
+                                use_pipeline_cache=False,
+                            )
+                            pipeline_futures[future] = (view_index, view_cfg, view_key)
 
-                # 跨窗口 EWMA 初始状态（首次为 None → 正常初始化）
-                ewma_init = self._ewma_state.get(view_key)
+                        for future in as_completed(pipeline_futures):
+                            view_index, view_cfg, view_key = pipeline_futures[future]
+                            try:
+                                stage_output = future.result()
+                            except Exception as e:
+                                logger.error("视图 {} 管道计算失败: {}", view_key, e)
+                                continue
 
-                # 运行管道
-                stage_output = self._compute_pipeline_for_view(
-                    view_cfg, window_data, ewma_init=ewma_init,
-                )
+                            # 阶段 3: 顺序处理（EWMA状态、跨周期对齐、持仓掩码、BS标记）
+                            tf = view_cfg["tf"]
+                            schmitt = stage_output.get("schmitt")
+                            if schmitt is not None:
+                                self._ewma_state[view_key] = {
+                                    "init_mu": schmitt.get("final_mu", 0.0),
+                                    "init_sigma": schmitt.get("final_sigma", 0.0),
+                                    "state": schmitt.get("final_state", 0),
+                                    "dur": schmitt.get("final_dur", 0),
+                                }
 
-                # 保存本窗口 EWMA + 施密特末态，供下一窗口使用
-                schmitt = stage_output.get("schmitt")
-                if schmitt is not None:
-                    self._ewma_state[view_key] = {
-                        "init_mu": schmitt.get("final_mu", 0.0),
-                        "init_sigma": schmitt.get("final_sigma", 0.0),
-                        "state": schmitt.get("final_state", 0),
-                        "dur": schmitt.get("final_dur", 0),
-                    }
+                            higher_tf = TF_HIERARCHY.get(tf)
+                            higher_pnl = tf_pnl_cache.get(higher_tf) if higher_tf else None
+                            stage_output["higher_pnl"] = higher_pnl
 
-                # 跨周期 PnL 对齐：检查是否有高周期 PnL 可用
-                higher_tf = TF_HIERARCHY.get(tf)
-                higher_pnl = tf_pnl_cache.get(higher_tf) if higher_tf else None
-                stage_output["higher_pnl"] = higher_pnl
+                            long_mask, short_mask = self._compute_masks_for_view(
+                                stage_output, higher_pnl,
+                            )
+                            stage_output["long_mask"] = long_mask
+                            stage_output["short_mask"] = short_mask
 
-                # 计算持仓掩码和 BS 标记
-                long_mask, short_mask = self._compute_masks_for_view(
-                    stage_output, higher_pnl,
-                )
-                stage_output["long_mask"] = long_mask
-                stage_output["short_mask"] = short_mask
+                            bs_markers = self._compute_bs_for_view(
+                                stage_output, view_cfg, long_mask, short_mask,
+                            )
+                            stage_output["bs_markers"] = bs_markers
 
-                bs_markers = self._compute_bs_for_view(
-                    stage_output, view_cfg, long_mask, short_mask,
-                )
-                stage_output["bs_markers"] = bs_markers
+                            view_outputs[view_key] = stage_output
 
-                view_outputs[view_key] = stage_output
+                            if stage_output.get("long_pnl") is not None:
+                                tf_pnl_cache[tf] = {
+                                    "dates": stage_output["dates"],
+                                    "long_pnl": stage_output["long_pnl"],
+                                    "short_pnl": stage_output["short_pnl"],
+                                    "trade_records": stage_output["trade_records"],
+                                }
+            else:
+                # 顺序模式（原有逻辑，保持兼容）
+                for view_index, view_cfg in sorted_views:
+                    tf = view_cfg["tf"]
+                    n_pts = view_cfg.get("n_pts", 120)
+                    view_key = f"v{view_index}_{tf}"
 
-                # 缓存本 TF 的 PnL 数据供更低周期使用
-                if stage_output.get("long_pnl") is not None:
-                    tf_pnl_cache[tf] = {
-                        "dates": stage_output["dates"],
-                        "long_pnl": stage_output["long_pnl"],
-                        "short_pnl": stage_output["short_pnl"],
-                        "trade_records": stage_output["trade_records"],
-                    }
+                    window_data = self._load_window_data(tf, n_pts)
+                    if window_data is None:
+                        logger.warning("视图 {} 窗口数据为空，跳过", view_key)
+                        continue
+
+                    ewma_init = self._ewma_state.get(view_key)
+
+                    stage_output = self._compute_pipeline_for_view(
+                        view_cfg, window_data, ewma_init=ewma_init,
+                    )
+
+                    schmitt = stage_output.get("schmitt")
+                    if schmitt is not None:
+                        self._ewma_state[view_key] = {
+                            "init_mu": schmitt.get("final_mu", 0.0),
+                            "init_sigma": schmitt.get("final_sigma", 0.0),
+                            "state": schmitt.get("final_state", 0),
+                            "dur": schmitt.get("final_dur", 0),
+                        }
+
+                    higher_tf = TF_HIERARCHY.get(tf)
+                    higher_pnl = tf_pnl_cache.get(higher_tf) if higher_tf else None
+                    stage_output["higher_pnl"] = higher_pnl
+
+                    long_mask, short_mask = self._compute_masks_for_view(
+                        stage_output, higher_pnl,
+                    )
+                    stage_output["long_mask"] = long_mask
+                    stage_output["short_mask"] = short_mask
+
+                    bs_markers = self._compute_bs_for_view(
+                        stage_output, view_cfg, long_mask, short_mask,
+                    )
+                    stage_output["bs_markers"] = bs_markers
+
+                    view_outputs[view_key] = stage_output
+
+                    if stage_output.get("long_pnl") is not None:
+                        tf_pnl_cache[tf] = {
+                            "dates": stage_output["dates"],
+                            "long_pnl": stage_output["long_pnl"],
+                            "short_pnl": stage_output["short_pnl"],
+                            "trade_records": stage_output["trade_records"],
+                        }
 
             results.append({
                 "step_index": bar_index,
@@ -510,6 +584,7 @@ class BacktestRunner:
     def _compute_pipeline_for_view(
         self, view_cfg: dict, window_data: tuple,
         ewma_init: Optional[dict] = None,
+        use_pipeline_cache: bool = True,
     ) -> dict:
         """对单个视图运行完整管道计算（步骤 1–6）。
 
@@ -544,9 +619,10 @@ class BacktestRunner:
         t, noisy, ohlc, dates = window_data
         tf = view_cfg["tf"]
 
-        # P0-2: construct cache key from previous window's noisy prefix hash
+        # P3-2: skip pipeline_cache when running in parallel (thread safety)
+        _pipeline_cache = self._pipeline_cache if use_pipeline_cache else None
         _cache_key = ""
-        if len(noisy) > 1:
+        if use_pipeline_cache and len(noisy) > 1:
             _prev_n = len(noisy) - 1
             _prefix_hash = hashlib.md5(np.ascontiguousarray(noisy[:_prev_n]).data.tobytes()).hexdigest()
             _cache_key = f"{tf}_{_prev_n}_{_prefix_hash}"
@@ -554,12 +630,12 @@ class BacktestRunner:
         # ── Step 1: 计算滤波器 ──
         filtered, filtered2 = self._compute_filters(
             noisy, t, view_cfg,
-            pipeline_cache=self._pipeline_cache,
+            pipeline_cache=_pipeline_cache,
             cache_key=_cache_key,
         )
 
-        # P0-2: update cache key for next bar (will use current noisy as prefix)
-        if _cache_key:
+        # P3-2: only update cache when pipeline_cache is enabled
+        if _pipeline_cache is not None and _cache_key:
             _next_hash = hashlib.md5(np.ascontiguousarray(noisy).data.tobytes()).hexdigest()
             _next_n = len(noisy)
             self._pipeline_cache[f"{tf}_{_next_n}_{_next_hash}"] = (filtered, filtered2)
