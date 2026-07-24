@@ -18,7 +18,7 @@ if str(_src) not in sys.path:
 import pytest
 
 # Module under test
-from components.sidebar import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY
+from browse.components_sidebar import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY
 
 
 # ===================================================================
@@ -140,7 +140,7 @@ class TestCompactSliderFormatLogic:
 
     def test_fmt_none_when_no_fmt(self):
         """不传 fmt 时 kwargs 不应包含 format."""
-        from components.sidebar import _compact_slider
+        from browse.components_sidebar import _compact_slider
         # 仅验证函数签名存在且 fmt 参数默认是 None
         import inspect
         sig = inspect.signature(_compact_slider)
@@ -149,7 +149,7 @@ class TestCompactSliderFormatLogic:
 
     def test_fmt_provided_includes_format(self):
         """传入 fmt 时 kwargs 应包含 format."""
-        from components.sidebar import _compact_slider
+        from browse.components_sidebar import _compact_slider
         import inspect
         sig = inspect.signature(_compact_slider)
         assert "fmt" in sig.parameters
@@ -170,14 +170,14 @@ class TestRenderParamSliderLogic:
 
     def test_key_suffix_append(self):
         """key_suffix 非空时 key 应为 f'{label}_{key_suffix}'."""
-        from components.sidebar import _render_param_slider
+        from browse.components_sidebar import _render_param_slider
         import inspect
         sig = inspect.signature(_render_param_slider)
         assert sig.parameters["key_suffix"].default == ""
 
     def test_container_default_is_none(self):
         """container 默认 None 表示向后兼容 sidebar."""
-        from components.sidebar import _render_param_slider
+        from browse.components_sidebar import _render_param_slider
         import inspect
         sig = inspect.signature(_render_param_slider)
         assert sig.parameters["container"].default is None
@@ -198,7 +198,7 @@ class TestCompactSlider:
 
         with patch("components.sidebar.st.columns",
                    return_value=[mock_col0, mock_col1]):
-            from components.sidebar import _compact_slider
+            from browse.components_sidebar import _compact_slider
             result = _compact_slider("N", 20, 300, 120, 10)
             assert result == 50.0
             mock_col0.caption.assert_called_once()
@@ -215,7 +215,7 @@ class TestCompactSlider:
 
         with patch("components.sidebar.st.columns",
                    return_value=[mock_col0, mock_col1]):
-            from components.sidebar import _compact_slider
+            from browse.components_sidebar import _compact_slider
             result = _compact_slider("sigma", 0.0, 1.0, 0.5, 0.01,
                                      key="my_ke", fmt="%.3f")
             assert result == 0.5
@@ -233,7 +233,7 @@ class TestCompactSlider:
 
         with patch("components.sidebar.st.columns",
                    return_value=[mock_col0, mock_col1]):
-            from components.sidebar import _compact_slider
+            from browse.components_sidebar import _compact_slider
             _compact_slider("窗口", 1, 100, 50, 1)
             mock_col0.caption.assert_called_once_with("窗口")
 
@@ -251,7 +251,7 @@ class TestRenderParamSlider:
         mock_sidebar.slider.return_value = 0.5
         with patch("components.sidebar.st.sidebar", mock_sidebar), \
              patch("components.sidebar.st.session_state", {}, create=True):
-            from components.sidebar import _render_param_slider
+            from browse.components_sidebar import _render_param_slider
             result = _render_param_slider("阈值", 0.0, 1.0, 0.1, 0.5)
             assert result == 0.5
             mock_sidebar.slider.assert_called_once()
@@ -261,7 +261,7 @@ class TestRenderParamSlider:
         mock_st = MagicMock()
         mock_st.slider.return_value = 20.0
         with patch("components.sidebar.st", mock_st):
-            from components.sidebar import _render_param_slider
+            from browse.components_sidebar import _render_param_slider
             result = _render_param_slider("窗口", 5, 100, 5, 20,
                                           container=mock_st)
             assert result == 20.0
@@ -273,7 +273,7 @@ class TestRenderParamSlider:
         mock_sidebar.slider.return_value = 10.0
         with patch("components.sidebar.st.sidebar", mock_sidebar), \
              patch("components.sidebar.st.session_state", {}, create=True):
-            from components.sidebar import _render_param_slider
+            from browse.components_sidebar import _render_param_slider
             _render_param_slider("跨度", 2, 100, 1, 10,
                                  key_suffix="f1_sma")
             call_key = mock_sidebar.slider.call_args[1].get("key")
@@ -285,7 +285,7 @@ class TestRenderParamSlider:
         mock_sidebar.slider.return_value = 10
         with patch("components.sidebar.st.sidebar", mock_sidebar), \
              patch("components.sidebar.st.session_state", {}, create=True):
-            from components.sidebar import _render_param_slider
+            from browse.components_sidebar import _render_param_slider
             _render_param_slider("跨度", 2, 100, 1, 10)
             call_kwargs = mock_sidebar.slider.call_args[1]
             assert "format" not in call_kwargs
@@ -296,7 +296,7 @@ class TestRenderParamSlider:
         mock_sidebar.slider.return_value = 0.5
         with patch("components.sidebar.st.sidebar", mock_sidebar), \
              patch("components.sidebar.st.session_state", {}, create=True):
-            from components.sidebar import _render_param_slider
+            from browse.components_sidebar import _render_param_slider
             _render_param_slider("sigma", 0.0, 1.0, 0.001, 0.5)
             call_kwargs = mock_sidebar.slider.call_args[1]
             assert call_kwargs["format"] == "%.3f"
@@ -307,7 +307,7 @@ class TestRenderParamSlider:
         mock_sidebar.slider.return_value = 0.5
         with patch("components.sidebar.st.sidebar", mock_sidebar), \
              patch("components.sidebar.st.session_state", {}, create=True):
-            from components.sidebar import _render_param_slider
+            from browse.components_sidebar import _render_param_slider
             _render_param_slider("比例", 0.0, 1.0, 0.1, 0.5)
             call_kwargs = mock_sidebar.slider.call_args[1]
             assert call_kwargs["format"] == "%.2f"
@@ -318,7 +318,7 @@ class TestRenderParamSlider:
         mock_sidebar.slider.return_value = 5
         with patch("components.sidebar.st.sidebar", mock_sidebar), \
              patch("components.sidebar.st.session_state", {}, create=True):
-            from components.sidebar import _render_param_slider
+            from browse.components_sidebar import _render_param_slider
             _render_param_slider("窗口", 3, 101, 2, 11, key_suffix="")
             call_kwargs = mock_sidebar.slider.call_args[1]
             assert call_kwargs["key"] is None
@@ -356,7 +356,7 @@ class TestRenderParams:
                    return_value=50.0), \
              patch("components.sidebar.st.color_picker",
                    return_value="#00d4aa"):
-            from components.sidebar import _render_params
+            from browse.components_sidebar import _render_params
             cfg = _render_params(
                 key="v0", filter_id="sma", dual=False,
                 filter_id2=None, tf_default="日线",
@@ -386,7 +386,7 @@ class TestRenderParams:
              patch("components.sidebar.st.session_state",
                    {}, create=True), \
              patch("components.sidebar.st.expander"):
-            from components.sidebar import _render_params
+            from browse.components_sidebar import _render_params
             cfg = _render_params(
                 key="v0", filter_id="nonexistent", dual=False,
                 filter_id2=None, tf_default="日线",
@@ -424,7 +424,7 @@ class TestRenderParams:
                    return_value=50.0), \
              patch("components.sidebar.st.color_picker",
                    return_value="#00d4aa"):
-            from components.sidebar import _render_params
+            from browse.components_sidebar import _render_params
             cfg = _render_params(
                 key="v0", filter_id="sma", dual=True,
                 filter_id2="ema", tf_default="60分钟",
@@ -463,7 +463,7 @@ class TestRenderParams:
                    return_value=50.0), \
              patch("components.sidebar.st.color_picker",
                    return_value="#00d4aa"):
-            from components.sidebar import _render_params
+            from browse.components_sidebar import _render_params
             cfg = _render_params(
                 key="v0", filter_id="sma", dual=True,
                 filter_id2="unknown_filter", tf_default="日线",
@@ -486,7 +486,7 @@ class TestRenderParams:
              patch("components.sidebar.st.session_state",
                    {}, create=True), \
              patch("components.sidebar.st.expander"):
-            from components.sidebar import _render_params
+            from browse.components_sidebar import _render_params
             cfg = _render_params(
                 key="v0", filter_id="sma", dual=False,
                 filter_id2=None, tf_default="日线",
@@ -525,7 +525,7 @@ class TestRenderParams:
              patch("components.sidebar.st.session_state", ss,
                    create=True), \
              patch("components.sidebar.st.expander"):
-            from components.sidebar import _render_params
+            from browse.components_sidebar import _render_params
             _render_params(
                 key="v0", filter_id="sma", dual=False,
                 filter_id2=None, tf_default="日线",
@@ -543,7 +543,7 @@ class TestRenderParams:
     })
     def test_render_params_strategy_disabled_reads_sl_from_state(self):
         """show_strategy=False 时从 session_state 读取 stop_loss_pct."""
-        from components.sidebar import _render_params
+        from browse.components_sidebar import _render_params
 
         ss = {"v0_strat": False, "v0_sl": 5.0}
         mock_column_calls = []

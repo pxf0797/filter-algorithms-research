@@ -29,7 +29,7 @@ from data.db import (
 )
 from data.loader import _fetch_all_timeframes
 from engine.filters import FILTERS
-from components.sidebar import _render_params, ALL_TFS, DEFAULT_TFS
+from browse.components_sidebar import _render_params, ALL_TFS, DEFAULT_TFS
 from shared.constants import TF_INTERVAL
 from shared.state import AppState
 

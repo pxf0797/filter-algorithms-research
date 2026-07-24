@@ -43,7 +43,7 @@ class TestExportCompleteness:
 
     def test_all_per_view_keys_exported(self):
         """导出函数(registry 驱动)包含每个视图的全部参数(含新增 pnlfb)"""
-        from streamlit_app import _view_export_params
+        from browse.app import _view_export_params
         # 合成一个含全部 cfg 键的视图配置
         cfg = {cfg_key: (default if default is not None else "x")
                for _, cfg_key, default in VIEW_PARAM_SPECS}
@@ -396,7 +396,7 @@ class TestParamRegistryGuard:
 
     def test_export_helper_covers_pnlfb(self):
         """JSON 导出函数包含 v{i}_pnlfb。"""
-        from streamlit_app import _view_export_params
+        from browse.app import _view_export_params
         out = _view_export_params({"show_pnl_feedback": True}, 2)
         assert out["v2_pnlfb"] is True
 
@@ -412,7 +412,7 @@ class TestParamRegistryGuard:
 
     def test_json_roundtrip_pnlfb(self):
         """JSON 导出→序列化→读回：pnlfb 值被保留。"""
-        from streamlit_app import _view_export_params
+        from browse.app import _view_export_params
         exported = _view_export_params({"show_pnl_feedback": True}, 0)
         blob = json.loads(json.dumps(exported))     # 模拟 download→upload
         assert blob["v0_pnlfb"] is True

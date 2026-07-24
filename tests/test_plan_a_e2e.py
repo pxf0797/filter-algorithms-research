@@ -93,12 +93,12 @@ class TestPlanAE2eFigureConstruction:
         t, noisy, filtered, filtered2, ohlc = _make_data(n)
 
         # 导入所有 _add_* 函数
-        from streamlit_app import (
+        from browse.app import (
             _add_main_price_traces, _add_residual_traces, _add_schmitt_traces,
             _add_pnl_traces, _add_feedback_subplot, _determine_subplot_layout,
             _insert_feedback_row,
         )
-        from components.charts import (
+        from browse.charts import (
             _add_prediction_traces, _add_cross_pnl_subplot,
             _add_alignment_subplot,
         )
@@ -298,7 +298,7 @@ class TestPlanAE2eFigureConstruction:
     # ----------------------------------------------------------------
     def test_figure_to_json_with_ndarray_data(self):
         """_add_* 输出含 np 类型后 to_json() 仍工作。"""
-        from streamlit_app import _add_main_price_traces
+        from browse.app import _add_main_price_traces
         n = 20
         t = np.arange(n, dtype=float)
         noisy = np.linspace(100, 110, n)

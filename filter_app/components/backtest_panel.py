@@ -16,7 +16,7 @@ from loguru import logger
 
 from shared.state import AppState
 from backtest_logger import log_mode_switch
-from components.sidebar import ALL_TFS  # keep for backward-compat; primary source is filter_app.constants
+from browse.components_sidebar import ALL_TFS  # keep for backward-compat; primary source is filter_app.constants
 
 
 # ============================================================================

@@ -87,7 +87,7 @@ class TestImportHygiene:
 
     def test_sidebar_sections_imports(self):
         """sidebar_sections module should import without error."""
-        from filter_app import sidebar_sections
+        from filter_app.browse import sidebar
         # The module itself should import cleanly
         assert sidebar_sections is not None
 

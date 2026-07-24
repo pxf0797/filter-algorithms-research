@@ -3,11 +3,11 @@
 import numpy as np
 import pandas as pd
 from plotly.subplots import make_subplots
-from streamlit_app import (
+from browse.app import (
     _add_main_price_traces, _add_residual_traces, _add_schmitt_traces,
     _add_pnl_traces, _add_feedback_subplot,
 )
-from components.charts import (
+from browse.charts import (
     _add_prediction_traces, _add_cross_pnl_subplot, _add_alignment_subplot,
     _render_entry_marker, _render_exit_marker_with_label,
     _render_pnl_curves, _render_baseline, _draw_holding_bands,

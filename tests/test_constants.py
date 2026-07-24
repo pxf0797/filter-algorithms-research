@@ -74,7 +74,7 @@ class TestImportConsistency:
 
     def test_sidebar_re_exports_all_tfs(self):
         """sidebar.py should re-export ALL_TFS from constants."""
-        from components.sidebar import ALL_TFS as S_ALL_TFS
+        from browse.components_sidebar import ALL_TFS as S_ALL_TFS
         assert S_ALL_TFS == ALL_TFS
 
     def test_backtest_core_re_exports_all_tfs(self):

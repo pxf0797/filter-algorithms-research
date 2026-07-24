@@ -11,7 +11,7 @@ from engine.filters import (
     apply_sma, apply_ema, FILTERS,
 )
 from data.loader import _stock_name_lookup
-from components.sidebar import TF_HIERARCHY, ALL_TFS
+from browse.components_sidebar import TF_HIERARCHY, ALL_TFS
 
 
 # =========================================================================

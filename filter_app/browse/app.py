@@ -33,17 +33,17 @@ from data.loader import (
     _fetch_all_timeframes, _fetch_stock, _sync_to_display,
     load_display_cache, _stock_name_lookup,
 )
-from components.charts import (
+from browse.charts import (
     _render_plotly, _add_prediction_traces,
     _add_cross_pnl_subplot, _add_alignment_subplot,
     _draw_holding_bands, _add_bs_markers,
 )
-from chart_builder import (
+from browse.chart_builder import (
     _date_markers, _determine_subplot_layout, _insert_feedback_row,
     _add_main_price_traces, _add_residual_traces, _add_schmitt_traces,
     _add_pnl_traces, _add_feedback_subplot,
 )
-from sidebar_sections import (
+from browse.sidebar import (
     _handle_pending_apply, _render_config_import, _handle_initial_fetch,
     _render_refresh_row, _render_preset_selector, _render_health_check,
     _render_data_validation, _render_filter_selectors, _render_param_panels,
@@ -51,7 +51,7 @@ from sidebar_sections import (
     _render_config_history, _render_db_import_export, _run_auto_refresh,
 )
 from engine.signals import compute_bs_markers, get_lower_tfs
-from components.sidebar import (
+from browse.components_sidebar import (
     _render_params, ALL_TFS, DEFAULT_TFS, TF_HIERARCHY,
 )
 from shared.constants import TF_INTERVAL

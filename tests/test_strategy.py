@@ -10,7 +10,7 @@ from engine.filters import (
     _fit_parabolic, _fit_physics_parabola,
     _compute_strategy_pnl, _find_all_pairs,
 )
-from components.charts import _add_prediction_traces
+from browse.charts import _add_prediction_traces
 
 
 # ============================================================================

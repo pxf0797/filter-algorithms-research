@@ -32,7 +32,7 @@ import pytest
 
 
 # Module under test
-from components.charts import (
+from browse.charts import (
     _render_entry_marker,
     _render_exit_marker_with_label,
     _render_pnl_curves,
@@ -305,7 +305,7 @@ class TestRenderPlotlyHtml:
 
     def test_fallback_html_structure(self):
         """H4: _render_plotly 输出包含 plotly-fallback div + IIFE 结构."""
-        from components.charts import _render_plotly
+        from browse.charts import _render_plotly
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=[1, 2, 3], y=[1, 2, 3]))
@@ -336,7 +336,7 @@ class TestRenderPlotlyHtml:
     # -----------------------------------------------------------------
     def test_timeout_safety_check(self):
         """H5: 输出包含 5秒 setTimeout 安全检查."""
-        from components.charts import _render_plotly
+        from browse.charts import _render_plotly
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=[1, 2, 3], y=[1, 2, 3]))
@@ -363,7 +363,7 @@ class TestRenderPlotlyHtml:
     # -----------------------------------------------------------------
     def test_iife_wrapping_is_valid(self):
         """修复验证: (function() { 和 })(); 配对，return 在函数内."""
-        from components.charts import _render_plotly
+        from browse.charts import _render_plotly
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=[1, 2, 3], y=[1, 2, 3]))
@@ -435,7 +435,7 @@ class TestRenderPlotlySerialization:
         # 向第一个 trace 的 y 中注入 NaN
         fig.data[0].y = np.array([1.0, float("nan"), 3.0, float("nan"), 5.0])
 
-        from components.charts import _render_plotly
+        from browse.charts import _render_plotly
         _render_plotly(fig)
 
         assert "html" in captured
@@ -461,7 +461,7 @@ class TestRenderPlotlySerialization:
         fig = _make_fig()
         fig.data[0].y = np.array([1.0, float("inf"), 3.0, float("-inf"), 5.0])
 
-        from components.charts import _render_plotly
+        from browse.charts import _render_plotly
         _render_plotly(fig)
 
         assert "html" in captured
@@ -486,7 +486,7 @@ class TestRenderPlotlySerialization:
         fig = go.Figure()  # 完全空白的 figure
         fig.add_trace(go.Scatter(x=[], y=[]))
 
-        from components.charts import _render_plotly
+        from browse.charts import _render_plotly
         _render_plotly(fig)
 
         assert "html" in captured
@@ -505,7 +505,7 @@ class TestRenderPlotlySerialization:
         fig = _make_fig()
         dates = [datetime(2026, 1, 1), datetime(2026, 1, 2)]
 
-        from components.charts import _render_plotly
+        from browse.charts import _render_plotly
         _render_plotly(fig, dates=dates)
 
         assert "html" in captured
