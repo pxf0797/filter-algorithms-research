@@ -272,17 +272,17 @@ class TestRenderPlotlyHtml:
 
     def test_cdn_url_in_html(self):
         """源码中应包含 Plotly CDN URL."""
-        source = Path(_src / "components" / "charts.py").read_text()
+        source = Path(_src / "browse" / "charts.py").read_text()
         assert "https://cdn.plot.ly/plotly-2.35.2.min.js" in source
 
     def test_cdn_fallback_url(self):
         """应有 CDNJS fallback URL."""
-        source = Path(_src / "components" / "charts.py").read_text()
+        source = Path(_src / "browse" / "charts.py").read_text()
         assert "cdnjs.cloudflare.com/ajax/libs/plotly.js" in source
 
     def test_html_contains_date_tip_div(self):
         """HTML 模板应包含 date-tip div."""
-        source = Path(_src / "components" / "charts.py").read_text()
+        source = Path(_src / "browse" / "charts.py").read_text()
         assert "date-tip-" in source
 
     def test_html_contains_crosshair_logic(self):
@@ -293,7 +293,7 @@ class TestRenderPlotlyHtml:
         2. charts.js 包含 crosshair 逻辑
         """
         # charts.py 应从外部 JS 文件读取（而非内联）
-        py_source = Path(_src / "components" / "charts.py").read_text()
+        py_source = Path(_src / "browse" / "charts.py").read_text()
         assert "charts.js" in py_source, "charts.py 应从 charts.js 文件读取 JS"
 
         # JS 文件应包含 crosshair 核心逻辑

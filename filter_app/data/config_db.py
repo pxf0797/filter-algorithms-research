@@ -106,7 +106,14 @@ def init_config_tables():
         conn.executescript(_SCHEMA)
         conn.executescript(_HISTORY_SCHEMA)
 
-        # P0-2: 迁移已有 config_ticker 表 — SQLite 不支持 ALTER COLUMN 改 FK，
+        # P0-2a: 为旧版 config_presets 表添加 description 列（若缺失）
+        cursor = conn.execute("PRAGMA table_info(config_presets)")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'description' not in columns:
+            conn.execute("ALTER TABLE config_presets ADD COLUMN description TEXT DEFAULT ''")
+            logger.info("init_config_tables: 已添加 description 列到 config_presets 表")
+
+        # P0-2b: 迁移已有 config_ticker 表 — SQLite 不支持 ALTER COLUMN 改 FK，
         # 需重建表来添加 ON DELETE SET NULL。检查现有 FK 是否缺少 ON DELETE 子句。
         fk_list = conn.execute("PRAGMA foreign_key_list('config_ticker')").fetchall()
         needs_migration = any(

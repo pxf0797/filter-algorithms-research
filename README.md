@@ -9,7 +9,7 @@
 ```bash
 cd filter_research
 pip install -r filter_app/requirements.txt
-streamlit run filter_app/streamlit_app.py
+streamlit run filter_app/browse/app.py
 ```
 
 浏览器自动打开 `http://localhost:8501`，侧边栏调节参数，关闭终端即停止服务。
@@ -212,7 +212,7 @@ filter_research/
 │   ├── config_db.py            # 预设配置管理（保存/应用/导入/导出）
 │   ├── db.py                   # SQLite 数据层（8 周期 K 线存储）
 │   ├── state.py                # AppState 会话状态管理
-│   └── streamlit_app.py        # 入口文件（2x2 网格布局 + 图表渲染编排）
+│   └── browse/app.py          # 入口文件（2x2 网格布局 + 图表渲染编排）
 ├── tests/                      # 测试目录（20 个文件）
 ├── config/                     # 策略配置文件（JSON）
 ├── data/                       # SQLite 数据库 + Parquet 缓存 + 快照

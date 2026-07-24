@@ -35,7 +35,7 @@ clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +
 
 run:
-	streamlit run filter_app/streamlit_app.py
+	streamlit run filter_app/browse/app.py
 
 changelog:
 	@echo "# Changelog\n" > CHANGELOG.md.tmp

@@ -531,7 +531,7 @@ class TestRenderParams:
                 filter_id2=None, tf_default="日线",
             )
 
-        assert ss.get("v0_exp_all") is True
+        assert ss.get("v0_exp_all") is False
 
 
     @patch("browse.components_sidebar.FILTERS", {

@@ -63,6 +63,47 @@ class TestInitConfigTables:
         config_db.init_config_tables()
         config_db.init_config_tables()  # 不应抛出异常
 
+    def test_description_column_migration(self, tmp_path):
+        """旧版 DB 无 description 列时，init_config_tables 自动添加。"""
+        import data.config_db as config_db
+
+        db_path = tmp_path / "config_no_desc.db"
+        with patch("data.config_db._CONFIG_DB_PATH", db_path):
+            # 模拟旧版 schema：建表时无 description 列
+            conn = sqlite3.connect(str(db_path))
+            conn.executescript("""
+                CREATE TABLE config_presets (
+                    preset_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name         TEXT    NOT NULL UNIQUE,
+                    category     TEXT    DEFAULT '通用',
+                    params_json  TEXT    NOT NULL,
+                    created_at   TEXT    DEFAULT (datetime('now','localtime')),
+                    updated_at   TEXT    DEFAULT (datetime('now','localtime'))
+                );
+                INSERT INTO config_presets(name, params_json) VALUES('old_preset','{"v":1}');
+                CREATE TABLE config_ticker (
+                    ticker       TEXT    NOT NULL,
+                    variant      TEXT    NOT NULL DEFAULT 'single',
+                    market       TEXT    DEFAULT '',
+                    preset_id    INTEGER,
+                    params_json  TEXT    DEFAULT '',
+                    updated_at   TEXT    DEFAULT (datetime('now','localtime')),
+                    PRIMARY KEY (ticker, variant)
+                );
+            """)
+            conn.commit()
+            conn.close()
+
+            # 跑迁移 — 应自动添加 description 列
+            config_db.init_config_tables()
+
+            # 验证 description 列已存在且有默认值
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT * FROM config_presets WHERE name='old_preset'").fetchone()
+            conn.close()
+            assert dict(row).get("description") == ""
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 2. TestPresetCRUD
@@ -941,7 +982,10 @@ class TestInitConfigTablesMigration:
                 CREATE TABLE config_presets (
                     preset_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL UNIQUE,
-                    params_json TEXT NOT NULL
+                    category TEXT DEFAULT '通用',
+                    params_json TEXT NOT NULL,
+                    created_at TEXT DEFAULT (datetime('now','localtime')),
+                    updated_at TEXT DEFAULT (datetime('now','localtime'))
                 );
                 INSERT INTO config_presets(name, params_json) VALUES('p1','{"v":1}');
                 CREATE TABLE config_ticker (

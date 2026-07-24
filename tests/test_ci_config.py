@@ -113,3 +113,20 @@ def test_makefile_snapshot_update_uses_update_flag():
     assert "--snapshot-update" in recipe, (
         "snapshot-update target must use --snapshot-update flag"
     )
+
+
+def test_no_stale_streamlit_app_paths():
+    """Dockerfile/Makefile/README 中不应存在过时的 streamlit_app.py 路径。"""
+    files_to_check = {
+        "Dockerfile": ROOT / "Dockerfile",
+        "Makefile": ROOT / "Makefile",
+        "README.md": ROOT / "README.md",
+    }
+
+    for name, path in files_to_check.items():
+        assert path.exists(), f"{name} not found at {path}"
+        content = path.read_text()
+        assert "streamlit_app.py" not in content, (
+            f"{name} contains stale reference to 'streamlit_app.py'. "
+            f"Should use 'browse/app.py' instead."
+        )

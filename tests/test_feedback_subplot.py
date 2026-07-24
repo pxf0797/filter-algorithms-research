@@ -1,7 +1,7 @@
 """
 Smoke tests for holding-state bands & layout insertion.
 
-- 共享绘制 _draw_holding_bands / _contiguous_runs 在 components.charts
+- 共享绘制 _draw_holding_bands / _contiguous_runs 在 browse.charts
 - 当前周期"实际持仓状态" _add_feedback_subplot 与布局 _insert_feedback_row 在 streamlit_app
 
 持仓状态直接来自实际成交区间(entry→exit)，无 PnL 反馈门控。
