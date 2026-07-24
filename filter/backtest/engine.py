@@ -542,11 +542,15 @@ class BacktestRunner:
 
         # Per-bar windowing: filter to cutoff_date, keep last n_pts bars
         if cutoff_date is not None:
-            cutoff_dt = pd.Timestamp(cutoff_date)
+            cutoff_dt = pd.Timestamp(cutoff_date).tz_localize(None)
             # For daily+ TFs, match by day boundary so that intraday cutoff
             # (e.g. "2026-04-01T15:45") still includes the daily bar at
             # "2026-04-01".
-            df = df[df.index <= cutoff_dt]
+            # Normalise index timezone to avoid tz-aware vs tz-naive mismatch
+            idx = df.index
+            if hasattr(idx, "tz") and idx.tz is not None:
+                idx = idx.tz_localize(None)
+            df = df.loc[idx <= cutoff_dt]
             if len(df) > n_pts:
                 df = df.iloc[-n_pts:]
 

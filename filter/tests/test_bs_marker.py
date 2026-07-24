@@ -418,3 +418,82 @@ class TestTFHierarchy:
                 assert len(path) <= len(TF_LOWER), (
                     f"Cycle detected in TF_LOWER starting from {tf}"
                 )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Tz-aware date comparison regression tests
+# ══════════════════════════════════════════════════════════════════════
+
+class TestTzDateComparison:
+    """Regression tests for tz-aware vs tz-naive index comparison.
+
+    Engine._load_window_data normalises both sides before filtering,
+    avoiding ``TypeError: Invalid comparison between dtype=datetime64[ns,
+    UTC+08:00] and Timestamp``.
+    """
+
+    def _filter_by_cutoff(self, df, cutoff_date, n_pts=None):
+        """Mirror engine._load_window_data date-filter logic."""
+        cutoff_dt = pd.Timestamp(cutoff_date).tz_localize(None)
+        idx = df.index
+        if hasattr(idx, "tz") and idx.tz is not None:
+            idx = idx.tz_localize(None)
+        df = df.loc[idx <= cutoff_dt]
+        if n_pts is not None and len(df) > n_pts:
+            df = df.iloc[-n_pts:]
+        return df
+
+    def test_tz_aware_index_with_tz_aware_cutoff(self):
+        """Index=UTC+08:00, cutoff=+08:00 → no crash, correct filter."""
+        df = pd.DataFrame(
+            {"Close": range(10)},
+            index=pd.date_range("2026-04-01T10:00:00+08:00", periods=10, freq="15min"),
+        )
+        result = self._filter_by_cutoff(df, "2026-04-01T10:30:00+08:00")
+        # Should include bars <= 10:30:00 → bars 0,1,2 (10:00, 10:15, 10:30)
+        assert len(result) == 3, f"Expected 3 bars, got {len(result)}"
+
+    def test_tz_naive_index_with_tz_aware_cutoff(self):
+        """Index=naive, cutoff=+08:00 → no crash, correct filter."""
+        df = pd.DataFrame(
+            {"Close": range(10)},
+            index=pd.date_range("2026-04-01", periods=10, freq="D"),
+        )
+        result = self._filter_by_cutoff(df, "2026-04-03T00:00:00+08:00")
+        # Apr 1, 2, 3 → 3 bars
+        assert len(result) == 3, f"Expected 3 bars, got {len(result)}"
+
+    def test_tz_aware_index_with_tz_naive_cutoff(self):
+        """Index=UTC+08:00, cutoff=naive → no crash, correct filter."""
+        df = pd.DataFrame(
+            {"Close": range(10)},
+            index=pd.date_range("2026-04-01T10:00:00+08:00", periods=10, freq="15min"),
+        )
+        result = self._filter_by_cutoff(df, "2026-04-01 10:30:00")
+        assert len(result) == 3
+
+    def test_empty_result_when_cutoff_before_all_bars(self):
+        """Cutoff before all bar dates → empty DataFrame, no crash."""
+        df = pd.DataFrame(
+            {"Close": range(10)},
+            index=pd.date_range("2026-04-01T10:00:00+08:00", periods=10, freq="15min"),
+        )
+        result = self._filter_by_cutoff(df, "2026-03-01T00:00:00+08:00")
+        assert len(result) == 0
+
+    def test_n_pts_truncation_applied(self):
+        """n_pts limits result after date filter."""
+        df = pd.DataFrame(
+            {"Close": range(100)},
+            index=pd.date_range("2026-04-01T10:00:00+08:00", periods=100, freq="15min"),
+        )
+        result = self._filter_by_cutoff(df, "2026-04-02T00:00:00+08:00", n_pts=20)
+        assert len(result) == 20
+        # From 10:00 to midnight = 14h = 840min = 56 intervals → bars 0..56 (57 bars
+        # since <= includes the midnight bar).  Last 20 = bars 37..56.
+        # Bar 37: 10:00 + 37*15min = 19:15
+        # Note: index preserves original tz, only comparison uses tz-naive
+        expected = pd.Timestamp("2026-04-01T19:15:00+08:00")
+        assert result.index[0] == expected, (
+            f"Expected {expected}, got {result.index[0]}"
+        )
