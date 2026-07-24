@@ -92,6 +92,17 @@ jobs:
           name: medium-test-report-${{ matrix.python-version }}
           path: medium-test-results.xml
 
+  snapshot-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install syrupy pytest
+      - run: pip install -r requirements.lock 2>/dev/null || true
+      - run: python -m pytest tests/test_snapshots.py --tb=short -q
+
   slow-tests:
     runs-on: ubuntu-latest
     needs: [lint]
@@ -153,6 +164,18 @@ jobs:
       - run: python -m pytest tests/ --ignore=tests/test_app_ui.py
                --cov=filter_app --cov-report=term
                --cov-fail-under=55 -q --tb=short
+
+  changelog-check:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check CHANGELOG was updated
+        run: |
+          git diff --name-only origin/${{ github.base_ref }}...HEAD | grep -q CHANGELOG.md || \
+            (echo "::error::PR must update CHANGELOG.md. Run 'make changelog' and commit the result." && exit 1)
 
   docker-verify:
     runs-on: ubuntu-latest

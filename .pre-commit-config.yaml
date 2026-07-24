@@ -27,6 +27,17 @@ repos:
         additional_dependencies: [types-requests, types-pyyaml]
         files: ^filter_app/
 
+  # changelog: ensure CHANGELOG.md is updated when source files change
+  - repo: local
+    hooks:
+      - id: changelog-updated
+        name: Check CHANGELOG.md updated
+        entry: bash -c 'git diff --cached --name-only | grep -qv "^CHANGELOG.md$" && git diff --cached --name-only | grep -qE "\.(py|toml|yaml|yml)$" && ! git diff --cached --name-only | grep -q "^CHANGELOG.md$" && echo "ERROR: Source files changed but CHANGELOG.md not updated. Stage CHANGELOG.md or run make changelog." && exit 1 || exit 0'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
   # P1-17: security linting
   - repo: https://github.com/PyCQA/bandit
     rev: 1.7.9

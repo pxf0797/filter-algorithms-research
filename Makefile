@@ -2,13 +2,19 @@
 # The .python-version file pins the required Python version.
 # Run `pyenv install` or `asdf install` to ensure it's available.
 
-.PHONY: install test lint format mypy bandit check clean run
+.PHONY: install test test-snapshots snapshot-update lint format mypy bandit check clean run changelog
 
 install:
 	pip install -r requirements.lock
 
 test:
 	python -m pytest tests/ --tb=short -q
+
+test-snapshots:
+	python -m pytest tests/test_snapshots.py --tb=short -q
+
+snapshot-update:
+	python -m pytest tests/test_snapshots.py --snapshot-update --tb=short -q
 
 lint:
 	ruff check .
@@ -30,3 +36,14 @@ clean:
 
 run:
 	streamlit run filter_app/streamlit_app.py
+
+changelog:
+	@echo "# Changelog\n" > CHANGELOG.md.tmp
+	@git tag --sort=-creatordate | while read tag; do \
+		echo "## $$tag"; \
+		echo ""; \
+		git log --oneline --no-merges $$tag...$$prev_tag 2>/dev/null | sed 's/^/- /'; \
+		echo ""; \
+		prev_tag=$$tag; \
+	done >> CHANGELOG.md.tmp
+	@mv CHANGELOG.md.tmp CHANGELOG.md
