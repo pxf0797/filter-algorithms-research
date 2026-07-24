@@ -22,9 +22,9 @@ pytestmark = pytest.mark.numba
 def _reimport_engine():
     """Reimport filter_engine from a clean cache for fallback testing."""
     for mod in list(sys.modules):
-        if mod.startswith("services.filter_engine") or mod == "services":
+        if mod.startswith("engine.filters") or mod == "engine":
             del sys.modules[mod]
-    import services.filter_engine as eng
+    import engine.filters as eng
     return eng
 
 
@@ -264,7 +264,7 @@ class TestNumbaFallback:
         """Verify that the pure Python fallback path inside apply_kalman
         produces correct numerical results by simulating numba-unavailable."""
         from engine.filters import _kalman_core
-        import services.filter_engine as eng
+        import engine.filters as eng
 
         Q, R = 0.01, 1.0
         dt = float(time_index_500[1] - time_index_500[0])

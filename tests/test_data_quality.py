@@ -196,8 +196,8 @@ class TestEmptyDataHandling:
     def test_empty_query_returns_empty_df(self, monkeypatch, tmp_path):
         """无数据 ticker 查询返回空 DataFrame"""
         db_path = tmp_path / "empty.db"
-        monkeypatch.setattr("db.DB_PATH", db_path)
-        import data.db
+        monkeypatch.setattr("data.db.DB_PATH", db_path)
+        import data.db as db
         db.init_db()
         result = db.query_kline("NONEXISTENT", "日线", n_pts=50)
         assert isinstance(result, pd.DataFrame)

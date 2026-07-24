@@ -21,8 +21,8 @@ def repo_with_db():
     """创建临时 config.db，初始化表，返回 PresetRepository 实例。"""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "config.db"
-        with patch("config_db._CONFIG_DB_PATH", db_path):
-            import data.config_db
+        with patch("data.config_db._CONFIG_DB_PATH", db_path):
+            import data.config_db as config_db
             config_db.init_config_tables()
             from shared.repository import PresetRepository
             yield PresetRepository()
@@ -251,7 +251,7 @@ class TestPresetRepositoryIsolation:
 
     def test_repo_and_raw_share_data(self, repo_with_db, sample_params):
         """Repository 与原始 config_db 函数共享同一数据库。"""
-        import data.config_db
+        import data.config_db as config_db
 
         # 通过 repo 写入
         pid = repo_with_db.save({"name": "shared_test", "params_json": sample_params,

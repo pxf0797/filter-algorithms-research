@@ -13,14 +13,14 @@ class TestSynthCache:
 
     def test_cache_state_initialized(self):
         """模块级缓存变量存在且初始为空"""
-        import services.data_loader as dl
+        import data.loader as dl
         assert hasattr(dl, "_synth_cache_state")
         # After import, cache may contain data from other tests — check it's a dict
         assert isinstance(dl._synth_cache_state, dict)
 
     def test_cache_hit_returns_dict(self):
         """模拟缓存命中：设置 last_key + last_result 后再次调用应返回缓存值"""
-        import services.data_loader as dl
+        import data.loader as dl
         # Save original
         orig_state = dict(dl._synth_cache_state)
         try:
@@ -40,7 +40,7 @@ class TestSynthCache:
 
     def test_cache_key_different_cutoff_invalidates(self):
         """不同 cutoff_date 会生成不同缓存键，缓存应失效"""
-        import services.data_loader as dl
+        import data.loader as dl
         orig_state = dict(dl._synth_cache_state)
         try:
             dl._synth_cache_state.clear()

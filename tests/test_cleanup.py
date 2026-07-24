@@ -73,17 +73,17 @@ class TestImportHygiene:
         # We use compile to check syntax without executing Streamlit code
         import ast
         from pathlib import Path
-        app_path = Path(__file__).parent.parent / "filter_app" / "streamlit_app.py"
+        app_path = Path(__file__).parent.parent / "filter_app" / "browse" / "app.py"
         source = app_path.read_text(encoding="utf-8")
         try:
             ast.parse(source)
         except SyntaxError as e:
-            pytest.fail(f"streamlit_app.py has syntax error: {e}")
+            pytest.fail(f"browse/app.py has syntax error: {e}")
 
     def test_data_loader_imports(self):
         """data_loader module should import without error."""
-        from filter_app.services import data_loader
-        assert hasattr(data_loader, "_stock_name_lookup")
+        from filter_app.data import loader
+        assert hasattr(loader, "_stock_name_lookup")
 
     def test_sidebar_sections_imports(self):
         """sidebar_sections module should import without error."""
@@ -93,16 +93,16 @@ class TestImportHygiene:
 
     def test_backtest_panel_imports(self):
         """backtest_panel module should import without error."""
-        from filter_app.components import backtest_panel
-        assert hasattr(backtest_panel, "render_backtest_panel")
-        assert hasattr(backtest_panel, "run_backtest_play")
-        assert hasattr(backtest_panel, "sync_backtest_cascading_data")
+        from filter_app.backtest import panel
+        assert hasattr(panel, "render_backtest_panel")
+        assert hasattr(panel, "run_backtest_play")
+        assert hasattr(panel, "sync_backtest_cascading_data")
 
     def test_no_dead_imports_in_app(self):
-        """Verify dead top-level imports are removed from streamlit_app.py source."""
+        """Verify dead top-level imports are removed from browse/app.py source."""
         from pathlib import Path
         import ast
-        app_path = Path(__file__).parent.parent / "filter_app" / "streamlit_app.py"
+        app_path = Path(__file__).parent.parent / "filter_app" / "browse" / "app.py"
         source = app_path.read_text(encoding="utf-8")
 
         # Parse top-level imports
@@ -121,7 +121,7 @@ class TestImportHygiene:
         dead_top_level = {"json", "os", "tempfile", "pathlib"}
         for dead in dead_top_level:
             assert dead not in top_level_imports, \
-                f"Dead top-level import '{dead}' still present in streamlit_app.py"
+                f"Dead top-level import '{dead}' still present in browse/app.py"
 
         # These specific names should NOT appear in top-level imports
         dead_from_names = {
@@ -130,11 +130,11 @@ class TestImportHygiene:
         }
         for dead in dead_from_names:
             assert dead not in top_level_imports, \
-                f"Dead import '{dead}' still present in streamlit_app.py"
+                f"Dead import '{dead}' still present in browse/app.py"
 
         # yfinance should not be a top-level import
         assert "yfinance" not in top_level_imports, \
-            "Dead import 'yfinance' still present in streamlit_app.py"
+            "Dead import 'yfinance' still present in browse/app.py"
 
         # log_data_load should still be there
         assert "backtest_logger.log_data_load" in top_level_imports, \
@@ -142,9 +142,9 @@ class TestImportHygiene:
         assert "log_data_load" in source, "'log_data_load' was incorrectly removed"
 
     def test_sidebar_dead_functions_removed(self):
-        """Verify dead functions are removed from sidebar_sections.py."""
+        """Verify dead functions are removed from browse/sidebar.py."""
         from pathlib import Path
-        sidebar_path = Path(__file__).parent.parent / "filter_app" / "sidebar_sections.py"
+        sidebar_path = Path(__file__).parent.parent / "filter_app" / "browse" / "sidebar.py"
         source = sidebar_path.read_text(encoding="utf-8")
 
         assert "def _render_market_ticker" not in source, \

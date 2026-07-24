@@ -48,9 +48,9 @@ def test_data_pipeline_e2e(monkeypatch, tmp_path):
     """端到端数据管线: 构造OHLC数据 → upsert_kline → query_kline → 数据完整性验证"""
     # ── 隔离 DB 路径 ──
     db_path = tmp_path / "test_market.db"
-    monkeypatch.setattr("db.DB_PATH", db_path)
+    monkeypatch.setattr("data.db.DB_PATH", db_path)
 
-    import data.db
+    import data.db as db
     db.init_db()
 
     # ── 构造 OHLC DataFrame ──
@@ -100,8 +100,8 @@ def test_config_preset_lifecycle(tmp_path):
     config_dir = tmp_path / "config"
     config_dir.mkdir()
 
-    with patch("config_db._CONFIG_DB_PATH", db_path), patch("config_db._CONFIG_DIR", config_dir):
-        import data.config_db
+    with patch("data.config_db._CONFIG_DB_PATH", db_path), patch("data.config_db._CONFIG_DIR", config_dir):
+        import data.config_db as config_db
         config_db.init_config_tables()
 
         # ── 保存2个预设 ──
@@ -405,7 +405,7 @@ def test_cli_help_output():
     _pkg_dir = Path(__file__).resolve().parent.parent / "filter_app"
     env = os.environ.copy()
     result = subprocess.run(
-        [sys.executable, "-m", "filter_app.backtest_cli", "--help"],
+        [sys.executable, "-m", "filter_app.backtest.cli", "--help"],
         capture_output=True, text=True, timeout=30,
         cwd=str(_pkg_dir.parent),
         env=env,
@@ -423,7 +423,7 @@ def test_cli_missing_ticker_exits_nonzero():
     _pkg_dir = Path(__file__).resolve().parent.parent / "filter_app"
     env = os.environ.copy()
     result = subprocess.run(
-        [sys.executable, "-m", "filter_app.backtest_cli"],
+        [sys.executable, "-m", "filter_app.backtest.cli"],
         capture_output=True, text=True, timeout=30,
         cwd=str(_pkg_dir.parent),
         env=env,
@@ -438,15 +438,15 @@ def test_cli_bad_preset_exits_nonzero(monkeypatch, tmp_path):
     import os
     # 使用隔离的 config DB 路径，确保没有预设数据
     db_path = tmp_path / "config_empty.db"
-    monkeypatch.setattr("config_db._CONFIG_DB_PATH", db_path)
+    monkeypatch.setattr("data.config_db._CONFIG_DB_PATH", db_path)
     # 初始化空 config tables
-    import data.config_db
+    import data.config_db as config_db
     config_db.init_config_tables()
 
     _pkg_dir = Path(__file__).resolve().parent.parent / "filter_app"
     env = os.environ.copy()
     result = subprocess.run(
-        [sys.executable, "-m", "filter_app.backtest_cli",
+        [sys.executable, "-m", "filter_app.backtest.cli",
          "--ticker", "NONEXISTENT",
          "--preset", "NONEXISTENT_PRESET"],
         capture_output=True, text=True, timeout=30,
@@ -464,7 +464,7 @@ def test_cli_invalid_config_file_exits_nonzero():
     _pkg_dir = Path(__file__).resolve().parent.parent / "filter_app"
     env = os.environ.copy()
     result = subprocess.run(
-        [sys.executable, "-m", "filter_app.backtest_cli",
+        [sys.executable, "-m", "filter_app.backtest.cli",
          "--ticker", "AAPL",
          "--config-file", "/nonexistent/path/config.json"],
         capture_output=True, text=True, timeout=30,
@@ -483,9 +483,9 @@ def test_config_db_init_creates_correct_schema(monkeypatch, tmp_path):
     """init_config_tables：创建正确的表结构和 FK 约束"""
     import sqlite3
     db_path = tmp_path / "config.db"
-    monkeypatch.setattr("config_db._CONFIG_DB_PATH", db_path)
+    monkeypatch.setattr("data.config_db._CONFIG_DB_PATH", db_path)
 
-    import data.config_db
+    import data.config_db as config_db
     config_db.init_config_tables()
 
     # 验证所有3张表存在
@@ -512,9 +512,9 @@ def test_config_db_init_creates_correct_schema(monkeypatch, tmp_path):
 def test_config_db_init_idempotent(monkeypatch, tmp_path):
     """init_config_tables 多次调用应是幂等的"""
     db_path = tmp_path / "config.db"
-    monkeypatch.setattr("config_db._CONFIG_DB_PATH", db_path)
+    monkeypatch.setattr("data.config_db._CONFIG_DB_PATH", db_path)
 
-    import data.config_db
+    import data.config_db as config_db
     config_db.init_config_tables()
     # 第二次调用不应抛异常
     config_db.init_config_tables()
@@ -533,8 +533,8 @@ def test_config_db_init_idempotent(monkeypatch, tmp_path):
 def test_db_init_idempotent(monkeypatch, tmp_path):
     """db.init_db() 多次调用应是幂等的（不抛异常）"""
     db_path = tmp_path / "market.db"
-    monkeypatch.setattr("db.DB_PATH", db_path)
-    import data.db
+    monkeypatch.setattr("data.db.DB_PATH", db_path)
+    import data.db as db
     # 第一次
     db.init_db()
     # 第二次（验证不抛异常也不破坏 schema）
@@ -592,7 +592,7 @@ def test_load_configs_from_valid_file(tmp_path):
 
     # patch DB_PATH 避免 import backtest.cli 时连接真实 DB
     from unittest.mock import patch
-    with patch("db.DB_PATH", tmp_path / "noop.db"):
+    with patch("data.db.DB_PATH", tmp_path / "noop.db"):
         from backtest.cli import _load_configs_from_file
     configs = _load_configs_from_file(str(config_file))
 
@@ -620,7 +620,7 @@ def test_load_configs_from_flat_preset_format(tmp_path):
     config_file.write_text(json.dumps(config_data, ensure_ascii=False), encoding="utf-8")
 
     from unittest.mock import patch
-    with patch("db.DB_PATH", tmp_path / "noop.db"):
+    with patch("data.db.DB_PATH", tmp_path / "noop.db"):
         from backtest.cli import _load_configs_from_file
     configs = _load_configs_from_file(str(config_file))
 
@@ -635,7 +635,7 @@ def test_load_configs_from_flat_preset_format(tmp_path):
 def test_load_configs_missing_file_exits():
     """_load_configs_from_file：不存在的文件应触发 SystemExit"""
     from unittest.mock import patch
-    with patch("db.DB_PATH", Path("/noop") / "noop.db"):
+    with patch("data.db.DB_PATH", Path("/noop") / "noop.db"):
         from backtest.cli import _load_configs_from_file
     with pytest.raises(SystemExit):
         _load_configs_from_file("/nonexistent/config_xyz.json")

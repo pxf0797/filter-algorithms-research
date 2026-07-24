@@ -18,7 +18,7 @@ _old_streamlit = sys.modules.get("streamlit")
 if "streamlit" in sys.modules:
     del sys.modules["streamlit"]
 
-import state  # noqa: E402
+import shared.state as state  # noqa: E402
 
 sys.modules["streamlit"] = _old_streamlit
 
@@ -120,8 +120,8 @@ class TestSyncToDisplay:
         display_dir = tmp_path / "display"
         display_dir.mkdir()
 
-        with patch("db.get_conn", return_value=mock_conn), \
-             patch("services.data_loader.Path") as mock_path_class:
+        with patch("data.db.get_conn", return_value=mock_conn), \
+             patch("data.loader.Path") as mock_path_class:
             # 让 (__file__).parent.parent.parent 指向 tmp_path
             mock_path_class.return_value.parent.parent.parent.__truediv__.return_value = display_dir
 
@@ -142,7 +142,7 @@ class TestSyncToDisplay:
         mock_conn.__exit__.return_value = False
         mock_conn.execute.return_value.fetchall.return_value = []
 
-        with patch("db.get_conn", return_value=mock_conn):
+        with patch("data.db.get_conn", return_value=mock_conn):
             ok, count = _sync_to_display("AAPL", "1d", n_pts=120, cutoff_date="1990-01-01")
             assert ok is False
             assert count == 0
@@ -152,7 +152,7 @@ class TestSyncToDisplay:
         from data.loader import _sync_to_display
         import pandas as pd
 
-        with patch("services.data_loader.query_kline", return_value=pd.DataFrame()) as mock_query:
+        with patch("data.loader.query_kline", return_value=pd.DataFrame()) as mock_query:
             ok, count = _sync_to_display("AAPL", "1d", n_pts=120, cutoff_date=None)
 
             assert ok is False
@@ -168,7 +168,7 @@ class TestSyncToDisplay:
         mock_conn.__exit__.return_value = False
         mock_conn.execute.return_value.fetchall.return_value = []
 
-        with patch("db.get_conn", return_value=mock_conn):
+        with patch("data.db.get_conn", return_value=mock_conn):
             ok, count = _sync_to_display("XYZ", "1mo", n_pts=120, cutoff_date="2025-01-01")
             assert ok is False  # 触发 _load_chart_data 走 _cached_fetch_stock
 
@@ -190,8 +190,8 @@ class TestSyncToDisplay:
         display_dir = tmp_path / "display"
         display_dir.mkdir()
 
-        with patch("db.get_conn", return_value=mock_conn), \
-             patch("services.data_loader.Path") as mock_path_class:
+        with patch("data.db.get_conn", return_value=mock_conn), \
+             patch("data.loader.Path") as mock_path_class:
             mock_path_class.return_value.parent.parent.parent.__truediv__.return_value = display_dir
 
             ok, count = _sync_to_display("AAPL", "1d", n_pts=n_pts, cutoff_date="2026-06-15")
@@ -213,7 +213,7 @@ class TestBacktestEdgeCases:
         mock_conn.__exit__.return_value = False
         mock_conn.execute.return_value.fetchall.return_value = []
 
-        with patch("db.get_conn", return_value=mock_conn):
+        with patch("data.db.get_conn", return_value=mock_conn):
             ok, count = _sync_to_display("AAPL", "1mo", n_pts=120, cutoff_date="1990-01-01")
             assert ok is False
             assert count == 0
@@ -280,7 +280,7 @@ class TestGetBarDateFromDb:
         mock_conn.__exit__.return_value = False
         mock_conn.execute.return_value.fetchone.return_value = ("2026-06-15",)
 
-        with patch("db.get_conn", return_value=mock_conn):
+        with patch("data.db.get_conn", return_value=mock_conn):
             result = _get_bar_date_from_db("AAPL", "1d", 100)
             assert result == "2026-06-15"
 
@@ -293,7 +293,7 @@ class TestGetBarDateFromDb:
         mock_conn.__exit__.return_value = False
         mock_conn.execute.return_value.fetchone.return_value = None
 
-        with patch("db.get_conn", return_value=mock_conn):
+        with patch("data.db.get_conn", return_value=mock_conn):
             result = _get_bar_date_from_db("AAPL", "1d", 99999)
             assert result == ""
 

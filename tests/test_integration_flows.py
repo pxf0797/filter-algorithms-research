@@ -10,7 +10,7 @@ import pytest
 
 # 移除 conftest mock 使 state.py 中 import streamlit 失败 → st = None
 _old_streamlit = sys.modules.pop("streamlit", None)
-import state  # noqa: E402
+import shared.state as state  # noqa: E402
 sys.modules["streamlit"] = _old_streamlit
 
 AppState = state.AppState

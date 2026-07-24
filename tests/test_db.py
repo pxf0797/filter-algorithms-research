@@ -75,7 +75,7 @@ def _count_rows(db_path, ticker=None, tf=None):
 @pytest.fixture
 def db_target(tmp_path):
     """初始化一个临时 DB，返回 (db_module, db_path) 供各测试使用。"""
-    import data.db
+    import data.db as db
     db_path = tmp_path / "test_market.db"
     snap_dir = tmp_path / "snapshots"
 
@@ -116,7 +116,7 @@ class TestInitDb:
 
     def test_init_db_creates_tables(self, tmp_path):
         """调用 init_db 后 kline 表存在。"""
-        import data.db
+        import data.db as db
         db_path = tmp_path / "test_market.db"
         db.DB_PATH = db_path
         db.init_db()
@@ -140,7 +140,7 @@ class TestInitDb:
 
     def test_init_db_idempotent(self, tmp_path):
         """重复调用 init_db 不报错。"""
-        import data.db
+        import data.db as db
         db_path = tmp_path / "test_market.db"
         db.DB_PATH = db_path
         db.init_db()
@@ -741,7 +741,7 @@ class TestGetDbSize:
 
     def test_get_db_size_nonexistent(self, tmp_path):
         """不存在的文件返回 0.0。"""
-        import data.db
+        import data.db as db
         db.DB_PATH = tmp_path / "nonexistent.db"
         size = db.get_db_size_mb()
         assert size == 0.0
@@ -756,7 +756,7 @@ class TestClearDisplayCache:
 
     def test_clear_display_cache(self, tmp_path):
         """创建临时 parquet → clear → 文件被删除。"""
-        import data.db
+        import data.db as db
         db.DB_PATH = tmp_path / "test_market.db"
         display_dir = tmp_path / "display"
         display_dir.mkdir(parents=True, exist_ok=True)
@@ -775,13 +775,13 @@ class TestClearDisplayCache:
 
     def test_clear_display_cache_no_dir(self, tmp_path):
         """display 目录不存在时静默跳过。"""
-        import data.db
+        import data.db as db
         db.DB_PATH = tmp_path / "test_market.db"
         db.clear_display_cache()  # 不应抛出异常
 
     def test_clear_display_cache_error_handling(self, tmp_path):
         """unlink 抛 OSError 时静默跳过。"""
-        import data.db
+        import data.db as db
         import time
         db.DB_PATH = tmp_path / "test_market.db"
         display_dir = tmp_path / "display"
@@ -869,7 +869,7 @@ class TestEdgeCases:
 
     def test_restore_with_wal_shm(self, tmp_path):
         """恢复时自动清理旧的 -wal / -shm 文件。"""
-        import data.db
+        import data.db as db
         db_path = tmp_path / "test_market.db"
         db.DB_PATH = db_path
         db.SNAPSHOT_DIR = tmp_path / "snapshots"
@@ -889,7 +889,7 @@ class TestEdgeCases:
 
     def test_snapshot_dir_created_on_demand(self, tmp_path):
         """snapshot_db 自动创建 snapshots 目录。"""
-        import data.db
+        import data.db as db
         db_path = tmp_path / "test_market.db"
         snap_dir = tmp_path / "snapshots" / "nested"
         db.DB_PATH = db_path
@@ -940,7 +940,7 @@ class TestPragmaOptimization:
 
     def test_mmap_size_set(self):
         """get_conn() 应设置 mmap_size。"""
-        from filter_app.db import get_conn
+        from filter_app.data.db import get_conn
 
         conn = get_conn()
         try:
@@ -952,7 +952,7 @@ class TestPragmaOptimization:
 
     def test_temp_store_memory(self):
         """get_conn() 应设置 temp_store=MEMORY。"""
-        from filter_app.db import get_conn
+        from filter_app.data.db import get_conn
 
         conn = get_conn()
         try:
@@ -964,7 +964,7 @@ class TestPragmaOptimization:
 
     def test_cache_size_set(self):
         """get_conn() 应设置 cache_size 为负值（KB）。"""
-        from filter_app.db import get_conn
+        from filter_app.data.db import get_conn
 
         conn = get_conn()
         try:
@@ -976,7 +976,7 @@ class TestPragmaOptimization:
 
     def test_busy_timeout_set(self):
         """get_conn() 应设置 busy_timeout。"""
-        from filter_app.db import get_conn
+        from filter_app.data.db import get_conn
 
         conn = get_conn()
         try:
@@ -995,7 +995,7 @@ class TestForceUpdateBatch:
 
     def test_force_update_deletes_overlapping(self, db_target):
         """force_update_kline 应正确删除重叠时间戳并插入新数据。"""
-        from filter_app.db import force_update_kline, query_kline
+        from filter_app.data.db import force_update_kline, query_kline
 
         _, db_path = db_target
 
@@ -1022,7 +1022,7 @@ class TestForceUpdateBatch:
 
     def test_force_update_empty_records(self, db_target):
         """空 DataFrame 的 force_update 不应报错。"""
-        from filter_app.db import force_update_kline
+        from filter_app.data.db import force_update_kline
 
         import pandas as pd
         df_empty = pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])

@@ -647,7 +647,7 @@ class TestModule:
     """Smoke tests ensuring cascading synthesis symbols can be imported."""
 
     def test_module_imports(self):
-        from services import data_loader
+        from data import loader as data_loader
         assert hasattr(data_loader, "_ensure_tz_naive")
         assert hasattr(data_loader, "_get_tz_suffix")
         assert hasattr(data_loader, "_format_synth_date")

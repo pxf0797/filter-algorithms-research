@@ -196,7 +196,7 @@ class TestCompactSlider:
         mock_col1 = MagicMock()
         mock_col1.slider.return_value = 50.0
 
-        with patch("components.sidebar.st.columns",
+        with patch("browse.components_sidebar.st.columns",
                    return_value=[mock_col0, mock_col1]):
             from browse.components_sidebar import _compact_slider
             result = _compact_slider("N", 20, 300, 120, 10)
@@ -213,7 +213,7 @@ class TestCompactSlider:
         mock_col1 = MagicMock()
         mock_col1.slider.return_value = 0.5
 
-        with patch("components.sidebar.st.columns",
+        with patch("browse.components_sidebar.st.columns",
                    return_value=[mock_col0, mock_col1]):
             from browse.components_sidebar import _compact_slider
             result = _compact_slider("sigma", 0.0, 1.0, 0.5, 0.01,
@@ -231,7 +231,7 @@ class TestCompactSlider:
         mock_col1 = MagicMock()
         mock_col1.slider.return_value = 5.0
 
-        with patch("components.sidebar.st.columns",
+        with patch("browse.components_sidebar.st.columns",
                    return_value=[mock_col0, mock_col1]):
             from browse.components_sidebar import _compact_slider
             _compact_slider("窗口", 1, 100, 50, 1)
@@ -249,8 +249,8 @@ class TestRenderParamSlider:
         """container=None 时使用 st.sidebar.slider."""
         mock_sidebar = MagicMock()
         mock_sidebar.slider.return_value = 0.5
-        with patch("components.sidebar.st.sidebar", mock_sidebar), \
-             patch("components.sidebar.st.session_state", {}, create=True):
+        with patch("browse.components_sidebar.st.sidebar", mock_sidebar), \
+             patch("browse.components_sidebar.st.session_state", {}, create=True):
             from browse.components_sidebar import _render_param_slider
             result = _render_param_slider("阈值", 0.0, 1.0, 0.1, 0.5)
             assert result == 0.5
@@ -260,7 +260,7 @@ class TestRenderParamSlider:
         """container=st 时使用 st.slider（而非 st.sidebar.slider）."""
         mock_st = MagicMock()
         mock_st.slider.return_value = 20.0
-        with patch("components.sidebar.st", mock_st):
+        with patch("browse.components_sidebar.st", mock_st):
             from browse.components_sidebar import _render_param_slider
             result = _render_param_slider("窗口", 5, 100, 5, 20,
                                           container=mock_st)
@@ -271,8 +271,8 @@ class TestRenderParamSlider:
         """key_suffix 非空时 key 为 f'{label}_{key_suffix}'."""
         mock_sidebar = MagicMock()
         mock_sidebar.slider.return_value = 10.0
-        with patch("components.sidebar.st.sidebar", mock_sidebar), \
-             patch("components.sidebar.st.session_state", {}, create=True):
+        with patch("browse.components_sidebar.st.sidebar", mock_sidebar), \
+             patch("browse.components_sidebar.st.session_state", {}, create=True):
             from browse.components_sidebar import _render_param_slider
             _render_param_slider("跨度", 2, 100, 1, 10,
                                  key_suffix="f1_sma")
@@ -283,8 +283,8 @@ class TestRenderParamSlider:
         """int step 不传 format 参数."""
         mock_sidebar = MagicMock()
         mock_sidebar.slider.return_value = 10
-        with patch("components.sidebar.st.sidebar", mock_sidebar), \
-             patch("components.sidebar.st.session_state", {}, create=True):
+        with patch("browse.components_sidebar.st.sidebar", mock_sidebar), \
+             patch("browse.components_sidebar.st.session_state", {}, create=True):
             from browse.components_sidebar import _render_param_slider
             _render_param_slider("跨度", 2, 100, 1, 10)
             call_kwargs = mock_sidebar.slider.call_args[1]
@@ -294,8 +294,8 @@ class TestRenderParamSlider:
         """float step < 0.01 使用 %.3f 格式."""
         mock_sidebar = MagicMock()
         mock_sidebar.slider.return_value = 0.5
-        with patch("components.sidebar.st.sidebar", mock_sidebar), \
-             patch("components.sidebar.st.session_state", {}, create=True):
+        with patch("browse.components_sidebar.st.sidebar", mock_sidebar), \
+             patch("browse.components_sidebar.st.session_state", {}, create=True):
             from browse.components_sidebar import _render_param_slider
             _render_param_slider("sigma", 0.0, 1.0, 0.001, 0.5)
             call_kwargs = mock_sidebar.slider.call_args[1]
@@ -305,8 +305,8 @@ class TestRenderParamSlider:
         """0.01 <= float step < 1.0 使用 %.2f 格式."""
         mock_sidebar = MagicMock()
         mock_sidebar.slider.return_value = 0.5
-        with patch("components.sidebar.st.sidebar", mock_sidebar), \
-             patch("components.sidebar.st.session_state", {}, create=True):
+        with patch("browse.components_sidebar.st.sidebar", mock_sidebar), \
+             patch("browse.components_sidebar.st.session_state", {}, create=True):
             from browse.components_sidebar import _render_param_slider
             _render_param_slider("比例", 0.0, 1.0, 0.1, 0.5)
             call_kwargs = mock_sidebar.slider.call_args[1]
@@ -316,8 +316,8 @@ class TestRenderParamSlider:
         """key_suffix='' 时不查 session_state，直接使用 pdefault."""
         mock_sidebar = MagicMock()
         mock_sidebar.slider.return_value = 5
-        with patch("components.sidebar.st.sidebar", mock_sidebar), \
-             patch("components.sidebar.st.session_state", {}, create=True):
+        with patch("browse.components_sidebar.st.sidebar", mock_sidebar), \
+             patch("browse.components_sidebar.st.session_state", {}, create=True):
             from browse.components_sidebar import _render_param_slider
             _render_param_slider("窗口", 3, 101, 2, 11, key_suffix="")
             call_kwargs = mock_sidebar.slider.call_args[1]
@@ -331,7 +331,7 @@ class TestRenderParamSlider:
 class TestRenderParams:
     """_render_params 函数测试 -- 深度 mock Streamlit 组件 + FILTERS."""
 
-    @patch("components.sidebar.FILTERS", {
+    @patch("browse.components_sidebar.FILTERS", {
         "sma": {
             "name": "SMA",
             "func": lambda x: x,
@@ -341,20 +341,20 @@ class TestRenderParams:
     def test_render_params_basic_sma(self):
         """基本 SMA filter, show_sch=True, show_pred=True."""
         mock_cols = [MagicMock() for _ in range(5)]
-        with patch("components.sidebar.st.columns",
+        with patch("browse.components_sidebar.st.columns",
                    return_value=mock_cols), \
-             patch("components.sidebar.st.selectbox",
+             patch("browse.components_sidebar.st.selectbox",
                    return_value="日线"), \
-             patch("components.sidebar.st.checkbox",
+             patch("browse.components_sidebar.st.checkbox",
                    return_value=True), \
-             patch("components.sidebar.st.button",
+             patch("browse.components_sidebar.st.button",
                    return_value=False), \
-             patch("components.sidebar.st.session_state",
+             patch("browse.components_sidebar.st.session_state",
                    {}, create=True), \
-             patch("components.sidebar.st.expander"), \
-             patch("components.sidebar.st.slider",
+             patch("browse.components_sidebar.st.expander"), \
+             patch("browse.components_sidebar.st.slider",
                    return_value=50.0), \
-             patch("components.sidebar.st.color_picker",
+             patch("browse.components_sidebar.st.color_picker",
                    return_value="#00d4aa"):
             from browse.components_sidebar import _render_params
             cfg = _render_params(
@@ -369,23 +369,23 @@ class TestRenderParams:
         assert "pv2" in cfg
         assert cfg["fc2"] == "#ff6b6b"
 
-    @patch("components.sidebar.FILTERS", {})
+    @patch("browse.components_sidebar.FILTERS", {})
     def test_render_params_unknown_filter_warning(self):
         """未知 filter_id 触发 st.warning 并提前返回 None."""
         mock_warning = MagicMock()
         mock_cols = [MagicMock() for _ in range(5)]
-        with patch("components.sidebar.st.warning", mock_warning), \
-             patch("components.sidebar.st.columns",
+        with patch("browse.components_sidebar.st.warning", mock_warning), \
+             patch("browse.components_sidebar.st.columns",
                    return_value=mock_cols), \
-             patch("components.sidebar.st.selectbox",
+             patch("browse.components_sidebar.st.selectbox",
                    return_value="日线"), \
-             patch("components.sidebar.st.checkbox",
+             patch("browse.components_sidebar.st.checkbox",
                    return_value=True), \
-             patch("components.sidebar.st.button",
+             patch("browse.components_sidebar.st.button",
                    return_value=False), \
-             patch("components.sidebar.st.session_state",
+             patch("browse.components_sidebar.st.session_state",
                    {}, create=True), \
-             patch("components.sidebar.st.expander"):
+             patch("browse.components_sidebar.st.expander"):
             from browse.components_sidebar import _render_params
             cfg = _render_params(
                 key="v0", filter_id="nonexistent", dual=False,
@@ -395,7 +395,7 @@ class TestRenderParams:
         mock_warning.assert_called_once()
         assert cfg is None
 
-    @patch("components.sidebar.FILTERS", {
+    @patch("browse.components_sidebar.FILTERS", {
         "sma": {
             "name": "SMA",
             "func": lambda x: x,
@@ -409,20 +409,20 @@ class TestRenderParams:
     })
     def test_render_params_dual_filter(self):
         """dual=True + filter_id2 渲染第二个滤波参数."""
-        with patch("components.sidebar.st.columns",
+        with patch("browse.components_sidebar.st.columns",
                    return_value=[MagicMock() for _ in range(5)]), \
-             patch("components.sidebar.st.selectbox",
+             patch("browse.components_sidebar.st.selectbox",
                    return_value="60分钟"), \
-             patch("components.sidebar.st.checkbox",
+             patch("browse.components_sidebar.st.checkbox",
                    return_value=True), \
-             patch("components.sidebar.st.button",
+             patch("browse.components_sidebar.st.button",
                    return_value=False), \
-             patch("components.sidebar.st.session_state",
+             patch("browse.components_sidebar.st.session_state",
                    {}, create=True), \
-             patch("components.sidebar.st.expander"), \
-             patch("components.sidebar.st.slider",
+             patch("browse.components_sidebar.st.expander"), \
+             patch("browse.components_sidebar.st.slider",
                    return_value=50.0), \
-             patch("components.sidebar.st.color_picker",
+             patch("browse.components_sidebar.st.color_picker",
                    return_value="#00d4aa"):
             from browse.components_sidebar import _render_params
             cfg = _render_params(
@@ -437,7 +437,7 @@ class TestRenderParams:
         assert "fc" in cfg
         assert "fc2" in cfg
 
-    @patch("components.sidebar.FILTERS", {
+    @patch("browse.components_sidebar.FILTERS", {
         "sma": {
             "name": "SMA",
             "func": lambda x: x,
@@ -447,21 +447,21 @@ class TestRenderParams:
     def test_render_params_unknown_filter_id2_not_crash(self):
         """dual=True 但 filter_id2 未知时不应崩溃 (regression)."""
         mock_warning = MagicMock()
-        with patch("components.sidebar.st.warning", mock_warning), \
-             patch("components.sidebar.st.columns",
+        with patch("browse.components_sidebar.st.warning", mock_warning), \
+             patch("browse.components_sidebar.st.columns",
                    return_value=[MagicMock() for _ in range(5)]), \
-             patch("components.sidebar.st.selectbox",
+             patch("browse.components_sidebar.st.selectbox",
                    return_value="日线"), \
-             patch("components.sidebar.st.checkbox",
+             patch("browse.components_sidebar.st.checkbox",
                    return_value=True), \
-             patch("components.sidebar.st.button",
+             patch("browse.components_sidebar.st.button",
                    return_value=False), \
-             patch("components.sidebar.st.session_state",
+             patch("browse.components_sidebar.st.session_state",
                    {}, create=True), \
-             patch("components.sidebar.st.expander"), \
-             patch("components.sidebar.st.slider",
+             patch("browse.components_sidebar.st.expander"), \
+             patch("browse.components_sidebar.st.slider",
                    return_value=50.0), \
-             patch("components.sidebar.st.color_picker",
+             patch("browse.components_sidebar.st.color_picker",
                    return_value="#00d4aa"):
             from browse.components_sidebar import _render_params
             cfg = _render_params(
@@ -475,17 +475,17 @@ class TestRenderParams:
 
     def test_render_params_show_sch_false_skips_expanders(self):
         """show_sch=False 时不渲染施密特面板."""
-        with patch("components.sidebar.st.columns",
+        with patch("browse.components_sidebar.st.columns",
                    return_value=[MagicMock() for _ in range(5)]), \
-             patch("components.sidebar.st.selectbox",
+             patch("browse.components_sidebar.st.selectbox",
                    return_value="日线"), \
-             patch("components.sidebar.st.checkbox",
+             patch("browse.components_sidebar.st.checkbox",
                    return_value=False), \
-             patch("components.sidebar.st.button",
+             patch("browse.components_sidebar.st.button",
                    return_value=False), \
-             patch("components.sidebar.st.session_state",
+             patch("browse.components_sidebar.st.session_state",
                    {}, create=True), \
-             patch("components.sidebar.st.expander"):
+             patch("browse.components_sidebar.st.expander"):
             from browse.components_sidebar import _render_params
             cfg = _render_params(
                 key="v0", filter_id="sma", dual=False,
@@ -495,7 +495,7 @@ class TestRenderParams:
         assert cfg["show_pred"] is not None
         assert "pv" in cfg
 
-    @patch("components.sidebar.FILTERS", {
+    @patch("browse.components_sidebar.FILTERS", {
         "sma": {
             "name": "SMA",
             "func": lambda x: x,
@@ -514,17 +514,17 @@ class TestRenderParams:
                 return True  # clicked
             return False
 
-        with patch("components.sidebar.st.columns",
+        with patch("browse.components_sidebar.st.columns",
                    return_value=[MagicMock() for _ in range(5)]), \
-             patch("components.sidebar.st.selectbox",
+             patch("browse.components_sidebar.st.selectbox",
                    return_value="日线"), \
-             patch("components.sidebar.st.checkbox",
+             patch("browse.components_sidebar.st.checkbox",
                    return_value=True), \
-             patch("components.sidebar.st.button",
+             patch("browse.components_sidebar.st.button",
                    side_effect=lambda *a, **kw: button_side_effect(**kw)), \
-             patch("components.sidebar.st.session_state", ss,
+             patch("browse.components_sidebar.st.session_state", ss,
                    create=True), \
-             patch("components.sidebar.st.expander"):
+             patch("browse.components_sidebar.st.expander"):
             from browse.components_sidebar import _render_params
             _render_params(
                 key="v0", filter_id="sma", dual=False,
@@ -534,7 +534,7 @@ class TestRenderParams:
         assert ss.get("v0_exp_all") is True
 
 
-    @patch("components.sidebar.FILTERS", {
+    @patch("browse.components_sidebar.FILTERS", {
         "sma": {
             "name": "SMA",
             "func": lambda x: x,
@@ -560,20 +560,20 @@ class TestRenderParams:
                 return True   # show_pred = True
             return True
 
-        with patch("components.sidebar.st.columns",
+        with patch("browse.components_sidebar.st.columns",
                    return_value=[MagicMock() for _ in range(5)]), \
-             patch("components.sidebar.st.selectbox",
+             patch("browse.components_sidebar.st.selectbox",
                    return_value="日线"), \
-             patch("components.sidebar.st.checkbox",
+             patch("browse.components_sidebar.st.checkbox",
                    side_effect=checkbox_side_effect), \
-             patch("components.sidebar.st.button",
+             patch("browse.components_sidebar.st.button",
                    return_value=False), \
-             patch("components.sidebar.st.session_state", ss,
+             patch("browse.components_sidebar.st.session_state", ss,
                    create=True), \
-             patch("components.sidebar.st.expander"), \
-             patch("components.sidebar.st.slider",
+             patch("browse.components_sidebar.st.expander"), \
+             patch("browse.components_sidebar.st.slider",
                    return_value=50.0), \
-             patch("components.sidebar.st.color_picker",
+             patch("browse.components_sidebar.st.color_picker",
                    return_value="#00d4aa"):
             cfg = _render_params(
                 key="v0", filter_id="sma", dual=False,

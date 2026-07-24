@@ -16,8 +16,8 @@ from pathlib import Path
 from typing import Any, Dict, List
 from loguru import logger
 
-# ── 确保 filter_app 在 sys.path 上（支持 python -m filter_app.backtest_cli） ──
-_pkg_dir = os.path.dirname(os.path.abspath(__file__))
+# ── 确保 filter_app 在 sys.path 上（支持 python -m filter_app.backtest.cli） ──
+_pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _pkg_dir not in sys.path:
     sys.path.insert(0, _pkg_dir)
 

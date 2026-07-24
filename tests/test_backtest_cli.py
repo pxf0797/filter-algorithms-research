@@ -96,14 +96,14 @@ def _run_main_with_mocks(cli_args: list, *, mock_runner=None, mock_store=None,
         mock_recorder = MagicMock()
         mock_recorder.start_session.return_value = "session-abc"
 
-    with patch("filter_app.backtest_cli.has_data", return_value=True), \
-         patch("filter_app.backtest_cli._get_total_bars", return_value=500), \
-         patch("filter_app.backtest_cli.Path.mkdir"), \
-         patch("filter_app.backtest_cli.BacktestRunner",
+    with patch("filter_app.backtest.cli.has_data", return_value=True), \
+         patch("filter_app.backtest.cli._get_total_bars", return_value=500), \
+         patch("filter_app.backtest.cli.Path.mkdir"), \
+         patch("filter_app.backtest.cli.BacktestRunner",
                return_value=mock_runner), \
-         patch("filter_app.backtest_cli.EventRecorder",
+         patch("filter_app.backtest.cli.EventRecorder",
                return_value=mock_recorder) as mock_rec_cls, \
-         patch("filter_app.backtest_cli.ParquetStore") as mock_store_cls, \
+         patch("filter_app.backtest.cli.ParquetStore") as mock_store_cls, \
          patch.object(sys, "argv", cli_args):
 
         if mock_store is not None:

@@ -57,7 +57,7 @@ class TestIterrowsReplacement:
     @pytest.fixture
     def db_env(self, tmp_path):
         """初始化临时 DB 环境。"""
-        import data.db
+        import data.db as db
         db_path = tmp_path / "test_market.db"
         db.DB_PATH = db_path
         db.SNAPSHOT_DIR = tmp_path / "snapshots"
@@ -282,7 +282,7 @@ class TestLoguruMigration:
     def test_db_module_prints_to_logger(self, capsys):
         """db.py __main__ 块使用 logger 而非 print。"""
         # 导入后重新执行 __name__ == "__main__" 块
-        import data.db
+        import data.db as db
         import runpy
         # 不直接运行整个模块, 而是验证 print 已被替换
         # 检查模块级代码中不再有裸 print 调用（排除注释和文档字符串）
@@ -293,10 +293,10 @@ class TestLoguruMigration:
         assert 'print("DB initialized:' not in source
 
     def test_parquet_store_uses_logger(self):
-        """parquet_store.py 使用 logger.warning 替代 print。"""
-        from services import parquet_store
+        """store.py 使用 logger.warning 替代 print。"""
+        from data import store
 
-        source = Path(parquet_store.__file__).read_text(encoding="utf-8")
+        source = Path(store.__file__).read_text(encoding="utf-8")
         # 确认 import logger
         assert "from loguru import logger" in source
         # 确认没有裸 print 调用（文档字符串和注释除外）
@@ -313,7 +313,7 @@ class TestLoguruMigration:
 
     def test_backtest_cli_uses_logger(self):
         """backtest_cli.py 使用 logger 替代 print。"""
-        import backtest.cli
+        import backtest.cli as backtest_cli
 
         source = Path(backtest_cli.__file__).read_text(encoding="utf-8")
         # 确认没有 print to stderr
@@ -412,7 +412,7 @@ class TestRegressionExistingDb:
 
     def test_upsert_then_query_roundtrip(self, tmp_path):
         """upsert → query 往返数据一致。"""
-        import data.db
+        import data.db as db
         db_path = tmp_path / "test_market.db"
         db.DB_PATH = db_path
         db.SNAPSHOT_DIR = tmp_path / "snapshots"
@@ -429,7 +429,7 @@ class TestRegressionExistingDb:
 
     def test_multi_timeframe_isolation(self, tmp_path):
         """同 ticker 不同 tf 数据互不干扰。"""
-        import data.db
+        import data.db as db
         db_path = tmp_path / "test_market.db"
         db.DB_PATH = db_path
         db.SNAPSHOT_DIR = tmp_path / "snapshots"
