@@ -235,6 +235,29 @@ def has_data(ticker: str) -> bool:
     return row is not None
 
 
+def get_latest_date(ticker: str, tf: str) -> Optional[str]:
+    """获取指定股票+周期的最新数据时间戳。
+
+    Parameters
+    ----------
+    ticker : str
+        股票代码。
+    tf : str
+        时间周期（如 ``"日线"``, ``"60分钟"``）。
+
+    Returns
+    -------
+    Optional[str]
+        最新时间戳字符串，无数据时返回 ``None``。
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT MAX(ts) FROM kline WHERE ticker=? AND timeframe=?",
+            (ticker, tf),
+        ).fetchone()
+    return row[0] if (row and row[0]) else None
+
+
 # ---------------------------------------------------------------------------
 # 数据可靠性：健康检查 / 快照 / 导入导出
 # ---------------------------------------------------------------------------
