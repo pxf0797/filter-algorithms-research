@@ -65,7 +65,7 @@ _VIEW_COLUMN_TYPES: dict[str, pa.DataType] = {
 _FLOAT_NA: float = float("nan")
 _INT_NA: int = 0
 _BOOL_NA: bool = False
-_STR_NA: str = ""
+_STR_NA = None
 
 _COL_DEFAULTS: dict[str, Any] = {
     "sig": _INT_NA,
@@ -760,6 +760,14 @@ class ParquetStore:
         # CSV export
         csv_path = self._session_dir / "backtest_result.csv"
         df = merged.to_pandas()
+        # Convert float32 → float64 so CSV text serialization preserves exact
+        # values: float32.repr truncates to ~7 sig digits, but when read_csv
+        # re-interprets the text as float64 the reconstructed value differs
+        # from the original float32 bits (e.g. 86.652405 → 86.652405000000002
+        # while the true float32 value is 86.652404785156250).
+        float32_cols = [c for c in df.columns if df[c].dtype == "float32"]
+        if float32_cols:
+            df[float32_cols] = df[float32_cols].astype("float64")
         df.to_csv(str(csv_path), index=False)
 
         # Remove part files now that the merged file exists
