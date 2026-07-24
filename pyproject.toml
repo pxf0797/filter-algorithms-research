@@ -24,6 +24,7 @@ markers = [
     "signal: Schmitt trigger and signal tests",
     "strategy: PnL and strategy tests",
     "alignment: time alignment tests",
+    "benchmark: performance regression benchmarks (pytest-benchmark)",
 ]
 
 [tool.coverage.run]
