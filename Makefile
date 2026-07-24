@@ -1,3 +1,7 @@
+# Python version management via pyenv or asdf.
+# The .python-version file pins the required Python version.
+# Run `pyenv install` or `asdf install` to ensure it's available.
+
 .PHONY: install test lint format mypy bandit check clean run
 
 install:
