@@ -70,36 +70,6 @@ def _render_config_import() -> None:
                 st.sidebar.error(f"导入失败: {e}")
 
 
-def _render_market_ticker() -> tuple:
-    """Render market radio + ticker input. Returns (market, ticker_code)."""
-    market = st.sidebar.radio("市场", ["美股 US", "A股(沪深)", "港股 HK"],
-                               horizontal=True, key="market")
-    c1, c2 = st.sidebar.columns([1, 1])
-    with c1:
-        ticker_code = st.text_input("股票代码", value="AAPL", key="ticker").strip()
-    with c2:
-        if ticker_code:
-            @st.cache_data(show_spinner=False, ttl=3600)
-            def _stock_name(mkt, code) -> str:
-                if not code or not code.strip():
-                    return ""
-                try:
-                    if mkt == "A股(沪深)":
-                        full = code + (".SS" if code[0] == "6" else ".SZ")
-                    elif mkt == "港股 HK":
-                        full = code.zfill(4) + ".HK"
-                    else:
-                        full = code.upper()
-                    return yf.Ticker(full).info.get("longName") or ""
-                except Exception as e:
-                    logger.debug(f"Stock name lookup failed for {full}: {e}")
-                    return ""
-            name = _stock_name(market, ticker_code)
-            if name:
-                st.caption(f"📌 {name}")
-    return market, ticker_code
-
-
 def _handle_initial_fetch(market, ticker_code) -> None:
     """Auto-fetch all timeframes on first load."""
     if not AppState.has("_fetched_ticker"):
@@ -418,26 +388,6 @@ def _render_filter_selectors() -> tuple:
         filter_id2 = st.sidebar.selectbox("滤波器 2", list(FILTERS.keys()),
             format_func=lambda x: FILTERS.get(x, {}).get("name", x), key="global_f2")
     return filter_id, dual, filter_id2
-
-
-def _render_operating_tf_selector() -> str:
-    """Render operating timeframe selector for BS markers.
-    Positioned next to stock code. Options based on current view timeframes."""
-    view_tfs = []
-    for i in range(4):
-        tf = st.session_state.get(f"v{i}_tf", DEFAULT_TFS[i])
-        if tf not in view_tfs:
-            view_tfs.append(tf)
-    view_tfs.sort(key=lambda x: ALL_TFS.index(x), reverse=True)
-
-    operating_tf = st.sidebar.selectbox(
-        "🎯 操作周期",
-        view_tfs,
-        index=0,
-        key="operating_tf",
-        help="仅此周期及更低周期显示 BS 买卖标记",
-    )
-    return operating_tf
 
 
 def _render_param_panels(filter_id, dual, filter_id2) -> list:

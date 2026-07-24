@@ -4,19 +4,12 @@
 入口文件：页面布局 + session_state初始化 + st.fragment 包装
 """
 
-import json
-import os
 import sqlite3
-import tempfile
 import time
-from pathlib import Path
 from loguru import logger
 import streamlit as st
 import numpy as np
 import pandas as pd
-
-
-import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from config_db import (init_config_tables, list_presets, apply_preset,
@@ -38,7 +31,7 @@ from services.filter_engine import (
 )
 from services.data_loader import (
     _fetch_all_timeframes, _fetch_stock, _sync_to_display,
-    _sync_all_cascading, load_display_cache,
+    load_display_cache, _stock_name_lookup,
 )
 from components.charts import (
     _render_plotly, _add_prediction_traces,
@@ -64,8 +57,8 @@ from components.sidebar import (
 from constants import TF_INTERVAL
 from state import AppState
 from services.pipeline_capture import PipelineCapture, PipelineStageData
-from backtest_logger import log_bar_navigation, log_data_load, log_error
-from components.backtest_panel import render_backtest_panel, run_backtest_play
+from backtest_logger import log_data_load
+from components.backtest_panel import render_backtest_panel, run_backtest_play, sync_backtest_cascading_data
 
 # ---------------------------------------------------------------------------
 # Page config (must be the first Streamlit command)
@@ -689,19 +682,7 @@ def main() -> None:
     if ticker_code:
         @st.cache_data(show_spinner=False, ttl=3600)
         def _stock_name(mkt, code) -> str:
-            if not code or not code.strip():
-                return ""
-            try:
-                if mkt == "A股(沪深)":
-                    full = code + (".SS" if code[0] == "6" else ".SZ")
-                elif mkt == "港股 HK":
-                    full = code.zfill(4) + ".HK"
-                else:
-                    full = code.upper()
-                return yf.Ticker(full).info.get("longName") or ""
-            except Exception as e:
-                logger.debug(f"Stock name lookup failed for {full}: {e}")
-                return ""
+            return _stock_name_lookup(mkt, code)
         name = _stock_name(market, ticker_code)
         if name:
             st.sidebar.caption(f"📌 {name}")
@@ -766,20 +747,8 @@ def main() -> None:
 
     # ── 回测模式: 前置级联合成（一次性写入所有TF的parquet）──
     if cb_mode and ticker_code and cutoff_date:
-        tfs_in_use = sorted(set(cfg["tf"] for cfg in configs),
-                            key=lambda x: ALL_TFS.index(x))
-        min_tf_val = AppState.get("_min_tf", "")
-        if tfs_in_use and min_tf_val:
-            # ★ P1-1: build per-TF n_pts dict from view configs
-            tf_n_pts = {cfg["tf"]: cfg["n_pts"] for cfg in configs}
-            # ★ P1-2: check return value, warn on partial failure
-            bt_results = _sync_all_cascading(ticker_code, tfs_in_use, cutoff_date,
-                                              min_tf_val, n_pts=tf_n_pts)
-            failed_tfs = [tf for tf, ok in bt_results.items() if not ok]
-            if failed_tfs:
-                logger.warning(f"Backtest cascading failed for: {failed_tfs}")
-            if len(failed_tfs) == len(tfs_in_use):
-                st.sidebar.warning("回测数据加载失败，请检查数据库")
+        sync_backtest_cascading_data(ticker_code, configs, cutoff_date,
+                                      AppState.get("_min_tf", ""), ALL_TFS)
 
     # PIPELINE_CAPTURE: per-step data collector (populated by _render_chart)
     _capture_collector = {} if "_pipeline_capture" in st.session_state else None

@@ -502,3 +502,47 @@ def render_backtest_panel(market, ticker_code, configs) -> None:
 
     # ── 回测模式切换 ──
     _render_backtest_mode(market, ticker_code, configs)
+
+
+# ============================================================================
+# 回测数据同步
+# ============================================================================
+
+def sync_backtest_cascading_data(ticker_code: str, configs: list, cutoff_date: str,
+                                  min_tf: str, all_tfs: list) -> None:
+    """回测模式前置级联合成 — 一次性写入所有 TF 的 Parquet 数据。
+
+    在图表渲染之前调用，确保回测窗口对应的所有时间周期数据已就绪。
+    通过 ``_sync_all_cascading`` 从 DB 中逐 Bar 合成各 TF 的 OHLC 并写入 Parquet。
+
+    Parameters
+    ----------
+    ticker_code : str
+        股票代码。
+    configs : list of dict
+        各视图的配置 dict，需包含 ``tf`` 和 ``n_pts`` 键。
+    cutoff_date : str
+        回测截止日期（YYYY-MM-DD 格式）。
+    min_tf : str
+        最小时间周期标签，用于级联合成的基准周期。
+    all_tfs : list of str
+        所有时间周期标签列表，按精细度排序。
+
+    Returns
+    -------
+    None
+    """
+    from services.data_loader import _sync_all_cascading
+
+    tfs_in_use = sorted(set(cfg["tf"] for cfg in configs),
+                        key=lambda x: all_tfs.index(x))
+    if tfs_in_use and min_tf:
+        tf_n_pts = {cfg["tf"]: cfg["n_pts"] for cfg in configs}
+        bt_results = _sync_all_cascading(ticker_code, tfs_in_use, cutoff_date,
+                                          min_tf, n_pts=tf_n_pts)
+        failed_tfs = [tf for tf, ok in bt_results.items() if not ok]
+        if failed_tfs:
+            logger.warning(f"Backtest cascading failed for: {failed_tfs}")
+        if len(failed_tfs) == len(tfs_in_use):
+            import streamlit as st
+            st.sidebar.warning("回测数据加载失败，请检查数据库")

@@ -553,7 +553,6 @@ def _stock_name_lookup(market: str, code: str) -> str:
     try:
         if market == "A股(沪深)":
             full = code + (".SS" if code[0] == "6" else ".SZ")
-            full = code + (".SS" if code[0] == "6" else ".SZ")
         elif market == "港股 HK":
             full = code.zfill(4) + ".HK"
         else:
