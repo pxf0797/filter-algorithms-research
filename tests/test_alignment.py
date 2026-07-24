@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from services.filter_engine import _align_pnl_to_current_tf, _compute_holding_masks
+from engine.filters import _align_pnl_to_current_tf, _compute_holding_masks
 
 
 # =========================================================================

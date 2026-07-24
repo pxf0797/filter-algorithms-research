@@ -12,7 +12,7 @@ import numpy as np
 import streamlit as st
 import plotly.graph_objects as go
 
-from services.filter_engine import _compute_holding_masks
+from engine.filters import _compute_holding_masks
 
 # ---------------------------------------------------------------------------
 # Module-level constants

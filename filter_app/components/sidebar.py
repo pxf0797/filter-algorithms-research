@@ -7,7 +7,7 @@
 """
 
 import streamlit as st
-from services.filter_engine import FILTERS
+from engine.filters import FILTERS
 from typing import Any, Dict, Optional
 from shared.constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY
 

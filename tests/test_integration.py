@@ -27,7 +27,7 @@ if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
 # Phase 2 modularization: functions moved to services.filter_engine
-from services.filter_engine import (
+from engine.filters import (
     FILTERS,
     compute_metrics,
     _schmitt_trigger,
@@ -238,7 +238,7 @@ def test_schmitt_trigger_pipeline():
     t = x
 
     # ── Savgol 滤波 ──
-    from services.filter_engine import apply_savgol
+    from engine.filters import apply_savgol
     filtered = apply_savgol(noisy, t, window=21, order=2)
 
     # ── 计算 v, a ──

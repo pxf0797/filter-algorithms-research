@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from services.filter_engine import (
+from engine.filters import (
     _compute_strategy_pnl, _find_all_pairs, _align_pnl_to_current_tf,
     _fit_parabolic, _fit_physics_parabola, _schmitt_trigger,
     apply_sma, apply_ema, FILTERS,

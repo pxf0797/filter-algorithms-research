@@ -4,7 +4,7 @@ Tests for Schmitt trigger (_schmitt_trigger) and pair finding (_find_all_pairs).
 
 import numpy as np
 import pytest
-from services.filter_engine import _schmitt_trigger, _find_all_pairs
+from engine.filters import _schmitt_trigger, _find_all_pairs
 
 
 # ============================================================================
@@ -282,7 +282,7 @@ class TestFindAllPairsP0Fix:
     @pytest.mark.signal
     def test_pnl_reflects_first_segment(self):
         """Verify PnL computation includes trade from the first signal segment."""
-        from services.filter_engine import _compute_strategy_pnl
+        from engine.filters import _compute_strategy_pnl
         n = 50
         t = np.arange(n, dtype=float)
         # Rising price: ensures long trade is profitable
@@ -335,7 +335,7 @@ class TestFindAllPairsP0Fix:
     @pytest.mark.signal
     def test_single_segment_pnl(self):
         """Single segment (+1) → one trade, PnL reflects price movement."""
-        from services.filter_engine import _compute_strategy_pnl
+        from engine.filters import _compute_strategy_pnl
         n = 30
         t = np.arange(n, dtype=float)
         filtered = 100.0 + 0.5 * t  # rising price
@@ -878,7 +878,7 @@ class TestPnLSliceVectorizedConsistency:
     @pytest.mark.signal
     def test_vectorized_matches_reference_single_long(self):
         """Single long trade: vectorized output must match for-loop reference."""
-        from services.filter_engine import _compute_strategy_pnl
+        from engine.filters import _compute_strategy_pnl
 
         n = 100
         t = np.arange(n, dtype=float)
@@ -909,7 +909,7 @@ class TestPnLSliceVectorizedConsistency:
     @pytest.mark.signal
     def test_vectorized_matches_reference_multi_trade(self):
         """Multiple long+short trades: vectorized output must match reference."""
-        from services.filter_engine import _compute_strategy_pnl, _find_all_pairs
+        from engine.filters import _compute_strategy_pnl, _find_all_pairs
 
         n = 150
         t = np.arange(n, dtype=float)
@@ -952,7 +952,7 @@ class TestPnLSliceVectorizedConsistency:
     @pytest.mark.signal
     def test_vectorized_handles_nan_prices(self):
         """PnL vectorized fill should skip NaN prices (same as for-loop continue)."""
-        from services.filter_engine import _compute_strategy_pnl
+        from engine.filters import _compute_strategy_pnl
 
         n = 80
         t = np.arange(n, dtype=float)

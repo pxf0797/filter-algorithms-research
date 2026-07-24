@@ -23,7 +23,7 @@ from db import (init_db, get_date_range, has_data,
                 DB_PATH)
 
 # --- Import from new modules ---
-from services.filter_engine import (
+from engine.filters import (
     FILTERS,
     _schmitt_trigger, _find_all_pairs,
     _fit_physics_parabola,
@@ -50,7 +50,7 @@ from sidebar_sections import (
     _render_db_backup, _view_export_params, _render_export_config,
     _render_config_history, _render_db_import_export, _run_auto_refresh,
 )
-from services.bs_marker import compute_bs_markers, get_lower_tfs
+from engine.signals import compute_bs_markers, get_lower_tfs
 from components.sidebar import (
     _render_params, ALL_TFS, DEFAULT_TFS, TF_HIERARCHY,
 )

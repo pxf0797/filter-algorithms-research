@@ -20,7 +20,7 @@ _src = Path(__file__).resolve().parent.parent / "filter_app"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
-from services.filter_engine import (
+from engine.filters import (
     apply_savgol,
     apply_ema,
     apply_sma,

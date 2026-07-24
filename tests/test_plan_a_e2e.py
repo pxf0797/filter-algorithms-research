@@ -102,7 +102,7 @@ class TestPlanAE2eFigureConstruction:
             _add_prediction_traces, _add_cross_pnl_subplot,
             _add_alignment_subplot,
         )
-        from services.filter_engine import _compute_holding_masks
+        from engine.filters import _compute_holding_masks
 
         # 准备数据
         schmitt = _make_schmitt(n) if has_s else None

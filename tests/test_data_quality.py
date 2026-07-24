@@ -143,7 +143,7 @@ class TestStatisticalDistribution:
         np.random.seed(42)
         x = np.arange(200, dtype=float)
         noisy = np.sin(x / 5.0) + np.random.randn(200) * 0.3
-        from services.filter_engine import apply_savgol
+        from engine.filters import apply_savgol
         filtered = apply_savgol(noisy, x, window=21, order=2)
         assert np.std(filtered) < np.std(noisy), (
             f"滤波后标准差 {np.std(filtered):.4f} >= 原始 {np.std(noisy):.4f}"
@@ -211,7 +211,7 @@ class TestEmptyDataHandling:
         signal = np.random.randn(n)
         signal[10:15] = np.nan  # 插入 NaN 段
 
-        from services.filter_engine import apply_sma
+        from engine.filters import apply_sma
         # SMA 在 NaN 附近应返回 NaN 或产生安全结果
         result = apply_sma(signal, x, window=5)
         assert len(result) == n, "输出长度应等于输入长度"

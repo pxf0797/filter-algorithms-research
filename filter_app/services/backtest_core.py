@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 
-from .filter_engine import (
+from engine.filters import (
     FILTERS,
     _schmitt_trigger,
     _find_all_pairs,
@@ -25,7 +25,7 @@ from .filter_engine import (
     _compute_holding_masks,
 )
 from .data_loader import _sync_all_cascading, load_display_cache
-from .bs_marker import compute_bs_markers
+from engine.signals import compute_bs_markers
 from db import get_conn
 from shared.constants import ALL_TFS, TF_HIERARCHY
 

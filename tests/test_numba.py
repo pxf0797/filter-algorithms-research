@@ -66,7 +66,7 @@ class TestSchmittNumba:
 
     def test_equivalence_randomsignal(self):
         """TC-NUMBA-01: numba _schmitt_core matches pure Python reference."""
-        from services.filter_engine import _schmitt_core
+        from engine.filters import _schmitt_core
 
         np.random.seed(123)
         n = 1000
@@ -82,7 +82,7 @@ class TestSchmittNumba:
 
     def test_all_above_upper(self):
         """TC-NUMBA-02: price always above upper → output all 1."""
-        from services.filter_engine import _schmitt_core
+        from engine.filters import _schmitt_core
 
         n = 100
         price = np.full(n, 5.0)
@@ -94,7 +94,7 @@ class TestSchmittNumba:
 
     def test_all_below_lower(self):
         """TC-NUMBA-03: price always below lower → output all 0."""
-        from services.filter_engine import _schmitt_core
+        from engine.filters import _schmitt_core
 
         n = 100
         price = np.full(n, 1.0)
@@ -106,7 +106,7 @@ class TestSchmittNumba:
 
     def test_hysteresis_preserved(self):
         """TC-NUMBA-04: within deadband → state unchanged (hysteresis)."""
-        from services.filter_engine import _schmitt_core
+        from engine.filters import _schmitt_core
 
         price = np.array([3.0, 2.5, 2.5, 2.5, 1.0])
         upper = np.array([4.0, 4.0, 4.0, 4.0, 4.0])
@@ -157,7 +157,7 @@ class TestKalmanNumba:
 
     def test_equivalence_large_signal(self, price_data, time_index_500):
         """TC-NUMBA-05: numba kalman output matches pure Python (rtol=1e-10)."""
-        from services.filter_engine import _kalman_core
+        from engine.filters import _kalman_core
 
         dt = 1.0
         Q, R = 0.01, 1.0
@@ -169,7 +169,7 @@ class TestKalmanNumba:
 
     def test_equivalence_various_params(self, price_data):
         """TC-NUMBA-06: equivalence holds across multiple Q/R combinations."""
-        from services.filter_engine import _kalman_core
+        from engine.filters import _kalman_core
 
         dt = 1.0
         params = [
@@ -190,7 +190,7 @@ class TestKalmanNumba:
 
     def test_constant_signal_convergence(self):
         """TC-NUMBA-07: constant signal → kalman converges to signal value."""
-        from services.filter_engine import _kalman_core
+        from engine.filters import _kalman_core
 
         n = 200
         signal = np.full(n, 3.0)
@@ -202,7 +202,7 @@ class TestKalmanNumba:
 
     def test_apply_kalman_delegates(self, price_data, time_index_500):
         """TC-NUMBA-08: apply_kalman output matches _kalman_core directly."""
-        from services.filter_engine import apply_kalman, _kalman_core
+        from engine.filters import apply_kalman, _kalman_core
 
         Q, R = 0.02, 2.0
         dt = float(time_index_500[1] - time_index_500[0])
@@ -223,7 +223,7 @@ class TestNumbaFallback:
 
     def test_has_numba_flag_set(self):
         """HAS_NUMBA is True when numba is installed."""
-        from services.filter_engine import HAS_NUMBA
+        from engine.filters import HAS_NUMBA
         assert HAS_NUMBA is True, "numba should be installed in test env"
 
     def test_schmitt_fallback_when_numba_missing(self):
@@ -233,7 +233,7 @@ class TestNumbaFallback:
         # checking that the function executes correctly (it uses pure loops).
         # The decorator fallback logic (identity) is tested implicitly via
         # the HAS_NUMBA guard in apply_kalman.
-        from services.filter_engine import _schmitt_core
+        from engine.filters import _schmitt_core
         price = np.arange(10, dtype=float)
         upper = np.full(10, 5.0)
         lower = np.full(10, 3.0)
@@ -245,7 +245,7 @@ class TestNumbaFallback:
     def test_kalman_fallback_path(self, price_data, time_index_500):
         """apply_kalman fallback (pure numpy) matches _kalman_core when
         numba is available, proving both code paths are consistent."""
-        from services.filter_engine import apply_kalman, _kalman_core
+        from engine.filters import apply_kalman, _kalman_core
 
         Q, R = 0.01, 2.0
         dt = float(time_index_500[1] - time_index_500[0])
@@ -263,7 +263,7 @@ class TestNumbaFallback:
     def test_kalman_pure_python_path_numcorrectness(self, price_data, time_index_500):
         """Verify that the pure Python fallback path inside apply_kalman
         produces correct numerical results by simulating numba-unavailable."""
-        from services.filter_engine import _kalman_core
+        from engine.filters import _kalman_core
         import services.filter_engine as eng
 
         Q, R = 0.01, 1.0
@@ -290,7 +290,7 @@ class TestNumbaSanity:
 
     def test_schmitt_large_array(self):
         """10k-element Schmitt trigger should not crash."""
-        from services.filter_engine import _schmitt_core
+        from engine.filters import _schmitt_core
 
         n = 10000
         np.random.seed(99)
@@ -304,14 +304,14 @@ class TestNumbaSanity:
 
     def test_kalman_empty_signal(self):
         """Empty signal returns empty array."""
-        from services.filter_engine import _kalman_core
+        from engine.filters import _kalman_core
 
         result = _kalman_core(np.array([], dtype=float), 1.0, 0.01, 1.0)
         assert len(result) == 0
 
     def test_kalman_single_point(self):
         """Single-point signal returns its own value."""
-        from services.filter_engine import _kalman_core
+        from engine.filters import _kalman_core
 
         result = _kalman_core(np.array([5.0]), 1.0, 0.01, 1.0)
         assert len(result) == 1
