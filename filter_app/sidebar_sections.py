@@ -215,10 +215,10 @@ def _render_preset_selector(market, ticker_code) -> None:
                     AppState.pop("_preset_action_id")
                     st.rerun()
             with cc2:
-                if st.button("取消", key="update_cancel_btn", use_container_width=True):
-                    AppState.pop("_preset_action")
-                    AppState.pop("_preset_action_id")
-                    st.rerun()
+                # P1-4: on_click callback — Streamlit auto-reruns after callback
+                st.button("取消", key="update_cancel_btn", use_container_width=True,
+                          on_click=lambda: (AppState.pop("_preset_action"),
+                                            AppState.pop("_preset_action_id")))
         elif _action == "rename":
             st.sidebar.caption(f"重命名 **{target['name']}**")
             new_name = st.sidebar.text_input("新名称", value=target["name"],
@@ -237,10 +237,10 @@ def _render_preset_selector(market, ticker_code) -> None:
                     else:
                         st.error("名称不能为空")
             with cc2:
-                if st.button("取消", key="rename_cancel_btn", use_container_width=True):
-                    AppState.pop("_preset_action")
-                    AppState.pop("_preset_action_id")
-                    st.rerun()
+                # P1-4: on_click callback — Streamlit auto-reruns after callback
+                st.button("取消", key="rename_cancel_btn", use_container_width=True,
+                          on_click=lambda: (AppState.pop("_preset_action"),
+                                            AppState.pop("_preset_action_id")))
         elif _action == "delete":
             st.sidebar.error(f"确认删除 **{target['name']}**？此操作不可恢复。")
             cc1, cc2 = st.sidebar.columns(2)
@@ -252,10 +252,10 @@ def _render_preset_selector(market, ticker_code) -> None:
                     AppState.pop("_preset_action_id")
                     st.rerun()
             with cc2:
-                if st.button("取消", key="delete_cancel_btn", use_container_width=True):
-                    AppState.pop("_preset_action")
-                    AppState.pop("_preset_action_id")
-                    st.rerun()
+                # P1-4: on_click callback — Streamlit auto-reruns after callback
+                st.button("取消", key="delete_cancel_btn", use_container_width=True,
+                          on_click=lambda: (AppState.pop("_preset_action"),
+                                            AppState.pop("_preset_action_id")))
 
     # Save as preset
     with st.sidebar.expander("💾 保存 / 另存为预设", expanded=False):
@@ -598,18 +598,27 @@ def _render_db_import_export() -> None:
 
 
 def _run_auto_refresh(market, ticker_code, auto_refresh, interval) -> None:
-    """Execute auto-refresh if enabled — sleep full interval, then refresh once.
+    """Execute auto-refresh if enabled — non-blocking timestamp-check mode.
 
-    设计: time.sleep(interval) 阻塞等待，不产生中间 rerun。
-    页面仅在 sleep 前渲染一次 caption，到周期后才 rerun 刷新数据。
+    Uses session_state timestamp comparison instead of time.sleep() which
+    blocked the entire Streamlit thread. Depends on natural rerun triggers
+    (user interaction, browser reconnect) to check elapsed time.
     """
     if not auto_refresh:
         return
 
-    st.caption(f"⏱️ {interval}s 后自动刷新")
-    time.sleep(interval)
+    now = time.time()
+    last_refresh = st.session_state.get("_last_auto_refresh", 0)
+    elapsed = now - last_refresh
 
+    if elapsed < interval:
+        remaining = int(interval - elapsed)
+        st.caption(f"⏱️ {remaining}s 后自动刷新 (共 {interval}s)")
+        return  # 不阻塞,正常渲染,等下次 rerun 再检查
+
+    # 到达刷新时间
     logger.info(f"Auto-refresh triggered for {ticker_code} (interval={interval}s)")
     st.cache_data.clear()
     _fetch_all_timeframes(market, ticker_code)
+    st.session_state["_last_auto_refresh"] = now
     st.rerun()

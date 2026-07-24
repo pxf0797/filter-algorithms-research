@@ -4,7 +4,6 @@
 入口文件：页面布局 + session_state初始化 + st.fragment 包装
 """
 
-import hashlib
 import json
 import os
 import sqlite3
@@ -17,9 +16,6 @@ import numpy as np
 import pandas as pd
 
 
-def _hash_array(arr):
-    """Hash numpy array for @st.cache_data hash_funcs (bytes of contiguous copy)."""
-    return hashlib.md5(np.ascontiguousarray(arr).data.tobytes()).hexdigest()
 import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -176,10 +172,10 @@ def _load_chart_data(market, ticker_code, tf, n_pts, window_start=None, cutoff_d
     return _cached_fetch_stock(market, ticker_code, tf, n_pts)
 
 
-@st.cache_data(hash_funcs={np.ndarray: _hash_array}, show_spinner=False)
+@st.cache_data(show_spinner=False)
 def _compute_filters(noisy, t, cfg) -> tuple[np.ndarray, np.ndarray | None]:
     """Compute primary and optional secondary filter. Returns (filtered, filtered2).
-    Cached: reuses prior result when noisy/t/cfg unchanged (np.ndarray via _hash_array)."""
+    Cached: reuses prior result when noisy/t/cfg unchanged (np.ndarray via Streamlit built-in hash)."""
     sf = FILTERS.get(cfg["_fid"])
     if sf is None:
         logger.warning(f"Unknown filter_id '{cfg['_fid']}', skipping primary filter")
@@ -207,10 +203,10 @@ def _compute_filters(noisy, t, cfg) -> tuple[np.ndarray, np.ndarray | None]:
     return filtered, filtered2
 
 
-@st.cache_data(hash_funcs={np.ndarray: _hash_array}, show_spinner=False)
+@st.cache_data(show_spinner=False)
 def _compute_schmitt_trigger(filtered, t, cfg) -> dict | None:
     """Compute Schmitt trigger signal. Returns schmitt dict or None.
-    Cached with _hash_array for filtered/t ndarray inputs."""
+    Cached: pickle-serialize schmitt dict (window ≤300 rows, negligible overhead)."""
     if not cfg["show_sch"] or np.all(np.isnan(filtered)) or len(t) < 2:
         return None
     _v = np.gradient(filtered, t)
@@ -219,7 +215,7 @@ def _compute_schmitt_trigger(filtered, t, cfg) -> dict | None:
     return _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
 
 
-@st.cache_data(hash_funcs={np.ndarray: _hash_array}, show_spinner=False)
+@st.cache_data(show_spinner=False)
 def _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs) -> list:
     """Compute prediction curves for each pair. Returns list of pred_pairs dicts.
     Cached: pickle-serialize schmitt dict (window ≤300 rows, negligible overhead)."""
@@ -240,7 +236,7 @@ def _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs) -> list:
     return pred_pairs
 
 
-@st.cache_data(hash_funcs={np.ndarray: _hash_array}, show_spinner=False)
+@st.cache_data(show_spinner=False)
 def _cached_strategy_pnl(t, filtered, sig, all_pairs_tuple, pred_pairs_json, stop_loss_pct, n_extend):
     """Cached wrapper for _compute_strategy_pnl to avoid redundant PnL recalculations.
 

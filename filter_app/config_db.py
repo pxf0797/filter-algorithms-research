@@ -129,7 +129,8 @@ def init_config_tables():
                 )
             """)
             conn.execute(
-                "INSERT INTO config_ticker_new SELECT * FROM config_ticker"
+                "INSERT INTO config_ticker_new (ticker, variant, market, preset_id, params_json, updated_at) "
+                "SELECT ticker, variant, market, preset_id, params_json, updated_at FROM config_ticker"
             )
             conn.execute("DROP TABLE config_ticker")
             conn.execute("ALTER TABLE config_ticker_new RENAME TO config_ticker")
@@ -158,11 +159,15 @@ def list_presets(category: Optional[str] = None) -> List[Dict[str, Any]]:
     with _get_conn() as conn:
         if category:
             rows = conn.execute(
-                "SELECT * FROM config_presets WHERE category=? ORDER BY name", (category,)
+                "SELECT preset_id, name, description, category, params_json, "
+                "created_at, updated_at FROM config_presets "
+                "WHERE category=? ORDER BY name", (category,)
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM config_presets ORDER BY category, name"
+                "SELECT preset_id, name, description, category, params_json, "
+                "created_at, updated_at FROM config_presets "
+                "ORDER BY category, name"
             ).fetchall()
     return [dict(r) for r in rows]
 
@@ -183,7 +188,8 @@ def get_preset(preset_id: int) -> Optional[Dict[str, Any]]:
     logger.debug("Getting preset by id={}", preset_id)
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT * FROM config_presets WHERE preset_id=?", (preset_id,)
+            "SELECT preset_id, name, description, category, params_json, "
+            "created_at, updated_at FROM config_presets WHERE preset_id=?", (preset_id,)
         ).fetchone()
     return dict(row) if row else None
 
@@ -204,7 +210,8 @@ def get_preset_by_name(name: str) -> Optional[Dict[str, Any]]:
     logger.debug("Getting preset by name={}", name)
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT * FROM config_presets WHERE name=?", (name,)
+            "SELECT preset_id, name, description, category, params_json, "
+            "created_at, updated_at FROM config_presets WHERE name=?", (name,)
         ).fetchone()
     return dict(row) if row else None
 
@@ -399,7 +406,8 @@ def load_ticker_config(ticker: str, variant: str = "single") -> Optional[Dict[st
     logger.debug("Loading ticker config: ticker={}, variant={}", ticker, variant)
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT * FROM config_ticker WHERE ticker=? AND variant=?",
+            "SELECT ticker, variant, market, preset_id, params_json, updated_at "
+            "FROM config_ticker WHERE ticker=? AND variant=?",
             (ticker, variant)).fetchone()
     if not row:
         return None

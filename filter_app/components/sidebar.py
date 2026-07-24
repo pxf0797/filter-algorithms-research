@@ -98,6 +98,7 @@ def _render_param_slider(label: str, pmin: float, pmax: float, pstep: float,
 
 
 
+@st.fragment
 def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[str],
                    tf_default: str) -> Dict[str, Any]:
     """Render an ultra-compact parameter panel for one view.
@@ -156,10 +157,11 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
     exp_all = st.session_state[exp_key]
     with c1[4]:
         label = "▲" if exp_all else "▼"
-        if st.button(label, key=f"{key}_tgl", help="展开/折叠全部参数",
-                     use_container_width=True):
-            st.session_state[exp_key] = not exp_all
-            st.rerun()
+        # P1-13: on_click callback within @st.fragment — no full-page rerun
+        st.button(label, key=f"{key}_tgl", help="展开/折叠全部参数",
+                  use_container_width=True,
+                  on_click=lambda ek=exp_key: st.session_state.__setitem__(
+                      ek, not st.session_state.get(ek, False)))
 
     # Schmitt ON → 折叠面板
     if cfg["show_sch"]:
