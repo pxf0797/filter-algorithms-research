@@ -448,6 +448,203 @@ def _render_backtest_mode(market, ticker_code, configs) -> None:
 
 
 # ============================================================================
+# 完整回测运行
+# ============================================================================
+
+def _render_full_backtest_section(ticker_code: str, configs: list) -> None:
+    """渲染"运行完整回测"按钮和历史回测加载。
+
+    Parameters
+    ----------
+    ticker_code : str
+        当前股票代码。
+    configs : list of dict
+        视图配置列表。
+    """
+    if not ticker_code or not configs:
+        return
+
+    st.sidebar.markdown("---")
+    st.sidebar.caption("🚀 完整回测")
+
+    min_tf, bar_count = _get_min_tf_and_count(configs, ticker_code)
+    min_n_pts = min(
+        (cfg["n_pts"] for cfg in configs if cfg["tf"] == min_tf),
+        default=120,
+    )
+
+    if bar_count <= 0 or not min_tf:
+        st.sidebar.caption("数据未就绪，请先加载数据")
+        return
+
+    col1, col2 = st.sidebar.columns([2, 1])
+    with col1:
+        run_clicked = st.button(
+            f"运行完整回测 (bar {min_n_pts}~{bar_count})",
+            type="primary",
+            use_container_width=True,
+            key="_bt_run_full",
+        )
+    with col2:
+        if st.button("📋 历史", key="_bt_sessions_toggle", use_container_width=True,
+                     help="显示历史回测记录"):
+            st.session_state["_show_bt_sessions"] = not st.session_state.get(
+                "_show_bt_sessions", False
+            )
+
+    if run_clicked:
+        _execute_full_backtest(ticker_code, configs, min_n_pts, bar_count)
+
+    # 历史回测列表
+    if st.session_state.get("_show_bt_sessions", False):
+        _render_past_sessions()
+
+
+def _execute_full_backtest(
+    ticker_code: str, configs: list, start_bar: int, end_bar: int
+) -> None:
+    """执行完整回测：运行 BacktestRunner + ParquetStore，存储结果。
+
+    Parameters
+    ----------
+    ticker_code : str
+        股票代码。
+    configs : list of dict
+        视图配置列表。
+    start_bar : int
+        起始 bar 索引。
+    end_bar : int
+        结束 bar 索引（不含）。
+    """
+    from filter.backtest.engine import BacktestRunner
+    from filter.data.store import ParquetStore
+    import os as _os
+
+    st.toast(f"开始完整回测: bar {start_bar} ~ {end_bar}")
+    logger.info("开始完整回测: ticker={}, bars=[{}, {}]", ticker_code, start_bar, end_bar)
+
+    # 进度占位
+    progress_bar = st.sidebar.progress(0, text="准备中...")
+    status_text = st.sidebar.empty()
+
+    try:
+        # 1. 初始化
+        runner = BacktestRunner(ticker_code, configs)
+        parquet_store = ParquetStore("backtest_output", ticker_code, configs)
+        session_id = parquet_store.start_session()
+
+        # 2. 运行回测
+        total_steps = (end_bar - start_bar)
+        results = runner.run(start_bar, end_bar, step_interval=1)
+
+        for step_idx, output in enumerate(results):
+            parquet_store.append_row(
+                bar_index=output["bar_index"],
+                bar_timestamp=output["bar_timestamp"],
+                cutoff_date=output["cutoff_date"],
+                stage_outputs=output,
+            )
+
+            # 更新进度
+            pct = (step_idx + 1) / max(total_steps, 1)
+            progress_bar.progress(
+                min(pct, 1.0),
+                text=f"回测中... {step_idx + 1}/{total_steps}",
+            )
+            if step_idx % 10 == 0:
+                status_text.caption(
+                    f"bar {output.get('bar_index', '?')}  "
+                    f"cutoff: {output.get('cutoff_date', '?')}"
+                )
+
+        # 3. 完成
+        parquet_store.end_session()
+        progress_bar.progress(1.0, text="完成!")
+        status_text.empty()
+
+        # 4. 加载结果到 session_state
+        result_path = parquet_store.output_dir / "backtest_result.parquet"
+        if result_path.exists():
+            import pandas as pd
+            result_df = pd.read_parquet(result_path)
+            st.session_state["backtest_result"] = result_df
+            st.session_state["backtest_result_path"] = str(result_path)
+            st.session_state["backtest_metrics"] = None  # 由 dashboard 按需计算
+            st.success(
+                f"回测完成! {len(result_df)} rows, "
+                f"session: {parquet_store.output_dir.name}"
+            )
+        else:
+            st.error("回测完成但 parquet 文件未生成")
+
+    except Exception as e:
+        logger.error("完整回测失败: {}", e)
+        st.error(f"回测失败: {e}")
+    finally:
+        progress_bar.empty()
+
+
+def _render_past_sessions() -> None:
+    """渲染历史回测 session 列表，支持加载。"""
+    from filter.backtest.catalog import BacktestCatalog
+    from pathlib import Path as _Path
+
+    try:
+        catalog = BacktestCatalog("backtest_output")
+        sessions = catalog.scan()
+    except Exception:
+        sessions = []
+
+    if not sessions:
+        st.sidebar.caption("暂无历史回测记录")
+        return
+
+    st.sidebar.caption("历史回测:")
+    for s in sessions[:10]:  # 最多显示 10 条
+        ticker = s.get("ticker", "?")
+        start_ts = s.get("start_time", "")[:16] if s.get("start_time") else "?"
+        row_count = s.get("parquet_row_count") or s.get("step_count") or "?"
+        status = s.get("status", "?")
+        label = f"{ticker} ({row_count} rows, {start_ts}) [{status}]"
+        if st.sidebar.button(
+            label, key=f"_bt_load_{s.get('name', '')}",
+            use_container_width=True,
+        ):
+            _load_session(s)
+
+
+def _load_session(session: dict) -> None:
+    """加载历史回测 session 的结果。
+
+    Parameters
+    ----------
+    session : dict
+        BacktestCatalog 返回的 session 信息。
+    """
+    import pandas as pd
+    from pathlib import Path as _Path
+
+    session_dir = session.get("path", "")
+    if not session_dir:
+        st.sidebar.warning("session 路径无效")
+        return
+
+    parquet_path = _Path(session_dir) / "backtest_result.parquet"
+    if not parquet_path.exists():
+        st.sidebar.warning(f"parquet 文件不存在: {parquet_path}")
+        return
+
+    try:
+        result_df = pd.read_parquet(parquet_path)
+        st.session_state["backtest_result"] = result_df
+        st.session_state["backtest_result_path"] = str(parquet_path)
+        st.session_state["backtest_metrics"] = None
+        st.toast(f"已加载: {_Path(session_dir).name} ({len(result_df)} rows)")
+    except Exception as e:
+        st.sidebar.error(f"加载失败: {e}")
+
+
+# ============================================================================
 # 公共 API
 # ============================================================================
 
@@ -502,6 +699,9 @@ def render_backtest_panel(market, ticker_code, configs) -> None:
 
     # ── 回测模式切换 ──
     _render_backtest_mode(market, ticker_code, configs)
+
+    # ── 完整回测运行按钮 ──
+    _render_full_backtest_section(ticker_code, configs)
 
 
 # ============================================================================

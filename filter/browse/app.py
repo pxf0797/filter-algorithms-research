@@ -64,6 +64,7 @@ from filter.shared.state import AppState
 from filter.backtest.pipeline import PipelineCapture, PipelineStageData
 from filter.backtest.logger import log_data_load
 from filter.backtest.panel import render_backtest_panel, run_backtest_play, sync_backtest_cascading_data
+from filter.backtest.dashboard import render_backtest_dashboard
 
 # ---------------------------------------------------------------------------
 # Page config (must be the first Streamlit command)
@@ -743,6 +744,22 @@ def main() -> None:
         if step_idx != _last:
             _cap.capture_step(step_idx, cutoff_date, _capture_collector)
             st.session_state["_capture_bar_idx"] = step_idx
+
+    # ── 回测结果仪表盘 ──
+    if "backtest_result" in st.session_state and st.session_state["backtest_result"] is not None:
+        st.markdown("---")
+        st.header("📊 回测结果仪表盘")
+        render_backtest_dashboard(
+            st.session_state["backtest_result"],
+            metrics=st.session_state.get("backtest_metrics"),
+        )
+        col_close, _ = st.columns([1, 4])
+        with col_close:
+            if st.button("关闭仪表盘", key="_bt_close_dashboard"):
+                st.session_state.pop("backtest_result", None)
+                st.session_state.pop("backtest_result_path", None)
+                st.session_state.pop("backtest_metrics", None)
+                st.rerun()
 
     # ── Export config ──
     _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_code)
