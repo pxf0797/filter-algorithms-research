@@ -25,6 +25,7 @@ if "streamlit" not in sys.modules:
     # Support both @st.cache_resource and @st.cache_resource() usage
     mock_st.cache_resource = lambda f=None, **kw: f if callable(f) else (lambda g: g)
     mock_st.cache_data = lambda f=None, **kw: f if callable(f) else (lambda g: g)
+    mock_st.fragment = lambda f=None, **kw: f if callable(f) else (lambda g: g)
     sys.modules["streamlit"] = mock_st
 
 import numpy as np
