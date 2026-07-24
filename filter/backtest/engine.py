@@ -193,7 +193,7 @@ class BacktestRunner:
                     tf = view_cfg["tf"]
                     n_pts = view_cfg.get("n_pts", 120)
                     view_key = f"v{view_index}_{tf}"
-                    window_data = self._load_window_data(tf, n_pts)
+                    window_data = self._load_window_data(tf, n_pts, cutoff_date)
                     if window_data is None:
                         logger.warning("视图 {} 窗口数据为空，跳过", view_key)
                         continue
@@ -237,7 +237,7 @@ class BacktestRunner:
                     n_pts = view_cfg.get("n_pts", 120)
                     view_key = f"v{view_index}_{tf}"
 
-                    window_data = self._load_window_data(tf, n_pts)
+                    window_data = self._load_window_data(tf, n_pts, cutoff_date)
                     if window_data is None:
                         logger.warning("视图 {} 窗口数据为空，跳过", view_key)
                         continue
@@ -478,8 +478,9 @@ class BacktestRunner:
     def _sync_data(self, cutoff_date: str) -> None:
         """同步数据到 display parquet（级联合成）。
 
-        调用 ``_sync_all_cascading`` 将所有在用 TF 的窗口数据写入
-        ``data/display/{tf}.parquet``。
+        调用 ``_sync_all_cascading`` 将所有在用 TF 的全量历史数据写入
+        ``data/display/{tf}.parquet``。使用 ``sync_all=True`` 拉取全量数据，
+        由 ``_load_window_data`` 按 bar 自行窗口化。
 
         Parameters
         ----------
@@ -492,6 +493,7 @@ class BacktestRunner:
             cutoff_date,
             self._min_tf,
             n_pts=self._tf_n_pts,
+            sync_all=True,
         )
         failed = [tf for tf, ok in results.items() if not ok]
         if failed:
@@ -503,6 +505,7 @@ class BacktestRunner:
 
     def _load_window_data(
         self, tf: str, n_pts: int,
+        cutoff_date: Optional[str] = None,
     ) -> Optional[Tuple[np.ndarray, np.ndarray, pd.DataFrame, pd.DatetimeIndex]]:
         """从 ``data/display/{tf}.parquet`` 加载窗口数据。
 
@@ -514,6 +517,9 @@ class BacktestRunner:
             周期名称。
         n_pts : int
             期望的数据点数（用于校验）。
+        cutoff_date : Optional[str], default None
+            回测截止日期。传入时先按 ``Date <= cutoff_date`` 过滤，再取最后
+            ``n_pts`` 行，确保每 bar 的窗口不包含未来数据。
 
         Returns
         -------
@@ -530,12 +536,23 @@ class BacktestRunner:
         if "Date" not in df.columns or "Close" not in df.columns:
             logger.warning("parquet {}/{} 缺少 Date/Close 列", self.ticker, tf)
             return None
-        if len(df) < 2:
-            logger.warning("parquet {}/{} 数据点不足 (len={})", self.ticker, tf, len(df))
-            return None
 
         df["Date"] = pd.to_datetime(df["Date"])
         df = df.set_index("Date").sort_index()
+
+        # Per-bar windowing: filter to cutoff_date, keep last n_pts bars
+        if cutoff_date is not None:
+            cutoff_dt = pd.Timestamp(cutoff_date)
+            # For daily+ TFs, match by day boundary so that intraday cutoff
+            # (e.g. "2026-04-01T15:45") still includes the daily bar at
+            # "2026-04-01".
+            df = df[df.index <= cutoff_dt]
+            if len(df) > n_pts:
+                df = df.iloc[-n_pts:]
+
+        if len(df) < 2:
+            logger.warning("parquet {}/{} 数据点不足 (len={})", self.ticker, tf, len(df))
+            return None
 
         t = np.arange(len(df), dtype=float)
         noisy = df["Close"].values.ravel()

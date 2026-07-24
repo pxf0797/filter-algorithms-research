@@ -441,8 +441,9 @@ def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
     return _aggregate_bars(all_finer_bars, synth_date)
 
 
-def _build_output_df(db_rows: list, synthesized_bar: _Optional[dict], n_pts: int) -> pd.DataFrame:
-    """合并 DB 行与可选的合成 K 线，返回恰好 n_pts 行的 DataFrame。
+def _build_output_df(db_rows: list, synthesized_bar: _Optional[dict], n_pts: int,
+                     truncate: bool = True) -> pd.DataFrame:
+    """合并 DB 行与可选的合成 K 线，返回 DataFrame。
 
     当合成 K 线存在时，它会**替换**最后一条 DB 行（二者代表同一周期——DB 行是收盘后
     下载的复盘完整 K 线，合成行是截止到 cutoff_date 的部分视图）。同时追加两者会
@@ -455,7 +456,9 @@ def _build_output_df(db_rows: list, synthesized_bar: _Optional[dict], n_pts: int
     synthesized_bar : Optional[dict]
         合成的 K 线字典，为 None 时不替换。
     n_pts : int
-        返回 DataFrame 的最大行数。
+        返回 DataFrame 的最大行数（仅当 truncate=True 时生效）。
+    truncate : bool
+        是否截断到 n_pts 行。回测预同步模式设 False 以存储全量数据。
 
     Returns
     -------
@@ -468,7 +471,7 @@ def _build_output_df(db_rows: list, synthesized_bar: _Optional[dict], n_pts: int
             data[-1] = synthesized_bar
         else:
             data.append(synthesized_bar)
-    if len(data) > n_pts:
+    if truncate and len(data) > n_pts:
         data = data[-n_pts:]
     return pd.DataFrame(data, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
 
@@ -520,7 +523,8 @@ def _write_parquet(tf: str, df: pd.DataFrame, ticker_code: str = "") -> bool:
 # ═══════════════════════════════════════════════════════════════
 
 def _sync_all_cascading(ticker_code: str, tfs: list, cutoff_date: str,
-                         min_tf: str, n_pts: int = 120) -> dict:
+                         min_tf: str, n_pts: int = 120,
+                         sync_all: bool = False) -> dict:
     """级联合成主入口：从细到粗处理周期列表，为每个周期合成未完成 K 线。
 
     处理流程：按周期列表从细到粗遍历，对每个周期从 DB 获取数据，判断是否需要合成，
@@ -539,6 +543,9 @@ def _sync_all_cascading(ticker_code: str, tfs: list, cutoff_date: str,
     n_pts : int or dict[str, int], default 120
         每个周期需要的数据点数。若为 int 则统一应用于所有周期；
         若为 dict，则键为周期名、值为对应的 n_pts。
+    sync_all : bool, default False
+        是否预同步全量数据（回测模式用）。为 True 时从 DB 拉取所有历史数据且不
+        在 _build_output_df 中截断，由下游按 bar 自行窗口化。
 
     Returns
     -------
@@ -549,18 +556,24 @@ def _sync_all_cascading(ticker_code: str, tfs: list, cutoff_date: str,
     synth_cache: dict = {}
 
     # P0-1: module-level cache — skip re-synthesis when cutoff_date + n_pts unchanged
+    # In sync_all mode, bypass cache because the output differs (full vs truncated).
     _n_pts_repr = tuple(n_pts[tf] if isinstance(n_pts, dict) else n_pts
                         for tf in tfs) if isinstance(n_pts, dict) else str(n_pts)
     cache_key = (ticker_code, cutoff_date, _n_pts_repr)
-    if cache_key == _synth_cache_state.get("last_key"):
+    if not sync_all and cache_key == _synth_cache_state.get("last_key"):
         logger.debug(f"[cascading] cache hit for {ticker_code} @ {cutoff_date}")
         return dict(_synth_cache_state.get("last_result", {}))
+
+    # In sync_all mode, use a large fetch limit to pull all historical bars
+    _FETCH_LIMIT = 100_000 if sync_all else None
 
     for tf in tfs:
         # Resolve per-TF n_pts
         tf_n_pts = n_pts[tf] if isinstance(n_pts, dict) else n_pts
+        # sync_all: fetch all bars, not just n_pts
+        fetch_limit = _FETCH_LIMIT if sync_all else tf_n_pts
 
-        db_rows = _query_tf_from_db(ticker_code, tf, cutoff_date, tf_n_pts)
+        db_rows = _query_tf_from_db(ticker_code, tf, cutoff_date, fetch_limit)
         if not db_rows:
             logger.debug(f"[cascading] {tf}: no DB data, skip")
             results[tf] = False
@@ -592,7 +605,8 @@ def _sync_all_cascading(ticker_code: str, tfs: list, cutoff_date: str,
             else:
                 logger.debug(f"[cascading] {tf}: no finer_tf ({finer_tf}) in cache, skip synth")
 
-        combined = _build_output_df(db_rows, synthesized_bar, tf_n_pts)
+        combined = _build_output_df(db_rows, synthesized_bar, tf_n_pts,
+                                    truncate=not sync_all)
         ok = _write_parquet(tf, combined, ticker_code)
         results[tf] = ok
 
