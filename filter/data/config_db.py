@@ -11,8 +11,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-_CONFIG_DB_PATH = Path(__file__).parent.parent / "data" / "config.db"
-_CONFIG_DIR = Path(__file__).parent.parent / "config"
+_CONFIG_DB_PATH = Path(__file__).parent.parent.parent / "data" / "config.db"
+_CONFIG_DIR = Path(__file__).parent.parent.parent / "config"
 
 
 @contextmanager

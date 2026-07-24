@@ -12,7 +12,7 @@ from typing import Optional, Tuple
 import pandas as pd
 from loguru import logger
 
-DB_PATH = Path(__file__).parent.parent / "data" / "market.db"
+DB_PATH = Path(__file__).parent.parent.parent / "data" / "market.db"
 SNAPSHOT_DIR = DB_PATH.parent / "snapshots"
 
 
