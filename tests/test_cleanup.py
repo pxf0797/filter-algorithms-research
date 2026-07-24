@@ -86,10 +86,10 @@ class TestImportHygiene:
         assert hasattr(loader, "_stock_name_lookup")
 
     def test_sidebar_sections_imports(self):
-        """sidebar_sections module should import without error."""
+        """sidebar module should import without error."""
         from filter_app.browse import sidebar
-        # The module itself should import cleanly
-        assert sidebar_sections is not None
+        # The module itself should import cleanly with expected exports
+        assert hasattr(sidebar, "_render_param_panels")
 
     def test_backtest_panel_imports(self):
         """backtest_panel module should import without error."""
@@ -136,8 +136,8 @@ class TestImportHygiene:
         assert "yfinance" not in top_level_imports, \
             "Dead import 'yfinance' still present in browse/app.py"
 
-        # log_data_load should still be there
-        assert "backtest_logger.log_data_load" in top_level_imports, \
+        # log_data_load should still be there (now at backtest.logger per P2 restructure)
+        assert "backtest.logger.log_data_load" in top_level_imports, \
             "'log_data_load' was incorrectly removed"
         assert "log_data_load" in source, "'log_data_load' was incorrectly removed"
 

@@ -24,11 +24,10 @@ from data.db import (init_db, get_date_range, has_data,
 
 # --- Import from new modules ---
 from engine.filters import (
-    FILTERS,
-    _schmitt_trigger, _find_all_pairs,
-    _fit_physics_parabola,
+    _find_all_pairs,
     _compute_strategy_pnl, _align_pnl_to_current_tf, _compute_holding_masks,
 )
+from engine.pipeline import compute_filters, compute_schmitt_trigger, compute_prediction_pairs
 from data.loader import (
     _fetch_all_timeframes, _fetch_stock, _sync_to_display,
     load_display_cache, _stock_name_lookup,
@@ -168,31 +167,7 @@ def _load_chart_data(market, ticker_code, tf, n_pts, window_start=None, cutoff_d
 def _compute_filters(noisy, t, cfg) -> tuple[np.ndarray, np.ndarray | None]:
     """Compute primary and optional secondary filter. Returns (filtered, filtered2).
     Cached: reuses prior result when noisy/t/cfg unchanged (np.ndarray via Streamlit built-in hash)."""
-    sf = FILTERS.get(cfg["_fid"])
-    if sf is None:
-        logger.warning(f"Unknown filter_id '{cfg['_fid']}', skipping primary filter")
-        filtered = np.full_like(noisy, np.nan)
-        return filtered, None
-    try:
-        filtered = sf["func"](noisy, t, **cfg["pv"])
-        filtered = np.asarray(filtered, dtype=float).ravel()
-    except Exception as e:
-        logger.error(f"Filter {cfg['_fid']} failed: {e}", exc_info=True)
-        filtered = np.full_like(noisy, np.nan)
-    filtered2 = None
-    if cfg["_dual"] and cfg["_fid2"] and cfg["pv2"]:
-        try:
-            sf2 = FILTERS.get(cfg["_fid2"])
-            if sf2 is None:
-                logger.warning(f"Unknown filter_id2 '{cfg['_fid2']}', skipping secondary filter")
-                filtered2 = np.full_like(noisy, np.nan)
-            else:
-                filtered2 = sf2["func"](noisy, t, **cfg["pv2"])
-            filtered2 = np.asarray(filtered2, dtype=float).ravel()
-        except Exception as e:
-            logger.warning(f"Filter2 {cfg['_fid2']} failed: {e}")
-            filtered2 = np.full_like(noisy, np.nan)
-    return filtered, filtered2
+    return compute_filters(noisy, t, cfg)
 
 
 @st.cache_data(show_spinner=False, ttl=600)
@@ -201,10 +176,8 @@ def _compute_schmitt_trigger(filtered, t, cfg) -> dict | None:
     Cached: pickle-serialize schmitt dict (window ≤300 rows, negligible overhead)."""
     if not cfg["show_sch"] or np.all(np.isnan(filtered)) or len(t) < 2:
         return None
-    _v = np.gradient(filtered, t)
-    _a = np.gradient(_v, t)
     logger.debug(f"Computing Schmitt trigger: ewma={cfg['ew']}, k_eps={cfg['ke']}, sigma_min={cfg['sm']}")
-    return _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
+    return compute_schmitt_trigger(filtered, t, cfg)
 
 
 @st.cache_data(show_spinner=False, ttl=600)
@@ -213,19 +186,8 @@ def _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs) -> list:
     Cached: pickle-serialize schmitt dict (window ≤300 rows, negligible overhead)."""
     if not cfg.get("show_pred") or schmitt is None:
         return []
-    pred_pairs = []
     logger.debug(f"Computing prediction curves: {len(all_pairs)} pairs, mode={cfg.get('fit_mode')}")
-    fit_func = _fit_physics_parabola
-    for pair_start, pair_end in all_pairs:
-        if pair_end - pair_start >= 3:
-            fit_result = fit_func(t, filtered, pair_start, pair_end)
-            if fit_result is not None:
-                pred_pairs.append({
-                    "fit_result": fit_result,
-                    "fit_start": pair_start,
-                    "pair_end": pair_end,
-                })
-    return pred_pairs
+    return compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs)
 
 
 @st.cache_data(show_spinner=False, ttl=600)

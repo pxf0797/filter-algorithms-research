@@ -16,14 +16,12 @@ from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 
 from engine.filters import (
-    FILTERS,
-    _schmitt_trigger,
     _find_all_pairs,
-    _fit_physics_parabola,
     _compute_strategy_pnl,
     _align_pnl_to_current_tf,
     _compute_holding_masks,
 )
+from engine.pipeline import compute_filters, compute_schmitt_trigger, compute_prediction_pairs
 from data.loader import _sync_all_cascading, load_display_cache
 from engine.signals import compute_bs_markers
 from data.db import get_conn
@@ -227,41 +225,11 @@ class BacktestRunner:
                                 logger.error("视图 {} 管道计算失败: {}", view_key, e)
                                 continue
 
-                            # 阶段 3: 顺序处理（EWMA状态、跨周期对齐、持仓掩码、BS标记）
-                            tf = view_cfg["tf"]
-                            schmitt = stage_output.get("schmitt")
-                            if schmitt is not None:
-                                self._ewma_state[view_key] = {
-                                    "init_mu": schmitt.get("final_mu", 0.0),
-                                    "init_sigma": schmitt.get("final_sigma", 0.0),
-                                    "state": schmitt.get("final_state", 0),
-                                    "dur": schmitt.get("final_dur", 0),
-                                }
-
-                            higher_tf = TF_HIERARCHY.get(tf)
-                            higher_pnl = tf_pnl_cache.get(higher_tf) if higher_tf else None
-                            stage_output["higher_pnl"] = higher_pnl
-
-                            long_mask, short_mask = self._compute_masks_for_view(
-                                stage_output, higher_pnl,
+                            # 阶段 3: 共享后处理
+                            self._process_view_post_pipeline(
+                                stage_output, view_cfg, view_key, tf_pnl_cache,
                             )
-                            stage_output["long_mask"] = long_mask
-                            stage_output["short_mask"] = short_mask
-
-                            bs_markers = self._compute_bs_for_view(
-                                stage_output, view_cfg, long_mask, short_mask,
-                            )
-                            stage_output["bs_markers"] = bs_markers
-
                             view_outputs[view_key] = stage_output
-
-                            if stage_output.get("long_pnl") is not None:
-                                tf_pnl_cache[tf] = {
-                                    "dates": stage_output["dates"],
-                                    "long_pnl": stage_output["long_pnl"],
-                                    "short_pnl": stage_output["short_pnl"],
-                                    "trade_records": stage_output["trade_records"],
-                                }
             else:
                 # 顺序模式（原有逻辑，保持兼容）
                 for view_index, view_cfg in sorted_views:
@@ -280,39 +248,10 @@ class BacktestRunner:
                         view_cfg, window_data, ewma_init=ewma_init,
                     )
 
-                    schmitt = stage_output.get("schmitt")
-                    if schmitt is not None:
-                        self._ewma_state[view_key] = {
-                            "init_mu": schmitt.get("final_mu", 0.0),
-                            "init_sigma": schmitt.get("final_sigma", 0.0),
-                            "state": schmitt.get("final_state", 0),
-                            "dur": schmitt.get("final_dur", 0),
-                        }
-
-                    higher_tf = TF_HIERARCHY.get(tf)
-                    higher_pnl = tf_pnl_cache.get(higher_tf) if higher_tf else None
-                    stage_output["higher_pnl"] = higher_pnl
-
-                    long_mask, short_mask = self._compute_masks_for_view(
-                        stage_output, higher_pnl,
+                    self._process_view_post_pipeline(
+                        stage_output, view_cfg, view_key, tf_pnl_cache,
                     )
-                    stage_output["long_mask"] = long_mask
-                    stage_output["short_mask"] = short_mask
-
-                    bs_markers = self._compute_bs_for_view(
-                        stage_output, view_cfg, long_mask, short_mask,
-                    )
-                    stage_output["bs_markers"] = bs_markers
-
                     view_outputs[view_key] = stage_output
-
-                    if stage_output.get("long_pnl") is not None:
-                        tf_pnl_cache[tf] = {
-                            "dates": stage_output["dates"],
-                            "long_pnl": stage_output["long_pnl"],
-                            "short_pnl": stage_output["short_pnl"],
-                            "trade_records": stage_output["trade_records"],
-                        }
 
             results.append({
                 "step_index": bar_index,
@@ -355,6 +294,19 @@ class BacktestRunner:
             "回测完成: ticker={}, bar 范围=[{},{}), 间隔={}, 步数={}",
             self.ticker, start_bar, end_bar, step_interval, len(results),
         )
+
+        # ── 自动计算回测指标 ──
+        _compute_and_log_metrics(results, self.ticker)
+
+        # ── 自动更新 catalog 索引 ──
+        try:
+            from filter_app.backtest.catalog import BacktestCatalog
+            catalog = BacktestCatalog()
+            catalog.save_index()
+            logger.debug("Backtest catalog index updated")
+        except Exception as e:
+            logger.debug("Failed to update backtest catalog: {}", e)
+
         return results
 
     def get_bar_count(self) -> int:
@@ -717,66 +669,20 @@ class BacktestRunner:
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """计算主线滤波与可选的副线滤波。
 
-        对齐 ``streamlit_app._compute_filters`` 的逻辑，去掉 ``@st.cache_data``。
+        委托给 ``engine.pipeline.compute_filters``，增加增量缓存支持。
 
         P0-2: 增量计算支持 — 当 pipeline_cache 提供且 cache_key 命中时，
         复用上一窗口的前 N-1 个滤波点，仅计算最后一个点。
-
-        Parameters
-        ----------
-        noisy : np.ndarray
-            原始价格序列。
-        t : np.ndarray
-            时间索引。
-        cfg : dict
-            视图配置。
-        pipeline_cache : Optional[dict]
-            增量计算缓存字典，同一回测运行器的 ``_pipeline_cache``。
-        cache_key : str
-            缓存查找键，格式为 ``"{tf}_{prev_n_pts}_{hash}"``。
-
-        Returns
-        -------
-        Tuple[np.ndarray, Optional[np.ndarray]]
-            ``(filtered, filtered2)`` — 主线滤波结果与副线结果（可能为 None）。
         """
         # P0-2: check incremental cache
-        prev_filtered = None
-        prev_filtered2 = None
         if pipeline_cache is not None and cache_key:
             cached = pipeline_cache.get(cache_key)
             if cached is not None:
                 prev_filtered, prev_filtered2 = cached
                 if prev_filtered is not None and len(prev_filtered) == len(noisy) - 1:
-                    # Reuse prefix; only compute last point on the full noisy array
                     logger.debug(f"[pipeline_cache] hit: {cache_key}, reusing {len(prev_filtered)} prefix points")
 
-        sf = FILTERS.get(cfg["_fid"])
-        if sf is None:
-            logger.warning("未知 filter_id '{}', 使用 NaN", cfg["_fid"])
-            filtered = np.full_like(noisy, np.nan)
-            return filtered, None
-
-        try:
-            filtered = sf["func"](noisy, t, **cfg["pv"])
-            filtered = np.asarray(filtered, dtype=float).ravel()
-        except Exception as e:
-            logger.error("滤波器 {} 失败: {}", cfg["_fid"], e)
-            filtered = np.full_like(noisy, np.nan)
-
-        filtered2: Optional[np.ndarray] = None
-        if cfg.get("_dual") and cfg.get("_fid2") and cfg.get("pv2"):
-            try:
-                sf2 = FILTERS.get(cfg["_fid2"])
-                if sf2 is None:
-                    logger.warning("未知 filter_id2 '{}'", cfg["_fid2"])
-                    filtered2 = np.full_like(noisy, np.nan)
-                else:
-                    filtered2 = sf2["func"](noisy, t, **cfg["pv2"])
-                filtered2 = np.asarray(filtered2, dtype=float).ravel()
-            except Exception as e:
-                logger.warning("副线滤波器 {} 失败: {}", cfg["_fid2"], e)
-                filtered2 = np.full_like(noisy, np.nan)
+        filtered, filtered2 = compute_filters(noisy, t, cfg)
 
         # P0-2: save to incremental cache for next bar
         if pipeline_cache is not None and cache_key:
@@ -792,51 +698,14 @@ class BacktestRunner:
         init_state: int = 0,
         init_dur: int = 0,
     ) -> Optional[dict]:
-        """计算施密特触发器信号。
-
-        对齐 ``streamlit_app._compute_schmitt_trigger`` 的逻辑。
-
-        Parameters
-        ----------
-        filtered : np.ndarray
-            滤波价格序列。
-        t : np.ndarray
-            时间索引。
-        cfg : dict
-            视图配置，需含 ``show_sch``, ``ew``, ``ke``, ``sm``。
-        init_mu : Optional[float], optional
-            跨窗口 EWMA 均值初始值（回测连续模式用）。
-        init_sigma : Optional[float], optional
-            跨窗口 EWMA 标准差初始值（回测连续模式用）。
-        init_state : int, optional
-            跨窗口施密特状态初始值（回测连续模式用，默认 0）。
-        init_dur : int, optional
-            跨窗口施密特持续期数初始值（回测连续模式用，默认 0）。
-
-        Returns
-        -------
-        Optional[dict]
-            施密特触发器输出字典；数据不足时返回 ``None``。
-        """
+        """计算施密特触发器信号。委托给 ``engine.pipeline.compute_schmitt_trigger``。"""
         if not cfg.get("show_sch") or np.all(np.isnan(filtered)) or len(t) < 2:
             return None
-
-        v = np.gradient(filtered, t)
-        a = np.gradient(v, t)
-        result = _schmitt_trigger(
-            v, a,
-            ewma_span=cfg.get("ew", 60),
-            k_eps=cfg.get("ke", 0.15),
-            sigma_min=cfg.get("sm", 0.05),
-            init_mu=init_mu,
-            init_sigma=init_sigma,
-            init_state=init_state,
-            init_dur=init_dur,
+        return compute_schmitt_trigger(
+            filtered, t, cfg,
+            init_mu=init_mu, init_sigma=init_sigma,
+            init_state=init_state, init_dur=init_dur,
         )
-        if result is not None:
-            result["v"] = v
-            result["a"] = a
-        return result
 
     @staticmethod
     def _compute_prediction_pairs(
@@ -846,42 +715,10 @@ class BacktestRunner:
         cfg: dict,
         all_pairs: list,
     ) -> list:
-        """计算每对多空信号的预测曲线。
-
-        对齐 ``streamlit_app._compute_prediction_pairs`` 的逻辑。
-
-        Parameters
-        ----------
-        t : np.ndarray
-            时间索引。
-        filtered : np.ndarray
-            滤波价格序列。
-        schmitt : Optional[dict]
-            施密特触发器输出。
-        cfg : dict
-            视图配置，需含 ``show_pred``。
-        all_pairs : list
-            多空切换对列表。
-
-        Returns
-        -------
-        list[dict]
-            预测曲线数据列表。
-        """
+        """计算每对多空信号的预测曲线。委托给 ``engine.pipeline.compute_prediction_pairs``。"""
         if not cfg.get("show_pred") or schmitt is None:
             return []
-
-        pred_pairs = []
-        for pair_start, pair_end in all_pairs:
-            if pair_end - pair_start >= 3:
-                fit_result = _fit_physics_parabola(t, filtered, pair_start, pair_end)
-                if fit_result is not None:
-                    pred_pairs.append({
-                        "fit_result": fit_result,
-                        "fit_start": pair_start,
-                        "pair_end": pair_end,
-                    })
-        return pred_pairs
+        return compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs)
 
     @staticmethod
     def _compute_strategy_for_view(
@@ -1020,6 +857,46 @@ class BacktestRunner:
     # DB 查询
     # ------------------------------------------------------------------
 
+    def _process_view_post_pipeline(
+        self, stage_output: dict, view_cfg: dict,
+        view_key: str, tf_pnl_cache: dict,
+    ) -> None:
+        """共享的后处理逻辑：EWMA 状态更新、跨周期对齐、持仓掩码、BS 标记。
+
+        并行和顺序管线均调用此方法，避免重复代码。
+        """
+        tf = view_cfg["tf"]
+        schmitt = stage_output.get("schmitt")
+        if schmitt is not None:
+            self._ewma_state[view_key] = {
+                "init_mu": schmitt.get("final_mu", 0.0),
+                "init_sigma": schmitt.get("final_sigma", 0.0),
+                "state": schmitt.get("final_state", 0),
+                "dur": schmitt.get("final_dur", 0),
+            }
+
+        higher_tf = TF_HIERARCHY.get(tf)
+        higher_pnl = tf_pnl_cache.get(higher_tf) if higher_tf else None
+        stage_output["higher_pnl"] = higher_pnl
+
+        long_mask, short_mask = self._compute_masks_for_view(
+            stage_output, higher_pnl,
+        )
+        stage_output["long_mask"] = long_mask
+        stage_output["short_mask"] = short_mask
+
+        stage_output["bs_markers"] = self._compute_bs_for_view(
+            stage_output, view_cfg, long_mask, short_mask,
+        )
+
+        if stage_output.get("long_pnl") is not None:
+            tf_pnl_cache[tf] = {
+                "dates": stage_output["dates"],
+                "long_pnl": stage_output["long_pnl"],
+                "short_pnl": stage_output["short_pnl"],
+                "trade_records": stage_output["trade_records"],
+            }
+
     def _query_bar_count(self) -> int:
         """查询 min_tf 上的总 bar 数。
 
@@ -1142,3 +1019,61 @@ def replay_bar(
     if results:
         return results[0]
     return None
+
+
+# ═══════════════════════════════════════════════════════════════
+# 自动指标计算
+# ═══════════════════════════════════════════════════════════════
+
+def _compute_and_log_metrics(results: list[dict], ticker: str) -> None:
+    """从回测结果中提取最后一步的 PnL 数据，计算核心指标并记录日志。
+
+    从最后一步的第一个视图获取 PnL 和交易记录（跨视图指标计算暂未实现）。
+    结果通过 loguru 记录，便于后续查询和分析。
+
+    Parameters
+    ----------
+    results : list[dict]
+        ``BacktestRunner.run()`` 的输出结果列表。
+    ticker : str
+        股票代码。
+    """
+    if not results:
+        return
+
+    try:
+        from filter_app.backtest.metrics import compute_backtest_metrics
+    except ImportError:
+        logger.debug("backtest.metrics module not available, skipping metrics")
+        return
+
+    last_step = results[-1]
+    views = last_step.get("views", {})
+    if not views:
+        return
+
+    # 取第一个视图的 PnL 数据（未来可扩展为跨视图聚合）
+    first_view = next(iter(views.values()))
+    long_pnl = first_view.get("long_pnl")
+    short_pnl = first_view.get("short_pnl")
+    trade_records = first_view.get("trade_records", [])
+    n_bars = len(first_view.get("t", []))
+
+    if long_pnl is None or short_pnl is None:
+        return
+
+    try:
+        metrics = compute_backtest_metrics(
+            long_pnl, short_pnl, trade_records, n_bars,
+        )
+        logger.info(
+            "回测指标: ticker={}, total_return={}%, sharpe={}, max_dd={}%, trades={}, win_rate={}%",
+            ticker,
+            metrics.get("total_return_pct", 0),
+            metrics.get("sharpe_ratio", 0),
+            metrics.get("max_drawdown_pct", 0),
+            metrics.get("total_trades", 0),
+            metrics.get("win_rate_pct", 0),
+        )
+    except Exception as e:
+        logger.debug("Failed to compute backtest metrics: {}", e)

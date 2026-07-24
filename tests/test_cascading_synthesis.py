@@ -421,8 +421,8 @@ class TestCrossPeriodFilter:
             {"Date": "2026-07-03T14:30:00+08:00", "Open": 101, "High": 103, "Low": 100, "Close": 102, "Volume": 1500}, # 7/3 — 保留
         ]
 
-        with patch('services.data_loader._query_tf_for_period', return_value=mock_finer_bars), \
-             patch('services.data_loader._query_tf_from_db', return_value=[{"Date": "2026-07-03T14:15:00+08:00"}]):
+        with patch('data.synth._query_tf_for_period', return_value=mock_finer_bars), \
+             patch('data.synth._query_tf_from_db', return_value=[{"Date": "2026-07-03T14:15:00+08:00"}]):
             result = _synthesize_incomplete_bar("60分钟", db_rows, cutoff_date, "AAPL", "15分钟", None)
 
         assert result is not None
@@ -444,8 +444,8 @@ class TestCrossPeriodFilter:
             {"Date": "2026-07-03T10:30:00+08:00", "Open": 105, "High": 108, "Low": 104, "Close": 107, "Volume": 3000},  # 7/3 — 保留
         ]
 
-        with patch('services.data_loader._query_tf_for_period', return_value=mock_finer_bars), \
-             patch('services.data_loader._query_tf_from_db', return_value=[{"Date": "2026-07-03T10:30:00+08:00"}]):
+        with patch('data.synth._query_tf_for_period', return_value=mock_finer_bars), \
+             patch('data.synth._query_tf_from_db', return_value=[{"Date": "2026-07-03T10:30:00+08:00"}]):
             result = _synthesize_incomplete_bar("日线", db_rows, cutoff_date, "AAPL", "60分钟", None)
 
         assert result is not None
@@ -470,8 +470,8 @@ class TestCrossPeriodFilter:
             {"Date": "2026-07-02T00:00:00", "Open": 104, "High": 106, "Low": 103, "Close": 105, "Volume": 9000},  # 周四 — 保留
         ]
 
-        with patch('services.data_loader._query_tf_for_period', return_value=mock_finer_bars), \
-             patch('services.data_loader._query_tf_from_db', return_value=[{"Date": "2026-07-02T00:00:00"}]):
+        with patch('data.synth._query_tf_for_period', return_value=mock_finer_bars), \
+             patch('data.synth._query_tf_from_db', return_value=[{"Date": "2026-07-02T00:00:00"}]):
             result = _synthesize_incomplete_bar("周线", db_rows, cutoff_date, "AAPL", "日线", None)
 
         assert result is not None
@@ -495,8 +495,8 @@ class TestCrossPeriodFilter:
             {"Date": "2026-07-02T00:00:00", "Open": 111, "High": 113, "Low": 110, "Close": 112, "Volume": 7000},    # 7月 — 保留
         ]
 
-        with patch('services.data_loader._query_tf_for_period', return_value=mock_finer_bars), \
-             patch('services.data_loader._query_tf_from_db', return_value=[{"Date": "2026-07-15T00:00:00"}]):
+        with patch('data.synth._query_tf_for_period', return_value=mock_finer_bars), \
+             patch('data.synth._query_tf_from_db', return_value=[{"Date": "2026-07-15T00:00:00"}]):
             result = _synthesize_incomplete_bar("月线", db_rows, cutoff_date, "AAPL", "日线", None)
 
         assert result is not None
@@ -518,8 +518,8 @@ class TestCrossPeriodFilter:
             {"Date": "2026-07-02T00:00:00", "Open": 101, "High": 104, "Low": 100, "Close": 103, "Volume": 4000},  # Q3 — 保留
         ]
 
-        with patch('services.data_loader._query_tf_for_period', return_value=mock_finer_bars), \
-             patch('services.data_loader._query_tf_from_db', return_value=[{"Date": "2026-07-15T00:00:00"}]):
+        with patch('data.synth._query_tf_for_period', return_value=mock_finer_bars), \
+             patch('data.synth._query_tf_from_db', return_value=[{"Date": "2026-07-15T00:00:00"}]):
             result = _synthesize_incomplete_bar("季线", db_rows, cutoff_date, "AAPL", "日线", None)
 
         assert result is not None
@@ -617,9 +617,9 @@ class TestCascadeEndToEnd:
                 ]
             return []
 
-        with patch('services.data_loader._write_parquet', side_effect=capture_write), \
-             patch('services.data_loader._query_tf_from_db', side_effect=q_db), \
-             patch('services.data_loader._query_tf_for_period', side_effect=q_period):
+        with patch('data.synth._write_parquet', side_effect=capture_write), \
+             patch('data.synth._query_tf_from_db', side_effect=q_db), \
+             patch('data.synth._query_tf_for_period', side_effect=q_period):
             results = _sync_all_cascading("AAPL", tfs, cutoff, "60分钟", 120)
 
         # 三个TF均写入成功

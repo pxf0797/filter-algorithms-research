@@ -120,7 +120,7 @@ class TestSyncToDisplay:
         display_dir = tmp_path / "display"
         display_dir.mkdir()
 
-        with patch("data.db.get_conn", return_value=mock_conn), \
+        with patch("data.loader.get_conn", return_value=mock_conn), \
              patch("data.loader.Path") as mock_path_class:
             # 让 (__file__).parent.parent.parent 指向 tmp_path
             mock_path_class.return_value.parent.parent.parent.__truediv__.return_value = display_dir
@@ -142,7 +142,7 @@ class TestSyncToDisplay:
         mock_conn.__exit__.return_value = False
         mock_conn.execute.return_value.fetchall.return_value = []
 
-        with patch("data.db.get_conn", return_value=mock_conn):
+        with patch("data.loader.get_conn", return_value=mock_conn):
             ok, count = _sync_to_display("AAPL", "1d", n_pts=120, cutoff_date="1990-01-01")
             assert ok is False
             assert count == 0
@@ -168,7 +168,7 @@ class TestSyncToDisplay:
         mock_conn.__exit__.return_value = False
         mock_conn.execute.return_value.fetchall.return_value = []
 
-        with patch("data.db.get_conn", return_value=mock_conn):
+        with patch("data.loader.get_conn", return_value=mock_conn):
             ok, count = _sync_to_display("XYZ", "1mo", n_pts=120, cutoff_date="2025-01-01")
             assert ok is False  # 触发 _load_chart_data 走 _cached_fetch_stock
 
@@ -190,7 +190,7 @@ class TestSyncToDisplay:
         display_dir = tmp_path / "display"
         display_dir.mkdir()
 
-        with patch("data.db.get_conn", return_value=mock_conn), \
+        with patch("data.loader.get_conn", return_value=mock_conn), \
              patch("data.loader.Path") as mock_path_class:
             mock_path_class.return_value.parent.parent.parent.__truediv__.return_value = display_dir
 
@@ -213,7 +213,7 @@ class TestBacktestEdgeCases:
         mock_conn.__exit__.return_value = False
         mock_conn.execute.return_value.fetchall.return_value = []
 
-        with patch("data.db.get_conn", return_value=mock_conn):
+        with patch("data.loader.get_conn", return_value=mock_conn):
             ok, count = _sync_to_display("AAPL", "1mo", n_pts=120, cutoff_date="1990-01-01")
             assert ok is False
             assert count == 0
@@ -293,7 +293,7 @@ class TestGetBarDateFromDb:
         mock_conn.__exit__.return_value = False
         mock_conn.execute.return_value.fetchone.return_value = None
 
-        with patch("data.db.get_conn", return_value=mock_conn):
+        with patch("data.loader.get_conn", return_value=mock_conn):
             result = _get_bar_date_from_db("AAPL", "1d", 99999)
             assert result == ""
 
@@ -309,7 +309,7 @@ class TestBacktestLogger:
         import json
         from backtest.logger import log_mode_switch
 
-        with patch("backtest_logger.LOG_DIR", tmp_path):
+        with patch("backtest.logger.LOG_DIR", tmp_path):
             log_mode_switch("AAPL", "enter", "60分钟", 500)
 
             log_files = list(tmp_path.glob("*.jsonl"))
@@ -327,7 +327,7 @@ class TestBacktestLogger:
         import json
         from backtest.logger import log_bar_navigation
 
-        with patch("backtest_logger.LOG_DIR", tmp_path):
+        with patch("backtest.logger.LOG_DIR", tmp_path):
             log_bar_navigation("AAPL", "60分钟", 50, 500, "2026-06-15")
 
             record = json.loads(list(tmp_path.glob("*.jsonl"))[0].read_text().strip())
@@ -340,7 +340,7 @@ class TestBacktestLogger:
         import json
         from backtest.logger import log_data_load
 
-        with patch("backtest_logger.LOG_DIR", tmp_path):
+        with patch("backtest.logger.LOG_DIR", tmp_path):
             log_data_load("MSFT", "1d", 120, "2026-05-01", elapsed_ms=150.5)
 
             record = json.loads(list(tmp_path.glob("*.jsonl"))[0].read_text().strip())
@@ -354,7 +354,7 @@ class TestBacktestLogger:
         import json
         from backtest.logger import log_error
 
-        with patch("backtest_logger.LOG_DIR", tmp_path):
+        with patch("backtest.logger.LOG_DIR", tmp_path):
             log_error("TSLA", "_sync_to_display", "数据库连接超时")
 
             record = json.loads(list(tmp_path.glob("*.jsonl"))[0].read_text().strip())
@@ -367,7 +367,7 @@ class TestBacktestLogger:
         from backtest.logger import _ensure_dir
 
         logs = tmp_path / "nested" / "backtest_logs"
-        with patch("backtest_logger.LOG_DIR", logs):
+        with patch("backtest.logger.LOG_DIR", logs):
             _ensure_dir()
             assert logs.exists()
             assert logs.is_dir()
@@ -634,7 +634,7 @@ class TestOnSliderChange:
              "_fetched_ticker": "AAPL", "_min_tf": "日线"},
         )
         from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
-        with patch("filter_app.components.backtest_panel._get_bar_date_from_db", return_value="2026-07-15"):
+        with patch("filter_app.backtest.panel._get_bar_date_from_db", return_value="2026-07-15"):
             _on_slider_change()
         assert ss["_bar_index"] == 42
         assert ss["_bt_cutoff_date"] == "2026-07-15"
@@ -692,7 +692,7 @@ class TestOnSliderChange:
              "_bt_cutoff_date": "old-date"},
         )
         from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
-        with patch("filter_app.components.backtest_panel._get_bar_date_from_db", return_value=""):
+        with patch("filter_app.backtest.panel._get_bar_date_from_db", return_value=""):
             _on_slider_change()
         assert ss["_bar_index"] == 42
         assert ss["_bt_cutoff_date"] == "old-date"
@@ -971,7 +971,7 @@ class TestRunBacktestPlay:
         bp.st.session_state = ss
         state.st.session_state = ss
         # logger 已在 conftest mock 的 streamlit runtime 之外，需要 patch
-        with patch("filter_app.components.backtest_panel.logger"):
+        with patch("filter_app.backtest.panel.logger"):
             if extras and extras.get("_min_tf_bar_count", 0) > 0:
                 # 需要 cutt-off patch
                 pass
@@ -1061,7 +1061,7 @@ class TestBacktestIntegration:
         ss["_is_playing"] = True
 
         # 3. 播放 5 帧
-        with patch("filter_app.components.backtest_panel.logger"):
+        with patch("filter_app.backtest.panel.logger"):
             for _ in range(5):
                 bp._run_backtest_play()
         assert ss["_bar_index"] == 505
@@ -1072,13 +1072,13 @@ class TestBacktestIntegration:
 
         # 5. 拖动 slider（期望 _get_bar_date_from_db 返回对应日期）
         ss["_bt_slider_pos"] = 300
-        with patch("filter_app.components.backtest_panel._get_bar_date_from_db", return_value="2026-06-15"):
+        with patch("filter_app.backtest.panel._get_bar_date_from_db", return_value="2026-06-15"):
             bp._on_slider_change()
         assert ss["_bar_index"] == 300
 
         # 6. 恢复播放
         ss["_is_playing"] = True
-        with patch("filter_app.components.backtest_panel.logger"):
+        with patch("filter_app.backtest.panel.logger"):
             bp._run_backtest_play()
         assert ss["_bar_index"] == 301  # 从 300 继续递增
 
@@ -1101,8 +1101,8 @@ class TestUpdateCutoffAndRerun:
         bp.st.session_state = ss
         state.st.session_state = ss
 
-        with patch("filter_app.components.backtest_panel._get_bar_date_from_db", return_value="2026-06-15"), \
-             patch("filter_app.components.backtest_panel.st.rerun"):
+        with patch("filter_app.backtest.panel._get_bar_date_from_db", return_value="2026-06-15"), \
+             patch("filter_app.backtest.panel.st.rerun"):
             bp._update_cutoff_and_rerun()
 
         assert ss["_bt_slider_pos"] == 10
@@ -1121,8 +1121,8 @@ class TestUpdateCutoffAndRerun:
         bp.st.session_state = ss
         state.st.session_state = ss
 
-        with patch("filter_app.components.backtest_panel._get_bar_date_from_db") as mock_get_date, \
-             patch("filter_app.components.backtest_panel.st.rerun"):
+        with patch("filter_app.backtest.panel._get_bar_date_from_db") as mock_get_date, \
+             patch("filter_app.backtest.panel.st.rerun"):
             mock_get_date.return_value = "2026-07-01"
             bp._update_cutoff_and_rerun()
 
@@ -1146,8 +1146,8 @@ class TestUpdateCutoffAndRerun:
         # 模拟前进按钮操作
         ss["_bar_index"] = 6
 
-        with patch("filter_app.components.backtest_panel._get_bar_date_from_db", return_value="2026-06-20"), \
-             patch("filter_app.components.backtest_panel.st.rerun"):
+        with patch("filter_app.backtest.panel._get_bar_date_from_db", return_value="2026-06-20"), \
+             patch("filter_app.backtest.panel.st.rerun"):
             bp._update_cutoff_and_rerun()
 
         assert ss["_bt_slider_pos"] == 6
@@ -1170,14 +1170,14 @@ class TestUpdateCutoffAndRerun:
         state.st.session_state = ss
 
         # _on_slider_change 在播放时应该跳过
-        with patch("filter_app.components.backtest_panel.logger"):
+        with patch("filter_app.backtest.panel.logger"):
             bp._on_slider_change()
         # _bar_index 应保持不变（未被 on_change 改写）
         assert ss["_bar_index"] == 200
 
         # _run_backtest_play 递增 _bar_index，不受 _bt_slider_pos 干扰
-        with patch("filter_app.components.backtest_panel.logger"), \
-             patch("filter_app.components.backtest_panel._get_bar_date_from_db", return_value="2026-06-20"):
+        with patch("filter_app.backtest.panel.logger"), \
+             patch("filter_app.backtest.panel._get_bar_date_from_db", return_value="2026-06-20"):
             result = bp._run_backtest_play()
         assert result is True
         assert ss["_bar_index"] == 201  # 从 200 递增
@@ -1225,7 +1225,7 @@ class TestCheckpoint:
         configs = _make_minimal_configs()
         mock_conn = _make_mock_db_conn()
 
-        with patch("filter_app.services.backtest_core.get_conn", return_value=mock_conn):
+        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
             r1 = BacktestRunner("TEST", configs)
             r2 = BacktestRunner("TEST", configs)
 
@@ -1236,13 +1236,13 @@ class TestCheckpoint:
         """不同配置产生不同哈希。"""
         mock_conn = _make_mock_db_conn()
 
-        with patch("filter_app.services.backtest_core.get_conn", return_value=mock_conn):
+        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
             r1 = BacktestRunner("TEST", _make_minimal_configs())
 
         configs2 = _make_minimal_configs()
         configs2[0]["n_pts"] = 200  # 修改一个参数
 
-        with patch("filter_app.services.backtest_core.get_conn", return_value=mock_conn):
+        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
             r2 = BacktestRunner("TEST", configs2)
 
         assert r1._config_hash() != r2._config_hash()
@@ -1252,7 +1252,7 @@ class TestCheckpoint:
         configs = _make_minimal_configs()
         mock_conn = _make_mock_db_conn()
 
-        with patch("filter_app.services.backtest_core.get_conn", return_value=mock_conn):
+        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
             runner = BacktestRunner("TEST", configs)
 
         # 手动设置 EWMA 状态（模拟回测进行中）
@@ -1281,7 +1281,7 @@ class TestCheckpoint:
         assert saved["ewma_state"]["v0_日线"]["state"] == 1
 
         # 创建新 runner 并从断点恢复
-        with patch("filter_app.services.backtest_core.get_conn", return_value=mock_conn):
+        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
             runner2 = BacktestRunner("TEST", configs)
 
         # 恢复前 EWMA 为空
@@ -1300,7 +1300,7 @@ class TestCheckpoint:
         configs = _make_minimal_configs()
         mock_conn = _make_mock_db_conn()
 
-        with patch("filter_app.services.backtest_core.get_conn", return_value=mock_conn):
+        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
             runner = BacktestRunner("TEST", configs)
 
         runner._ewma_state = {"v0_日线": {"init_mu": 100.0, "init_sigma": 2.0, "state": 1, "dur": 0}}
@@ -1312,7 +1312,7 @@ class TestCheckpoint:
         configs2 = _make_minimal_configs()
         configs2[0]["n_pts"] = 999
 
-        with patch("filter_app.services.backtest_core.get_conn", return_value=mock_conn):
+        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
             runner2 = BacktestRunner("TEST", configs2)
 
         with pytest.raises(ValueError, match="配置哈希不匹配"):
@@ -1323,7 +1323,7 @@ class TestCheckpoint:
         configs = _make_minimal_configs()
         mock_conn = _make_mock_db_conn()
 
-        with patch("filter_app.services.backtest_core.get_conn", return_value=mock_conn):
+        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
             runner = BacktestRunner("TEST", configs)
 
         with pytest.raises(ValueError, match="断点文件不存在"):
@@ -1347,7 +1347,7 @@ class TestCheckpoint:
             "volume": 1000,
         }.get(k)
 
-        with patch("filter_app.services.backtest_core.get_conn", return_value=mock_conn):
+        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
             runner = BacktestRunner("TEST", configs)
 
         # 手动注入 _get_bar_info 返回（避免真实 DB 查询）
@@ -1378,7 +1378,7 @@ class TestCheckpoint:
 
         mock_conn = _make_mock_db_conn(bar_count=20)
 
-        with patch("filter_app.services.backtest_core.get_conn", return_value=mock_conn):
+        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
             runner = BacktestRunner("TEST", configs)
 
         runner._get_bar_info = lambda idx: {
@@ -1400,7 +1400,7 @@ class TestCheckpoint:
 
         mock_conn = _make_mock_db_conn(bar_count=20)
 
-        with patch("filter_app.services.backtest_core.get_conn", return_value=mock_conn):
+        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
             runner = BacktestRunner("TEST", configs)
 
         runner._get_bar_info = lambda idx: {
@@ -1426,7 +1426,7 @@ class TestCheckpoint:
             json.dump(state, f)
 
         # 恢复
-        with patch("filter_app.services.backtest_core.get_conn", return_value=mock_conn):
+        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
             runner2 = BacktestRunner("TEST", configs)
         resume_bar = runner2._restore_checkpoint(cp_path, configs)
         assert resume_bar == 5
@@ -1440,13 +1440,13 @@ class TestCheckpoint:
 
         mock_conn = _make_mock_db_conn(bar_count=20)
 
-        with patch("filter_app.services.backtest_core.get_conn", return_value=mock_conn):
+        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
             runner = BacktestRunner("TEST", configs)
 
         # make runner save checkpoint with empty ewma
         runner.save_checkpoint(cp_path)
 
-        with patch("filter_app.services.backtest_core.get_conn", return_value=mock_conn):
+        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
             runner2 = BacktestRunner("TEST", configs)
         resume_bar = runner2._restore_checkpoint(cp_path, configs)
         assert runner2._ewma_state == {}

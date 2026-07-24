@@ -221,7 +221,7 @@ class TestCLISmoke:
 
         result = subprocess.run(
             [
-                "python", "-m", "filter_app.backtest_cli",
+                "python", "-m", "filter_app.backtest.cli",
             ],
             capture_output=True, text=True, timeout=15,
         )
@@ -239,7 +239,7 @@ class TestCLISmoke:
 
         result = subprocess.run(
             [
-                "python", "-m", "filter_app.backtest_cli", "--help",
+                "python", "-m", "filter_app.backtest.cli", "--help",
             ],
             capture_output=True, text=True, timeout=15,
         )
@@ -256,7 +256,7 @@ class TestCLISmoke:
         output_dir = tmp_path / "bt_output"
         result = subprocess.run(
             [
-                "python", "-m", "filter_app.backtest_cli",
+                "python", "-m", "filter_app.backtest.cli",
                 "--ticker", "AAPL",
                 "--start-bar", "0", "--end-bar", "10",
                 "--step-interval", "1",
