@@ -8,16 +8,154 @@ import json
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from datetime import timedelta
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 from typing import Any, Dict, Optional, Tuple
-from db import upsert_kline, query_kline
+from db import upsert_kline, query_kline, get_latest_date
 from constants import ALL_TFS
 
 # 模块级缓存：避免逐 bar 重复写入相同的 parquet 数据
 # key = (ticker_code, cutoff_date, n_pts_hash) → last results dict
 _synth_cache_state: dict = {}
+
+
+# ═══════════════════════════════════════════════════════════════
+# Time‑Based Parquet Partitioning  — YYYY/MM directory structure
+# ═══════════════════════════════════════════════════════════════
+
+from datetime import datetime
+import os as _os
+
+
+def _partitioned_path(base_dir, ticker: str, tf: str, dt=None):
+    """返回时间分区路径: ``{base_dir}/{ticker}/{YYYY}/{MM}/{ticker}_{tf}.parquet``。
+
+    Parameters
+    ----------
+    base_dir : str or Path
+        根目录，通常为 ``data/display``。
+    ticker : str
+        股票代码。
+    tf : str
+        周期名称。
+    dt : datetime, optional
+        分区时间戳，默认为当前时间。
+
+    Returns
+    -------
+    str
+        分区文件路径字符串。
+    """
+    if dt is None:
+        dt = datetime.now()
+    return _os.path.join(
+        str(base_dir), ticker,
+        f"{dt.year:04d}", f"{dt.month:02d}",
+        f"{ticker}_{tf}.parquet",
+    )
+
+
+def _resolve_read_path(base_dir, ticker: str, tf: str):
+    """读取时先查新分区路径，不存在则扫描历史分区，最后回退旧平铺路径。
+
+    扫描顺序：
+      1. 当前月份的分区路径
+      2. 任意历史月份的分区路径（遍历 ticker 目录）
+      3. 旧平铺路径 ``{ticker}/{tf}.parquet``
+      4. 均不存在时返回当前月份分区路径（供调用方判断 ``exists()``）
+
+    Parameters
+    ----------
+    base_dir : str or Path
+        根目录。
+    ticker : str
+        股票代码。
+    tf : str
+        周期名称。
+
+    Returns
+    -------
+    str
+        存在的文件路径，或首选分区路径（均不存在时）。
+    """
+    base_str = str(base_dir)
+
+    # 1. 当前月份分区
+    new_path = _partitioned_path(base_str, ticker, tf)
+    if _os.path.exists(new_path):
+        return new_path
+
+    # 2. 扫描历史分区
+    ticker_dir = _os.path.join(base_str, ticker)
+    if _os.path.isdir(ticker_dir):
+        target = f"{ticker}_{tf}.parquet"
+        for root, _dirs, files in _os.walk(ticker_dir):
+            if target in files:
+                return _os.path.join(root, target)
+
+    # 3. 旧平铺路径
+    old_path = _os.path.join(base_str, ticker, f"{tf}.parquet")
+    if _os.path.exists(old_path):
+        return old_path
+
+    # 4. 不存在，返回首选新路径
+    return new_path
+
+
+def _scan_partitions_for_range(base_dir, ticker: str, tf: str,
+                                start_dt, end_dt):
+    """按时间范围扫描匹配的分区文件路径列表。
+
+    遍历 ``{base_dir}/{ticker}/`` 下的 ``YYYY/MM`` 子目录，若其年份-月份
+    落在 ``[start_dt, end_dt]`` 范围内，则收集对应的 parquet 文件路径。
+
+    Parameters
+    ----------
+    base_dir : str or Path
+        根目录。
+    ticker : str
+        股票代码。
+    tf : str
+        周期名称。
+    start_dt : datetime
+        起始时间（含）。
+    end_dt : datetime
+        结束时间（含）。
+
+    Returns
+    -------
+    list[str]
+        匹配的分区文件路径列表，按路径排序。
+    """
+    ticker_dir = _os.path.join(str(base_dir), ticker)
+    if not _os.path.isdir(ticker_dir):
+        return []
+
+    target = f"{ticker}_{tf}.parquet"
+    matched = []
+    for root, _dirs, files in _os.walk(ticker_dir):
+        if target not in files:
+            continue
+        # root relative to ticker_dir, e.g. "2026/07"
+        rel = _os.path.relpath(root, ticker_dir)
+        parts = rel.replace("\\", "/").split("/")
+        if len(parts) >= 2:
+            try:
+                y, m = int(parts[0]), int(parts[1])
+                month_start = datetime(y, m, 1)
+                # month_end = first day of next month
+                if m == 12:
+                    month_end = datetime(y + 1, 1, 1)
+                else:
+                    month_end = datetime(y, m + 1, 1)
+                # overlap check: [month_start, month_end) overlaps [start_dt, end_dt]
+                if month_start < end_dt and month_end > start_dt:
+                    matched.append(_os.path.join(root, target))
+            except (ValueError, IndexError):
+                continue
+    return sorted(matched)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -108,6 +246,7 @@ def _invalidate_cache(parquet_path: Path) -> None:
 def load_display_cache(ticker_code: str, tf: str) -> Optional[pd.DataFrame]:
     """带版本校验的 display 缓存读取。
 
+    优先查找时间分区路径，不存在则回退旧平铺路径。
     读取前比较 checksum（mtime + 行数），不匹配则删除缓存文件并返回 ``None``，
     由调用方触发数据刷新。
 
@@ -123,9 +262,9 @@ def load_display_cache(ticker_code: str, tf: str) -> Optional[pd.DataFrame]:
     Optional[pd.DataFrame]
         缓存有效时返回 DataFrame，无效时返回 ``None``。
     """
-    display_path = (
-        Path(__file__).parent.parent.parent / "data" / "display" / ticker_code / f"{tf}.parquet"
-    )
+    display_dir = Path(__file__).parent.parent.parent / "data" / "display"
+    resolved = _resolve_read_path(str(display_dir), ticker_code, tf)
+    display_path = Path(resolved)
     if not display_path.exists():
         return None
     if not _is_cache_valid(display_path):
