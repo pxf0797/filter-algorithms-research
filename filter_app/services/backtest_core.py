@@ -24,7 +24,7 @@ from .filter_engine import (
     _align_pnl_to_current_tf,
     _compute_holding_masks,
 )
-from .data_loader import _sync_all_cascading
+from .data_loader import _sync_all_cascading, load_display_cache
 from .bs_marker import compute_bs_markers
 from db import get_conn
 from constants import ALL_TFS, TF_HIERARCHY
@@ -569,24 +569,17 @@ class BacktestRunner:
             ``(t, noisy, ohlc, dates)`` — bar 索引、收盘价、OHLC DataFrame、
             日期索引。parquet 不存在或数据不足时返回 ``None``。
         """
-        display_path = (
-            Path(__file__).parent.parent.parent / "data" / "display" / self.ticker / f"{tf}.parquet"
-        )
-        if not display_path.exists():
-            logger.warning("parquet 不存在: {}", display_path)
-            return None
-
-        try:
-            df = pd.read_parquet(display_path)
-        except Exception as e:
-            logger.warning("parquet 读取失败 {}: {}", display_path, e)
+        df = load_display_cache(self.ticker, tf)
+        if df is None:
+            if not (Path(__file__).parent.parent.parent / "data" / "display" / self.ticker / f"{tf}.parquet").exists():
+                logger.warning("parquet 不存在: {}", Path(__file__).parent.parent.parent / "data" / "display" / self.ticker / f"{tf}.parquet")
             return None
 
         if "Date" not in df.columns or "Close" not in df.columns:
-            logger.warning("parquet {} 缺少 Date/Close 列", display_path)
+            logger.warning("parquet {}/{} 缺少 Date/Close 列", self.ticker, tf)
             return None
         if len(df) < 2:
-            logger.warning("parquet {} 数据点不足 (len={})", display_path, len(df))
+            logger.warning("parquet {}/{} 数据点不足 (len={})", self.ticker, tf, len(df))
             return None
 
         df["Date"] = pd.to_datetime(df["Date"])

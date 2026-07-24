@@ -38,7 +38,7 @@ from services.filter_engine import (
 )
 from services.data_loader import (
     _fetch_all_timeframes, _fetch_stock, _sync_to_display,
-    _sync_all_cascading,
+    _sync_all_cascading, load_display_cache,
 )
 from components.charts import (
     _render_plotly, _add_prediction_traces,
@@ -135,11 +135,10 @@ def _load_chart_data(market, ticker_code, tf, n_pts, window_start=None, cutoff_d
             # parquet 写入失败，直接走 API 回退
             return _cached_fetch_stock(market, ticker_code, tf, n_pts)
         _is_backtest = False
-    display_path = Path(__file__).parent.parent / "data" / "display" / ticker_code / f"{tf}.parquet"
     err = None
-    if display_path.exists():
+    df = load_display_cache(ticker_code, tf)
+    if df is not None:
         try:
-            df = pd.read_parquet(display_path)
             if "Date" in df.columns and "Close" in df.columns and len(df) >= 2:
                 df["Date"] = pd.to_datetime(df["Date"])
                 df = df.set_index("Date").sort_index()
@@ -172,7 +171,7 @@ def _load_chart_data(market, ticker_code, tf, n_pts, window_start=None, cutoff_d
     return _cached_fetch_stock(market, ticker_code, tf, n_pts)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=600)
 def _compute_filters(noisy, t, cfg) -> tuple[np.ndarray, np.ndarray | None]:
     """Compute primary and optional secondary filter. Returns (filtered, filtered2).
     Cached: reuses prior result when noisy/t/cfg unchanged (np.ndarray via Streamlit built-in hash)."""
@@ -203,7 +202,7 @@ def _compute_filters(noisy, t, cfg) -> tuple[np.ndarray, np.ndarray | None]:
     return filtered, filtered2
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=600)
 def _compute_schmitt_trigger(filtered, t, cfg) -> dict | None:
     """Compute Schmitt trigger signal. Returns schmitt dict or None.
     Cached: pickle-serialize schmitt dict (window ≤300 rows, negligible overhead)."""
@@ -215,7 +214,7 @@ def _compute_schmitt_trigger(filtered, t, cfg) -> dict | None:
     return _schmitt_trigger(_v, _a, ewma_span=cfg["ew"], k_eps=cfg["ke"], sigma_min=cfg["sm"])
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=600)
 def _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs) -> list:
     """Compute prediction curves for each pair. Returns list of pred_pairs dicts.
     Cached: pickle-serialize schmitt dict (window ≤300 rows, negligible overhead)."""
@@ -236,7 +235,7 @@ def _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs) -> list:
     return pred_pairs
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, ttl=600)
 def _cached_strategy_pnl(t, filtered, sig, all_pairs_tuple, pred_pairs_json, stop_loss_pct, n_extend):
     """Cached wrapper for _compute_strategy_pnl to avoid redundant PnL recalculations.
 

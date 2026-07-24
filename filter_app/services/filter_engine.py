@@ -16,6 +16,14 @@ from statsmodels.nonparametric.smoothers_lowess import lowess
 from pandas import DataFrame
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from numba import jit
+    HAS_NUMBA = True
+except ImportError:
+    def jit(*args, **kwargs):
+        return lambda f: f
+    HAS_NUMBA = False
+
 
 # ---------------------------------------------------------------------------
 # Filter implementations (scipy / numpy only)
@@ -154,6 +162,99 @@ def apply_savgol(signal: np.ndarray, t: np.ndarray, window: int, order: int) -> 
     return savgol_filter(signal, window, order)
 
 
+# ---------------------------------------------------------------------------
+# Kalman filter numba-accelerated core
+# ---------------------------------------------------------------------------
+
+@jit(nopython=True, cache=True)
+def _kalman_core(signal: np.ndarray, dt: float, Q: float, R: float) -> np.ndarray:
+    """numba-accelerated 1D constant-velocity Kalman filter core loop.
+
+    State: [position, velocity]. Constant-velocity model with
+    scalar position observation.
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        Input observation signal (position measurements).
+    dt : float
+        Time step between observations.
+    Q : float
+        Process noise covariance magnitude.
+    R : float
+        Measurement noise covariance.
+
+    Returns
+    -------
+    np.ndarray
+        Filtered position sequence, same length as signal.
+    """
+    n = len(signal)
+    x = np.zeros(2)
+    x[0] = signal[0]
+    x[1] = 0.0
+    P = np.zeros((2, 2))
+    P[0, 0] = 0.1
+    P[1, 1] = 0.1
+    F = np.zeros((2, 2))
+    F[0, 0] = 1.0
+    F[0, 1] = dt
+    F[1, 0] = 0.0
+    F[1, 1] = 1.0
+    result = np.zeros(n)
+
+    for i in range(n):
+        # Predict
+        x_new = np.zeros(2)
+        x_new[0] = F[0, 0] * x[0] + F[0, 1] * x[1]
+        x_new[1] = F[1, 0] * x[0] + F[1, 1] * x[1]
+        x[0] = x_new[0]
+        x[1] = x_new[1]
+
+        P_new = np.zeros((2, 2))
+        for r_idx in range(2):
+            for c_idx in range(2):
+                s = 0.0
+                for k in range(2):
+                    s += F[r_idx, k] * P[k, c_idx]
+                P_new[r_idx, c_idx] = s
+        P_mid = np.zeros((2, 2))
+        for r_idx in range(2):
+            for c_idx in range(2):
+                s = 0.0
+                for k in range(2):
+                    s += P_new[r_idx, k] * F[c_idx, k]
+                P_mid[r_idx, c_idx] = s
+
+        # Process noise
+        P_mid[0, 0] += Q * dt ** 4 / 4.0
+        P_mid[0, 1] += Q * dt ** 3 / 2.0
+        P_mid[1, 0] += Q * dt ** 3 / 2.0
+        P_mid[1, 1] += Q * dt ** 2
+
+        P_old = P
+
+        # Update (scalar observation)
+        y = signal[i] - x[0]
+        S = P_mid[0, 0] + R
+        K = np.zeros(2)
+        K[0] = P_mid[0, 0] / S
+        K[1] = P_mid[1, 0] / S
+        x[0] = x[0] + K[0] * y
+        x[1] = x[1] + K[1] * y
+
+        P = np.zeros((2, 2))
+        # P = P_mid - K * K^T * S
+        P[0, 0] = P_mid[0, 0] - K[0] * K[0] * S
+        P[0, 1] = P_mid[0, 1] - K[0] * K[1] * S
+        P[1, 0] = P_mid[1, 0] - K[1] * K[0] * S
+        P[1, 1] = P_mid[1, 1] - K[1] * K[1] * S
+
+        result[i] = x[0]
+
+    return result
+
+
 def apply_kalman(signal: np.ndarray, t: np.ndarray, Q: float, R: float) -> np.ndarray:
     """1D 恒定速度卡尔曼滤波.
 
@@ -175,7 +276,11 @@ def apply_kalman(signal: np.ndarray, t: np.ndarray, Q: float, R: float) -> np.nd
     np.ndarray
         卡尔曼滤波后的信号序列，长度与输入相同。
     """
-    dt = t[1] - t[0]
+    dt = float(t[1] - t[0])
+    if HAS_NUMBA:
+        return _kalman_core(signal, dt, Q, R)
+
+    # Pure Python / NumPy fallback
     n = len(signal)
     x = np.array([signal[0], 0.0])     # [position, velocity]
     P = np.eye(2) * 0.1
@@ -425,6 +530,46 @@ def compute_metrics(clean: np.ndarray, noisy: np.ndarray, filtered: np.ndarray) 
         "mse": mse, "rmse": rmse, "mae": mae,
         "snr_imp": snr_imp, "lag": lag, "roughness": roughness,
     }
+
+
+# ---------------------------------------------------------------------------
+# Schmitt Trigger numba-accelerated core
+# ---------------------------------------------------------------------------
+
+@jit(nopython=True, cache=True)
+def _schmitt_core(price: np.ndarray, upper: np.ndarray, lower: np.ndarray,
+                  state: int = 0) -> np.ndarray:
+    """numba-accelerated Schmitt trigger core loop.
+
+    Classic two-threshold hysteresis state machine:
+    - price > upper → state = 1 (on)
+    - price < lower → state = 0 (off)
+    - otherwise state stays unchanged.
+
+    Parameters
+    ----------
+    price : np.ndarray
+        Input price/signal sequence.
+    upper : np.ndarray
+        Upper threshold array (same length as price).
+    lower : np.ndarray
+        Lower threshold array (same length as price).
+    state : int
+        Initial state (0 or 1).
+
+    Returns
+    -------
+    np.ndarray
+        State sequence (0 or 1), same length as price.
+    """
+    out = np.empty_like(price)
+    for i in range(len(price)):
+        if price[i] > upper[i]:
+            state = 1
+        elif price[i] < lower[i]:
+            state = 0
+        out[i] = state
+    return out
 
 
 # ---------------------------------------------------------------------------

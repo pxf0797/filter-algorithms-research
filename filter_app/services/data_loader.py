@@ -4,6 +4,7 @@
 无Streamlit依赖，仅基础库 + db模块
 """
 
+import json
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -17,6 +18,125 @@ from constants import ALL_TFS
 # 模块级缓存：避免逐 bar 重复写入相同的 parquet 数据
 # key = (ticker_code, cutoff_date, n_pts_hash) → last results dict
 _synth_cache_state: dict = {}
+
+
+# ═══════════════════════════════════════════════════════════════
+# Display Cache Versioning — checksum 校验防脏读
+# ═══════════════════════════════════════════════════════════════
+
+def _version_path(parquet_path: Path) -> Path:
+    """返回 parquet 文件对应的版本标记文件路径 (.version.json)。"""
+    return parquet_path.with_suffix(".version.json")
+
+
+def _compute_version(parquet_path: Path) -> Dict[str, Any]:
+    """计算 display 缓存的版本标记：文件 mtime + 数据行数。
+
+    Parameters
+    ----------
+    parquet_path : Path
+        parquet 文件路径。
+
+    Returns
+    -------
+    dict
+        ``{"mtime": float, "rows": int}``。
+    """
+    mtime = parquet_path.stat().st_mtime
+    df = pd.read_parquet(parquet_path)
+    return {"mtime": mtime, "rows": len(df)}
+
+
+def _save_version(parquet_path: Path) -> None:
+    """写入 parquet 后保存版本标记到 ``{parquet}.version.json``。
+
+    Parameters
+    ----------
+    parquet_path : Path
+        已写入的 parquet 文件路径。
+    """
+    try:
+        version = _compute_version(parquet_path)
+        vp = _version_path(parquet_path)
+        vp.write_text(json.dumps(version))
+    except Exception as e:
+        logger.warning(f"Failed to save version for {parquet_path}: {e}")
+
+
+def _is_cache_valid(parquet_path: Path) -> bool:
+    """检查 display 缓存的版本标记是否与当前文件状态一致。
+
+    Parameters
+    ----------
+    parquet_path : Path
+        parquet 文件路径。
+
+    Returns
+    -------
+    bool
+        版本一致返回 True，否则返回 False。
+    """
+    vp = _version_path(parquet_path)
+    if not parquet_path.exists():
+        return False
+    if not vp.exists():
+        return False
+    try:
+        stored = json.loads(vp.read_text())
+        current = _compute_version(parquet_path)
+        return stored == current
+    except Exception:
+        return False
+
+
+def _invalidate_cache(parquet_path: Path) -> None:
+    """删除 display 缓存文件及其版本标记。
+
+    Parameters
+    ----------
+    parquet_path : Path
+        parquet 文件路径。
+    """
+    for p in (parquet_path, _version_path(parquet_path)):
+        try:
+            if p.exists():
+                p.unlink()
+        except Exception as e:
+            logger.warning(f"Failed to delete {p}: {e}")
+
+
+def load_display_cache(ticker_code: str, tf: str) -> Optional[pd.DataFrame]:
+    """带版本校验的 display 缓存读取。
+
+    读取前比较 checksum（mtime + 行数），不匹配则删除缓存文件并返回 ``None``，
+    由调用方触发数据刷新。
+
+    Parameters
+    ----------
+    ticker_code : str
+        股票代码。
+    tf : str
+        周期名称。
+
+    Returns
+    -------
+    Optional[pd.DataFrame]
+        缓存有效时返回 DataFrame，无效时返回 ``None``。
+    """
+    display_path = (
+        Path(__file__).parent.parent.parent / "data" / "display" / ticker_code / f"{tf}.parquet"
+    )
+    if not display_path.exists():
+        return None
+    if not _is_cache_valid(display_path):
+        logger.debug(f"Display cache invalid (version mismatch): {display_path}")
+        _invalidate_cache(display_path)
+        return None
+    try:
+        return pd.read_parquet(display_path)
+    except Exception as e:
+        logger.warning(f"Failed to read display cache {display_path}: {e}")
+        return None
 
 
 def _fetch_all_timeframes(market: str, code: str) -> Dict[str, Tuple[bool, Any]]:
@@ -215,6 +335,7 @@ def _sync_to_display(ticker_code: str, tf: str, n_pts: int = 120,
             rows.reverse()  # DESC → ASC
             df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
             df.to_parquet(display_base / f"{tf}.parquet", index=False)
+            _save_version(display_base / f"{tf}.parquet")
             return True, len(df)
         return False, 0
 
@@ -224,6 +345,7 @@ def _sync_to_display(ticker_code: str, tf: str, n_pts: int = 120,
         return False, len(df)
     df["Date"] = pd.to_datetime(df["Date"])
     df.to_parquet(display_base / f"{tf}.parquet", index=False)
+    _save_version(display_base / f"{tf}.parquet")
     return True, len(df)
 
 
@@ -733,7 +855,9 @@ def _write_parquet(tf: str, df: pd.DataFrame, ticker_code: str = "") -> bool:
             Path(__file__).parent.parent.parent / "data" / "display" / ticker_code
         )
         display_dir.mkdir(parents=True, exist_ok=True)
-        df.to_parquet(display_dir / f"{tf}.parquet", index=False)
+        parquet_path = display_dir / f"{tf}.parquet"
+        df.to_parquet(parquet_path, index=False)
+        _save_version(parquet_path)
         return True
     except Exception as e:
         logger.warning(f"Failed to write parquet for {tf}: {e}")

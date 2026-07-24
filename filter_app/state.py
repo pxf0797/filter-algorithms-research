@@ -14,6 +14,7 @@
     vs.set("ke", 0.20)               # 写优先 key + 写 _imp_ 备份
 """
 from typing import Any, Dict, Optional
+import re
 
 try:
     import streamlit as st
@@ -116,6 +117,40 @@ class AppState:
         for k, v in SYSTEM_KEYS.items():
             if k not in st.session_state and v is not None:
                 st.session_state[k] = v
+        AppState.cleanup_orphaned_imp_keys()
+
+    @staticmethod
+    def cleanup_orphaned_imp_keys() -> None:
+        """Remove orphaned _imp_ keys that no longer correspond to any known parameter.
+
+        清理策略：
+        - 只清理可明确判断为无效的 view-pattern key (v{N}_{suffix})
+        - N 不在 0-3 范围内，或 suffix 不在 VIEW_DEFAULTS 中 → 删除
+        - 非 view-pattern 的 _imp_ key 保留（可能是 widget 创建的动态 key）
+        """
+        if st is None:
+            return
+
+        # 有效的 view suffix 集合
+        valid_suffixes: set = set(VIEW_DEFAULTS.keys()) | {"exp_all"}
+        # 可选的 N 范围
+        valid_view_indices = {0, 1, 2, 3}
+
+        # pattern: v{N}_{suffix}，suffix 至少一个字符
+        view_key_re = re.compile(r"^v(\d+)_(.+)$")
+
+        for key in list(st.session_state.keys()):
+            if not key.startswith("_imp_"):
+                continue
+            main_key = key[5:]  # 去掉 "_imp_" 前缀
+            m = view_key_re.match(main_key)
+            if not m:
+                # 非 view-pattern key（如 widget key），保留不清理
+                continue
+            vi = int(m.group(1))
+            suffix = m.group(2)
+            if vi not in valid_view_indices or suffix not in valid_suffixes:
+                del st.session_state[key]
 
     @staticmethod
     def get(key: str, default: Any = None) -> Any:
