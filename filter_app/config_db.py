@@ -508,7 +508,9 @@ def get_history(ticker: str, variant: str = "single",
     logger.debug("Getting history: ticker={}, variant={}, limit={}", ticker, variant, limit)
     with _get_conn() as conn:
         rows = conn.execute(
-            """SELECT h.*, p.name as preset_name
+            """SELECT h.id, h.ticker, h.variant, h.preset_id,
+                      h.old_json, h.new_json, h.changed_at, h.source,
+                      p.name as preset_name
                FROM config_history h
                LEFT JOIN config_presets p ON h.preset_id = p.preset_id
                WHERE h.ticker=? AND h.variant=?

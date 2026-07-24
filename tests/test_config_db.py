@@ -259,6 +259,18 @@ class TestHistory:
         assert history[0]["preset_id"] == pid
         assert history[0]["preset_name"] == "hist_preset"
 
+    def test_history_returns_explicit_columns(self, temp_config_db):
+        """get_history 返回显式列名（不含 SELECT *）。"""
+        import config_db
+        config_db.save_ticker_config("AAPL", "US", "single", params_json="{}")
+        config_db.record_history("AAPL", "single", "", "{}", source="test")
+        history = config_db.get_history("AAPL")
+        assert len(history) == 1
+        expected_cols = {"id", "ticker", "variant", "preset_id",
+                         "old_json", "new_json", "changed_at", "source",
+                         "preset_name"}
+        assert set(history[0].keys()) == expected_cols
+
     def test_history_empty_for_new_ticker(self, temp_config_db):
         """从未记录过的 ticker 返回空列表。"""
         import config_db
