@@ -54,8 +54,8 @@ from services.bs_marker import compute_bs_markers, get_lower_tfs
 from components.sidebar import (
     _render_params, ALL_TFS, DEFAULT_TFS, TF_HIERARCHY,
 )
-from constants import TF_INTERVAL
-from state import AppState
+from shared.constants import TF_INTERVAL
+from shared.state import AppState
 from services.pipeline_capture import PipelineCapture, PipelineStageData
 from backtest_logger import log_data_load
 from components.backtest_panel import render_backtest_panel, run_backtest_play, sync_backtest_cascading_data

@@ -23,7 +23,7 @@ if _pkg_dir not in sys.path:
 
 # ── 项目内导入（与现有模块导入风格一致） ──
 from services.backtest_core import BacktestRunner
-from constants import ALL_TFS, DEFAULT_TFS
+from shared.constants import ALL_TFS, DEFAULT_TFS
 from services.event_recorder import EventRecorder
 from services.filter_engine import FILTERS
 from services.parquet_store import ParquetStore

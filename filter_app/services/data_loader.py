@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 from typing import Any, Dict, Optional, Tuple
 from db import upsert_kline, query_kline, get_latest_date
-from constants import ALL_TFS
+from shared.constants import ALL_TFS
 
 # 模块级缓存：避免逐 bar 重复写入相同的 parquet 数据
 # key = (ticker_code, cutoff_date, n_pts_hash) → last results dict

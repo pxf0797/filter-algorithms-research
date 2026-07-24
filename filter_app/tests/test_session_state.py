@@ -50,7 +50,7 @@ class TestCleanupOrphanedImpKeys:
 
     def test_removes_orphaned_view_imp_keys(self, monkeypatch):
         """孤立的 view-pattern _imp_ key 应被删除。"""
-        from state import AppState
+        from shared.state import AppState
 
         ss = _make_ss_with_imp()
         # 模拟 st.session_state 为 dict
@@ -67,7 +67,7 @@ class TestCleanupOrphanedImpKeys:
 
     def test_preserves_valid_view_imp_keys(self, monkeypatch):
         """有效的 view-pattern _imp_ key 应保留。"""
-        from state import AppState
+        from shared.state import AppState
 
         ss = _make_ss_with_imp()
         mock_st = MagicMock()
@@ -83,7 +83,7 @@ class TestCleanupOrphanedImpKeys:
 
     def test_preserves_non_view_imp_keys(self, monkeypatch):
         """非 view-pattern _imp_ key（widget key、系统 key）应保留。"""
-        from state import AppState
+        from shared.state import AppState
 
         ss = _make_ss_with_imp()
         mock_st = MagicMock()
@@ -98,7 +98,7 @@ class TestCleanupOrphanedImpKeys:
 
     def test_noop_on_empty_session_state(self, monkeypatch):
         """空 session_state 上调用不应报错。"""
-        from state import AppState
+        from shared.state import AppState
 
         ss = {}
         mock_st = MagicMock()
@@ -111,7 +111,7 @@ class TestCleanupOrphanedImpKeys:
 
     def test_init_defaults_calls_cleanup(self, monkeypatch):
         """init_defaults() 应自动调用 cleanup_orphaned_imp_keys()。"""
-        from state import AppState
+        from shared.state import AppState
 
         ss = _make_ss_with_imp()
         mock_st = MagicMock()
@@ -126,7 +126,7 @@ class TestCleanupOrphanedImpKeys:
 
     def test_main_keys_untouched_by_cleanup(self, monkeypatch):
         """cleanup 只删 _imp_ 前缀的 key，主 key 原封不动。"""
-        from state import AppState
+        from shared.state import AppState
 
         ss = _make_ss_with_imp()
         # 加一个"疑似孤立但主key还在"的场景

@@ -7,7 +7,7 @@
 3. 向后兼容 — 旧 _imp_ key 自动 fallback，预设/导入/导出无缝衔接
 
 用法:
-    from state import AppState, ViewState
+    from shared.state import AppState, ViewState
     AppState.init_defaults()          # main() 开头
     vs = ViewState.load(0)            # 加载视图 0 的参数
     vs.slider("ke", 0.15)            # 类型安全的 slider 读写

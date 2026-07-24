@@ -27,7 +27,7 @@ from .filter_engine import (
 from .data_loader import _sync_all_cascading, load_display_cache
 from .bs_marker import compute_bs_markers
 from db import get_conn
-from constants import ALL_TFS, TF_HIERARCHY
+from shared.constants import ALL_TFS, TF_HIERARCHY
 
 
 class BacktestRunner:

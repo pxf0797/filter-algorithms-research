@@ -360,18 +360,18 @@ class TestMagicStringsConstants:
 
     def test_default_tf_constant(self):
         """DEFAULT_TF 值为 '日线' 且在 ALL_TFS 中。"""
-        from constants import DEFAULT_TF, ALL_TFS
+        from shared.constants import DEFAULT_TF, ALL_TFS
         assert DEFAULT_TF == "日线"
         assert DEFAULT_TF in ALL_TFS
 
     def test_view_key_prefix_constant(self):
         """VIEW_KEY_PREFIX 值为 'v'。"""
-        from constants import VIEW_KEY_PREFIX
+        from shared.constants import VIEW_KEY_PREFIX
         assert VIEW_KEY_PREFIX == "v"
 
     def test_view_suffix_mapping_completeness(self):
         """VIEW_SUFFIX_TO_CFG_KEY 包含常见映射。"""
-        from constants import VIEW_SUFFIX_TO_CFG_KEY
+        from shared.constants import VIEW_SUFFIX_TO_CFG_KEY
         assert VIEW_SUFFIX_TO_CFG_KEY["n"] == "n_pts"
         assert VIEW_SUFFIX_TO_CFG_KEY["sch"] == "show_sch"
         assert VIEW_SUFFIX_TO_CFG_KEY["pred"] == "show_pred"
@@ -380,13 +380,13 @@ class TestMagicStringsConstants:
 
     def test_state_view_prefix_consistent(self):
         """state.py 中 ViewState._PREFIX 与 constants.VIEW_KEY_PREFIX 一致。"""
-        from constants import VIEW_KEY_PREFIX
-        from state import ViewState
+        from shared.constants import VIEW_KEY_PREFIX
+        from shared.state import ViewState
         assert ViewState._PREFIX == VIEW_KEY_PREFIX
 
     def test_backtest_cli_view_spec_consistent(self):
         """backtest_cli 中 _VIEW_SPECS 后缀映射与 constants 一致。"""
-        from constants import VIEW_SUFFIX_TO_CFG_KEY
+        from shared.constants import VIEW_SUFFIX_TO_CFG_KEY
         from backtest_cli import _VIEW_SPECS
 
         # 检查 _VIEW_SPECS 中每个 suffix 在 VIEW_SUFFIX_TO_CFG_KEY 中
