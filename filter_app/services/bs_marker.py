@@ -9,6 +9,8 @@ BS 仓位操作标识计算模块
   平多出场 — 绿 S    平空出场 — 红 B
 """
 
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 
@@ -20,7 +22,7 @@ TF_LOWER = {
 }
 
 
-def _find_date_index(dates, target_date):
+def _find_date_index(dates, target_date) -> Optional[int]:
     """在 dates 数组中查找第一个 >= target_date 的 bar 索引。
 
     Parameters
@@ -61,7 +63,7 @@ def _find_date_index(dates, target_date):
         return None
 
 
-def _compute_own_from_trades(t, dates, trade_records):
+def _compute_own_from_trades(t, dates, trade_records) -> dict:
     """从本周期 trade_records 生成 BS 标记（回退：顶周期无更高参考时使用）。
 
     trade_records 非空时从中生成标记（入场=entry_idx, 出场=exit_idx）。
@@ -93,7 +95,7 @@ def _compute_own_from_trades(t, dates, trade_records):
     return {"entry_markers": entry, "exit_markers": exit_}
 
 
-def _compute_from_trades_filtered(t, dates, trade_records, holding_masks):
+def _compute_from_trades_filtered(t, dates, trade_records, holding_masks) -> dict:
     """从 trade_records 生成 BS 标记，经 holding_masks 过滤。
 
     只有 entry_idx 落在对应方向 mask 内的交易才标 BS。
@@ -137,7 +139,7 @@ def _compute_from_trades_filtered(t, dates, trade_records, holding_masks):
 
 def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
                         tf, operating_tf, higher_bs=None,
-                        holding_masks=None):
+                        holding_masks=None) -> dict:
     """为单个视图计算 BS 标记。
 
     统一逻辑：所有周期使用相同的过滤逻辑。
@@ -181,7 +183,7 @@ def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
         return {"entry_markers": [], "exit_markers": []}
 
 
-def get_lower_tfs(operating_tf):
+def get_lower_tfs(operating_tf) -> list[str]:
     """获取操作周期以下的所有周期（级联链）。
 
     Parameters

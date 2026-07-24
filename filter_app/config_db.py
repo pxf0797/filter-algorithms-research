@@ -38,8 +38,9 @@ def _get_conn() -> sqlite3.Connection:
     try:
         yield conn
         conn.commit()  # 显式提交，确保关闭前写入
-    except Exception:
+    except Exception as e:
         conn.rollback()
+        logger.error(f"Config DB connection error: {e}")
         raise
     finally:
         conn.close()  # P1-7: sqlite3 Connection 的 __exit__ 不关闭连接，必须显式 close()
@@ -128,7 +129,8 @@ def init_config_tables():
                 )
             """)
             conn.execute(
-                "INSERT INTO config_ticker_new SELECT * FROM config_ticker"
+                "INSERT INTO config_ticker_new (ticker, variant, market, preset_id, params_json, updated_at) "
+                "SELECT ticker, variant, market, preset_id, params_json, updated_at FROM config_ticker"
             )
             conn.execute("DROP TABLE config_ticker")
             conn.execute("ALTER TABLE config_ticker_new RENAME TO config_ticker")
@@ -157,11 +159,15 @@ def list_presets(category: Optional[str] = None) -> List[Dict[str, Any]]:
     with _get_conn() as conn:
         if category:
             rows = conn.execute(
-                "SELECT * FROM config_presets WHERE category=? ORDER BY name", (category,)
+                "SELECT preset_id, name, description, category, params_json, "
+                "created_at, updated_at FROM config_presets "
+                "WHERE category=? ORDER BY name", (category,)
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM config_presets ORDER BY category, name"
+                "SELECT preset_id, name, description, category, params_json, "
+                "created_at, updated_at FROM config_presets "
+                "ORDER BY category, name"
             ).fetchall()
     return [dict(r) for r in rows]
 
@@ -182,7 +188,8 @@ def get_preset(preset_id: int) -> Optional[Dict[str, Any]]:
     logger.debug("Getting preset by id={}", preset_id)
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT * FROM config_presets WHERE preset_id=?", (preset_id,)
+            "SELECT preset_id, name, description, category, params_json, "
+            "created_at, updated_at FROM config_presets WHERE preset_id=?", (preset_id,)
         ).fetchone()
     return dict(row) if row else None
 
@@ -203,7 +210,8 @@ def get_preset_by_name(name: str) -> Optional[Dict[str, Any]]:
     logger.debug("Getting preset by name={}", name)
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT * FROM config_presets WHERE name=?", (name,)
+            "SELECT preset_id, name, description, category, params_json, "
+            "created_at, updated_at FROM config_presets WHERE name=?", (name,)
         ).fetchone()
     return dict(row) if row else None
 
@@ -398,7 +406,8 @@ def load_ticker_config(ticker: str, variant: str = "single") -> Optional[Dict[st
     logger.debug("Loading ticker config: ticker={}, variant={}", ticker, variant)
     with _get_conn() as conn:
         row = conn.execute(
-            "SELECT * FROM config_ticker WHERE ticker=? AND variant=?",
+            "SELECT ticker, variant, market, preset_id, params_json, updated_at "
+            "FROM config_ticker WHERE ticker=? AND variant=?",
             (ticker, variant)).fetchone()
     if not row:
         return None
@@ -499,7 +508,9 @@ def get_history(ticker: str, variant: str = "single",
     logger.debug("Getting history: ticker={}, variant={}, limit={}", ticker, variant, limit)
     with _get_conn() as conn:
         rows = conn.execute(
-            """SELECT h.*, p.name as preset_name
+            """SELECT h.id, h.ticker, h.variant, h.preset_id,
+                      h.old_json, h.new_json, h.changed_at, h.source,
+                      p.name as preset_name
                FROM config_history h
                LEFT JOIN config_presets p ON h.preset_id = p.preset_id
                WHERE h.ticker=? AND h.variant=?

@@ -4,16 +4,305 @@
 无Streamlit依赖，仅基础库 + db模块
 """
 
+import json
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from datetime import timedelta
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 from typing import Any, Dict, Optional, Tuple
-from db import upsert_kline, query_kline
-# 周期层级定义（与 components/sidebar.py 保持一致）
-ALL_TFS = ["1分钟", "5分钟", "15分钟", "60分钟", "日线", "周线", "月线", "季线"]
+from db import upsert_kline, query_kline, get_latest_date
+from constants import ALL_TFS
+
+# 模块级缓存：避免逐 bar 重复写入相同的 parquet 数据
+# key = (ticker_code, cutoff_date, n_pts_hash) → last results dict
+_synth_cache_state: dict = {}
+
+
+# ═══════════════════════════════════════════════════════════════
+# Time‑Based Parquet Partitioning  — YYYY/MM directory structure
+# ═══════════════════════════════════════════════════════════════
+
+from datetime import datetime
+import os as _os
+
+
+def _partitioned_path(base_dir, ticker: str, tf: str, dt=None):
+    """返回时间分区路径: ``{base_dir}/{ticker}/{YYYY}/{MM}/{ticker}_{tf}.parquet``。
+
+    Parameters
+    ----------
+    base_dir : str or Path
+        根目录，通常为 ``data/display``。
+    ticker : str
+        股票代码。
+    tf : str
+        周期名称。
+    dt : datetime, optional
+        分区时间戳，默认为当前时间。
+
+    Returns
+    -------
+    str
+        分区文件路径字符串。
+    """
+    if dt is None:
+        dt = datetime.now()
+    return _os.path.join(
+        str(base_dir), ticker,
+        f"{dt.year:04d}", f"{dt.month:02d}",
+        f"{ticker}_{tf}.parquet",
+    )
+
+
+def _resolve_read_path(base_dir, ticker: str, tf: str):
+    """读取时先查新分区路径，不存在则扫描历史分区，最后回退旧平铺路径。
+
+    扫描顺序：
+      1. 当前月份的分区路径
+      2. 任意历史月份的分区路径（遍历 ticker 目录）
+      3. 旧平铺路径 ``{ticker}/{tf}.parquet``
+      4. 均不存在时返回当前月份分区路径（供调用方判断 ``exists()``）
+
+    Parameters
+    ----------
+    base_dir : str or Path
+        根目录。
+    ticker : str
+        股票代码。
+    tf : str
+        周期名称。
+
+    Returns
+    -------
+    str
+        存在的文件路径，或首选分区路径（均不存在时）。
+    """
+    base_str = str(base_dir)
+
+    # 1. 当前月份分区
+    new_path = _partitioned_path(base_str, ticker, tf)
+    if _os.path.exists(new_path):
+        return new_path
+
+    # 2. 扫描历史分区
+    ticker_dir = _os.path.join(base_str, ticker)
+    if _os.path.isdir(ticker_dir):
+        target = f"{ticker}_{tf}.parquet"
+        for root, _dirs, files in _os.walk(ticker_dir):
+            if target in files:
+                return _os.path.join(root, target)
+
+    # 3. 旧平铺路径
+    old_path = _os.path.join(base_str, ticker, f"{tf}.parquet")
+    if _os.path.exists(old_path):
+        return old_path
+
+    # 4. 不存在，返回首选新路径
+    return new_path
+
+
+def _scan_partitions_for_range(base_dir, ticker: str, tf: str,
+                                start_dt, end_dt):
+    """按时间范围扫描匹配的分区文件路径列表。
+
+    遍历 ``{base_dir}/{ticker}/`` 下的 ``YYYY/MM`` 子目录，若其年份-月份
+    落在 ``[start_dt, end_dt]`` 范围内，则收集对应的 parquet 文件路径。
+
+    Parameters
+    ----------
+    base_dir : str or Path
+        根目录。
+    ticker : str
+        股票代码。
+    tf : str
+        周期名称。
+    start_dt : datetime
+        起始时间（含）。
+    end_dt : datetime
+        结束时间（含）。
+
+    Returns
+    -------
+    list[str]
+        匹配的分区文件路径列表，按路径排序。
+    """
+    ticker_dir = _os.path.join(str(base_dir), ticker)
+    if not _os.path.isdir(ticker_dir):
+        return []
+
+    target = f"{ticker}_{tf}.parquet"
+    matched = []
+    for root, _dirs, files in _os.walk(ticker_dir):
+        if target not in files:
+            continue
+        # root relative to ticker_dir, e.g. "2026/07"
+        rel = _os.path.relpath(root, ticker_dir)
+        parts = rel.replace("\\", "/").split("/")
+        if len(parts) >= 2:
+            try:
+                y, m = int(parts[0]), int(parts[1])
+                month_start = datetime(y, m, 1)
+                # month_end = first day of next month
+                if m == 12:
+                    month_end = datetime(y + 1, 1, 1)
+                else:
+                    month_end = datetime(y, m + 1, 1)
+                # overlap check: [month_start, month_end) overlaps [start_dt, end_dt]
+                if month_start < end_dt and month_end > start_dt:
+                    matched.append(_os.path.join(root, target))
+            except (ValueError, IndexError):
+                continue
+    return sorted(matched)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Display Cache Versioning — checksum 校验防脏读
+# ═══════════════════════════════════════════════════════════════
+
+def _version_path(parquet_path: Path) -> Path:
+    """返回 parquet 文件对应的版本标记文件路径 (.version.json)。"""
+    return parquet_path.with_suffix(".version.json")
+
+
+def _compute_version(parquet_path: Path) -> Dict[str, Any]:
+    """计算 display 缓存的版本标记：文件 mtime + 数据行数。
+
+    Parameters
+    ----------
+    parquet_path : Path
+        parquet 文件路径。
+
+    Returns
+    -------
+    dict
+        ``{"mtime": float, "rows": int}``。
+    """
+    mtime = parquet_path.stat().st_mtime
+    df = pd.read_parquet(parquet_path)
+    return {"mtime": mtime, "rows": len(df)}
+
+
+def _save_version(parquet_path: Path) -> None:
+    """写入 parquet 后保存版本标记到 ``{parquet}.version.json``。
+
+    Parameters
+    ----------
+    parquet_path : Path
+        已写入的 parquet 文件路径。
+    """
+    try:
+        version = _compute_version(parquet_path)
+        vp = _version_path(parquet_path)
+        vp.write_text(json.dumps(version))
+    except Exception as e:
+        logger.warning(f"Failed to save version for {parquet_path}: {e}")
+
+
+def _is_cache_valid(parquet_path: Path) -> bool:
+    """检查 display 缓存的版本标记是否与当前文件状态一致。
+
+    Parameters
+    ----------
+    parquet_path : Path
+        parquet 文件路径。
+
+    Returns
+    -------
+    bool
+        版本一致返回 True，否则返回 False。
+    """
+    vp = _version_path(parquet_path)
+    if not parquet_path.exists():
+        return False
+    if not vp.exists():
+        return False
+    try:
+        stored = json.loads(vp.read_text())
+        current = _compute_version(parquet_path)
+        return stored == current
+    except Exception:
+        return False
+
+
+def _invalidate_cache(parquet_path: Path) -> None:
+    """删除 display 缓存文件及其版本标记。
+
+    Parameters
+    ----------
+    parquet_path : Path
+        parquet 文件路径。
+    """
+    for p in (parquet_path, _version_path(parquet_path)):
+        try:
+            if p.exists():
+                p.unlink()
+        except Exception as e:
+            logger.warning(f"Failed to delete {p}: {e}")
+
+
+def load_display_cache(ticker_code: str, tf: str) -> Optional[pd.DataFrame]:
+    """带版本校验的 display 缓存读取。
+
+    优先查找时间分区路径，不存在则回退旧平铺路径。
+    读取前比较 checksum（mtime + 行数），不匹配则删除缓存文件并返回 ``None``，
+    由调用方触发数据刷新。
+
+    Parameters
+    ----------
+    ticker_code : str
+        股票代码。
+    tf : str
+        周期名称。
+
+    Returns
+    -------
+    Optional[pd.DataFrame]
+        缓存有效时返回 DataFrame，无效时返回 ``None``。
+    """
+    display_dir = Path(__file__).parent.parent.parent / "data" / "display"
+    resolved = _resolve_read_path(str(display_dir), ticker_code, tf)
+    display_path = Path(resolved)
+    if not display_path.exists():
+        return None
+    if not _is_cache_valid(display_path):
+        logger.debug(f"Display cache invalid (version mismatch): {display_path}")
+        _invalidate_cache(display_path)
+        return None
+    try:
+        return pd.read_parquet(display_path)
+    except Exception as e:
+        logger.warning(f"Failed to read display cache {display_path}: {e}")
+        return None
+
+
+def fetch_incremental(market: str, code: str, tf: str, n_pts: int = 120,
+                      force_period: Optional[str] = None):
+    """增量拉取：检查DB中已有最新日期，仅拉取其后数据。避免全量重复下载。
+
+    DB有数据时从 last_date 开始增量拉取；无数据时回退到全量拉取。
+
+    Parameters
+    ----------
+    market : str
+        市场标识，如 "A股(沪深)"、"港股 HK" 等。
+    code : str
+        股票代码。
+    tf : str
+        周期名称，如 "日线"、"60分钟" 等。
+    n_pts : int
+        需要返回的数据点数。
+    force_period : Optional[str]
+        强制指定 yfinance 的 period 参数。
+
+    Returns
+    -------
+    Tuple
+        与 _fetch_stock 相同的返回元组。
+    """
+    return _fetch_stock(market, code, tf, n_pts, force_period=force_period, incremental=True)
 
 
 def _fetch_all_timeframes(market: str, code: str) -> Dict[str, Tuple[bool, Any]]:
@@ -58,7 +347,8 @@ def _fetch_all_timeframes(market: str, code: str) -> Dict[str, Tuple[bool, Any]]
 
 
 def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
-                 force_period: Optional[str] = None) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[pd.DataFrame], Optional[str], Optional[str], Optional[pd.DatetimeIndex]]:
+                 force_period: Optional[str] = None,
+                 incremental: bool = False) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[pd.DataFrame], Optional[str], Optional[str], Optional[pd.DatetimeIndex]]:
     """从yfinance获取股票数据并写入DB。
 
     Parameters
@@ -73,6 +363,8 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
         需要返回的数据点数。
     force_period : Optional[str]
         强制指定 yfinance 的 period 参数，覆盖自动计算。
+    incremental : bool
+        增量模式：检查DB最新日期，仅拉取其后数据。DB无数据时回退全量拉取。
 
     Returns
     -------
@@ -128,7 +420,16 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
     else:  # 季线
         period = "max"
 
-    data = yf.download(full, period=period, interval=interval, progress=False)
+    # ── 增量路径：DB有数据时从 last_date 开始，否则全量 ──
+    if incremental:
+        last_date = get_latest_date(code, tf)
+        if last_date:
+            start_str = last_date[:10]  # 取日期部分 "YYYY-MM-DD"
+            data = yf.download(full, start=start_str, interval=interval, progress=False)
+        else:
+            data = yf.download(full, period=period, interval=interval, progress=False)
+    else:
+        data = yf.download(full, period=period, interval=interval, progress=False)
     if data.empty:
         return None, None, None, full, f"无数据: {full}", None
 
@@ -195,8 +496,12 @@ def _sync_to_display(ticker_code: str, tf: str, n_pts: int = 120,
     Tuple[bool, int]
         (是否成功, 写入的数据条数)。
     """
-    display_base = Path(__file__).parent.parent.parent / "data" / "display" / ticker_code
-    display_base.mkdir(parents=True, exist_ok=True)
+    display_root = Path(__file__).parent.parent.parent / "data" / "display"
+    now = datetime.now()
+    partitioned = (
+        display_root / ticker_code / f"{now.year:04d}" / f"{now.month:02d}"
+        / f"{ticker_code}_{tf}.parquet"
+    )
 
     if cutoff_date is not None:
         # 回测模式：查询截止到 cutoff_date 的最后 n_pts 条，按日期对齐
@@ -211,7 +516,9 @@ def _sync_to_display(ticker_code: str, tf: str, n_pts: int = 120,
         if rows:
             rows.reverse()  # DESC → ASC
             df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
-            df.to_parquet(display_base / f"{tf}.parquet", index=False)
+            partitioned.parent.mkdir(parents=True, exist_ok=True)
+            df.to_parquet(partitioned, index=False)
+            _save_version(partitioned)
             return True, len(df)
         return False, 0
 
@@ -220,7 +527,9 @@ def _sync_to_display(ticker_code: str, tf: str, n_pts: int = 120,
     if len(df) < 5:
         return False, len(df)
     df["Date"] = pd.to_datetime(df["Date"])
-    df.to_parquet(display_base / f"{tf}.parquet", index=False)
+    partitioned.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(partitioned, index=False)
+    _save_version(partitioned)
     return True, len(df)
 
 
@@ -263,7 +572,7 @@ import re as _re
 from typing import Optional as _Optional
 from datetime import timezone as _dt_timezone, timedelta as _dt_timedelta
 
-def _offset_to_tz(offset_str: str):
+def _offset_to_tz(offset_str: str) -> _dt_timezone:
     """将 UTC 偏移字符串转换为 datetime.timezone 对象。
 
     Parameters
@@ -282,7 +591,7 @@ def _offset_to_tz(offset_str: str):
     h, m = map(int, offset_str[1:].split(':'))
     return _dt_timezone(_dt_timedelta(hours=sign * h, minutes=sign * m))
 
-def _ensure_tz_naive(ts):
+def _ensure_tz_naive(ts) -> pd.Timestamp:
     """去除 pd.Timestamp 的时区信息，保持挂钟时间不变。
 
     Parameters
@@ -350,7 +659,7 @@ def _format_synth_date(cutoff_date: str, tf: str, db_rows: list) -> str:
             return base + tz
     return base
 
-def _get_period_start_ts(ts, tf: str):
+def _get_period_start_ts(ts, tf: str) -> pd.Timestamp:
     """计算上一个完整 K 线之后的下一个周期的起始时间。
 
     ts 必须是不带时区的 pd.Timestamp。
@@ -585,7 +894,8 @@ def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
             market_open = query_start.replace(hour=9, minute=30, second=0, microsecond=0)
             if query_start < market_open < cutoff_dt:
                 actual_start = market_open
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to determine market_open for {target_tf}/{finer_tf}: {e}")
             pass
 
     # ★ BUGFIX v3: Proper timezone conversion for cross-timezone synthesis.
@@ -633,7 +943,8 @@ def _synthesize_incomplete_bar(target_tf: str, db_rows: list, cutoff_date: str,
                             all_finer_bars.sort(key=lambda b: _ensure_tz_naive(pd.Timestamp(b["Date"])))
                 else:
                     all_finer_bars.append(finer_synth_bar)
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to merge synth_bar for {ticker_code}/{target_tf}: {e}")
             pass
 
     # ★ Cross-period filter: the query window [last_ts, cutoff] can span
@@ -707,7 +1018,9 @@ def _build_output_df(db_rows: list, synthesized_bar: _Optional[dict], n_pts: int
     return pd.DataFrame(data, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
 
 def _write_parquet(tf: str, df: pd.DataFrame, ticker_code: str = "") -> bool:
-    """将 DataFrame 写入 data/display/{ticker_code}/{tf}.parquet 文件。
+    """将 DataFrame 写入时间分区 parquet 文件。
+
+    写入 ``data/display/{ticker_code}/{YYYY}/{MM}/{ticker_code}_{tf}.parquet``。
 
     Parameters
     ----------
@@ -724,11 +1037,15 @@ def _write_parquet(tf: str, df: pd.DataFrame, ticker_code: str = "") -> bool:
         写入成功返回 True，失败返回 False。
     """
     try:
-        display_dir = (
-            Path(__file__).parent.parent.parent / "data" / "display" / ticker_code
+        display_root = Path(__file__).parent.parent.parent / "data" / "display"
+        now = datetime.now()
+        parquet_path = (
+            display_root / ticker_code / f"{now.year:04d}" / f"{now.month:02d}"
+            / f"{ticker_code}_{tf}.parquet"
         )
-        display_dir.mkdir(parents=True, exist_ok=True)
-        df.to_parquet(display_dir / f"{tf}.parquet", index=False)
+        parquet_path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_parquet(parquet_path, index=False)
+        _save_version(parquet_path)
         return True
     except Exception as e:
         logger.warning(f"Failed to write parquet for {tf}: {e}")
@@ -762,6 +1079,14 @@ def _sync_all_cascading(ticker_code: str, tfs: list, cutoff_date: str,
     """
     results: dict = {}
     synth_cache: dict = {}
+
+    # P0-1: module-level cache — skip re-synthesis when cutoff_date + n_pts unchanged
+    _n_pts_repr = tuple(n_pts[tf] if isinstance(n_pts, dict) else n_pts
+                        for tf in tfs) if isinstance(n_pts, dict) else str(n_pts)
+    cache_key = (ticker_code, cutoff_date, _n_pts_repr)
+    if cache_key == _synth_cache_state.get("last_key"):
+        logger.debug(f"[cascading] cache hit for {ticker_code} @ {cutoff_date}")
+        return dict(_synth_cache_state.get("last_result", {}))
 
     for tf in tfs:
         # Resolve per-TF n_pts
@@ -815,4 +1140,9 @@ def _sync_all_cascading(ticker_code: str, tfs: list, cutoff_date: str,
         logger.warning(f"[cascading] partial success: {success_count}/{len(tfs)} TFs written")
     else:
         logger.debug(f"[cascading] done: all {success_count} TFs written")
+
+    # P0-1: save cache state for next bar iteration
+    if success_count == len(tfs):
+        _synth_cache_state["last_key"] = cache_key
+        _synth_cache_state["last_result"] = dict(results)
     return results

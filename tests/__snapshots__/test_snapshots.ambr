@@ -1,0 +1,1949 @@
+# serializer version: 1
+# name: test_multi_filter_comparison_snapshot
+  dict({
+    '_meta_n': 60,
+    '_noisy_segment': list([
+      -0.610237618415773,
+      -0.8941534024622417,
+      -0.9448492534207238,
+      -1.13616582225481,
+      -1.050602881288359,
+      -0.9478320156921518,
+      -0.9985540134623834,
+      -0.73519468572142,
+      -0.6913305068642022,
+      -0.49377155439308507,
+      -0.33958615942186554,
+      0.10213841563339739,
+      0.11519948237670025,
+      0.20577027061778785,
+      0.5763678423489271,
+      0.5349022337216869,
+      0.8145542233496287,
+      0.7027410834236494,
+      0.8351010671416432,
+      1.0182294689615174,
+    ]),
+    'ema_10': list([
+      -0.14193850900143376,
+      -0.2787048532670352,
+      -0.39982201693134223,
+      -0.5337027088083364,
+      -0.6276845583501587,
+      -0.6858931869577938,
+      -0.7427406099586282,
+      -0.7413686237336813,
+      -0.7322707843028669,
+      -0.6889072879556337,
+      -0.6253943554949486,
+      -0.4931156698352493,
+      -0.38251291488762207,
+      -0.27555233570482024,
+      -0.12065775787686615,
+      -0.0014650321316746853,
+      0.14690210522856229,
+      0.24796373762766902,
+      0.3547159793574825,
+      0.4753547956491252,
+    ]),
+    'median_7': list([
+      -0.7530882610762482,
+      -0.8941534024622417,
+      -0.9448492534207238,
+      -0.9478320156921518,
+      -0.9478320156921518,
+      -0.9478320156921518,
+      -0.9478320156921518,
+      -0.73519468572142,
+      -0.6913305068642022,
+      -0.49377155439308507,
+      -0.33958615942186554,
+      0.10213841563339739,
+      0.11519948237670025,
+      0.20577027061778785,
+      0.5349022337216869,
+      0.5763678423489271,
+      0.7027410834236494,
+      0.8145542233496287,
+      0.8351010671416432,
+      0.8430340798494563,
+    ]),
+    'savgol_21_2': list([
+      -0.7596742842035982,
+      -0.8753491621899058,
+      -0.940357696819738,
+      -0.9564402834715013,
+      -0.9649250558322439,
+      -0.9244786129085619,
+      -0.8536564643659433,
+      -0.7410880801062287,
+      -0.5992255317818125,
+      -0.45412120783425597,
+      -0.29938211335723564,
+      -0.10582561775284939,
+      0.0847352921698004,
+      0.27531384764008215,
+      0.4485105407363101,
+      0.5989053606842715,
+      0.726824839912371,
+      0.806126833607438,
+      0.8706551530717952,
+      0.9058157362633985,
+    ]),
+    'sma_11': list([
+      -0.6517394976863489,
+      -0.7502345221043628,
+      -0.8025561066734899,
+      -0.8450301192277533,
+      -0.8414345468228543,
+      -0.8038434466724559,
+      -0.7390819890316223,
+      -0.6473226358644458,
+      -0.5427208609518538,
+      -0.387035982351514,
+      -0.2428991537142371,
+      -0.08268222289225706,
+      0.07198096773374586,
+      0.21473512708493345,
+      0.37014967034181706,
+      0.5116929847978178,
+      0.6296433069996937,
+      0.6969974582920627,
+      0.7505508442864705,
+      0.7715776373080369,
+    ]),
+  })
+# ---
+# name: test_plotly_candlestick_figure_snapshot
+  dict({
+    'data': list([
+      dict({
+        'close': dict({
+          'bdata': 'mFQUFeUPWUAX3dJreAtZQHUBI0kyIFlAygQ/8u5QWUDgLgfDcElZQKmSPbbyQVlAkROOn3t0WUBpBNVyCo1ZQJpHr4MEfllAyLGQKmGPWUA6UTnZjIBZQMLFI5elcVlAgC3NvmN5WUAVUU8nKjxZQE1zbaD3BFlAENICXvnyWEBtizNBkNJYQLCWn5Ge3FhArAseCZC/WECF45VxXpJYQJ8h1QlFwVhA+cecegu6WEAgnoWrNLxYQNGDAyKdjlhA17ixjDF9WED4njk6voBYQA4BvknpW1hA/L+XAe9nWEDBgvaStlRYQNcI1QRhS1hA2l6b1h84WEDGkIGzZXNYQAQ2xiH3clhAbCYvXR5RWECaReSmcGtYQKaAMIBfRFhAgDzlgg5LWEAfnMbkWAxYQGk7v2TY4VdAd3iuFCXoV0AVwViZxv9XQCAqrnJCBVhA2lOnDo8BWECCq29q7PdXQBJKFl2cyFdAbKFdZpOxV0AVkNjY1aJXQJo/1sqpxFdAur+etqjPV0CQpW7jPZdXQDzcxsicoVdANMezMEqVV0D7HmDYoH9XQOgoh7Izk1dA4hI9pTG0V0B+8zOx/tFXQGjkftIjt1dA06okwT6tV0B6Mul22LdXQOJKUyEQ11dA',
+          'dtype': 'f8',
+        }),
+        'high': dict({
+          'bdata': 'y4dHSBgjWUBKEAafqx5ZQKg0VnxlM1lA/TdyJSJkWUATYjr2o1xZQNzFcOklVVlAxEbB0q6HWUCcNwimPaBZQM164rY3kVlA++TDXZSiWUBthGwMwJNZQPX4VsrYhFlAs2AA8paMWUBIhIJaXU9ZQICmoNMqGFlAQwU2kSwGWUCgvmZ0w+VYQOPJ0sTR71hA3z5RPMPSWEC4FsmkkaVYQNJUCD141FhALPvPrT7NWEBT0bjeZ89YQAS3NlXQoVhACuzkv2SQWEAr0mxt8ZNYQEE08Xwcb1hAL/PKNCJ7WED0tSnG6WdYQAo8CDiUXlhADZLOCVNLWED5w7TmmIZYQDdp+VQqhlhAn1likFFkWEDNeBfao35YQNmzY7OSV1hAs28YtkFeWEBSz/kXjB9YQJxu8pcL9VdAqqvhR1j7V0BI9IvM+RJYQFNd4aV1GFhADYfaQcIUWEC13qKdHwtYQEV9SZDP21dAn9SQmcbEV0BIwwsMCbZXQM1yCf7c11dA7fLR6dviV0DD2KEWcapXQG8P+vvPtFdAZ/rmY32oV0AuUpML1JJXQBtcuuVmpldAFUZw2GTHV0CxJmfkMeVXQJsXsgVXyldABt5X9HHAV0CtZRyqC8tXQBV+hlRD6ldA',
+          'dtype': 'f8',
+        }),
+        'low': dict({
+          'bdata': 'ZSHh4bH8WEDkqZ84RfhYQELO7xX/DFlAl9ELv7s9WUCt+9OPPTZZQHZfCoO/LllAXuBabEhhWUA20aE/13lZQGcUfFDRallAlX5d9y18WUAHHgamWW1ZQI+S8GNyXllATfqZizBmWUDiHRz09ihZQBpAOm3E8VhA3Z7PKsbfWEA6WAAOXb9YQH1jbF5ryVhAedjq1VysWEBSsGI+K39YQGzuodYRrlhAxpRpR9imWEDtalJ4AalYQJ5Q0O5pe1hApIV+Wf5pWEDFawYHi21YQNvNiha2SFhAyYxkzrtUWECOT8Nfg0FYQKTVodEtOFhApytoo+wkWECTXU6AMmBYQNECk+7DX1hAOfP7Kes9WEBnErFzPVhYQHNN/UwsMVhATQmyT9s3WEDsaJOxJflXQDYIjDGlzldAREV74fHUV0DijSVmk+xXQO32ej8P8ldApyB021vuV0BPeDw3ueRXQN8W4ylptVdAOW4qM2CeV0DiXKWloo9XQGcMo5d2sVdAh4xrg3W8V0BdcjuwCoRXQAmpk5VpjldAAZSA/RaCV0DI6yylbWxXQLX1U38AgFdAr98Jcv6gV0BLwAB+y75XQDWxS5/wo1dAoHfxjQuaV0BH/7VDpaRXQK8XIO7cw1dA',
+          'dtype': 'f8',
+        }),
+        'name': 'K线',
+        'open': dict({
+          'bdata': 'Mu6trn4JWUCxdmwFEgVZQA+bvOLLGVlAZJ7Yi4hKWUB6yKBcCkNZQEMs10+MO1lAK60nORVuWUADnm4MpIZZQDThSB2ed1lAYksqxPqIWUDU6tJyJnpZQFxfvTA/a1lAGsdmWP1yWUCv6ujAwzVZQOcMBzqR/lhAqmuc95LsWEAHJc3aKcxYQEowOSs41lhARqW3oim5WEAffS8L+ItYQDm7bqPeulhAk2E2FKWzWEC6Nx9FzrVYQGsdnbs2iFhAcVJLJst2WECSONPTV3pYQKiaV+OCVVhAllkxm4hhWEBbHJAsUE5YQHGibp76RFhAdPg0cLkxWEBgKhtN/2xYQJ7PX7uQbFhABsDI9rdKWEA0331ACmVYQEAayhn5PVhAGtZ+HKhEWEC5NWB+8gVYQAPVWP5x21dAERJIrr7hV0CvWvIyYPlXQLrDRwzc/ldAdO1AqCj7V0AcRQkEhvFXQKzjr/Y1wldABjv3/yyrV0CvKXJyb5xXQDTZb2RDvldAVFk4UELJV0AqPwh915BXQNZ1YGI2m1dAzmBNyuOOV0CVuPlxOnlXQILCIEzNjFdAfKzWPsutV0AYjc1KmMtXQAJ+GGy9sFdAbUS+WtimV0AUzIIQcrFXQHzk7Lqp0FdA',
+          'dtype': 'f8',
+        }),
+        'type': 'candlestick',
+        'x': dict({
+          'bdata': 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7',
+          'dtype': 'i1',
+        }),
+      }),
+      dict({
+        'line': dict({
+          'color': '#5f6c80',
+          'width': 1.0,
+        }),
+        'mode': 'lines',
+        'name': '收盘',
+        'type': 'scatter',
+        'x': dict({
+          'bdata': 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8gISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7',
+          'dtype': 'i1',
+        }),
+        'y': dict({
+          'bdata': 'mFQUFeUPWUAX3dJreAtZQHUBI0kyIFlAygQ/8u5QWUDgLgfDcElZQKmSPbbyQVlAkROOn3t0WUBpBNVyCo1ZQJpHr4MEfllAyLGQKmGPWUA6UTnZjIBZQMLFI5elcVlAgC3NvmN5WUAVUU8nKjxZQE1zbaD3BFlAENICXvnyWEBtizNBkNJYQLCWn5Ge3FhArAseCZC/WECF45VxXpJYQJ8h1QlFwVhA+cecegu6WEAgnoWrNLxYQNGDAyKdjlhA17ixjDF9WED4njk6voBYQA4BvknpW1hA/L+XAe9nWEDBgvaStlRYQNcI1QRhS1hA2l6b1h84WEDGkIGzZXNYQAQ2xiH3clhAbCYvXR5RWECaReSmcGtYQKaAMIBfRFhAgDzlgg5LWEAfnMbkWAxYQGk7v2TY4VdAd3iuFCXoV0AVwViZxv9XQCAqrnJCBVhA2lOnDo8BWECCq29q7PdXQBJKFl2cyFdAbKFdZpOxV0AVkNjY1aJXQJo/1sqpxFdAur+etqjPV0CQpW7jPZdXQDzcxsicoVdANMezMEqVV0D7HmDYoH9XQOgoh7Izk1dA4hI9pTG0V0B+8zOx/tFXQGjkftIjt1dA06okwT6tV0B6Mul22LdXQOJKUyEQ11dA',
+          'dtype': 'f8',
+        }),
+      }),
+    ]),
+    'layout': dict({
+      'template': dict({
+        'data': dict({
+          'bar': list([
+            dict({
+              'error_x': dict({
+                'color': '#f2f5fa',
+              }),
+              'error_y': dict({
+                'color': '#f2f5fa',
+              }),
+              'marker': dict({
+                'line': dict({
+                  'color': 'rgb(17,17,17)',
+                  'width': 0.5,
+                }),
+                'pattern': dict({
+                  'fillmode': 'overlay',
+                  'size': 10,
+                  'solidity': 0.2,
+                }),
+              }),
+              'type': 'bar',
+            }),
+          ]),
+          'barpolar': list([
+            dict({
+              'marker': dict({
+                'line': dict({
+                  'color': 'rgb(17,17,17)',
+                  'width': 0.5,
+                }),
+                'pattern': dict({
+                  'fillmode': 'overlay',
+                  'size': 10,
+                  'solidity': 0.2,
+                }),
+              }),
+              'type': 'barpolar',
+            }),
+          ]),
+          'carpet': list([
+            dict({
+              'aaxis': dict({
+                'endlinecolor': '#A2B1C6',
+                'gridcolor': '#506784',
+                'linecolor': '#506784',
+                'minorgridcolor': '#506784',
+                'startlinecolor': '#A2B1C6',
+              }),
+              'baxis': dict({
+                'endlinecolor': '#A2B1C6',
+                'gridcolor': '#506784',
+                'linecolor': '#506784',
+                'minorgridcolor': '#506784',
+                'startlinecolor': '#A2B1C6',
+              }),
+              'type': 'carpet',
+            }),
+          ]),
+          'choropleth': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'type': 'choropleth',
+            }),
+          ]),
+          'contour': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'colorscale': list([
+                list([
+                  0.0,
+                  '#0d0887',
+                ]),
+                list([
+                  0.1111111111111111,
+                  '#46039f',
+                ]),
+                list([
+                  0.2222222222222222,
+                  '#7201a8',
+                ]),
+                list([
+                  0.3333333333333333,
+                  '#9c179e',
+                ]),
+                list([
+                  0.4444444444444444,
+                  '#bd3786',
+                ]),
+                list([
+                  0.5555555555555556,
+                  '#d8576b',
+                ]),
+                list([
+                  0.6666666666666666,
+                  '#ed7953',
+                ]),
+                list([
+                  0.7777777777777778,
+                  '#fb9f3a',
+                ]),
+                list([
+                  0.8888888888888888,
+                  '#fdca26',
+                ]),
+                list([
+                  1.0,
+                  '#f0f921',
+                ]),
+              ]),
+              'type': 'contour',
+            }),
+          ]),
+          'contourcarpet': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'type': 'contourcarpet',
+            }),
+          ]),
+          'heatmap': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'colorscale': list([
+                list([
+                  0.0,
+                  '#0d0887',
+                ]),
+                list([
+                  0.1111111111111111,
+                  '#46039f',
+                ]),
+                list([
+                  0.2222222222222222,
+                  '#7201a8',
+                ]),
+                list([
+                  0.3333333333333333,
+                  '#9c179e',
+                ]),
+                list([
+                  0.4444444444444444,
+                  '#bd3786',
+                ]),
+                list([
+                  0.5555555555555556,
+                  '#d8576b',
+                ]),
+                list([
+                  0.6666666666666666,
+                  '#ed7953',
+                ]),
+                list([
+                  0.7777777777777778,
+                  '#fb9f3a',
+                ]),
+                list([
+                  0.8888888888888888,
+                  '#fdca26',
+                ]),
+                list([
+                  1.0,
+                  '#f0f921',
+                ]),
+              ]),
+              'type': 'heatmap',
+            }),
+          ]),
+          'histogram': list([
+            dict({
+              'marker': dict({
+                'pattern': dict({
+                  'fillmode': 'overlay',
+                  'size': 10,
+                  'solidity': 0.2,
+                }),
+              }),
+              'type': 'histogram',
+            }),
+          ]),
+          'histogram2d': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'colorscale': list([
+                list([
+                  0.0,
+                  '#0d0887',
+                ]),
+                list([
+                  0.1111111111111111,
+                  '#46039f',
+                ]),
+                list([
+                  0.2222222222222222,
+                  '#7201a8',
+                ]),
+                list([
+                  0.3333333333333333,
+                  '#9c179e',
+                ]),
+                list([
+                  0.4444444444444444,
+                  '#bd3786',
+                ]),
+                list([
+                  0.5555555555555556,
+                  '#d8576b',
+                ]),
+                list([
+                  0.6666666666666666,
+                  '#ed7953',
+                ]),
+                list([
+                  0.7777777777777778,
+                  '#fb9f3a',
+                ]),
+                list([
+                  0.8888888888888888,
+                  '#fdca26',
+                ]),
+                list([
+                  1.0,
+                  '#f0f921',
+                ]),
+              ]),
+              'type': 'histogram2d',
+            }),
+          ]),
+          'histogram2dcontour': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'colorscale': list([
+                list([
+                  0.0,
+                  '#0d0887',
+                ]),
+                list([
+                  0.1111111111111111,
+                  '#46039f',
+                ]),
+                list([
+                  0.2222222222222222,
+                  '#7201a8',
+                ]),
+                list([
+                  0.3333333333333333,
+                  '#9c179e',
+                ]),
+                list([
+                  0.4444444444444444,
+                  '#bd3786',
+                ]),
+                list([
+                  0.5555555555555556,
+                  '#d8576b',
+                ]),
+                list([
+                  0.6666666666666666,
+                  '#ed7953',
+                ]),
+                list([
+                  0.7777777777777778,
+                  '#fb9f3a',
+                ]),
+                list([
+                  0.8888888888888888,
+                  '#fdca26',
+                ]),
+                list([
+                  1.0,
+                  '#f0f921',
+                ]),
+              ]),
+              'type': 'histogram2dcontour',
+            }),
+          ]),
+          'mesh3d': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'type': 'mesh3d',
+            }),
+          ]),
+          'parcoords': list([
+            dict({
+              'line': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'parcoords',
+            }),
+          ]),
+          'pie': list([
+            dict({
+              'automargin': True,
+              'type': 'pie',
+            }),
+          ]),
+          'scatter': list([
+            dict({
+              'marker': dict({
+                'line': dict({
+                  'color': '#283442',
+                }),
+              }),
+              'type': 'scatter',
+            }),
+          ]),
+          'scatter3d': list([
+            dict({
+              'line': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scatter3d',
+            }),
+          ]),
+          'scattercarpet': list([
+            dict({
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scattercarpet',
+            }),
+          ]),
+          'scattergeo': list([
+            dict({
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scattergeo',
+            }),
+          ]),
+          'scattergl': list([
+            dict({
+              'marker': dict({
+                'line': dict({
+                  'color': '#283442',
+                }),
+              }),
+              'type': 'scattergl',
+            }),
+          ]),
+          'scattermap': list([
+            dict({
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scattermap',
+            }),
+          ]),
+          'scattermapbox': list([
+            dict({
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scattermapbox',
+            }),
+          ]),
+          'scatterpolar': list([
+            dict({
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scatterpolar',
+            }),
+          ]),
+          'scatterpolargl': list([
+            dict({
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scatterpolargl',
+            }),
+          ]),
+          'scatterternary': list([
+            dict({
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scatterternary',
+            }),
+          ]),
+          'surface': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'colorscale': list([
+                list([
+                  0.0,
+                  '#0d0887',
+                ]),
+                list([
+                  0.1111111111111111,
+                  '#46039f',
+                ]),
+                list([
+                  0.2222222222222222,
+                  '#7201a8',
+                ]),
+                list([
+                  0.3333333333333333,
+                  '#9c179e',
+                ]),
+                list([
+                  0.4444444444444444,
+                  '#bd3786',
+                ]),
+                list([
+                  0.5555555555555556,
+                  '#d8576b',
+                ]),
+                list([
+                  0.6666666666666666,
+                  '#ed7953',
+                ]),
+                list([
+                  0.7777777777777778,
+                  '#fb9f3a',
+                ]),
+                list([
+                  0.8888888888888888,
+                  '#fdca26',
+                ]),
+                list([
+                  1.0,
+                  '#f0f921',
+                ]),
+              ]),
+              'type': 'surface',
+            }),
+          ]),
+          'table': list([
+            dict({
+              'cells': dict({
+                'fill': dict({
+                  'color': '#506784',
+                }),
+                'line': dict({
+                  'color': 'rgb(17,17,17)',
+                }),
+              }),
+              'header': dict({
+                'fill': dict({
+                  'color': '#2a3f5f',
+                }),
+                'line': dict({
+                  'color': 'rgb(17,17,17)',
+                }),
+              }),
+              'type': 'table',
+            }),
+          ]),
+        }),
+        'layout': dict({
+          'annotationdefaults': dict({
+            'arrowcolor': '#f2f5fa',
+            'arrowhead': 0,
+            'arrowwidth': 1,
+          }),
+          'autotypenumbers': 'strict',
+          'coloraxis': dict({
+            'colorbar': dict({
+              'outlinewidth': 0,
+              'ticks': '',
+            }),
+          }),
+          'colorscale': dict({
+            'diverging': list([
+              list([
+                0,
+                '#8e0152',
+              ]),
+              list([
+                0.1,
+                '#c51b7d',
+              ]),
+              list([
+                0.2,
+                '#de77ae',
+              ]),
+              list([
+                0.3,
+                '#f1b6da',
+              ]),
+              list([
+                0.4,
+                '#fde0ef',
+              ]),
+              list([
+                0.5,
+                '#f7f7f7',
+              ]),
+              list([
+                0.6,
+                '#e6f5d0',
+              ]),
+              list([
+                0.7,
+                '#b8e186',
+              ]),
+              list([
+                0.8,
+                '#7fbc41',
+              ]),
+              list([
+                0.9,
+                '#4d9221',
+              ]),
+              list([
+                1,
+                '#276419',
+              ]),
+            ]),
+            'sequential': list([
+              list([
+                0.0,
+                '#0d0887',
+              ]),
+              list([
+                0.1111111111111111,
+                '#46039f',
+              ]),
+              list([
+                0.2222222222222222,
+                '#7201a8',
+              ]),
+              list([
+                0.3333333333333333,
+                '#9c179e',
+              ]),
+              list([
+                0.4444444444444444,
+                '#bd3786',
+              ]),
+              list([
+                0.5555555555555556,
+                '#d8576b',
+              ]),
+              list([
+                0.6666666666666666,
+                '#ed7953',
+              ]),
+              list([
+                0.7777777777777778,
+                '#fb9f3a',
+              ]),
+              list([
+                0.8888888888888888,
+                '#fdca26',
+              ]),
+              list([
+                1.0,
+                '#f0f921',
+              ]),
+            ]),
+            'sequentialminus': list([
+              list([
+                0.0,
+                '#0d0887',
+              ]),
+              list([
+                0.1111111111111111,
+                '#46039f',
+              ]),
+              list([
+                0.2222222222222222,
+                '#7201a8',
+              ]),
+              list([
+                0.3333333333333333,
+                '#9c179e',
+              ]),
+              list([
+                0.4444444444444444,
+                '#bd3786',
+              ]),
+              list([
+                0.5555555555555556,
+                '#d8576b',
+              ]),
+              list([
+                0.6666666666666666,
+                '#ed7953',
+              ]),
+              list([
+                0.7777777777777778,
+                '#fb9f3a',
+              ]),
+              list([
+                0.8888888888888888,
+                '#fdca26',
+              ]),
+              list([
+                1.0,
+                '#f0f921',
+              ]),
+            ]),
+          }),
+          'colorway': list([
+            '#636efa',
+            '#EF553B',
+            '#00cc96',
+            '#ab63fa',
+            '#FFA15A',
+            '#19d3f3',
+            '#FF6692',
+            '#B6E880',
+            '#FF97FF',
+            '#FECB52',
+          ]),
+          'font': dict({
+            'color': '#f2f5fa',
+          }),
+          'geo': dict({
+            'bgcolor': 'rgb(17,17,17)',
+            'lakecolor': 'rgb(17,17,17)',
+            'landcolor': 'rgb(17,17,17)',
+            'showlakes': True,
+            'showland': True,
+            'subunitcolor': '#506784',
+          }),
+          'hoverlabel': dict({
+            'align': 'left',
+          }),
+          'hovermode': 'closest',
+          'mapbox': dict({
+            'style': 'dark',
+          }),
+          'paper_bgcolor': 'rgb(17,17,17)',
+          'plot_bgcolor': 'rgb(17,17,17)',
+          'polar': dict({
+            'angularaxis': dict({
+              'gridcolor': '#506784',
+              'linecolor': '#506784',
+              'ticks': '',
+            }),
+            'bgcolor': 'rgb(17,17,17)',
+            'radialaxis': dict({
+              'gridcolor': '#506784',
+              'linecolor': '#506784',
+              'ticks': '',
+            }),
+          }),
+          'scene': dict({
+            'xaxis': dict({
+              'backgroundcolor': 'rgb(17,17,17)',
+              'gridcolor': '#506784',
+              'gridwidth': 2,
+              'linecolor': '#506784',
+              'showbackground': True,
+              'ticks': '',
+              'zerolinecolor': '#C8D4E3',
+            }),
+            'yaxis': dict({
+              'backgroundcolor': 'rgb(17,17,17)',
+              'gridcolor': '#506784',
+              'gridwidth': 2,
+              'linecolor': '#506784',
+              'showbackground': True,
+              'ticks': '',
+              'zerolinecolor': '#C8D4E3',
+            }),
+            'zaxis': dict({
+              'backgroundcolor': 'rgb(17,17,17)',
+              'gridcolor': '#506784',
+              'gridwidth': 2,
+              'linecolor': '#506784',
+              'showbackground': True,
+              'ticks': '',
+              'zerolinecolor': '#C8D4E3',
+            }),
+          }),
+          'shapedefaults': dict({
+            'line': dict({
+              'color': '#f2f5fa',
+            }),
+          }),
+          'sliderdefaults': dict({
+            'bgcolor': '#C8D4E3',
+            'bordercolor': 'rgb(17,17,17)',
+            'borderwidth': 1,
+            'tickwidth': 0,
+          }),
+          'ternary': dict({
+            'aaxis': dict({
+              'gridcolor': '#506784',
+              'linecolor': '#506784',
+              'ticks': '',
+            }),
+            'baxis': dict({
+              'gridcolor': '#506784',
+              'linecolor': '#506784',
+              'ticks': '',
+            }),
+            'bgcolor': 'rgb(17,17,17)',
+            'caxis': dict({
+              'gridcolor': '#506784',
+              'linecolor': '#506784',
+              'ticks': '',
+            }),
+          }),
+          'title': dict({
+            'x': 0.05,
+          }),
+          'updatemenudefaults': dict({
+            'bgcolor': '#506784',
+            'borderwidth': 0,
+          }),
+          'xaxis': dict({
+            'automargin': True,
+            'gridcolor': '#283442',
+            'linecolor': '#506784',
+            'ticks': '',
+            'title': dict({
+              'standoff': 15,
+            }),
+            'zerolinecolor': '#283442',
+            'zerolinewidth': 2,
+          }),
+          'yaxis': dict({
+            'automargin': True,
+            'gridcolor': '#283442',
+            'linecolor': '#506784',
+            'ticks': '',
+            'title': dict({
+              'standoff': 15,
+            }),
+            'zerolinecolor': '#283442',
+            'zerolinewidth': 2,
+          }),
+        }),
+      }),
+      'title': dict({
+        'text': 'K线图快照测试',
+      }),
+      'xaxis': dict({
+        'title': dict({
+          'text': 'bar index',
+        }),
+      }),
+      'yaxis': dict({
+        'title': dict({
+          'text': '价格',
+        }),
+      }),
+    }),
+  })
+# ---
+# name: test_plotly_schmitt_trigger_figure_snapshot
+  dict({
+    'data': list([
+      dict({
+        'line': dict({
+          'color': '#f85149',
+          'dash': 'dash',
+          'width': 0.8,
+        }),
+        'mode': 'lines',
+        'name': '+ε',
+        'type': 'scatter',
+        'x': dict({
+          'bdata': 'AAAAAAAAAAAAAAAAAADwPwAAAAAAAABAAAAAAAAACEAAAAAAAAAQQAAAAAAAABRAAAAAAAAAGEAAAAAAAAAcQAAAAAAAACBAAAAAAAAAIkAAAAAAAAAkQAAAAAAAACZAAAAAAAAAKEAAAAAAAAAqQAAAAAAAACxAAAAAAAAALkAAAAAAAAAwQAAAAAAAADFAAAAAAAAAMkAAAAAAAAAzQAAAAAAAADRAAAAAAAAANUAAAAAAAAA2QAAAAAAAADdAAAAAAAAAOEAAAAAAAAA5QAAAAAAAADpAAAAAAAAAO0AAAAAAAAA8QAAAAAAAAD1AAAAAAAAAPkAAAAAAAAA/QAAAAAAAAEBAAAAAAACAQEAAAAAAAABBQAAAAAAAgEFAAAAAAAAAQkAAAAAAAIBCQAAAAAAAAENAAAAAAACAQ0AAAAAAAABEQAAAAAAAgERAAAAAAAAARUAAAAAAAIBFQAAAAAAAAEZAAAAAAACARkAAAAAAAABHQAAAAAAAgEdAAAAAAAAASEAAAAAAAIBIQAAAAAAAAElAAAAAAACASUAAAAAAAABKQAAAAAAAgEpAAAAAAAAAS0AAAAAAAIBLQAAAAAAAAExAAAAAAACATEAAAAAAAABNQAAAAAAAgE1AAAAAAAAATkAAAAAAAIBOQAAAAAAAAE9AAAAAAACAT0AAAAAAAABQQAAAAAAAQFBAAAAAAACAUEAAAAAAAMBQQAAAAAAAAFFAAAAAAABAUUAAAAAAAIBRQAAAAAAAwFFAAAAAAAAAUkAAAAAAAEBSQAAAAAAAgFJAAAAAAADAUkAAAAAAAABTQAAAAAAAQFNAAAAAAACAU0AAAAAAAMBTQAAAAAAAAFRAAAAAAABAVEAAAAAAAIBUQAAAAAAAwFRAAAAAAAAAVUAAAAAAAEBVQAAAAAAAgFVAAAAAAADAVUAAAAAAAABWQAAAAAAAQFZAAAAAAACAVkAAAAAAAMBWQAAAAAAAAFdAAAAAAABAV0AAAAAAAIBXQAAAAAAAwFdAAAAAAAAAWEAAAAAAAEBYQAAAAAAAgFhAAAAAAADAWEA=',
+          'dtype': 'f8',
+        }),
+        'y': dict({
+          'bdata': 'uB6F61G4fj+4HoXrUbh+P7gehetRuH4/uB6F61G4fj+4HoXrUbh+P7gehetRuH4/uB6F61G4fj+YxbI7IFGAP+dWpsppVIM/ksYV3iddhj8hzCMUEROKP22K3rfWd44/WqE+/KIskT9KaLdF2sWSPxAfdip7QpQ/Slh/EEJ+lT9PFzNL2UuWPxXru2wxs5Y/nxmPtAfPlj9QIufIwJ+WPxI4GZo7OpY/ZWEZG52mlT/Q+AfO5vKUP+p2xWOGRJQ/a2k9Ps2okz8M24SstzmTP+08hwS2A5M/DU6mZc0Pkz+sQjXKsi2TP+QNNigmQpM/8lS5NcR8kz9yzQ7UnciTP9tMi4PG7ZM/Hb6KTvbikz9DvGLCXp2TP3u8EUwtLJM/8cT5c7+Wkj8VSyx2s/qRP9ECJITzZ5E/zRpSKYb6kD9vnDj0JdKQP5xLWo8x0pA/AwCdg00QkT/381jRs6+RP27zi3qSWZI/m1XMSmrskj/iUd4hmW2TP33R0qhh6ZM/+s7RvulTlD+RCCGJimKUP5LVY3l5HZQ/V9DLpjmnkz85OEFUHROTP/vFw7LrdZI/EVOgxzrbkT83MykPn1iRP6JDIEPJC5E/Nn6LJ5sMkT9TxQlHdW+RP3l+zD224JE/E1AmFb1Rkj/pKGJIreKSP8I3XC/gVpM/0oxiKbjHkz8hxOwBPhKUP+50YCbICZQ/60nrbqXFkz+e0vhtqUmTPyR4E6Mzt5I/fMGP950akj9H72Fg3JKRPzx64owaRpE/eiBf9a04kT+/jjnf+G+RP6SMgakJ4JE/qFwqR4Vwkj/4r2J4tBuTP1mMNqqQqpM/UME6IiAYlD9+8F7c3W+UPwNY/KQgkZQ/yXN6gNtalD9II5rdBe2TPzsxhmFcXZM/5rdhaMq/kj8+mCEWfCKSP+GMYM8tnJE/kcvKKtZCkT+di0XwySyRPzfP5wwVL5E/QZ0ApTI0kT8/5Bd1F2KRP9fXFG3etpE/kPLvriMvkj+IPQzMjcaSP2af3PxSeJM/N95UDqU/lD9tz8mk+xeVP2bomMM+/ZU/uRFplBXDlj8=',
+          'dtype': 'f8',
+        }),
+      }),
+      dict({
+        'line': dict({
+          'color': '#f85149',
+          'dash': 'dash',
+          'width': 0.8,
+        }),
+        'mode': 'lines',
+        'name': '-ε',
+        'type': 'scatter',
+        'x': dict({
+          'bdata': 'AAAAAAAAAAAAAAAAAADwPwAAAAAAAABAAAAAAAAACEAAAAAAAAAQQAAAAAAAABRAAAAAAAAAGEAAAAAAAAAcQAAAAAAAACBAAAAAAAAAIkAAAAAAAAAkQAAAAAAAACZAAAAAAAAAKEAAAAAAAAAqQAAAAAAAACxAAAAAAAAALkAAAAAAAAAwQAAAAAAAADFAAAAAAAAAMkAAAAAAAAAzQAAAAAAAADRAAAAAAAAANUAAAAAAAAA2QAAAAAAAADdAAAAAAAAAOEAAAAAAAAA5QAAAAAAAADpAAAAAAAAAO0AAAAAAAAA8QAAAAAAAAD1AAAAAAAAAPkAAAAAAAAA/QAAAAAAAAEBAAAAAAACAQEAAAAAAAABBQAAAAAAAgEFAAAAAAAAAQkAAAAAAAIBCQAAAAAAAAENAAAAAAACAQ0AAAAAAAABEQAAAAAAAgERAAAAAAAAARUAAAAAAAIBFQAAAAAAAAEZAAAAAAACARkAAAAAAAABHQAAAAAAAgEdAAAAAAAAASEAAAAAAAIBIQAAAAAAAAElAAAAAAACASUAAAAAAAABKQAAAAAAAgEpAAAAAAAAAS0AAAAAAAIBLQAAAAAAAAExAAAAAAACATEAAAAAAAABNQAAAAAAAgE1AAAAAAAAATkAAAAAAAIBOQAAAAAAAAE9AAAAAAACAT0AAAAAAAABQQAAAAAAAQFBAAAAAAACAUEAAAAAAAMBQQAAAAAAAAFFAAAAAAABAUUAAAAAAAIBRQAAAAAAAwFFAAAAAAAAAUkAAAAAAAEBSQAAAAAAAgFJAAAAAAADAUkAAAAAAAABTQAAAAAAAQFNAAAAAAACAU0AAAAAAAMBTQAAAAAAAAFRAAAAAAABAVEAAAAAAAIBUQAAAAAAAwFRAAAAAAAAAVUAAAAAAAEBVQAAAAAAAgFVAAAAAAADAVUAAAAAAAABWQAAAAAAAQFZAAAAAAACAVkAAAAAAAMBWQAAAAAAAAFdAAAAAAABAV0AAAAAAAIBXQAAAAAAAwFdAAAAAAAAAWEAAAAAAAEBYQAAAAAAAgFhAAAAAAADAWEA=',
+          'dtype': 'f8',
+        }),
+        'y': dict({
+          'bdata': 'uB6F61G4fr+4HoXrUbh+v7gehetRuH6/uB6F61G4fr+4HoXrUbh+v7gehetRuH6/uB6F61G4fr+YxbI7IFGAv+dWpsppVIO/ksYV3iddhr8hzCMUEROKv22K3rfWd46/WqE+/KIskb9KaLdF2sWSvxAfdip7QpS/Slh/EEJ+lb9PFzNL2UuWvxXru2wxs5a/nxmPtAfPlr9QIufIwJ+WvxI4GZo7Opa/ZWEZG52mlb/Q+AfO5vKUv+p2xWOGRJS/a2k9Ps2ok78M24SstzmTv+08hwS2A5O/DU6mZc0Pk7+sQjXKsi2Tv+QNNigmQpO/8lS5NcR8k79yzQ7UnciTv9tMi4PG7ZO/Hb6KTvbik79DvGLCXp2Tv3u8EUwtLJO/8cT5c7+Wkr8VSyx2s/qRv9ECJITzZ5G/zRpSKYb6kL9vnDj0JdKQv5xLWo8x0pC/AwCdg00Qkb/381jRs6+Rv27zi3qSWZK/m1XMSmrskr/iUd4hmW2Tv33R0qhh6ZO/+s7RvulTlL+RCCGJimKUv5LVY3l5HZS/V9DLpjmnk785OEFUHROTv/vFw7LrdZK/EVOgxzrbkb83MykPn1iRv6JDIEPJC5G/Nn6LJ5sMkb9TxQlHdW+Rv3l+zD224JG/E1AmFb1Rkr/pKGJIreKSv8I3XC/gVpO/0oxiKbjHk78hxOwBPhKUv+50YCbICZS/60nrbqXFk7+e0vhtqUmTvyR4E6Mzt5K/fMGP950akr9H72Fg3JKRvzx64owaRpG/eiBf9a04kb+/jjnf+G+Rv6SMgakJ4JG/qFwqR4Vwkr/4r2J4tBuTv1mMNqqQqpO/UME6IiAYlL9+8F7c3W+UvwNY/KQgkZS/yXN6gNtalL9II5rdBe2TvzsxhmFcXZO/5rdhaMq/kr8+mCEWfCKSv+GMYM8tnJG/kcvKKtZCkb+di0XwySyRvzfP5wwVL5G/QZ0ApTI0kb8/5Bd1F2KRv9fXFG3etpG/kPLvriMvkr+IPQzMjcaSv2af3PxSeJO/N95UDqU/lL9tz8mk+xeVv2bomMM+/ZW/uRFplBXDlr8=',
+          'dtype': 'f8',
+        }),
+      }),
+      dict({
+        'line': dict({
+          'color': '#d2991d',
+          'width': 1.5,
+        }),
+        'mode': 'lines',
+        'name': '加速度',
+        'type': 'scatter',
+        'x': dict({
+          'bdata': 'AAAAAAAAAAAAAAAAAADwPwAAAAAAAABAAAAAAAAACEAAAAAAAAAQQAAAAAAAABRAAAAAAAAAGEAAAAAAAAAcQAAAAAAAACBAAAAAAAAAIkAAAAAAAAAkQAAAAAAAACZAAAAAAAAAKEAAAAAAAAAqQAAAAAAAACxAAAAAAAAALkAAAAAAAAAwQAAAAAAAADFAAAAAAAAAMkAAAAAAAAAzQAAAAAAAADRAAAAAAAAANUAAAAAAAAA2QAAAAAAAADdAAAAAAAAAOEAAAAAAAAA5QAAAAAAAADpAAAAAAAAAO0AAAAAAAAA8QAAAAAAAAD1AAAAAAAAAPkAAAAAAAAA/QAAAAAAAAEBAAAAAAACAQEAAAAAAAABBQAAAAAAAgEFAAAAAAAAAQkAAAAAAAIBCQAAAAAAAAENAAAAAAACAQ0AAAAAAAABEQAAAAAAAgERAAAAAAAAARUAAAAAAAIBFQAAAAAAAAEZAAAAAAACARkAAAAAAAABHQAAAAAAAgEdAAAAAAAAASEAAAAAAAIBIQAAAAAAAAElAAAAAAACASUAAAAAAAABKQAAAAAAAgEpAAAAAAAAAS0AAAAAAAIBLQAAAAAAAAExAAAAAAACATEAAAAAAAABNQAAAAAAAgE1AAAAAAAAATkAAAAAAAIBOQAAAAAAAAE9AAAAAAACAT0AAAAAAAABQQAAAAAAAQFBAAAAAAACAUEAAAAAAAMBQQAAAAAAAAFFAAAAAAABAUUAAAAAAAIBRQAAAAAAAwFFAAAAAAAAAUkAAAAAAAEBSQAAAAAAAgFJAAAAAAADAUkAAAAAAAABTQAAAAAAAQFNAAAAAAACAU0AAAAAAAMBTQAAAAAAAAFRAAAAAAABAVEAAAAAAAIBUQAAAAAAAwFRAAAAAAAAAVUAAAAAAAEBVQAAAAAAAgFVAAAAAAADAVUAAAAAAAABWQAAAAAAAQFZAAAAAAACAVkAAAAAAAMBWQAAAAAAAAFdAAAAAAABAV0AAAAAAAIBXQAAAAAAAwFdAAAAAAAAAWEAAAAAAAEBYQAAAAAAAgFhAAAAAAADAWEA=',
+          'dtype': 'f8',
+        }),
+        'y': dict({
+          'bdata': 'kK7qtBmwib/sArBHE0STv5Cu6rQZsJm/kK7qtBmwmb+Iruq0GbCZv4Cu6rQZsJm/kK7qtBmwmb+Yruq0GbCZv5ix6rQZsJm/mCuSeAw5ob94lZwdev2mvw5iWYkL/aG/hKWVstR+kr905V3s3zKSv5zBe+SPPZG/wNj+e9L9aL/gexyoAVSCPzhVEZdmVok/tFX0paIJkT/EboRI+M2VP0x590xjWJo/YIkMlJBgpD802U1gnPujPyCbsRsH8Zw/7Ll2ihJjoT9AjX5dBWKjPyRYj8IkU6I/zFepnvqDmj8QkQcrTkCHP5AhmEp6Zo8/1DKC4vqSlT9YfqyU6dCAP7CSgAuT1HS/UEiU2ux2jb8ck7fOxOCVvwDTjUxtyp2/gnrjcMU2ob/Ibo0oQYebv3BMfzJHI6C/TABI2HyWpb9ER/XnNCyhv2i1wuutP5y/JPwhM2fior/UHQvlhmGfv/gUdvaZWY2/SBCs6rRphL8oTxyC9ECIvyCyAh9fboe/gJ3RGFIOdD+w2QiVnpiYP9B6zYkJCJw/eCmYs4+Lmz8wLOG+YOmZPwh2jYSlFJc/YLBW8SFqnz8cg049lYmkP/TQN4MiOKU/gJm03jfnpT/QIGvdPmmfP+B2CcAt2o8/uJ6vBR9Dkz+gVoG43EiPP6CaOqg2bYQ/wHDa26Zlfj9weW66+X6Cv7D+Dv7HRZS/KMVQHk5pmr/YxFS/tf2bv+j3HZxisJu/CELtqFIzpL9AAX3qnheov/S4UiPO5aS/8J99Pknhob9IClEg4Higv3AusETHmJu/kA6rBM5MmL+oT2dKkl+Qv0DdV1Rd0Hu/MNMGS0kxeb8AprdJIHs5v6iufYaERZE/tA5H8DiHmz+chAAtpFibPxSwhtxOnZo/EB0nsdS8mT/Y/fTI3K+gP0BAgXPLiaM/bGOqKDM/oz84HSx9t5mcPzATqrfKyIo/SLIadI/dkD+Y4XEL+YCYP6DecQv5gJg/oN5xC/mAmD+g3nEL+YCYP6DecQv5gJg/qN5xC/mAmD+Y3nEL+YCYP9hmlci6YJI/YN5xC/mAiD8=',
+          'dtype': 'f8',
+        }),
+      }),
+      dict({
+        'line': dict({
+          'color': '#58a6ff',
+          'shape': 'hv',
+          'width': 2,
+        }),
+        'mode': 'lines',
+        'name': '信号',
+        'type': 'scatter',
+        'x': dict({
+          'bdata': 'AAAAAAAAAAAAAAAAAADwPwAAAAAAAABAAAAAAAAACEAAAAAAAAAQQAAAAAAAABRAAAAAAAAAGEAAAAAAAAAcQAAAAAAAACBAAAAAAAAAIkAAAAAAAAAkQAAAAAAAACZAAAAAAAAAKEAAAAAAAAAqQAAAAAAAACxAAAAAAAAALkAAAAAAAAAwQAAAAAAAADFAAAAAAAAAMkAAAAAAAAAzQAAAAAAAADRAAAAAAAAANUAAAAAAAAA2QAAAAAAAADdAAAAAAAAAOEAAAAAAAAA5QAAAAAAAADpAAAAAAAAAO0AAAAAAAAA8QAAAAAAAAD1AAAAAAAAAPkAAAAAAAAA/QAAAAAAAAEBAAAAAAACAQEAAAAAAAABBQAAAAAAAgEFAAAAAAAAAQkAAAAAAAIBCQAAAAAAAAENAAAAAAACAQ0AAAAAAAABEQAAAAAAAgERAAAAAAAAARUAAAAAAAIBFQAAAAAAAAEZAAAAAAACARkAAAAAAAABHQAAAAAAAgEdAAAAAAAAASEAAAAAAAIBIQAAAAAAAAElAAAAAAACASUAAAAAAAABKQAAAAAAAgEpAAAAAAAAAS0AAAAAAAIBLQAAAAAAAAExAAAAAAACATEAAAAAAAABNQAAAAAAAgE1AAAAAAAAATkAAAAAAAIBOQAAAAAAAAE9AAAAAAACAT0AAAAAAAABQQAAAAAAAQFBAAAAAAACAUEAAAAAAAMBQQAAAAAAAAFFAAAAAAABAUUAAAAAAAIBRQAAAAAAAwFFAAAAAAAAAUkAAAAAAAEBSQAAAAAAAgFJAAAAAAADAUkAAAAAAAABTQAAAAAAAQFNAAAAAAACAU0AAAAAAAMBTQAAAAAAAAFRAAAAAAABAVEAAAAAAAIBUQAAAAAAAwFRAAAAAAAAAVUAAAAAAAEBVQAAAAAAAgFVAAAAAAADAVUAAAAAAAABWQAAAAAAAQFZAAAAAAACAVkAAAAAAAMBWQAAAAAAAAFdAAAAAAABAV0AAAAAAAIBXQAAAAAAAwFdAAAAAAAAAWEAAAAAAAEBYQAAAAAAAgFhAAAAAAADAWEA=',
+          'dtype': 'f8',
+        }),
+        'y': dict({
+          'bdata': 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPC/AAAAAAAA8L8AAAAAAADwvwAAAAAAAPC/AAAAAAAA8L8AAAAAAADwvwAAAAAAAPC/AAAAAAAA8L8AAAAAAADwvwAAAAAAAPC/AAAAAAAA8L8AAAAAAADwvwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAPA/AAAAAAAA8D8AAAAAAADwPwAAAAAAAPA/AAAAAAAA8D8AAAAAAADwPwAAAAAAAPA/AAAAAAAA8D8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADwvwAAAAAAAPC/AAAAAAAA8L8AAAAAAADwvwAAAAAAAPC/AAAAAAAA8L8AAAAAAADwvwAAAAAAAPC/AAAAAAAA8L8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPA/AAAAAAAA8D8AAAAAAADwPwAAAAAAAPA/AAAAAAAA8D8AAAAAAADwPwAAAAAAAPA/AAAAAAAA8D8AAAAAAADwPwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAPC/AAAAAAAA8L8AAAAAAADwvwAAAAAAAPC/AAAAAAAA8L8AAAAAAADwvwAAAAAAAPC/AAAAAAAA8L8AAAAAAADwvwAAAAAAAPC/AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA8D8AAAAAAADwPwAAAAAAAPA/AAAAAAAA8D8AAAAAAADwPwAAAAAAAPA/AAAAAAAA8D8AAAAAAADwPwAAAAAAAPA/AAAAAAAA8D8AAAAAAADwPwAAAAAAAPA/AAAAAAAA8D8=',
+          'dtype': 'f8',
+        }),
+      }),
+    ]),
+    'layout': dict({
+      'template': dict({
+        'data': dict({
+          'bar': list([
+            dict({
+              'error_x': dict({
+                'color': '#f2f5fa',
+              }),
+              'error_y': dict({
+                'color': '#f2f5fa',
+              }),
+              'marker': dict({
+                'line': dict({
+                  'color': 'rgb(17,17,17)',
+                  'width': 0.5,
+                }),
+                'pattern': dict({
+                  'fillmode': 'overlay',
+                  'size': 10,
+                  'solidity': 0.2,
+                }),
+              }),
+              'type': 'bar',
+            }),
+          ]),
+          'barpolar': list([
+            dict({
+              'marker': dict({
+                'line': dict({
+                  'color': 'rgb(17,17,17)',
+                  'width': 0.5,
+                }),
+                'pattern': dict({
+                  'fillmode': 'overlay',
+                  'size': 10,
+                  'solidity': 0.2,
+                }),
+              }),
+              'type': 'barpolar',
+            }),
+          ]),
+          'carpet': list([
+            dict({
+              'aaxis': dict({
+                'endlinecolor': '#A2B1C6',
+                'gridcolor': '#506784',
+                'linecolor': '#506784',
+                'minorgridcolor': '#506784',
+                'startlinecolor': '#A2B1C6',
+              }),
+              'baxis': dict({
+                'endlinecolor': '#A2B1C6',
+                'gridcolor': '#506784',
+                'linecolor': '#506784',
+                'minorgridcolor': '#506784',
+                'startlinecolor': '#A2B1C6',
+              }),
+              'type': 'carpet',
+            }),
+          ]),
+          'choropleth': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'type': 'choropleth',
+            }),
+          ]),
+          'contour': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'colorscale': list([
+                list([
+                  0.0,
+                  '#0d0887',
+                ]),
+                list([
+                  0.1111111111111111,
+                  '#46039f',
+                ]),
+                list([
+                  0.2222222222222222,
+                  '#7201a8',
+                ]),
+                list([
+                  0.3333333333333333,
+                  '#9c179e',
+                ]),
+                list([
+                  0.4444444444444444,
+                  '#bd3786',
+                ]),
+                list([
+                  0.5555555555555556,
+                  '#d8576b',
+                ]),
+                list([
+                  0.6666666666666666,
+                  '#ed7953',
+                ]),
+                list([
+                  0.7777777777777778,
+                  '#fb9f3a',
+                ]),
+                list([
+                  0.8888888888888888,
+                  '#fdca26',
+                ]),
+                list([
+                  1.0,
+                  '#f0f921',
+                ]),
+              ]),
+              'type': 'contour',
+            }),
+          ]),
+          'contourcarpet': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'type': 'contourcarpet',
+            }),
+          ]),
+          'heatmap': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'colorscale': list([
+                list([
+                  0.0,
+                  '#0d0887',
+                ]),
+                list([
+                  0.1111111111111111,
+                  '#46039f',
+                ]),
+                list([
+                  0.2222222222222222,
+                  '#7201a8',
+                ]),
+                list([
+                  0.3333333333333333,
+                  '#9c179e',
+                ]),
+                list([
+                  0.4444444444444444,
+                  '#bd3786',
+                ]),
+                list([
+                  0.5555555555555556,
+                  '#d8576b',
+                ]),
+                list([
+                  0.6666666666666666,
+                  '#ed7953',
+                ]),
+                list([
+                  0.7777777777777778,
+                  '#fb9f3a',
+                ]),
+                list([
+                  0.8888888888888888,
+                  '#fdca26',
+                ]),
+                list([
+                  1.0,
+                  '#f0f921',
+                ]),
+              ]),
+              'type': 'heatmap',
+            }),
+          ]),
+          'histogram': list([
+            dict({
+              'marker': dict({
+                'pattern': dict({
+                  'fillmode': 'overlay',
+                  'size': 10,
+                  'solidity': 0.2,
+                }),
+              }),
+              'type': 'histogram',
+            }),
+          ]),
+          'histogram2d': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'colorscale': list([
+                list([
+                  0.0,
+                  '#0d0887',
+                ]),
+                list([
+                  0.1111111111111111,
+                  '#46039f',
+                ]),
+                list([
+                  0.2222222222222222,
+                  '#7201a8',
+                ]),
+                list([
+                  0.3333333333333333,
+                  '#9c179e',
+                ]),
+                list([
+                  0.4444444444444444,
+                  '#bd3786',
+                ]),
+                list([
+                  0.5555555555555556,
+                  '#d8576b',
+                ]),
+                list([
+                  0.6666666666666666,
+                  '#ed7953',
+                ]),
+                list([
+                  0.7777777777777778,
+                  '#fb9f3a',
+                ]),
+                list([
+                  0.8888888888888888,
+                  '#fdca26',
+                ]),
+                list([
+                  1.0,
+                  '#f0f921',
+                ]),
+              ]),
+              'type': 'histogram2d',
+            }),
+          ]),
+          'histogram2dcontour': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'colorscale': list([
+                list([
+                  0.0,
+                  '#0d0887',
+                ]),
+                list([
+                  0.1111111111111111,
+                  '#46039f',
+                ]),
+                list([
+                  0.2222222222222222,
+                  '#7201a8',
+                ]),
+                list([
+                  0.3333333333333333,
+                  '#9c179e',
+                ]),
+                list([
+                  0.4444444444444444,
+                  '#bd3786',
+                ]),
+                list([
+                  0.5555555555555556,
+                  '#d8576b',
+                ]),
+                list([
+                  0.6666666666666666,
+                  '#ed7953',
+                ]),
+                list([
+                  0.7777777777777778,
+                  '#fb9f3a',
+                ]),
+                list([
+                  0.8888888888888888,
+                  '#fdca26',
+                ]),
+                list([
+                  1.0,
+                  '#f0f921',
+                ]),
+              ]),
+              'type': 'histogram2dcontour',
+            }),
+          ]),
+          'mesh3d': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'type': 'mesh3d',
+            }),
+          ]),
+          'parcoords': list([
+            dict({
+              'line': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'parcoords',
+            }),
+          ]),
+          'pie': list([
+            dict({
+              'automargin': True,
+              'type': 'pie',
+            }),
+          ]),
+          'scatter': list([
+            dict({
+              'marker': dict({
+                'line': dict({
+                  'color': '#283442',
+                }),
+              }),
+              'type': 'scatter',
+            }),
+          ]),
+          'scatter3d': list([
+            dict({
+              'line': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scatter3d',
+            }),
+          ]),
+          'scattercarpet': list([
+            dict({
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scattercarpet',
+            }),
+          ]),
+          'scattergeo': list([
+            dict({
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scattergeo',
+            }),
+          ]),
+          'scattergl': list([
+            dict({
+              'marker': dict({
+                'line': dict({
+                  'color': '#283442',
+                }),
+              }),
+              'type': 'scattergl',
+            }),
+          ]),
+          'scattermap': list([
+            dict({
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scattermap',
+            }),
+          ]),
+          'scattermapbox': list([
+            dict({
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scattermapbox',
+            }),
+          ]),
+          'scatterpolar': list([
+            dict({
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scatterpolar',
+            }),
+          ]),
+          'scatterpolargl': list([
+            dict({
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scatterpolargl',
+            }),
+          ]),
+          'scatterternary': list([
+            dict({
+              'marker': dict({
+                'colorbar': dict({
+                  'outlinewidth': 0,
+                  'ticks': '',
+                }),
+              }),
+              'type': 'scatterternary',
+            }),
+          ]),
+          'surface': list([
+            dict({
+              'colorbar': dict({
+                'outlinewidth': 0,
+                'ticks': '',
+              }),
+              'colorscale': list([
+                list([
+                  0.0,
+                  '#0d0887',
+                ]),
+                list([
+                  0.1111111111111111,
+                  '#46039f',
+                ]),
+                list([
+                  0.2222222222222222,
+                  '#7201a8',
+                ]),
+                list([
+                  0.3333333333333333,
+                  '#9c179e',
+                ]),
+                list([
+                  0.4444444444444444,
+                  '#bd3786',
+                ]),
+                list([
+                  0.5555555555555556,
+                  '#d8576b',
+                ]),
+                list([
+                  0.6666666666666666,
+                  '#ed7953',
+                ]),
+                list([
+                  0.7777777777777778,
+                  '#fb9f3a',
+                ]),
+                list([
+                  0.8888888888888888,
+                  '#fdca26',
+                ]),
+                list([
+                  1.0,
+                  '#f0f921',
+                ]),
+              ]),
+              'type': 'surface',
+            }),
+          ]),
+          'table': list([
+            dict({
+              'cells': dict({
+                'fill': dict({
+                  'color': '#506784',
+                }),
+                'line': dict({
+                  'color': 'rgb(17,17,17)',
+                }),
+              }),
+              'header': dict({
+                'fill': dict({
+                  'color': '#2a3f5f',
+                }),
+                'line': dict({
+                  'color': 'rgb(17,17,17)',
+                }),
+              }),
+              'type': 'table',
+            }),
+          ]),
+        }),
+        'layout': dict({
+          'annotationdefaults': dict({
+            'arrowcolor': '#f2f5fa',
+            'arrowhead': 0,
+            'arrowwidth': 1,
+          }),
+          'autotypenumbers': 'strict',
+          'coloraxis': dict({
+            'colorbar': dict({
+              'outlinewidth': 0,
+              'ticks': '',
+            }),
+          }),
+          'colorscale': dict({
+            'diverging': list([
+              list([
+                0,
+                '#8e0152',
+              ]),
+              list([
+                0.1,
+                '#c51b7d',
+              ]),
+              list([
+                0.2,
+                '#de77ae',
+              ]),
+              list([
+                0.3,
+                '#f1b6da',
+              ]),
+              list([
+                0.4,
+                '#fde0ef',
+              ]),
+              list([
+                0.5,
+                '#f7f7f7',
+              ]),
+              list([
+                0.6,
+                '#e6f5d0',
+              ]),
+              list([
+                0.7,
+                '#b8e186',
+              ]),
+              list([
+                0.8,
+                '#7fbc41',
+              ]),
+              list([
+                0.9,
+                '#4d9221',
+              ]),
+              list([
+                1,
+                '#276419',
+              ]),
+            ]),
+            'sequential': list([
+              list([
+                0.0,
+                '#0d0887',
+              ]),
+              list([
+                0.1111111111111111,
+                '#46039f',
+              ]),
+              list([
+                0.2222222222222222,
+                '#7201a8',
+              ]),
+              list([
+                0.3333333333333333,
+                '#9c179e',
+              ]),
+              list([
+                0.4444444444444444,
+                '#bd3786',
+              ]),
+              list([
+                0.5555555555555556,
+                '#d8576b',
+              ]),
+              list([
+                0.6666666666666666,
+                '#ed7953',
+              ]),
+              list([
+                0.7777777777777778,
+                '#fb9f3a',
+              ]),
+              list([
+                0.8888888888888888,
+                '#fdca26',
+              ]),
+              list([
+                1.0,
+                '#f0f921',
+              ]),
+            ]),
+            'sequentialminus': list([
+              list([
+                0.0,
+                '#0d0887',
+              ]),
+              list([
+                0.1111111111111111,
+                '#46039f',
+              ]),
+              list([
+                0.2222222222222222,
+                '#7201a8',
+              ]),
+              list([
+                0.3333333333333333,
+                '#9c179e',
+              ]),
+              list([
+                0.4444444444444444,
+                '#bd3786',
+              ]),
+              list([
+                0.5555555555555556,
+                '#d8576b',
+              ]),
+              list([
+                0.6666666666666666,
+                '#ed7953',
+              ]),
+              list([
+                0.7777777777777778,
+                '#fb9f3a',
+              ]),
+              list([
+                0.8888888888888888,
+                '#fdca26',
+              ]),
+              list([
+                1.0,
+                '#f0f921',
+              ]),
+            ]),
+          }),
+          'colorway': list([
+            '#636efa',
+            '#EF553B',
+            '#00cc96',
+            '#ab63fa',
+            '#FFA15A',
+            '#19d3f3',
+            '#FF6692',
+            '#B6E880',
+            '#FF97FF',
+            '#FECB52',
+          ]),
+          'font': dict({
+            'color': '#f2f5fa',
+          }),
+          'geo': dict({
+            'bgcolor': 'rgb(17,17,17)',
+            'lakecolor': 'rgb(17,17,17)',
+            'landcolor': 'rgb(17,17,17)',
+            'showlakes': True,
+            'showland': True,
+            'subunitcolor': '#506784',
+          }),
+          'hoverlabel': dict({
+            'align': 'left',
+          }),
+          'hovermode': 'closest',
+          'mapbox': dict({
+            'style': 'dark',
+          }),
+          'paper_bgcolor': 'rgb(17,17,17)',
+          'plot_bgcolor': 'rgb(17,17,17)',
+          'polar': dict({
+            'angularaxis': dict({
+              'gridcolor': '#506784',
+              'linecolor': '#506784',
+              'ticks': '',
+            }),
+            'bgcolor': 'rgb(17,17,17)',
+            'radialaxis': dict({
+              'gridcolor': '#506784',
+              'linecolor': '#506784',
+              'ticks': '',
+            }),
+          }),
+          'scene': dict({
+            'xaxis': dict({
+              'backgroundcolor': 'rgb(17,17,17)',
+              'gridcolor': '#506784',
+              'gridwidth': 2,
+              'linecolor': '#506784',
+              'showbackground': True,
+              'ticks': '',
+              'zerolinecolor': '#C8D4E3',
+            }),
+            'yaxis': dict({
+              'backgroundcolor': 'rgb(17,17,17)',
+              'gridcolor': '#506784',
+              'gridwidth': 2,
+              'linecolor': '#506784',
+              'showbackground': True,
+              'ticks': '',
+              'zerolinecolor': '#C8D4E3',
+            }),
+            'zaxis': dict({
+              'backgroundcolor': 'rgb(17,17,17)',
+              'gridcolor': '#506784',
+              'gridwidth': 2,
+              'linecolor': '#506784',
+              'showbackground': True,
+              'ticks': '',
+              'zerolinecolor': '#C8D4E3',
+            }),
+          }),
+          'shapedefaults': dict({
+            'line': dict({
+              'color': '#f2f5fa',
+            }),
+          }),
+          'sliderdefaults': dict({
+            'bgcolor': '#C8D4E3',
+            'bordercolor': 'rgb(17,17,17)',
+            'borderwidth': 1,
+            'tickwidth': 0,
+          }),
+          'ternary': dict({
+            'aaxis': dict({
+              'gridcolor': '#506784',
+              'linecolor': '#506784',
+              'ticks': '',
+            }),
+            'baxis': dict({
+              'gridcolor': '#506784',
+              'linecolor': '#506784',
+              'ticks': '',
+            }),
+            'bgcolor': 'rgb(17,17,17)',
+            'caxis': dict({
+              'gridcolor': '#506784',
+              'linecolor': '#506784',
+              'ticks': '',
+            }),
+          }),
+          'title': dict({
+            'x': 0.05,
+          }),
+          'updatemenudefaults': dict({
+            'bgcolor': '#506784',
+            'borderwidth': 0,
+          }),
+          'xaxis': dict({
+            'automargin': True,
+            'gridcolor': '#283442',
+            'linecolor': '#506784',
+            'ticks': '',
+            'title': dict({
+              'standoff': 15,
+            }),
+            'zerolinecolor': '#283442',
+            'zerolinewidth': 2,
+          }),
+          'yaxis': dict({
+            'automargin': True,
+            'gridcolor': '#283442',
+            'linecolor': '#506784',
+            'ticks': '',
+            'title': dict({
+              'standoff': 15,
+            }),
+            'zerolinecolor': '#283442',
+            'zerolinewidth': 2,
+          }),
+        }),
+      }),
+      'title': dict({
+        'text': '施密特触发器快照测试',
+      }),
+      'xaxis': dict({
+        'title': dict({
+          'text': 'bar index',
+        }),
+      }),
+    }),
+  })
+# ---
+# name: test_savgol_filter_output_snapshot
+  dict({
+    'filtered_head_10': list([
+      0.15523676071778822,
+      0.33509576284960196,
+      0.48986893270289644,
+      0.6195562702776716,
+      0.7241577755739275,
+      0.803673448591664,
+      0.8581032893308814,
+      0.8874472977915795,
+      0.8917054739737582,
+      0.8708778178774177,
+    ]),
+    'filtered_mean': 0.10637810022243732,
+    'filtered_std': 0.6530514670385745,
+    'filtered_tail_10': list([
+      0.9522172166059693,
+      0.946917471766394,
+      0.9122742965270327,
+      0.8482876908878854,
+      0.7549576548489516,
+      0.6322841884102317,
+      0.48026729157172565,
+      0.29890696433343367,
+      0.08820320669535464,
+      -0.15184398134250943,
+    ]),
+    'n': 80,
+    'noisy_head_10': list([
+      0.04967141530112327,
+      0.18484290067794276,
+      0.45418719611871977,
+      0.716945459035838,
+      0.6939407534271892,
+      0.8180572891129785,
+      1.0899603675179654,
+      1.062193202903751,
+      0.9526261644480098,
+      1.0281036352367916,
+    ]),
+    'noisy_tail_10': list([
+      1.0267469162457117,
+      1.1518303093629587,
+      0.9620751726382822,
+      1.0512555377219048,
+      0.5262775569663418,
+      0.7324780905946392,
+      0.4951033956776168,
+      0.27321762169911545,
+      0.11692972995299429,
+      -0.2906637416877709,
+    ]),
+  })
+# ---
+# name: test_schmitt_trigger_output_snapshot
+  dict({
+    'dur_max': 12,
+    'dur_mean': 4.8,
+    'eps_mean': 0.017249831284797533,
+    'eps_std': 0.0038337666115282475,
+    'n': 80,
+    'sig_head_20': list([
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+    ]),
+    'sig_tail_20': list([
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+      -1,
+    ]),
+    'sig_unique': list([
+      -1,
+      0,
+      1,
+    ]),
+    'sigma_v_mean': 0.11226816419892219,
+  })
+# ---

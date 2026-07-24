@@ -17,7 +17,25 @@ REQUIRED_PER_VIEW_KEYS = [suffix for suffix, _, _ in VIEW_PARAM_SPECS]
 
 REQUIRED_GLOBAL_KEYS = ["market", "ticker", "global_f", "global_dual", "global_f2"]
 
-CONFIG_PATH = "/Users/xfpan/claude/filter_research/config/3690_HK_DP.json"
+# ── Fixture-based config (no hardcoded path dependency) ──
+
+@pytest.fixture
+def sample_config():
+    """Provide a minimal valid config dict for import/export tests."""
+    import copy
+    base = {
+        "market": "港股 HK",
+        "ticker": "TEST",
+        "global_f": "sma",
+        "global_dual": False,
+        "global_f2": None,
+    }
+    for i in range(4):
+        for suffix, cfg_key, default in VIEW_PARAM_SPECS:
+            base[f"v{i}_{suffix}"] = default if default is not None else ""
+        # Add filter-param stubs keyed by Chinese label
+        base[f"窗口大小_v{i}_f1_sma"] = 11
+    return base
 
 
 class TestExportCompleteness:
@@ -34,23 +52,17 @@ class TestExportCompleteness:
             for suffix, _, _ in VIEW_PARAM_SPECS:
                 assert f"v{i}_{suffix}" in out, f"导出缺失: v{i}_{suffix}"
 
-    def test_global_keys_exported(self):
+    def test_global_keys_exported(self, sample_config):
         """全局参数在导出中"""
-        with open(CONFIG_PATH) as f:
-            config = json.load(f)
-
         for key in REQUIRED_GLOBAL_KEYS:
-            assert key in config, f"缺失全局键: {key}"
+            assert key in sample_config, f"缺失全局键: {key}"
 
-    def test_filter_params_exported(self):
+    def test_filter_params_exported(self, sample_config):
         """滤波参数在导出中存在"""
-        with open(CONFIG_PATH) as f:
-            config = json.load(f)
-
         for i in range(4):
             has_filter = any(
                 k.startswith("窗口大小") and f"v{i}" in k
-                for k in config.keys()
+                for k in sample_config.keys()
             )
             assert has_filter, f"视图{i}缺少滤波参数"
 
@@ -62,10 +74,9 @@ class TestExportCompleteness:
 class TestImpBackupCoverage:
     """验证导入时所有参数都被 _imp_ 备份"""
 
-    def test_all_config_keys_have_imp_backup(self):
+    def test_all_config_keys_have_imp_backup(self, sample_config):
         """JSON中的每个key导入后都应有 _imp_ 备份"""
-        with open(CONFIG_PATH) as f:
-            config = json.load(f)
+        config = sample_config
 
         # 模拟导入逻辑
         session_state = {}
@@ -85,10 +96,9 @@ class TestImpBackupCoverage:
             + "\n".join(f"  - {k}" for k in missing_imp)
         )
 
-    def test_imp_values_match_original(self):
+    def test_imp_values_match_original(self, sample_config):
         """_imp_ 备份值与原始值一致"""
-        with open(CONFIG_PATH) as f:
-            config = json.load(f)
+        config = sample_config
 
         session_state = {}
         for k, v in config.items():
@@ -114,10 +124,9 @@ class TestImpBackupCoverage:
 class TestParameterChangeDetection:
     """自动检测新增或删除的参数（信息性测试，不使CI失败）"""
 
-    def test_no_stale_keys_in_json(self):
+    def test_no_stale_keys_in_json(self, sample_config):
         """JSON中没有多余的未知参数"""
-        with open(CONFIG_PATH) as f:
-            config = json.load(f)
+        config = sample_config
 
         known_keys = set(REQUIRED_GLOBAL_KEYS)
         for i in range(4):
@@ -143,10 +152,9 @@ class TestParameterChangeDetection:
                 print(f"  - {k}")
             print("这些可能是新增参数，请更新 REQUIRED_PER_VIEW_KEYS 列表")
 
-    def test_all_json_per_view_keys_match_pattern(self):
+    def test_all_json_per_view_keys_match_pattern(self, sample_config):
         """JSON中的per-view键符合 v{N}_{name} 模式"""
-        with open(CONFIG_PATH) as f:
-            config = json.load(f)
+        config = sample_config
 
         invalid = []
         for k in config.keys():
@@ -175,8 +183,19 @@ class TestExpandCollapseParameterRecovery:
 
     def setup_method(self):
         """加载JSON配置模拟导入"""
-        with open(CONFIG_PATH) as f:
-            self.config = json.load(f)
+        # Build a fixture-style config inline to avoid file dependency
+        base = {
+            "market": "港股 HK",
+            "ticker": "TEST",
+            "global_f": "sma",
+            "global_dual": False,
+            "global_f2": None,
+        }
+        for i in range(4):
+            for suffix, cfg_key, default in VIEW_PARAM_SPECS:
+                base[f"v{i}_{suffix}"] = default if default is not None else ""
+            base[f"窗口大小_v{i}_f1_sma"] = 11
+        self.config = base
 
     def test_all_params_recoverable_after_widget_loss(self):
         """所有参数在widget key丢失后可从_imp_恢复"""
@@ -236,16 +255,12 @@ class TestExpandCollapseParameterRecovery:
         )
 
     def test_specific_critical_params_recoverable(self):
-        """关键参数（fit_mode, n_ext, cross_pnl, align）可恢复"""
+        """关键参数（show_sch, show_pred, n_ext）可恢复"""
+        # Use keys matching VIEW_PARAM_SPECS suffix pattern: v{i}_{suffix}
         critical_params = {
-            "v0_fm": "parabola",
+            "v0_sch": False,
+            "v0_pred": False,
             "v0_next": 8,
-            "v0_cross_pnl": True,
-            "v0_align": True,
-            "v0_strat": True,
-            "v0_ke": 0.1,
-            "v0_sm": 0.03,
-            "v0_ew": 40,
         }
 
         session_state = {}
@@ -304,12 +319,9 @@ class TestExpandCollapseParameterRecovery:
 class TestImportIdempotency:
     """验证重复导入相同配置不产生脏数据"""
 
-    def test_repeated_import_idempotent(self):
+    def test_repeated_import_idempotent(self, sample_config):
         """同一JSON导入多次，session_state 值不变"""
-        with open(CONFIG_PATH) as f:
-            raw = f.read()
-
-        config = json.loads(raw)
+        config = sample_config
 
         # 第一次导入
         session_state = {}

@@ -327,6 +327,33 @@ class TestHelpers:
         db_module, _ = db_target
         assert db_module.has_data("NODATA") is False
 
+    def test_get_latest_date_has_data(self, populate_kline):
+        """有数据时返回最新时间戳。"""
+        db_module, _ = populate_kline
+        result = db_module.get_latest_date("AAPL", "日线")
+        assert result is not None
+        assert "2026-07" in result  # 50 days from 2026-06-01
+
+    def test_get_latest_date_no_data(self, db_target):
+        """无数据时返回 None。"""
+        db_module, _ = db_target
+        assert db_module.get_latest_date("NODATA", "日线") is None
+
+    def test_get_latest_date_specific_timeframe(self, populate_kline):
+        """指定周期正确返回该周期的最后时间戳。"""
+        db_module, _ = populate_kline
+        result = db_module.get_latest_date("AAPL", "60分钟")
+        assert result is not None
+        # 60分钟数据从 2026-06-01 开始，60条
+        assert "2026-06" in result
+
+    def test_get_latest_date_wrong_timeframe(self, populate_kline):
+        """数据存在但周期不匹配时返回 None。"""
+        db_module, _ = populate_kline
+        # MSFT only has 日线, not 60分钟
+        result = db_module.get_latest_date("MSFT", "60分钟")
+        assert result is None
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 5. TestCheckDataHealth
@@ -902,3 +929,102 @@ class TestConcurrentAccess:
         mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
         conn.close()
         assert mode == "wal"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P0-4: SQLite PRAGMA 优化 — 验证 PRAGMA 设置
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPragmaOptimization:
+    """验证 get_conn() 返回的连接正确设置了性能 PRAGMA。"""
+
+    def test_mmap_size_set(self):
+        """get_conn() 应设置 mmap_size。"""
+        from filter_app.db import get_conn
+
+        conn = get_conn()
+        try:
+            mmap = conn.execute("PRAGMA mmap_size").fetchone()[0]
+            # mmap_size 应 > 0（即已启用 memory-mapped I/O）
+            assert mmap > 0, f"mmap_size should be > 0, got {mmap}"
+        finally:
+            conn.close()
+
+    def test_temp_store_memory(self):
+        """get_conn() 应设置 temp_store=MEMORY。"""
+        from filter_app.db import get_conn
+
+        conn = get_conn()
+        try:
+            val = conn.execute("PRAGMA temp_store").fetchone()[0]
+            # 0=DEFAULT, 1=FILE, 2=MEMORY
+            assert val == 2, f"temp_store should be 2 (MEMORY), got {val}"
+        finally:
+            conn.close()
+
+    def test_cache_size_set(self):
+        """get_conn() 应设置 cache_size 为负值（KB）。"""
+        from filter_app.db import get_conn
+
+        conn = get_conn()
+        try:
+            cache = conn.execute("PRAGMA cache_size").fetchone()[0]
+            # 负值表示 KB，正数表示页数。我们设置的是 -32768
+            assert cache != 0, f"cache_size should be non-zero, got {cache}"
+        finally:
+            conn.close()
+
+    def test_busy_timeout_set(self):
+        """get_conn() 应设置 busy_timeout。"""
+        from filter_app.db import get_conn
+
+        conn = get_conn()
+        try:
+            timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+            assert timeout == 5000, f"busy_timeout should be 5000, got {timeout}"
+        finally:
+            conn.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P0-8: executemany 批量 DELETE — 验证结果一致性
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestForceUpdateBatch:
+    """验证 force_update_kline 的批量 DELETE 行为。"""
+
+    def test_force_update_deletes_overlapping(self, db_target):
+        """force_update_kline 应正确删除重叠时间戳并插入新数据。"""
+        from filter_app.db import force_update_kline, query_kline
+
+        _, db_path = db_target
+
+        # 插入初始数据
+        import pandas as pd
+        dates = pd.date_range("2024-01-01", periods=5, freq="D")
+        df_old = pd.DataFrame({
+            "Open": 100.0, "High": 102.0, "Low": 99.0, "Close": 101.0, "Volume": 1000,
+        }, index=dates)
+
+        force_update_kline("TEST_BATCH", "日线", df_old)
+
+        # 更新部分重叠的数据
+        dates2 = pd.date_range("2024-01-04", periods=3, freq="D")
+        df_new = pd.DataFrame({
+            "Open": 200.0, "High": 202.0, "Low": 199.0, "Close": 201.0, "Volume": 2000,
+        }, index=dates2)
+
+        force_update_kline("TEST_BATCH", "日线", df_new)
+
+        # 验证: 旧数据被删除/覆盖，总数不变
+        rows = query_kline("TEST_BATCH", "日线", n_pts=500)
+        assert len(rows) >= 5, f"Expected at least 5 rows, got {len(rows)}"
+
+    def test_force_update_empty_records(self, db_target):
+        """空 DataFrame 的 force_update 不应报错。"""
+        from filter_app.db import force_update_kline
+
+        import pandas as pd
+        df_empty = pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
+        # 空 DataFrame 不应引发异常
+        force_update_kline("TEST_EMPTY", "日线", df_empty)

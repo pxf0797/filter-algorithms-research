@@ -16,6 +16,14 @@ from statsmodels.nonparametric.smoothers_lowess import lowess
 from pandas import DataFrame
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from numba import jit
+    HAS_NUMBA = True
+except ImportError:
+    def jit(*args, **kwargs):
+        return lambda f: f
+    HAS_NUMBA = False
+
 
 # ---------------------------------------------------------------------------
 # Filter implementations (scipy / numpy only)
@@ -154,6 +162,99 @@ def apply_savgol(signal: np.ndarray, t: np.ndarray, window: int, order: int) -> 
     return savgol_filter(signal, window, order)
 
 
+# ---------------------------------------------------------------------------
+# Kalman filter numba-accelerated core
+# ---------------------------------------------------------------------------
+
+@jit(nopython=True, cache=True)
+def _kalman_core(signal: np.ndarray, dt: float, Q: float, R: float) -> np.ndarray:
+    """numba-accelerated 1D constant-velocity Kalman filter core loop.
+
+    State: [position, velocity]. Constant-velocity model with
+    scalar position observation.
+
+    Parameters
+    ----------
+    signal : np.ndarray
+        Input observation signal (position measurements).
+    dt : float
+        Time step between observations.
+    Q : float
+        Process noise covariance magnitude.
+    R : float
+        Measurement noise covariance.
+
+    Returns
+    -------
+    np.ndarray
+        Filtered position sequence, same length as signal.
+    """
+    n = len(signal)
+    x = np.zeros(2)
+    x[0] = signal[0]
+    x[1] = 0.0
+    P = np.zeros((2, 2))
+    P[0, 0] = 0.1
+    P[1, 1] = 0.1
+    F = np.zeros((2, 2))
+    F[0, 0] = 1.0
+    F[0, 1] = dt
+    F[1, 0] = 0.0
+    F[1, 1] = 1.0
+    result = np.zeros(n)
+
+    for i in range(n):
+        # Predict
+        x_new = np.zeros(2)
+        x_new[0] = F[0, 0] * x[0] + F[0, 1] * x[1]
+        x_new[1] = F[1, 0] * x[0] + F[1, 1] * x[1]
+        x[0] = x_new[0]
+        x[1] = x_new[1]
+
+        P_new = np.zeros((2, 2))
+        for r_idx in range(2):
+            for c_idx in range(2):
+                s = 0.0
+                for k in range(2):
+                    s += F[r_idx, k] * P[k, c_idx]
+                P_new[r_idx, c_idx] = s
+        P_mid = np.zeros((2, 2))
+        for r_idx in range(2):
+            for c_idx in range(2):
+                s = 0.0
+                for k in range(2):
+                    s += P_new[r_idx, k] * F[c_idx, k]
+                P_mid[r_idx, c_idx] = s
+
+        # Process noise
+        P_mid[0, 0] += Q * dt ** 4 / 4.0
+        P_mid[0, 1] += Q * dt ** 3 / 2.0
+        P_mid[1, 0] += Q * dt ** 3 / 2.0
+        P_mid[1, 1] += Q * dt ** 2
+
+        P_old = P
+
+        # Update (scalar observation)
+        y = signal[i] - x[0]
+        S = P_mid[0, 0] + R
+        K = np.zeros(2)
+        K[0] = P_mid[0, 0] / S
+        K[1] = P_mid[1, 0] / S
+        x[0] = x[0] + K[0] * y
+        x[1] = x[1] + K[1] * y
+
+        P = np.zeros((2, 2))
+        # P = P_mid - K * K^T * S
+        P[0, 0] = P_mid[0, 0] - K[0] * K[0] * S
+        P[0, 1] = P_mid[0, 1] - K[0] * K[1] * S
+        P[1, 0] = P_mid[1, 0] - K[1] * K[0] * S
+        P[1, 1] = P_mid[1, 1] - K[1] * K[1] * S
+
+        result[i] = x[0]
+
+    return result
+
+
 def apply_kalman(signal: np.ndarray, t: np.ndarray, Q: float, R: float) -> np.ndarray:
     """1D 恒定速度卡尔曼滤波.
 
@@ -175,7 +276,11 @@ def apply_kalman(signal: np.ndarray, t: np.ndarray, Q: float, R: float) -> np.nd
     np.ndarray
         卡尔曼滤波后的信号序列，长度与输入相同。
     """
-    dt = t[1] - t[0]
+    dt = float(t[1] - t[0])
+    if HAS_NUMBA:
+        return _kalman_core(signal, dt, Q, R)
+
+    # Pure Python / NumPy fallback
     n = len(signal)
     x = np.array([signal[0], 0.0])     # [position, velocity]
     P = np.eye(2) * 0.1
@@ -428,6 +533,46 @@ def compute_metrics(clean: np.ndarray, noisy: np.ndarray, filtered: np.ndarray) 
 
 
 # ---------------------------------------------------------------------------
+# Schmitt Trigger numba-accelerated core
+# ---------------------------------------------------------------------------
+
+@jit(nopython=True, cache=True)
+def _schmitt_core(price: np.ndarray, upper: np.ndarray, lower: np.ndarray,
+                  state: int = 0) -> np.ndarray:
+    """numba-accelerated Schmitt trigger core loop.
+
+    Classic two-threshold hysteresis state machine:
+    - price > upper → state = 1 (on)
+    - price < lower → state = 0 (off)
+    - otherwise state stays unchanged.
+
+    Parameters
+    ----------
+    price : np.ndarray
+        Input price/signal sequence.
+    upper : np.ndarray
+        Upper threshold array (same length as price).
+    lower : np.ndarray
+        Lower threshold array (same length as price).
+    state : int
+        Initial state (0 or 1).
+
+    Returns
+    -------
+    np.ndarray
+        State sequence (0 or 1), same length as price.
+    """
+    out = np.empty_like(price)
+    for i in range(len(price)):
+        if price[i] > upper[i]:
+            state = 1
+        elif price[i] < lower[i]:
+            state = 0
+        out[i] = state
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Schmitt Trigger computation (ref: 多周期趋势策略V2_优化4 §二, chart ④⑥)
 # Inputs: v (velocity = d(filtered)/dt) as momentum, a (d²/dt²) as acceleration
 # ---------------------------------------------------------------------------
@@ -478,16 +623,20 @@ def _schmitt_trigger(v: np.ndarray, a: np.ndarray, ewma_span: int = 60,
     if n < ewma_span:
         return None
 
-    # EWMA volatility of v → σ_t(v)
+    # EWMA volatility of v → σ_t(v) — vectorized via pandas ewm (C impl)
+    # P1-11: replace for-loop with pd.Series.ewm for 5-15x speedup
     alpha = 2.0 / (ewma_span + 1)
-    mu_v = np.full(n, np.nan)
-    sigma_v = np.full(n, np.nan)
-    mu_v[0] = init_mu if init_mu is not None and init_sigma is not None else v[0]
-    sigma_v[0] = init_sigma if init_mu is not None and init_sigma is not None else 0.0
-    for i in range(1, n):
-        mu_v[i] = alpha * v[i] + (1 - alpha) * mu_v[i - 1]
-        sigma_v[i] = np.sqrt(
-            alpha * (v[i] - mu_v[i]) ** 2 + (1 - alpha) * sigma_v[i - 1] ** 2)
+    init_mu_val = init_mu if init_mu is not None and init_sigma is not None else v[0]
+    init_sigma_val = init_sigma if init_mu is not None and init_sigma is not None else 0.0
+
+    s = pd.Series(v)
+    mu_v = s.ewm(alpha=alpha, adjust=False).mean().values
+    sigma_v = np.sqrt(
+        pd.Series((v - mu_v) ** 2).ewm(alpha=alpha, adjust=False).mean().values
+    )
+    # Override initial values to match legacy explicit init behavior
+    mu_v[0] = init_mu_val
+    sigma_v[0] = init_sigma_val
 
     # Adaptive deadband
     eps_t = k_eps * np.maximum(sigma_v, sigma_min)
@@ -728,6 +877,8 @@ def _compute_strategy_pnl(
 
     trade_records = []
     trade_id = 0
+    last_long_exit = -1
+    last_short_exit = -1
 
     for pair_start, pair_end in all_pairs:
         # ---- 判断交易方向（仅凭 Sig 反转方向；入场不再依赖抛物线预测）----
@@ -817,32 +968,32 @@ def _compute_strategy_pnl(
         trade_id += 1
 
         # ---- 填充持仓期间的PnL曲线 ----
+        # P1-2: numpy向量化切片替代逐bar for循环（O(hold_bars) per trade）
+        idx_slice = slice(entry_idx, exit_idx + 1)
+        prices = filtered[idx_slice]
+        valid = ~(np.isnan(prices) | (prices <= 0))
         if is_long:
             # 做多：持仓期间曲线随价格变动
-            for i in range(entry_idx, exit_idx + 1):
-                cur_p = filtered[i]
-                if np.isnan(cur_p) or cur_p <= 0:
-                    continue
-                unrealized = (cur_p - entry_price) / entry_price
-                long_pnl[i] = long_capital * (1 + unrealized)
+            old_vals = long_pnl[idx_slice].copy()
+            if np.any(valid):
+                unrealized = np.zeros(len(prices))
+                unrealized[valid] = (prices[valid] - entry_price) / entry_price
+                new_vals = long_capital * (1 + unrealized)
+                long_pnl[idx_slice] = np.where(valid, new_vals, old_vals)
             # 更新做多已实现本金
             long_capital *= (1 + trade_return)
-            # 离场后到数据末尾先填充已实现值（后续交易会覆盖）
-            for i in range(exit_idx + 1, n):
-                long_pnl[i] = long_capital
+            last_long_exit = exit_idx
         else:
             # 做空：持仓期间曲线随价格变动
-            for i in range(entry_idx, exit_idx + 1):
-                cur_p = filtered[i]
-                if np.isnan(cur_p) or cur_p <= 0:
-                    continue
-                unrealized = (entry_price - cur_p) / entry_price
-                short_pnl[i] = short_capital * (1 + unrealized)
+            old_vals = short_pnl[idx_slice].copy()
+            if np.any(valid):
+                unrealized = np.zeros(len(prices))
+                unrealized[valid] = (entry_price - prices[valid]) / entry_price
+                new_vals = short_capital * (1 + unrealized)
+                short_pnl[idx_slice] = np.where(valid, new_vals, old_vals)
             # 更新做空已实现本金
             short_capital *= (1 + trade_return)
-            # 离场后填充已实现值
-            for i in range(exit_idx + 1, n):
-                short_pnl[i] = short_capital
+            last_short_exit = exit_idx
 
         # ---- 记录交易 ----
         trade_records.append({
@@ -856,22 +1007,20 @@ def _compute_strategy_pnl(
             "exit_reason": exit_reason,
         })
 
-    # ---- 前向填充：非持仓期维持上一个值不变（水平直线） ----
-    # 做多曲线
-    last_val = 100.0
-    for i in range(n):
-        if long_pnl[i] == 100.0 and i > 0 and last_val != 100.0:
-            long_pnl[i] = last_val
-        if long_pnl[i] != 100.0 or (i == 0):
-            last_val = long_pnl[i]
+    # ---- P1-2: 尾部一次性填充（替代循环内逐笔 O(n) 覆写） ----
+    # 只有最后一笔交易的尾部需要保留；前续交易的尾部随后续交易持仓期间价格覆盖
+    if last_long_exit >= 0 and last_long_exit + 1 < n:
+        long_pnl[last_long_exit + 1:] = long_capital
+    if last_short_exit >= 0 and last_short_exit + 1 < n:
+        short_pnl[last_short_exit + 1:] = short_capital
 
-    # 做空曲线
-    last_val = 100.0
-    for i in range(n):
-        if short_pnl[i] == 100.0 and i > 0 and last_val != 100.0:
-            short_pnl[i] = last_val
-        if short_pnl[i] != 100.0 or (i == 0):
-            last_val = short_pnl[i]
+    # ---- 前向填充：非持仓期维持上一个值不变（水平直线） ----
+    # P1-12: vectorized ffill via pandas (C impl, 5-15x speedup)
+    # Value 100.0 represents non-holding period → replace with NaN, ffill, then fill back to 100.0
+    long_series = pd.Series(long_pnl).replace(100.0, np.nan).ffill().fillna(100.0)
+    long_pnl = long_series.values
+    short_series = pd.Series(short_pnl).replace(100.0, np.nan).ffill().fillna(100.0)
+    short_pnl = short_series.values
 
     return long_pnl, short_pnl, trade_records
 
@@ -944,15 +1093,11 @@ def _align_pnl_to_current_tf(
     cd = _normalize_dates(current_dates)
 
     # 对当前周期的每个bar，找 ≤ 该时间戳的最近高周期bar（前向填充）
-    for i in range(n):
-        mask = hd <= cd[i]
-        if not mask.any():
-            continue
-        j = int(np.argmax(mask))  # 最后一个True的位置...
-        # argmax on boolean array returns first True. We want last True.
-        j = np.max(np.where(mask)[0])
-        aligned_long[i] = higher_pnl_long[j]
-        aligned_short[i] = higher_pnl_short[j]
+    # P0-1: np.searchsorted 替代 O(n*m) 逐 bar 布尔扫描
+    j_indices = np.searchsorted(hd, cd, side="right") - 1
+    valid = (j_indices >= 0) & (j_indices < len(hd))
+    aligned_long[valid] = higher_pnl_long[j_indices[valid]]
+    aligned_short[valid] = higher_pnl_short[j_indices[valid]]
 
     # 映射交易事件到当前周期bar index
     for trade in higher_trades:
@@ -966,13 +1111,13 @@ def _align_pnl_to_current_tf(
         # 找到当前周期中 ≤ entry_time 的最近bar
         # 若开仓在当前窗口起点之前，但仓位延续进窗口(exit ≥ 窗口起点)，则从
         # 窗口起点(bar0)开始显示，把当前周期起始点包含在内(与 eod 右延续镜像)。
-        entry_mask = cd <= entry_time
-        if entry_mask.any():
-            entry_bar = int(np.max(np.where(entry_mask)[0]))
-        elif n > 0 and exit_time >= cd[0]:
-            entry_bar = 0
-        else:
-            entry_bar = None
+        # P0-2: np.searchsorted 替代 np.where 布尔扫描
+        entry_bar = int(np.searchsorted(cd, entry_time, side="right")) - 1
+        if entry_bar < 0:
+            if n > 0 and exit_time >= cd[0]:
+                entry_bar = 0
+            else:
+                entry_bar = None
         if entry_bar is not None:
             pnl_at_entry = aligned_long[entry_bar] if trade["type"] == "long" else aligned_short[entry_bar]
             entry_markers.append((entry_bar, trade["type"], pnl_at_entry if not np.isnan(pnl_at_entry) else 100.0))
@@ -980,14 +1125,14 @@ def _align_pnl_to_current_tf(
         # 离场：≤ exit_time 的最近bar
         # eod = 高周期该仓位未真正结束(跑到数据末端被强制平仓)，低周期应延续到
         #       最新bar(右边缘)，而非停在高周期末bar对应的较早位置(半边多空对)。
+        # P0-2: np.searchsorted 替代 np.where 布尔扫描
         exit_reason = trade.get("exit_reason", "")
-        exit_mask = cd <= exit_time
         if exit_reason == "eod":
             exit_bar = n - 1
-        elif exit_mask.any():
-            exit_bar = int(np.max(np.where(exit_mask)[0]))
         else:
-            exit_bar = None
+            exit_bar = int(np.searchsorted(cd, exit_time, side="right")) - 1
+            if exit_bar < 0:
+                exit_bar = None
         if exit_bar is not None:
             pnl_at_exit = aligned_long[exit_bar] if trade["type"] == "long" else aligned_short[exit_bar]
             exit_markers.append((exit_bar, trade["type"],

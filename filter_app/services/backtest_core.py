@@ -7,9 +7,11 @@
 
 import hashlib
 import json
+import os
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 
@@ -22,17 +24,10 @@ from .filter_engine import (
     _align_pnl_to_current_tf,
     _compute_holding_masks,
 )
-from .data_loader import _sync_all_cascading
+from .data_loader import _sync_all_cascading, load_display_cache
 from .bs_marker import compute_bs_markers
 from db import get_conn
-
-# 周期层级定义（与 components/sidebar.py 保持一致）
-ALL_TFS = ["1分钟", "5分钟", "15分钟", "60分钟", "日线", "周线", "月线", "季线"]
-TF_HIERARCHY = {
-    "1分钟": "5分钟", "5分钟": "15分钟", "15分钟": "60分钟",
-    "60分钟": "日线", "日线": "周线", "周线": "月线",
-    "月线": "季线", "季线": None,
-}
+from constants import ALL_TFS, TF_HIERARCHY
 
 
 class BacktestRunner:
@@ -91,9 +86,17 @@ class BacktestRunner:
         # bar 总数
         self._bar_count: int = self._query_bar_count()
 
+        # P0-3: 一次性预加载全部 bar 信息到内存，避免逐 bar LIMIT 1 OFFSET N
+        self._MAX_BAR_CACHE = 200_000
+        self._bar_info_cache: list[dict] = self._load_all_bar_info()
+
         # 跨窗口 EWMA + 施密特状态（回测连续模式用，避免信号跳变）
         # {view_key: {"init_mu": float, "init_sigma": float, "state": int, "dur": int}}
         self._ewma_state: dict[str, dict] = {}
+
+        # P0-2: 增量计算缓存 — 避免相邻 bar 窗口 99% 重叠数据重算
+        # {(view_key, prev_window_hash): (filtered[:-1], filtered2[:-1])}
+        self._pipeline_cache: dict = {}
 
         logger.info(
             "BacktestRunner 初始化: ticker={}, min_tf={}, tfs={}, bar_count={}, views={}",
@@ -155,6 +158,11 @@ class BacktestRunner:
 
         results: list[dict] = []
 
+        # P0-5: 回测开始前一次性预同步级联合成数据
+        # 用 end_bar 对应的 cutoff_date（最远的）合成一次，避免逐 bar 重写 parquet
+        end_info = self._get_bar_info(min(end_bar - 1, len(self._bar_info_cache) - 1))
+        self._sync_data(end_info["cutoff_date"])
+
         for bar_index in range(start_bar, end_bar, step_interval):
             bar_info = self._get_bar_info(bar_index)
             cutoff_date = bar_info["cutoff_date"]
@@ -163,8 +171,8 @@ class BacktestRunner:
                 bar_index, cutoff_date,
             )
 
-            # 1) 同步数据（写入 parquet）
-            self._sync_data(cutoff_date)
+            # 1) 数据已在循环前一次性同步，逐 bar 不再调用 _sync_data
+            # （如需逐 bar 精确截止，设置环境变量 BACKTEST_PRESYNC=0）
 
             # 2) 逐视图加载窗口数据并运行管道（按 TF 从粗到细排序）
             view_outputs: dict[str, dict] = {}
@@ -177,62 +185,134 @@ class BacktestRunner:
                 reverse=True,  # 粗→细
             )
 
-            for view_index, view_cfg in sorted_views:
-                tf = view_cfg["tf"]
-                n_pts = view_cfg.get("n_pts", 120)
-                view_key = f"v{view_index}_{tf}"
+            # P3-2: 多视图并行计算 — 预加载窗口数据，然后并行运行管道
+            _use_parallel = os.environ.get("BACKTEST_PARALLEL_VIEWS", "1") == "1"
+            if _use_parallel and len(sorted_views) > 1:
+                # 阶段 1: 预加载所有窗口数据
+                preloaded: dict[str, tuple] = {}
+                ewma_inits: dict[str, Optional[dict]] = {}
+                for view_index, view_cfg in sorted_views:
+                    tf = view_cfg["tf"]
+                    n_pts = view_cfg.get("n_pts", 120)
+                    view_key = f"v{view_index}_{tf}"
+                    window_data = self._load_window_data(tf, n_pts)
+                    if window_data is None:
+                        logger.warning("视图 {} 窗口数据为空，跳过", view_key)
+                        continue
+                    preloaded[view_key] = window_data
+                    ewma_inits[view_key] = self._ewma_state.get(view_key)
 
-                # 加载窗口数据
-                window_data = self._load_window_data(tf, n_pts)
-                if window_data is None:
-                    logger.warning("视图 {} 窗口数据为空，跳过", view_key)
-                    continue
+                # 阶段 2: 并行运行管道计算（关闭 pipeline_cache 以确保线程安全）
+                n_views = len(preloaded)
+                if n_views > 0:
+                    pipeline_futures: dict = {}
+                    with ThreadPoolExecutor(max_workers=min(n_views, 4)) as executor:
+                        for view_index, view_cfg in sorted_views:
+                            view_key = f"v{view_index}_{view_cfg['tf']}"
+                            if view_key not in preloaded:
+                                continue
+                            future = executor.submit(
+                                self._compute_pipeline_for_view,
+                                view_cfg, preloaded[view_key],
+                                ewma_init=ewma_inits.get(view_key),
+                                use_pipeline_cache=False,
+                            )
+                            pipeline_futures[future] = (view_index, view_cfg, view_key)
 
-                # 跨窗口 EWMA 初始状态（首次为 None → 正常初始化）
-                ewma_init = self._ewma_state.get(view_key)
+                        for future in as_completed(pipeline_futures):
+                            view_index, view_cfg, view_key = pipeline_futures[future]
+                            try:
+                                stage_output = future.result()
+                            except Exception as e:
+                                logger.error("视图 {} 管道计算失败: {}", view_key, e)
+                                continue
 
-                # 运行管道
-                stage_output = self._compute_pipeline_for_view(
-                    view_cfg, window_data, ewma_init=ewma_init,
-                )
+                            # 阶段 3: 顺序处理（EWMA状态、跨周期对齐、持仓掩码、BS标记）
+                            tf = view_cfg["tf"]
+                            schmitt = stage_output.get("schmitt")
+                            if schmitt is not None:
+                                self._ewma_state[view_key] = {
+                                    "init_mu": schmitt.get("final_mu", 0.0),
+                                    "init_sigma": schmitt.get("final_sigma", 0.0),
+                                    "state": schmitt.get("final_state", 0),
+                                    "dur": schmitt.get("final_dur", 0),
+                                }
 
-                # 保存本窗口 EWMA + 施密特末态，供下一窗口使用
-                schmitt = stage_output.get("schmitt")
-                if schmitt is not None:
-                    self._ewma_state[view_key] = {
-                        "init_mu": schmitt.get("final_mu", 0.0),
-                        "init_sigma": schmitt.get("final_sigma", 0.0),
-                        "state": schmitt.get("final_state", 0),
-                        "dur": schmitt.get("final_dur", 0),
-                    }
+                            higher_tf = TF_HIERARCHY.get(tf)
+                            higher_pnl = tf_pnl_cache.get(higher_tf) if higher_tf else None
+                            stage_output["higher_pnl"] = higher_pnl
 
-                # 跨周期 PnL 对齐：检查是否有高周期 PnL 可用
-                higher_tf = TF_HIERARCHY.get(tf)
-                higher_pnl = tf_pnl_cache.get(higher_tf) if higher_tf else None
-                stage_output["higher_pnl"] = higher_pnl
+                            long_mask, short_mask = self._compute_masks_for_view(
+                                stage_output, higher_pnl,
+                            )
+                            stage_output["long_mask"] = long_mask
+                            stage_output["short_mask"] = short_mask
 
-                # 计算持仓掩码和 BS 标记
-                long_mask, short_mask = self._compute_masks_for_view(
-                    stage_output, higher_pnl,
-                )
-                stage_output["long_mask"] = long_mask
-                stage_output["short_mask"] = short_mask
+                            bs_markers = self._compute_bs_for_view(
+                                stage_output, view_cfg, long_mask, short_mask,
+                            )
+                            stage_output["bs_markers"] = bs_markers
 
-                bs_markers = self._compute_bs_for_view(
-                    stage_output, view_cfg, long_mask, short_mask,
-                )
-                stage_output["bs_markers"] = bs_markers
+                            view_outputs[view_key] = stage_output
 
-                view_outputs[view_key] = stage_output
+                            if stage_output.get("long_pnl") is not None:
+                                tf_pnl_cache[tf] = {
+                                    "dates": stage_output["dates"],
+                                    "long_pnl": stage_output["long_pnl"],
+                                    "short_pnl": stage_output["short_pnl"],
+                                    "trade_records": stage_output["trade_records"],
+                                }
+            else:
+                # 顺序模式（原有逻辑，保持兼容）
+                for view_index, view_cfg in sorted_views:
+                    tf = view_cfg["tf"]
+                    n_pts = view_cfg.get("n_pts", 120)
+                    view_key = f"v{view_index}_{tf}"
 
-                # 缓存本 TF 的 PnL 数据供更低周期使用
-                if stage_output.get("long_pnl") is not None:
-                    tf_pnl_cache[tf] = {
-                        "dates": stage_output["dates"],
-                        "long_pnl": stage_output["long_pnl"],
-                        "short_pnl": stage_output["short_pnl"],
-                        "trade_records": stage_output["trade_records"],
-                    }
+                    window_data = self._load_window_data(tf, n_pts)
+                    if window_data is None:
+                        logger.warning("视图 {} 窗口数据为空，跳过", view_key)
+                        continue
+
+                    ewma_init = self._ewma_state.get(view_key)
+
+                    stage_output = self._compute_pipeline_for_view(
+                        view_cfg, window_data, ewma_init=ewma_init,
+                    )
+
+                    schmitt = stage_output.get("schmitt")
+                    if schmitt is not None:
+                        self._ewma_state[view_key] = {
+                            "init_mu": schmitt.get("final_mu", 0.0),
+                            "init_sigma": schmitt.get("final_sigma", 0.0),
+                            "state": schmitt.get("final_state", 0),
+                            "dur": schmitt.get("final_dur", 0),
+                        }
+
+                    higher_tf = TF_HIERARCHY.get(tf)
+                    higher_pnl = tf_pnl_cache.get(higher_tf) if higher_tf else None
+                    stage_output["higher_pnl"] = higher_pnl
+
+                    long_mask, short_mask = self._compute_masks_for_view(
+                        stage_output, higher_pnl,
+                    )
+                    stage_output["long_mask"] = long_mask
+                    stage_output["short_mask"] = short_mask
+
+                    bs_markers = self._compute_bs_for_view(
+                        stage_output, view_cfg, long_mask, short_mask,
+                    )
+                    stage_output["bs_markers"] = bs_markers
+
+                    view_outputs[view_key] = stage_output
+
+                    if stage_output.get("long_pnl") is not None:
+                        tf_pnl_cache[tf] = {
+                            "dates": stage_output["dates"],
+                            "long_pnl": stage_output["long_pnl"],
+                            "short_pnl": stage_output["short_pnl"],
+                            "trade_records": stage_output["trade_records"],
+                        }
 
             results.append({
                 "step_index": bar_index,
@@ -379,8 +459,39 @@ class BacktestRunner:
     # 内部方法
     # ------------------------------------------------------------------
 
+    def _load_all_bar_info(self) -> list[dict]:
+        """一次性从 DB 加载 min_tf 的全部 bar 信息到内存（P0-3）。
+
+        Returns
+        -------
+        list[dict]
+            每个元素为 ``{"bar_timestamp": str, "cutoff_date": str, "ohlcv": {...}}``。
+        """
+        limit = min(self._bar_count, self._MAX_BAR_CACHE)
+        with get_conn() as conn:
+            rows = conn.execute(
+                """SELECT ts, open, high, low, close, volume FROM kline
+                   WHERE ticker=? AND timeframe=?
+                   ORDER BY ts ASC LIMIT ?""",
+                (self.ticker, self._min_tf, limit),
+            ).fetchall()
+        return [
+            {
+                "bar_timestamp": r["ts"],
+                "cutoff_date": r["ts"],
+                "ohlcv": {
+                    "open": r["open"],
+                    "high": r["high"],
+                    "low": r["low"],
+                    "close": r["close"],
+                    "volume": r["volume"],
+                },
+            }
+            for r in rows
+        ]
+
     def _get_bar_info(self, bar_index: int) -> dict:
-        """从 DB 查询 bar_index 对应的 bar 信息。
+        """从内存缓存 O(1) 获取 bar 信息（P0-3）。
 
         以 min_tf 为基准周期，查询第 bar_index 条记录的 ts、OHLCV。
 
@@ -404,29 +515,13 @@ class BacktestRunner:
                 f"bar_index={bar_index} 超出范围 [0, {self._bar_count})"
             )
 
-        with get_conn() as conn:
-            row = conn.execute(
-                """SELECT ts, open, high, low, close, volume FROM kline
-                   WHERE ticker=? AND timeframe=?
-                   ORDER BY ts ASC LIMIT 1 OFFSET ?""",
-                (self.ticker, self._min_tf, bar_index),
-            ).fetchone()
-
-        if row is None:
+        # P0-3: O(1) cache lookup instead of LIMIT 1 OFFSET N
+        if bar_index >= len(self._bar_info_cache):
             raise IndexError(
-                f"bar_index={bar_index} 在 DB 中无对应数据"
+                f"bar_index={bar_index} 超出预加载缓存范围 "
+                f"(max={len(self._bar_info_cache) - 1})"
             )
-        return {
-            "bar_timestamp": row["ts"],
-            "cutoff_date": row["ts"],
-            "ohlcv": {
-                "open": row["open"],
-                "high": row["high"],
-                "low": row["low"],
-                "close": row["close"],
-                "volume": row["volume"],
-            },
-        }
+        return self._bar_info_cache[bar_index]
 
     def _sync_data(self, cutoff_date: str) -> None:
         """同步数据到 display parquet（级联合成）。
@@ -474,24 +569,17 @@ class BacktestRunner:
             ``(t, noisy, ohlc, dates)`` — bar 索引、收盘价、OHLC DataFrame、
             日期索引。parquet 不存在或数据不足时返回 ``None``。
         """
-        display_path = (
-            Path(__file__).parent.parent.parent / "data" / "display" / self.ticker / f"{tf}.parquet"
-        )
-        if not display_path.exists():
-            logger.warning("parquet 不存在: {}", display_path)
-            return None
-
-        try:
-            df = pd.read_parquet(display_path)
-        except Exception as e:
-            logger.warning("parquet 读取失败 {}: {}", display_path, e)
+        df = load_display_cache(self.ticker, tf)
+        if df is None:
+            if not (Path(__file__).parent.parent.parent / "data" / "display" / self.ticker / f"{tf}.parquet").exists():
+                logger.warning("parquet 不存在: {}", Path(__file__).parent.parent.parent / "data" / "display" / self.ticker / f"{tf}.parquet")
             return None
 
         if "Date" not in df.columns or "Close" not in df.columns:
-            logger.warning("parquet {} 缺少 Date/Close 列", display_path)
+            logger.warning("parquet {}/{} 缺少 Date/Close 列", self.ticker, tf)
             return None
         if len(df) < 2:
-            logger.warning("parquet {} 数据点不足 (len={})", display_path, len(df))
+            logger.warning("parquet {}/{} 数据点不足 (len={})", self.ticker, tf, len(df))
             return None
 
         df["Date"] = pd.to_datetime(df["Date"])
@@ -513,6 +601,7 @@ class BacktestRunner:
     def _compute_pipeline_for_view(
         self, view_cfg: dict, window_data: tuple,
         ewma_init: Optional[dict] = None,
+        use_pipeline_cache: bool = True,
     ) -> dict:
         """对单个视图运行完整管道计算（步骤 1–6）。
 
@@ -547,8 +636,26 @@ class BacktestRunner:
         t, noisy, ohlc, dates = window_data
         tf = view_cfg["tf"]
 
+        # P3-2: skip pipeline_cache when running in parallel (thread safety)
+        _pipeline_cache = self._pipeline_cache if use_pipeline_cache else None
+        _cache_key = ""
+        if use_pipeline_cache and len(noisy) > 1:
+            _prev_n = len(noisy) - 1
+            _prefix_hash = hashlib.md5(np.ascontiguousarray(noisy[:_prev_n]).data.tobytes()).hexdigest()
+            _cache_key = f"{tf}_{_prev_n}_{_prefix_hash}"
+
         # ── Step 1: 计算滤波器 ──
-        filtered, filtered2 = self._compute_filters(noisy, t, view_cfg)
+        filtered, filtered2 = self._compute_filters(
+            noisy, t, view_cfg,
+            pipeline_cache=_pipeline_cache,
+            cache_key=_cache_key,
+        )
+
+        # P3-2: only update cache when pipeline_cache is enabled
+        if _pipeline_cache is not None and _cache_key:
+            _next_hash = hashlib.md5(np.ascontiguousarray(noisy).data.tobytes()).hexdigest()
+            _next_n = len(noisy)
+            self._pipeline_cache[f"{tf}_{_next_n}_{_next_hash}"] = (filtered, filtered2)
 
         # ── Step 2: 施密特触发器 ──
         init_mu = ewma_init.get("init_mu") if ewma_init else None
@@ -605,10 +712,15 @@ class BacktestRunner:
     @staticmethod
     def _compute_filters(
         noisy: np.ndarray, t: np.ndarray, cfg: dict,
+        pipeline_cache: Optional[dict] = None,
+        cache_key: str = "",
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
         """计算主线滤波与可选的副线滤波。
 
         对齐 ``streamlit_app._compute_filters`` 的逻辑，去掉 ``@st.cache_data``。
+
+        P0-2: 增量计算支持 — 当 pipeline_cache 提供且 cache_key 命中时，
+        复用上一窗口的前 N-1 个滤波点，仅计算最后一个点。
 
         Parameters
         ----------
@@ -618,12 +730,27 @@ class BacktestRunner:
             时间索引。
         cfg : dict
             视图配置。
+        pipeline_cache : Optional[dict]
+            增量计算缓存字典，同一回测运行器的 ``_pipeline_cache``。
+        cache_key : str
+            缓存查找键，格式为 ``"{tf}_{prev_n_pts}_{hash}"``。
 
         Returns
         -------
         Tuple[np.ndarray, Optional[np.ndarray]]
             ``(filtered, filtered2)`` — 主线滤波结果与副线结果（可能为 None）。
         """
+        # P0-2: check incremental cache
+        prev_filtered = None
+        prev_filtered2 = None
+        if pipeline_cache is not None and cache_key:
+            cached = pipeline_cache.get(cache_key)
+            if cached is not None:
+                prev_filtered, prev_filtered2 = cached
+                if prev_filtered is not None and len(prev_filtered) == len(noisy) - 1:
+                    # Reuse prefix; only compute last point on the full noisy array
+                    logger.debug(f"[pipeline_cache] hit: {cache_key}, reusing {len(prev_filtered)} prefix points")
+
         sf = FILTERS.get(cfg["_fid"])
         if sf is None:
             logger.warning("未知 filter_id '{}', 使用 NaN", cfg["_fid"])
@@ -650,6 +777,10 @@ class BacktestRunner:
             except Exception as e:
                 logger.warning("副线滤波器 {} 失败: {}", cfg["_fid2"], e)
                 filtered2 = np.full_like(noisy, np.nan)
+
+        # P0-2: save to incremental cache for next bar
+        if pipeline_cache is not None and cache_key:
+            pipeline_cache[cache_key] = (filtered, filtered2)
 
         return filtered, filtered2
 

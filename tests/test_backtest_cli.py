@@ -205,3 +205,70 @@ class TestMainResumeCheckpoint:
         )
         call_kwargs = mock_runner.run.call_args[1]
         assert call_kwargs["checkpoint_interval"] == 50
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P0-10: CLI 端到端烟雾测试 (subprocess)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.slow
+class TestCLISmoke:
+    """验证 backtest_cli.py 通过 subprocess 端到端运行不崩溃。"""
+
+    def test_cli_missing_args_shows_error(self):
+        """缺少必要参数时，应返回非零退出码并包含错误信息。"""
+        import subprocess
+
+        result = subprocess.run(
+            [
+                "python", "-m", "filter_app.backtest_cli",
+            ],
+            capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode != 0, (
+            f"CLI should fail without args. stdout={result.stdout}"
+        )
+        combined = (result.stderr + result.stdout).lower()
+        assert "error" in combined or "usage" in combined or "required" in combined, (
+            f"Expected error/usage message, got: stdout={result.stdout}, stderr={result.stderr}"
+        )
+
+    def test_cli_help(self):
+        """--help 应正常退出并包含 usage 信息。"""
+        import subprocess
+
+        result = subprocess.run(
+            [
+                "python", "-m", "filter_app.backtest_cli", "--help",
+            ],
+            capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 0, f"CLI --help failed: {result.stderr}"
+        assert (
+            "usage" in (result.stdout + result.stderr).lower()
+            or "help" in (result.stdout + result.stderr).lower()
+        ), f"No usage/help text found: stdout={result.stdout}"
+
+    def test_cli_smoke_run(self, tmp_path):
+        """验证带 ticker 的最小回测运行不崩溃并产生输出文件。"""
+        import subprocess
+
+        output_dir = tmp_path / "bt_output"
+        result = subprocess.run(
+            [
+                "python", "-m", "filter_app.backtest_cli",
+                "--ticker", "AAPL",
+                "--start-bar", "0", "--end-bar", "10",
+                "--step-interval", "1",
+                "--output-dir", str(output_dir),
+            ],
+            capture_output=True, text=True, timeout=60,
+        )
+        assert result.returncode == 0, (
+            f"CLI smoke run failed. stderr:\n{result.stderr}\nstdout:\n{result.stdout}"
+        )
+        # 即使没有输出文件（数据不存在），CLI 也不应崩溃
+        if output_dir.exists():
+            parquet_files = list(output_dir.rglob("*.parquet"))
+            csv_files = list(output_dir.rglob("*.csv"))
+            # 生产输出文件是可选的（取决于数据是否存在），不做强制断言

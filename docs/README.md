@@ -6,7 +6,7 @@
 |------|------|
 | [architecture/engineering-design-overview.md](architecture/engineering-design-overview.md) | **工程设计总览（据实）**：据当前代码实测撰写，标注函数名与文件行号 |
 | [strategy/strategy_documentation.md](strategy/strategy_documentation.md) | **策略体系总览 v1.4**：滤波算法、施密特触发器、预测曲线、交叉PnL分析 |
-| [test_cases.md](test_cases.md) | **测试用例参考**：按测试文件组织的用例索引（830+ 用例） |
+| [references/test_cases.md](references/test_cases.md) | **测试用例参考**：按测试文件组织的用例索引（830+ 用例） |
 
 ---
 
@@ -17,6 +17,10 @@
 | 文档 | 说明 |
 |------|------|
 | [engineering-design-overview.md](architecture/engineering-design-overview.md) | 工程设计总览，标注函数名与文件行号 |
+| [arch-analysis.md](architecture/arch-analysis.md) | **架构深度分析**：代码架构评估与问题诊断（2026-07-23） |
+| [final-report.md](architecture/final-report.md) | **深度优化综合报告**：架构+性能+代码质量+配置部署四维度综合分析（2026-07-23） |
+| [perf-analysis.md](architecture/perf-analysis.md) | **性能分析报告**：静态代码审查，瓶颈定位（2026-07-23） |
+| [quality-analysis.md](architecture/quality-analysis.md) | **代码质量分析**：10,554行Python + 35,329行测试的全面审计（2026-07-23） |
 | [data-processing.md](architecture/data-processing.md) | 数据处理说明：拉取策略、写入机制、健康检查、校验、备份恢复 |
 | [data-fetch-analysis.md](architecture/data-fetch-analysis.md) | 数据获取与入库链路分析（2026-07-05） |
 | [data-structures-analysis.md](architecture/data-structures-analysis.md) | 数据结构与状态管理全景分析（2026-07-05） |
@@ -29,27 +33,14 @@
 
 ## 回测 (backtesting/)
 
-回测模式设计与分析。
+回测数据存储与CLI工具。
 
 | 文档 | 说明 |
 |------|------|
-| [final-report.md](backtesting/final-report.md) | **回测最终状态报告**（2026-07-04） |
-| [half-pair-trading-strategy-v4.md](backtesting/half-pair-trading-strategy-v4.md) | **半边多空对交易策略 v4（最新）**：断续多空对质量甄别 |
-| [cascading-synthesis.md](backtesting/cascading-synthesis.md) | 回测数据级联合成方案 v2（合并版） |
-| [comparison-report.md](backtesting/comparison-report.md) | 浏览模式 vs 回测模式完整差异报告 |
-| [data-analysis.md](backtesting/data-analysis.md) | 回测数据加载流程完整分析（2026-07-05） |
-| [logic-change-analysis.md](backtesting/logic-change-analysis.md) | 回测模式变更前后逐行逻辑对比 |
-| [play-analysis.md](backtesting/play-analysis.md) | 前进下一个bar vs 播放逻辑差异分析 |
-| [redesign-v2.md](backtesting/redesign-v2.md) | 回测框架重构方案 v2 |
-| [before-after-comparison.md](backtesting/before-after-comparison.md) | 回测数据流变更前后完整对比 |
-| [pair-based-strategy-plan.md](backtesting/pair-based-strategy-plan.md) | 基于多空对的B周期交易策略（完善版） |
-| [b-cycle-gating-plan.md](backtesting/b-cycle-gating-plan.md) | B周期同向门控交易方案 |
-| [change-point-trading-plan.md](backtesting/change-point-trading-plan.md) | 周期变化点监测与交易方案（五层体系+六种模式） |
-| [strategy-improvement-plan.md](backtesting/strategy-improvement-plan.md) | 策略改进方案（2026-07-07） |
-| [pnl-design-doc.md](backtesting/pnl-design-doc.md) | PnL计算模块设计文档（As-Built，commit 1a4ecd7） |
-| [pnl-implementation-design-spec.md](backtesting/pnl-implementation-design-spec.md) | PnL实现设计说明书（基于1a4ecd7） |
-| [cross-period-position-state-design.md](backtesting/cross-period-position-state-design.md) | 高周期持仓状态色块设计（替代高周期PnL参考） |
-| [long-entry-drop-rootcause.md](backtesting/long-entry-drop-rootcause.md) | 根因分析：做多入场被静默丢弃（3690 60min复现） |
+| [回测数据CLI存储方案设计.md](backtesting/回测数据CLI存储方案设计.md) | 回测数据命令行存储方案设计 |
+| [回测数据分析示例.md](backtesting/回测数据分析示例.md) | 回测数据分析使用示例 |
+
+> **注意**：历史回测模式设计与分析文档已移至 [archive/](archive/)，包括回测框架重构方案、策略设计、PnL计算等。
 
 ## 策略 (strategy/)
 
@@ -110,12 +101,35 @@
 
 ## 开发 (development/)
 
-工程分析、已知问题与问题追踪。
+工程分析、已知问题、实现规格与问题追踪。
 
 | 文档 | 说明 |
 |------|------|
 | [KNOWN_ISSUES.md](development/KNOWN_ISSUES.md) | 已知问题列表 |
 | [all-issues-tracker.md](development/all-issues-tracker.md) | 回测级联合成完整问题追踪清单（2026-07-05） |
+| [backtest-capture-framework.md](development/backtest-capture-framework.md) | **回测数据采集系统 -- 宏观框架设计** v1.1（2026-07-13） |
+| [backtest-capture-guide.md](development/backtest-capture-guide.md) | **回测管道数据捕获与分析 -- 使用指南**（2026-07-13） |
+| [implementation-spec.md](development/implementation-spec.md) | **实现规格 -- 回测数据采集系统 MVP**（2026-07-13） |
+| [gap-analysis.md](development/gap-analysis.md) | **数据记录缺口分析**：EventRecorder / PipelineCapture / BacktestRunner 数据覆盖完整性（2026-07-13） |
+
+## 研究 (research/)
+
+深度研究报告与根因分析。
+
+| 文档 | 说明 |
+|------|------|
+| [回测信号稳定性-行业研究.md](research/回测信号稳定性-行业研究.md) | **回测信号稳定性 -- 量化行业解决方案深度研究**：学术文献+五大平台架构+七类稳定技术（2026-07-12） |
+| [PnL与信号不一致根因分析.md](research/PnL与信号不一致根因分析.md) | **PnL 曲线与信号对比图表不一致 -- 根因分析**（2026-07-19） |
+
+## 参考 (references/)
+
+测试用例、版本对比、运行示例等参考资料。
+
+| 文档 | 说明 |
+|------|------|
+| [test_cases.md](references/test_cases.md) | **测试用例文档**：830+用例，按测试文件组织（2026-07-11） |
+| [版本对比信号差异分析.md](references/版本对比信号差异分析.md) | **版本对比 -- 信号识别差异分析**：76ee7f0 vs HEAD P0-P5 修复后（2026-07-19） |
+| [example-run-results.md](references/example-run-results.md) | **回测数据采集系统 -- 示例运行结果**（2026-07-13） |
 
 ## 归档 (archive/)
 
@@ -139,6 +153,16 @@
 | [research-20260707/](archive/research-20260707/) | 2026-07-07策略研究系列（17篇，见子目录） |
 | [superpowers/](archive/superpowers/) | Superpowers计划与规格（与项目代码无关） |
 
+## 待审查归档 (_archive/)
+
+以下文档已从根目录移入，建议审查后决定保留或删除。
+
+| 文档 | 说明 | 建议 |
+|------|------|------|
+| [optimization-analysis-report.md](_archive/optimization-analysis-report.md) | 与 architecture/final-report.md 完全重复 | **建议删除**：内容与 final-report.md 完全相同 |
+| [分支整理与优化路线图.md](_archive/分支整理与优化路线图.md) | 分支整理工作规划（2026-07-19） | **建议归档**：已完成的分支整理计划，无长期参考价值 |
+| [当前分支变更参考.md](_archive/当前分支变更参考.md) | feat/backtest-data-storage 分支变更参考（2026-07-19） | **建议归档**：分支特异性参考，分支合并后可删除 |
+
 ---
 
-*最后更新：2026-07-12*
+*最后更新：2026-07-23*

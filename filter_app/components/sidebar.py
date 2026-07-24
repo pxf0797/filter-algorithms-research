@@ -9,9 +9,7 @@
 import streamlit as st
 from services.filter_engine import FILTERS
 from typing import Any, Dict, Optional
-
-ALL_TFS = ["1分钟","5分钟","15分钟","60分钟","日线","周线","月线","季线"]
-DEFAULT_TFS = ["日线", "60分钟", "15分钟", "5分钟"]
+from constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY
 
 
 def _compact_slider(label: str, pmin: float, pmax: float, pdefault: float,
@@ -96,14 +94,11 @@ def _render_param_slider(label: str, pmin: float, pmax: float, pstep: float,
     return ctx.slider(label, pmin, pmax, pdefault, pstep, format=fmt, key=key)
 
 
-# 紧邻高周期映射：本周期 → 高周期（用于跨周期PnL参考子图）
-TF_HIERARCHY = {
-    "1分钟": "5分钟", "5分钟": "15分钟", "15分钟": "60分钟",
-    "60分钟": "日线", "日线": "周线", "周线": "月线",
-    "月线": "季线", "季线": None,
-}
 
 
+
+
+@st.fragment
 def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[str],
                    tf_default: str) -> Dict[str, Any]:
     """Render an ultra-compact parameter panel for one view.
@@ -162,10 +157,11 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
     exp_all = st.session_state[exp_key]
     with c1[4]:
         label = "▲" if exp_all else "▼"
-        if st.button(label, key=f"{key}_tgl", help="展开/折叠全部参数",
-                     use_container_width=True):
-            st.session_state[exp_key] = not exp_all
-            st.rerun()
+        # P1-13: on_click callback within @st.fragment — no full-page rerun
+        st.button(label, key=f"{key}_tgl", help="展开/折叠全部参数",
+                  use_container_width=True,
+                  on_click=lambda ek=exp_key: st.session_state.__setitem__(
+                      ek, not st.session_state.get(ek, False)))
 
     # Schmitt ON → 折叠面板
     if cfg["show_sch"]:

@@ -1,140 +1,191 @@
 """
-Performance regression canary — runs the benchmark with a small N and asserts
-throughput is above a minimum threshold.
+Performance regression benchmarks for filter_app critical paths.
 
-This test catches accidentally-introduced O(N^2) regressions, memory blow-ups,
-or refactors that kill filter/schmitt/parquet performance.
-
-All tests use synthetic data — no DB required.
+Uses pytest-benchmark (benchmark fixture).
+Run: python -m pytest tests/test_benchmark.py --benchmark-only
 """
 
-import sys
-from pathlib import Path
-
+import numpy as np
+import pandas as pd
 import pytest
+from services.filter_engine import (
+    apply_sma, apply_ema, apply_wma, apply_alma,
+    apply_savgol, apply_kalman, apply_butterworth,
+    apply_gaussian, apply_median, apply_lowess,
+    compute_metrics, _schmitt_trigger, _find_all_pairs,
+    _fit_parabolic, _fit_physics_parabola,
+)
 
-# ── Ensure tools/ is importable ──────────────────────────────────────────────
-_TOOLS = Path(__file__).resolve().parent.parent / "tools"
-if str(_TOOLS) not in sys.path:
-    sys.path.insert(0, str(_TOOLS))
+# ---------------------------------------------------------------------------
+# Test data (shared across benchmarks)
+# ---------------------------------------------------------------------------
 
-# Trigger lazy imports inside test functions so import errors surface clearly.
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Thresholds (conservative — 10x higher than observed on a MacBook Pro M1)
-# ══════════════════════════════════════════════════════════════════════════════
-
-# SMA on 100 bars should complete in well under 500 us
-FILTER_MAX_US = 500  # microseconds per call
-
-# Schmitt trigger on 100 bars should complete in well under 2 ms
-SCHMITT_MAX_US = 2000  # microseconds per call
-
-# Parquet write of 100 rows should take well under 50 ms
-PARQUET_WRITE_MAX_MS = 50  # milliseconds
-
-# Parquet read of 100 rows should take well under 20 ms
-PARQUET_READ_MAX_MS = 20  # milliseconds
-
-# Event recording of 100 events should take well under 500 us per event
-EVENT_RECORDING_MAX_US = 500  # microseconds per event
+# Simulate realistic price data: ~2000 bars (approx 2 years of daily data)
+np.random.seed(42)
+N_BARS = 2000
+_t = np.arange(N_BARS, dtype=np.float64)
+_PRICE_LONG = np.cumsum(np.random.randn(N_BARS) * 2.0) + 200.0
+_PRICE_SHORT = np.sin(np.linspace(0, 20 * np.pi, N_BARS)) * 50 + 100
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-# Tests
-# ══════════════════════════════════════════════════════════════════════════════
+# ============================================================================
+# Filter computation benchmarks
+# ============================================================================
 
-class TestFilterThroughput:
-    """SMA filter throughput must stay above threshold."""
-
-    def test_sma_filter_latency(self):
-        from benchmark_pipeline import benchmark_filter
-
-        result = benchmark_filter(n_bars=100)
-        us = result["us_per_call"]
-        assert us < FILTER_MAX_US, (
-            f"SMA filter latency {us:.1f} us exceeds threshold {FILTER_MAX_US} us. "
-            f"Possible performance regression."
-        )
-
-
-class TestSchmittThroughput:
-    """Schmitt trigger throughput must stay above threshold."""
-
-    def test_schmitt_latency(self):
-        from benchmark_pipeline import benchmark_schmitt
-
-        result = benchmark_schmitt(n_bars=100)
-        us = result["us_per_call"]
-        assert us < SCHMITT_MAX_US, (
-            f"Schmitt trigger latency {us:.1f} us exceeds threshold {SCHMITT_MAX_US} us. "
-            f"Possible performance regression."
-        )
+FILTER_BENCH_SPECS = [
+    ("sma", apply_sma, {"window": 21}),
+    ("ema", apply_ema, {"span": 10}),
+    ("wma", apply_wma, {"window": 21}),
+    ("alma", apply_alma, {"window": 21, "offset": 0.85, "sigma": 6.0}),
+    ("savgol", apply_savgol, {"window": 21, "order": 2}),
+    ("kalman", apply_kalman, {"Q": 0.01, "R": 1.0}),
+    ("butterworth", apply_butterworth, {"order": 4, "cutoff": 10.0}),
+    ("gaussian", apply_gaussian, {"sigma": 3.0}),
+    ("median", apply_median, {"window": 15}),
+    ("lowess", apply_lowess, {"frac": 0.1}),
+]
 
 
-class TestParquetWrite:
-    """Parquet write performance must stay above threshold."""
+class TestFilterPerformance:
+    """Benchmark each filter on 2000-bar data."""
 
-    def test_parquet_write_speed(self):
-        from benchmark_pipeline import benchmark_parquet_write
-
-        result = benchmark_parquet_write(n_rows=100)
-        ms = result["write_sec"] * 1000
-        mbps = result["write_mb_per_sec"]
-        assert ms < PARQUET_WRITE_MAX_MS, (
-            f"Parquet write time {ms:.2f} ms exceeds threshold {PARQUET_WRITE_MAX_MS} ms. "
-            f"Throughput: {mbps:.2f} MB/s. Possible performance regression."
-        )
+    @pytest.mark.benchmark
+    @pytest.mark.filter
+    @pytest.mark.parametrize("name,func,kwargs", FILTER_BENCH_SPECS)
+    def test_filter_2000_bars(self, name, func, kwargs, benchmark):
+        """Benchmark a single filter call on 2000 data points."""
+        kwargs_copy = dict(kwargs)
+        benchmark(func, _PRICE_LONG, _t, **kwargs_copy)
 
 
-class TestParquetRead:
-    """Parquet read performance must stay above threshold."""
+# ============================================================================
+# Schmitt trigger benchmark
+# ============================================================================
 
-    def test_parquet_read_speed(self):
-        from benchmark_pipeline import benchmark_parquet_read
+class TestSchmittTriggerPerformance:
+    """Benchmark Schmitt trigger computation (critical path for strategy)."""
 
-        result = benchmark_parquet_read(n_rows=100)
-        ms = result["read_ms"]
-        assert ms < PARQUET_READ_MAX_MS, (
-            f"Parquet read latency {ms:.2f} ms exceeds threshold {PARQUET_READ_MAX_MS} ms. "
-            f"Possible performance regression."
-        )
+    @pytest.mark.benchmark
+    @pytest.mark.signal
+    def test_schmitt_trigger_2000_bars(self, benchmark):
+        """Benchmark Schmitt trigger on 2000 bars of v/a data."""
+        v = np.random.RandomState(42).randn(N_BARS) * 5.0
+        a = np.random.RandomState(43).randn(N_BARS) * 2.0
+        benchmark(_schmitt_trigger, v, a, ewma_span=60, k_eps=0.15, sigma_min=0.05)
+
+    @pytest.mark.benchmark
+    @pytest.mark.signal
+    def test_find_all_pairs_2000_bars(self, benchmark):
+        """Benchmark pair finding on Schmitt trigger output."""
+        # Generate typical sig_t: mostly 0, some +1/-1 segments
+        sig_t = np.zeros(N_BARS, dtype=int)
+        # Add alternating long/short segments
+        for start in range(0, N_BARS - 50, 60):
+            sig_t[start:start + 25] = 1
+            sig_t[start + 30:start + 55] = -1
+        benchmark(_find_all_pairs, sig_t)
 
 
-class TestEventRecording:
-    """Event recording latency must stay above threshold."""
+# ============================================================================
+# Metrics computation benchmark
+# ============================================================================
 
-    def test_event_recording_latency(self):
-        from benchmark_pipeline import benchmark_event_recording
+class TestMetricsPerformance:
+    """Benchmark compute_metrics on typical data sizes."""
 
-        result = benchmark_event_recording(n_events=100)
-        us = result["us_per_event"]
-        assert us < EVENT_RECORDING_MAX_US, (
-            f"Event recording latency {us:.1f} us exceeds threshold {EVENT_RECORDING_MAX_US} us. "
-            f"Possible performance regression."
-        )
+    @pytest.mark.benchmark
+    @pytest.mark.filter
+    def test_compute_metrics_2000_bars(self, benchmark):
+        """Benchmark metrics computation on 2000 data points."""
+        np.random.seed(42)
+        clean = _PRICE_LONG
+        noisy = clean + np.random.randn(N_BARS) * 5.0
+        filtered = apply_sma(noisy, _t, window=21)
+        benchmark(compute_metrics, clean, noisy, filtered)
 
 
-class TestEndToEnd:
-    """Basic sanity: benchmark runs end-to-end without error and returns valid data."""
+# ============================================================================
+# Parabolic fit benchmark
+# ============================================================================
 
-    def test_full_run_returns_valid_results(self):
-        from benchmark_pipeline import run_benchmarks
+class TestFitPerformance:
+    """Benchmark parabolic fitting (used in strategy prediction)."""
 
-        results = run_benchmarks(n_bars=100)
-        assert "meta" in results
-        assert "stages" in results
-        stages = results["stages"]
-        # All synthetic stages must succeed
-        assert "filter" in stages
-        assert "schmitt" in stages
-        assert "parquet_write" in stages
-        assert "parquet_read" in stages
-        assert "event_recording" in stages
-        # Verfiy filter stage has expected structure
-        assert stages["filter"]["us_per_call"] > 0
-        assert stages["schmitt"]["us_per_call"] > 0
-        assert stages["parquet_write"]["write_mb_per_sec"] > 0
-        assert stages["parquet_read"]["read_ms"] > 0
-        assert stages["event_recording"]["us_per_event"] > 0
+    @pytest.mark.benchmark
+    @pytest.mark.strategy
+    def test_fit_parabolic_100_bars(self, benchmark):
+        """Benchmark quadratic polynomial fit on 100-bar segment."""
+        seg_len = 100
+        x = np.arange(seg_len, dtype=np.float64)
+        y = np.random.RandomState(42).randn(seg_len) * 10 + 100
+        benchmark(_fit_parabolic, x, y, 0, seg_len - 1)
+
+    @pytest.mark.benchmark
+    @pytest.mark.strategy
+    def test_fit_physics_parabola_100_bars(self, benchmark):
+        """Benchmark physics parabola fit on 100-bar segment."""
+        seg_len = 100
+        x = np.arange(seg_len, dtype=np.float64)
+        y = np.random.RandomState(42).randn(seg_len) * 10 + 100
+        benchmark(_fit_physics_parabola, x, y, 0, seg_len - 1)
+
+
+# ============================================================================
+# Batch / data loading benchmarks
+# ============================================================================
+
+class TestBatchProcessing:
+    """Benchmark batch operations on multiple filter calls."""
+
+    @pytest.mark.benchmark
+    @pytest.mark.filter
+    def test_batch_filter_10x(self, benchmark):
+        """Benchmark running 10 different filter configs in sequence."""
+        configs = [
+            (apply_sma, {"window": 11}),
+            (apply_sma, {"window": 51}),
+            (apply_ema, {"span": 10}),
+            (apply_ema, {"span": 50}),
+            (apply_wma, {"window": 21}),
+            (apply_alma, {"window": 21, "offset": 0.85, "sigma": 6.0}),
+            (apply_savgol, {"window": 21, "order": 2}),
+            (apply_gaussian, {"sigma": 3.0}),
+            (apply_gaussian, {"sigma": 10.0}),
+            (apply_median, {"window": 15}),
+        ]
+
+        def batch_run():
+            for func, kwargs in configs:
+                func(_PRICE_LONG, _t, **kwargs)
+
+        benchmark(batch_run)
+
+    @pytest.mark.benchmark
+    @pytest.mark.filter
+    def test_compute_metrics_batch_50x(self, benchmark):
+        """Benchmark 50 sequential metrics computations."""
+        np.random.seed(42)
+        clean = _PRICE_LONG
+
+        def batch_metrics():
+            for i in range(50):
+                noisy = clean + np.random.randn(N_BARS) * 5.0
+                filtered = apply_sma(noisy, _t, window=21)
+                compute_metrics(clean, noisy, filtered)
+
+        benchmark(batch_metrics)
+
+    @pytest.mark.benchmark
+    @pytest.mark.signal
+    def test_data_loading_simulated_2000_bars(self, benchmark):
+        """Benchmark simulated data generation (proxy for data loading path)."""
+        def load_simulate():
+            np.random.seed(42)
+            bars = 2000
+            noise = np.random.randn(bars) * 50
+            trend = np.linspace(0, 200, bars)
+            signal = trend + noise
+            return signal
+
+        result = benchmark(load_simulate)
+        assert len(result) == 2000

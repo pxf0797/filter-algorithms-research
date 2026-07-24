@@ -286,10 +286,22 @@ class TestRenderPlotlyHtml:
         assert "date-tip-" in source
 
     def test_html_contains_crosshair_logic(self):
-        """HTML 模板应包含 cross-subplot crosshair JavaScript."""
-        source = Path(_src / "components" / "charts.py").read_text()
-        assert "plotly_hover" in source
-        assert "plotly_unhover" in source
+        """HTML 模板应包含 cross-subplot crosshair JavaScript.
+
+        验证:
+        1. charts.py 从 charts.js 文件加载 JS（提取完成）
+        2. charts.js 包含 crosshair 逻辑
+        """
+        # charts.py 应从外部 JS 文件读取（而非内联）
+        py_source = Path(_src / "components" / "charts.py").read_text()
+        assert "charts.js" in py_source, "charts.py 应从 charts.js 文件读取 JS"
+
+        # JS 文件应包含 crosshair 核心逻辑
+        js_path = _src / "static" / "charts.js"
+        assert js_path.exists(), f"charts.js 应存在于 {js_path}"
+        js_source = js_path.read_text()
+        assert "plotly_hover" in js_source
+        assert "plotly_unhover" in js_source
 
     def test_fallback_html_structure(self):
         """H4: _render_plotly 输出包含 plotly-fallback div + IIFE 结构."""

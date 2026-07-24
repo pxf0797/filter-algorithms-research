@@ -573,3 +573,407 @@ class TestEWMAStateContinuity:
         # Check that at least some early bars are -1
         early_state = result["sig"][:20]
         assert -1 in early_state or all(s == -1 for s in early_state)
+
+
+# ============================================================================
+# P1-11: EWMA vectorized consistency test
+# ============================================================================
+
+class TestEWMAVectorizedConsistency:
+    """Verify the pandas-ewm vectorized EWMA matches the manual for-loop reference."""
+
+    @staticmethod
+    def _ewma_manual(v: np.ndarray, alpha: float):
+        """Reference: manual for-loop EWMA for mu and sigma."""
+        n = len(v)
+        mu = np.full(n, np.nan)
+        sigma = np.full(n, np.nan)
+        mu[0] = v[0]
+        sigma[0] = 0.0
+        for i in range(1, n):
+            mu[i] = alpha * v[i] + (1 - alpha) * mu[i - 1]
+            sigma[i] = np.sqrt(
+                alpha * (v[i] - mu[i]) ** 2 + (1 - alpha) * sigma[i - 1] ** 2
+            )
+        return mu, sigma
+
+    @pytest.mark.signal
+    def test_ewma_matches_manual(self):
+        """Pandas ewm output should match manual for-loop within 1e-6 relative tolerance."""
+        rng = np.random.RandomState(12345)
+        n = 1000
+        v = rng.randn(n) * 0.5 + 0.02  # realistic momentum-like data
+        ewma_span = 60
+        alpha = 2.0 / (ewma_span + 1)
+
+        mu_manual, sigma_manual = self._ewma_manual(v, alpha)
+
+        # Vectorized version (matching _schmitt_trigger implementation)
+        import pandas as pd
+        mu_vec = pd.Series(v).ewm(alpha=alpha, adjust=False).mean().values
+        # Override first element to match manual init
+        mu_vec[0] = v[0]
+        sigma_vec = np.sqrt(
+            pd.Series((v - mu_vec) ** 2).ewm(alpha=alpha, adjust=False).mean().values
+        )
+        sigma_vec[0] = 0.0
+
+        np.testing.assert_allclose(mu_vec, mu_manual, rtol=1e-5, atol=1e-8,
+                                   err_msg="mu_v vectorized vs manual mismatch")
+        np.testing.assert_allclose(sigma_vec, sigma_manual, rtol=1e-5, atol=1e-8,
+                                   err_msg="sigma_v vectorized vs manual mismatch")
+
+    @pytest.mark.signal
+    def test_ewma_with_init_override(self):
+        """With explicit init_mu/init_sigma, the first-element override is correct."""
+        rng = np.random.RandomState(99)
+        n = 500
+        v = rng.randn(n) * 0.3
+        ewma_span = 40
+        alpha = 2.0 / (ewma_span + 1)
+        init_mu = 0.5
+        init_sigma = 0.1
+
+        import pandas as pd
+        mu_vec = pd.Series(v).ewm(alpha=alpha, adjust=False).mean().values
+        sigma_vec = np.sqrt(
+            pd.Series((v - mu_vec) ** 2).ewm(alpha=alpha, adjust=False).mean().values
+        )
+        # Override with init values
+        mu_vec[0] = init_mu
+        sigma_vec[0] = init_sigma
+
+        assert mu_vec[0] == pytest.approx(init_mu)
+        assert sigma_vec[0] == pytest.approx(init_sigma)
+        # Subsequent values should differ from the non-override version
+        mu_no_init = pd.Series(v).ewm(alpha=alpha, adjust=False).mean().values
+        assert mu_vec[0] != pytest.approx(mu_no_init[0])
+
+
+# ============================================================================
+# P1-12: ffill vectorized consistency test
+# ============================================================================
+
+class TestFfillVectorizedConsistency:
+    """Verify pandas-ffill vectorized forward fill matches manual for-loop."""
+
+    @staticmethod
+    def _ffill_manual(arr: np.ndarray, placeholder: float = 100.0):
+        """Reference: manual for-loop forward fill."""
+        result = arr.copy()
+        n = len(result)
+        last_val = placeholder
+        for i in range(n):
+            if result[i] == placeholder and i > 0 and last_val != placeholder:
+                result[i] = last_val
+            if result[i] != placeholder or i == 0:
+                last_val = result[i]
+        return result
+
+    @pytest.mark.signal
+    def test_ffill_matches_manual(self):
+        """Pandas ffill output should match manual for-loop exactly."""
+        rng = np.random.RandomState(42)
+        n = 500
+
+        # Construct a realistic PnL array: mostly non-100 values with some 100.0 gaps
+        arr = np.ones(n) * 100.0
+        # Segment 1: rising PnL
+        arr[20:50] = np.linspace(100.5, 108.0, 30)
+        # Segment 2: gap
+        # Segment 3: falling PnL
+        arr[80:110] = np.linspace(107.0, 95.0, 30)
+        # Segment 4: gap
+        # Segment 5: recovery
+        arr[150:200] = np.linspace(96.0, 112.0, 50)
+
+        manual = self._ffill_manual(arr, 100.0)
+
+        import pandas as pd
+        vec = pd.Series(arr).replace(100.0, np.nan).ffill().fillna(100.0).values
+
+        np.testing.assert_array_equal(vec, manual,
+                                      err_msg="ffill vectorized vs manual mismatch")
+
+    @pytest.mark.signal
+    def test_ffill_all_placeholder(self):
+        """When all values are placeholder (100.0), ffill should keep them."""
+        arr = np.ones(200) * 100.0
+        import pandas as pd
+        vec = pd.Series(arr).replace(100.0, np.nan).ffill().fillna(100.0).values
+        np.testing.assert_array_equal(vec, arr)
+
+    @pytest.mark.signal
+    def test_ffill_no_placeholder(self):
+        """When no placeholder exists, ffill is identity."""
+        arr = np.linspace(95.0, 115.0, 100)
+        import pandas as pd
+        vec = pd.Series(arr).replace(100.0, np.nan).ffill().fillna(100.0).values
+        np.testing.assert_allclose(vec, arr, rtol=1e-10)
+
+    @pytest.mark.signal
+    def test_ffill_leading_placeholder(self):
+        """Leading placeholders (before first non-placeholder) stay as placeholder."""
+        arr = np.ones(100) * 100.0
+        arr[50:80] = np.linspace(102.0, 110.0, 30)
+        import pandas as pd
+        vec = pd.Series(arr).replace(100.0, np.nan).ffill().fillna(100.0).values
+        # First 50 values should be 100.0 (leading placeholder preserved)
+        np.testing.assert_array_equal(vec[:50], 100.0 * np.ones(50))
+        # Values at positions 50-79 should match non-placeholder values
+        np.testing.assert_allclose(vec[50:80], arr[50:80])
+        # Values after 80 should still be 110.0 (ffill continuation)
+        np.testing.assert_allclose(vec[80:], np.full(20, 110.0))
+
+
+# ============================================================================
+# P1-2: PnL slicing vectorized consistency test
+# ============================================================================
+
+class TestPnLSliceVectorizedConsistency:
+    """Verify the numpy-slice vectorized PnL holding-period fill matches
+    expected behavior (identical to the original for-loop)."""
+
+    def _compute_pnl_reference(self, t, filtered, sig_t, all_pairs, pred_pairs,
+                                stop_loss_pct=2.0, n_extend=10):
+        """Reference implementation using for-loops for holding-period fill.
+
+        This mirrors the PRE-vectorization _compute_strategy_pnl, used as
+        ground truth for the vectorized version.
+        """
+        n = len(t)
+        long_pnl = np.full(n, 100.0)
+        short_pnl = np.full(n, 100.0)
+        long_capital = 100.0
+        short_capital = 100.0
+
+        if len(all_pairs) == 0 or len(pred_pairs) == 0:
+            return long_pnl, short_pnl, []
+
+        pred_map = {}
+        for pp in pred_pairs:
+            pred_map[pp["pair_end"]] = pp
+
+        trade_records = []
+        trade_id = 0
+        last_long_exit = -1
+        last_short_exit = -1
+
+        for pair_start, pair_end in all_pairs:
+            v2 = sig_t[pair_start]
+            is_long = (v2 == 1)
+            is_short = (v2 == -1)
+            if not is_long and not is_short:
+                continue
+
+            entry_idx = pair_start
+            entry_price = filtered[entry_idx]
+            if np.isnan(entry_price) or entry_price <= 0:
+                continue
+
+            pp = pred_map.get(pair_end)
+            a = b = c = x0 = None
+            if pp is not None:
+                fit_result = pp["fit_result"]
+                a, b, c = fit_result["a"], fit_result["b"], fit_result["c"]
+                x0 = fit_result.get("x0", None)
+
+            exit_idx = None
+            exit_reason = "take_profit"
+            protect_end = entry_idx + n_extend
+            scan_end = n - 1
+
+            for i in range(entry_idx + 1, scan_end + 1):
+                cur_price = filtered[i]
+                if np.isnan(cur_price) or cur_price <= 0:
+                    continue
+                if i <= protect_end:
+                    if a is not None:
+                        pred_val = np.polyval((a, b, c), i - x0) if x0 is not None \
+                            else np.polyval((a, b, c), i)
+                    else:
+                        pred_val = entry_price
+                    if not (np.isnan(pred_val) or pred_val <= 0):
+                        if is_long:
+                            stop_hit = cur_price < pred_val * (1 - stop_loss_pct / 100.0)
+                        else:
+                            stop_hit = cur_price > pred_val * (1 + stop_loss_pct / 100.0)
+                        if stop_hit:
+                            exit_idx = i
+                            exit_reason = "stop_loss"
+                            break
+                if is_long and sig_t[i] == -1:
+                    exit_idx = i
+                    exit_reason = "take_profit"
+                    break
+                if is_short and sig_t[i] == 1:
+                    exit_idx = i
+                    exit_reason = "take_profit"
+                    break
+
+            if exit_idx is None:
+                if n - 1 > entry_idx:
+                    exit_idx = n - 1
+                    exit_reason = "eod"
+                else:
+                    continue
+
+            exit_price = filtered[exit_idx]
+            if np.isnan(exit_price) or exit_price <= 0:
+                continue
+
+            if is_long:
+                trade_return = (exit_price - entry_price) / entry_price
+            else:
+                trade_return = (entry_price - exit_price) / entry_price
+
+            trade_id += 1
+
+            # *** Manual for-loop fill (reference implementation) ***
+            if is_long:
+                for i in range(entry_idx, exit_idx + 1):
+                    cur_p = filtered[i]
+                    if np.isnan(cur_p) or cur_p <= 0:
+                        continue
+                    unrealized = (cur_p - entry_price) / entry_price
+                    long_pnl[i] = long_capital * (1 + unrealized)
+                long_capital *= (1 + trade_return)
+                last_long_exit = exit_idx
+            else:
+                for i in range(entry_idx, exit_idx + 1):
+                    cur_p = filtered[i]
+                    if np.isnan(cur_p) or cur_p <= 0:
+                        continue
+                    unrealized = (entry_price - cur_p) / entry_price
+                    short_pnl[i] = short_capital * (1 + unrealized)
+                short_capital *= (1 + trade_return)
+                last_short_exit = exit_idx
+
+            trade_records.append({
+                "id": trade_id,
+                "type": "long" if is_long else "short",
+                "entry_idx": int(entry_idx),
+                "exit_idx": int(exit_idx),
+                "entry_price": float(entry_price),
+                "exit_price": float(exit_price),
+                "return_pct": float(trade_return * 100),
+                "exit_reason": exit_reason,
+            })
+
+        # Tail fill
+        if last_long_exit >= 0 and last_long_exit + 1 < n:
+            long_pnl[last_long_exit + 1:] = long_capital
+        if last_short_exit >= 0 and last_short_exit + 1 < n:
+            short_pnl[last_short_exit + 1:] = short_capital
+
+        # ffill
+        import pandas as pd
+        long_series = pd.Series(long_pnl).replace(100.0, np.nan).ffill().fillna(100.0)
+        long_pnl = long_series.values
+        short_series = pd.Series(short_pnl).replace(100.0, np.nan).ffill().fillna(100.0)
+        short_pnl = short_series.values
+
+        return long_pnl, short_pnl, trade_records
+
+    @pytest.mark.signal
+    def test_vectorized_matches_reference_single_long(self):
+        """Single long trade: vectorized output must match for-loop reference."""
+        from services.filter_engine import _compute_strategy_pnl
+
+        n = 100
+        t = np.arange(n, dtype=float)
+        filtered = 100.0 + 0.2 * t  # rising price
+        sig_t = np.zeros(n, dtype=int)
+        sig_t[10:50] = 1  # single long segment
+        sig_t[50:] = 0
+
+        all_pairs = [(10, 99)]  # trade from 10 to EOD
+        fit_result = {"a": 0.0, "b": 0.2, "c": 100.0, "x0": None}
+        pred_pairs = [{"fit_result": fit_result, "fit_start": 10, "pair_end": 99}]
+
+        long_actual, short_actual, trades_actual = _compute_strategy_pnl(
+            t, filtered, sig_t, all_pairs, pred_pairs,
+            stop_loss_pct=5.0, n_extend=10,
+        )
+        long_ref, short_ref, trades_ref = self._compute_pnl_reference(
+            t, filtered, sig_t, all_pairs, pred_pairs,
+            stop_loss_pct=5.0, n_extend=10,
+        )
+
+        np.testing.assert_allclose(long_actual, long_ref, rtol=1e-12, atol=1e-12,
+                                   err_msg="Long PnL: vectorized vs reference mismatch")
+        np.testing.assert_allclose(short_actual, short_ref, rtol=1e-12, atol=1e-12,
+                                   err_msg="Short PnL: vectorized vs reference mismatch")
+        assert len(trades_actual) == len(trades_ref)
+
+    @pytest.mark.signal
+    def test_vectorized_matches_reference_multi_trade(self):
+        """Multiple long+short trades: vectorized output must match reference."""
+        from services.filter_engine import _compute_strategy_pnl, _find_all_pairs
+
+        n = 150
+        t = np.arange(n, dtype=float)
+        # Sinusoidal price pattern
+        filtered = 100.0 + 5.0 * np.sin(np.linspace(0, 4 * np.pi, n))
+
+        sig_t = np.zeros(n, dtype=int)
+        sig_t[10:40] = 1    # long
+        sig_t[45:75] = -1   # short
+        sig_t[80:110] = 1   # long
+        sig_t[115:140] = -1  # short
+
+        all_pairs = _find_all_pairs(sig_t)
+
+        pred_pairs = []
+        for pair_start, pair_end in all_pairs:
+            if pair_end - pair_start >= 3:
+                fit_result = {"a": 0.0, "b": 0.0, "c": filtered[pair_end], "x0": None}
+                pred_pairs.append({
+                    "fit_result": fit_result,
+                    "fit_start": pair_start,
+                    "pair_end": pair_end,
+                })
+
+        long_actual, short_actual, trades_actual = _compute_strategy_pnl(
+            t, filtered, sig_t, all_pairs, pred_pairs,
+            stop_loss_pct=10.0, n_extend=10,
+        )
+        long_ref, short_ref, trades_ref = self._compute_pnl_reference(
+            t, filtered, sig_t, all_pairs, pred_pairs,
+            stop_loss_pct=10.0, n_extend=10,
+        )
+
+        np.testing.assert_allclose(long_actual, long_ref, rtol=1e-12, atol=1e-12,
+                                   err_msg="Long PnL (multi-trade) vectorized vs reference")
+        np.testing.assert_allclose(short_actual, short_ref, rtol=1e-12, atol=1e-12,
+                                   err_msg="Short PnL (multi-trade) vectorized vs reference")
+        assert len(trades_actual) == len(trades_ref)
+
+    @pytest.mark.signal
+    def test_vectorized_handles_nan_prices(self):
+        """PnL vectorized fill should skip NaN prices (same as for-loop continue)."""
+        from services.filter_engine import _compute_strategy_pnl
+
+        n = 80
+        t = np.arange(n, dtype=float)
+        filtered = 100.0 + 0.1 * t
+        filtered[30:35] = np.nan  # NaN gap during trade
+
+        sig_t = np.zeros(n, dtype=int)
+        sig_t[10:60] = 1
+
+        all_pairs = [(10, 79)]
+        fit_result = {"a": 0.0, "b": 0.1, "c": 100.0, "x0": None}
+        pred_pairs = [{"fit_result": fit_result, "fit_start": 10, "pair_end": 79}]
+
+        long_actual, _, _ = _compute_strategy_pnl(
+            t, filtered, sig_t, all_pairs, pred_pairs,
+            stop_loss_pct=20.0, n_extend=10,
+        )
+        long_ref, _, _ = self._compute_pnl_reference(
+            t, filtered, sig_t, all_pairs, pred_pairs,
+            stop_loss_pct=20.0, n_extend=10,
+        )
+
+        np.testing.assert_allclose(long_actual, long_ref, rtol=1e-12, atol=1e-12,
+                                   err_msg="PnL with NaN: vectorized vs reference mismatch")

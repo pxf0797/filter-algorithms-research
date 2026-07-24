@@ -1,6 +1,6 @@
 # 实现规格 -- 回测数据采集系统 MVP
 
-> 基于 `/Users/xfpan/claude/filter_research/docs/backtest-capture-framework.md` v1.0
+> 基于 `/Users/xfpan/claude/filter_research/docs/development/backtest-capture-framework.md` v1.0
 > 产出日期: 2026-07-13
 
 ---

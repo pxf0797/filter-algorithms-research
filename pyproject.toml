@@ -8,14 +8,24 @@ ignore = ["E501"]
 
 [project]
 name = "filter-research"
-version = "10.5.0"
+version = "3.4.0"
 description = "多周期股票滤波分析工具"
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
 addopts = ["-v", "--tb=short", "--strict-markers"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "filter: filter algorithm tests",
+    "signal: Schmitt trigger and signal tests",
+    "strategy: PnL and strategy tests",
+    "alignment: time alignment tests",
+    "benchmark: performance regression benchmarks (pytest-benchmark)",
+]
 
 [tool.coverage.run]
 source = ["filter_app"]

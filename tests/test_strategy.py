@@ -4,6 +4,7 @@ PnL computation (_compute_strategy_pnl, _add_prediction_traces).
 """
 
 import numpy as np
+import pandas as pd
 import pytest
 from services.filter_engine import (
     _fit_parabolic, _fit_physics_parabola,
@@ -496,3 +497,102 @@ class TestAddPredictionTraces:
             fit_start=10, pair_end=40, row=1, n_extend=0)
         assert len(traces) == 1, \
             f"n_extend=0 should add only fit trace, got {len(fig.data) - n_before}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P0-1/2: np.searchsorted 替代 np.where — 一致性验证
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSearchSortedConsistency:
+    """验证 searchsorted 替换 np.where 后结果一致。"""
+
+    def test_align_pnl_searchsorted_consistency(self):
+        """P0-1: _align_pnl_to_current_tf 的 searchsorted 与旧 np.where 等价。"""
+        from filter_app.services.filter_engine import _align_pnl_to_current_tf
+
+        np.random.seed(42)
+        n_higher = 50
+        n_current = 200
+
+        # 构造有序的时间戳
+        base = np.datetime64("2024-01-01")
+        higher_dates = pd.date_range(base, periods=n_higher, freq="5min")
+        current_dates = pd.date_range(base, periods=n_current, freq="1min")
+
+        higher_pnl_long = np.cumsum(np.random.randn(n_higher) * 0.1) + 100.0
+        higher_pnl_short = np.cumsum(np.random.randn(n_higher) * 0.1) + 100.0
+
+        # 构造跨周期交易
+        higher_trades = [
+            {
+                "type": "long",
+                "entry_idx": 5,
+                "exit_idx": 20,
+                "return_pct": 2.5,
+                "exit_reason": "signal",
+            },
+            {
+                "type": "short",
+                "entry_idx": 30,
+                "exit_idx": 40,
+                "return_pct": -1.2,
+                "exit_reason": "eod",
+            },
+        ]
+
+        result = _align_pnl_to_current_tf(
+            higher_dates, higher_pnl_long, higher_pnl_short,
+            higher_trades, current_dates,
+        )
+
+        assert result is not None
+        assert "aligned_long" in result
+        assert "aligned_short" in result
+        assert len(result["aligned_long"]) == n_current
+        assert len(result["aligned_short"]) == n_current
+
+        # 验证对齐后的值在合理范围内（不应全是 0 或 100）
+        assert not np.all(result["aligned_long"] == 0.0)
+        assert not np.all(result["aligned_short"] == 0.0)
+
+    def test_cross_period_markers_with_eod(self):
+        """P0-2: eod 退场 marker 正确设置为窗口最后一个 bar。"""
+        from filter_app.services.filter_engine import _align_pnl_to_current_tf
+
+        n_higher = 10
+        n_current = 30
+
+        base = np.datetime64("2024-01-01")
+        higher_dates = pd.date_range(base, periods=n_higher, freq="15min")
+        current_dates = pd.date_range(base, periods=n_current, freq="5min")
+
+        higher_pnl_long = np.linspace(100, 110, n_higher)
+        higher_pnl_short = np.linspace(100, 95, n_higher)
+
+        higher_trades = [
+            {
+                "type": "long",
+                "entry_idx": 2,
+                "exit_idx": 9,
+                "return_pct": 5.0,
+                "exit_reason": "eod",
+            },
+        ]
+
+        result = _align_pnl_to_current_tf(
+            higher_dates, higher_pnl_long, higher_pnl_short,
+            higher_trades, current_dates,
+        )
+
+        entry_markers = result.get("entry_markers", [])
+        exit_markers = result.get("exit_markers", [])
+
+        assert len(entry_markers) >= 1, "entry markers should exist"
+        assert len(exit_markers) >= 1, "exit markers should exist"
+
+        # eod exit bar 应该是当前周期最后一个 bar
+        eod_exit = [m for m in exit_markers if len(m) >= 5 and m[4] == "eod"]
+        if eod_exit:
+            assert eod_exit[0][0] == n_current - 1, (
+                f"eod exit bar should be {n_current - 1}, got {eod_exit[0][0]}"
+            )

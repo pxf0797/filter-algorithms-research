@@ -1,20 +1,29 @@
-FROM python:3.12-slim
+# Stage 1: Builder — install Python dependencies
+FROM python:3.12-slim AS builder
+WORKDIR /app
+COPY filter_app/requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
 
+# Stage 2: Runtime — minimal production image
+FROM python:3.12-slim
 WORKDIR /app
 
-# 创建非root用户
+# Create non-root user
 RUN groupadd -r streamlit && useradd -r -g streamlit -m -u 1000 streamlit
 
-# 安装依赖
-COPY filter_app/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy installed packages from builder
+COPY --from=builder /root/.local /home/streamlit/.local
 
-# 复制应用代码
-COPY . .
+# Copy only what's needed at runtime
+COPY filter_app/ ./filter_app/
+COPY data/ ./data/
 
-# 设置权限
+# Set ownership
 RUN chown -R streamlit:streamlit /app
 USER streamlit
+
+# Ensure pip-installed binaries are on PATH
+ENV PATH=/home/streamlit/.local/bin:$PATH
 
 EXPOSE 8501
 

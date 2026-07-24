@@ -4,13 +4,28 @@
 依赖: filter_engine (纯计算)、Streamlit (仅_st_import)
 """
 
+import functools
 import json
 import uuid
+from pathlib import Path
 import numpy as np
 import streamlit as st
 import plotly.graph_objects as go
 
 from services.filter_engine import _compute_holding_masks
+
+# ---------------------------------------------------------------------------
+# Module-level constants
+# ---------------------------------------------------------------------------
+_PLOTLY_CDN = "https://cdn.plot.ly/plotly-2.35.2.min.js"
+_PLOTLY_CDN_FALLBACK = "https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js"
+
+
+@functools.lru_cache(maxsize=1)
+def _get_chart_js() -> str:
+    """Cached read of the crosshair JavaScript file (read once, reused across all views)."""
+    _js_path = Path(__file__).parent.parent / "static" / "charts.js"
+    return _js_path.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -41,12 +56,17 @@ def _render_plotly(fig, height=750, dates=None) -> None:
     figure_json = json.dumps(fig_dict, cls=PlotlyJSONEncoder)
     div_id = f"plot-{uuid.uuid4().hex[:8]}"
 
-    html = """<!DOCTYPE html>
+    # Load crosshair JS from cached file read (avoids disk I/O on every chart render)
+    _js_code = _get_chart_js()
+    _js_code = _js_code.replace("__DIV_ID__", div_id)
+    _js_code = _js_code.replace("__FIGURE_JSON__", figure_json)
+
+    html = f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"
-    onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js';window._plotlyCdnFailed=true"></script>
+<script src="{_PLOTLY_CDN}"
+    onerror="this.onerror=null;this.src='{_PLOTLY_CDN_FALLBACK}';window._plotlyCdnFailed=true"></script>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 html, body {{ width: 100%; height: 100%; overflow: hidden; }}
@@ -76,109 +96,10 @@ g.hovertext {{ visibility: hidden !important; }}
   <p>请检查网络连接或联系管理员</p>
 </div>
 <script>
-(function() {{
-var _fallbackEl = document.getElementById('plotly-fallback-{div_id}');
-if (typeof Plotly === 'undefined') {{
-    _fallbackEl.style.display = 'block';
-    document.getElementById('{div_id}').style.display = 'none';
-    return;
-}} else if (window._plotlyCdnFailed) {{
-    // 从CDNJS fallback成功加载，清除标记
-    delete window._plotlyCdnFailed;
-}}
-var figure = {figure_json};
-    var config = {{
-        responsive: true,
-        displayModeBar: true,
-        displaylogo: false,
-        modeBarButtonsToRemove: ['lasso2d', 'select2d']
-    }};
-    Plotly.newPlot('{div_id}', figure.data, figure.layout, config).then(function(gd) {{
-        var _lastXv = -Infinity, _pending = false, _pendingXv = null, _THROTTLE_MS = 45;
-        function _nearestIdx(arr, xv) {{
-            var lo = 0, hi = arr.length - 1;
-            if (xv <= arr[lo]) return lo;
-            if (xv >= arr[hi]) return hi;
-            while (lo < hi - 1) {{ var mid = (lo + hi) >> 1; if (arr[mid] <= xv) lo = mid; else hi = mid; }}
-            return (xv - arr[lo] <= arr[hi] - xv) ? lo : hi;
-        }}
-        var _shapeKeys = [];
-        var shapes = gd.layout.shapes || [];
-        for (var i = 0; i < shapes.length; i++) {{
-            if (shapes[i].yref === 'paper' || shapes[i].yref === 'y domain') {{
-                _shapeKeys.push({{ x0: 'shapes[' + i + '].x0', x1: 'shapes[' + i + '].x1', vis: 'shapes[' + i + '].visible' }});
-            }}
-        }}
-        var _xArr0 = gd.data[0].x;
-        var _dates = gd.layout._dates;
-        var _hasDates = _dates && _dates.length > 0;
-        var _tip = document.getElementById('date-tip-{div_id}');
-        var _dateCache = '';
-
-        function _apply(xv) {{
-            _pending = false;
-            var u = {{}};
-            for (var i = 0; i < _shapeKeys.length; i++) {{ var k = _shapeKeys[i]; u[k.x0] = xv; u[k.x1] = xv; u[k.vis] = true; }}
-            Plotly.relayout(gd, u);
-            _lastXv = xv;
-            if (_hasDates && _xArr0 && _xArr0.length > 0) {{
-                var idx = _nearestIdx(_xArr0, xv);
-                _dateCache = (idx < _dates.length) ? _dates[idx] : '';
-                if (_dateCache) {{
-                    _tip.textContent = _dateCache;
-                    _tip.style.display = 'block';
-                }} else {{
-                    _tip.style.display = 'none';
-                }}
-            }}
-        }}
-
-        gd.on('plotly_hover', function(evt) {{
-            if (!evt.points || evt.points.length === 0) return;
-            var xv = evt.points[0].x;
-            if (xv === _lastXv) return;
-            if (_pending) {{ _pendingXv = xv; }}
-            else {{
-                _pending = true; _pendingXv = null;
-                _apply(xv);
-                setTimeout(function() {{
-                    if (_pendingXv !== null && _pendingXv !== _lastXv) _apply(_pendingXv);
-                    else _pending = false;
-                }}, _THROTTLE_MS);
-            }}
-        }});
-
-        gd.on('plotly_unhover', function() {{
-            _pending = false; _pendingXv = null; _lastXv = -Infinity;
-            var u = {{}};
-            for (var i = 0; i < _shapeKeys.length; i++) {{ u[_shapeKeys[i].vis] = false; }}
-            Plotly.relayout(gd, u);
-            _tip.style.display = 'none';
-            _dateCache = '';
-        }});
-
-        document.getElementById('{div_id}').addEventListener('mousemove', function(e) {{
-            if (_tip.style.display === 'block') {{
-                var tx = e.clientX + 16;
-                var tw = _tip.offsetWidth || 100;
-                if (tx + tw > window.innerWidth - 10) tx = e.clientX - tw - 16;
-                if (tx < 5) tx = 5;
-                _tip.style.left = tx + 'px';
-                _tip.style.top = (e.clientY - 28) + 'px';
-            }}
-        }});
-    }});
-    // Safety check: if Plotly still not loaded after 5s, show fallback
-    setTimeout(function() {{
-        if (typeof Plotly === 'undefined') {{
-            _fallbackEl.style.display = 'block';
-            document.getElementById('{div_id}').style.display = 'none';
-        }}
-    }}, 5000);
-}})();
+{_js_code}
 </script>
 </body>
-</html>""".format(div_id=div_id, figure_json=figure_json)
+</html>"""
 
     return st.components.v1.html(html, height=height)
 
