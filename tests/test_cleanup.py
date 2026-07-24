@@ -154,7 +154,7 @@ class TestImportHygiene:
 
     def test_sync_backtest_cascading_data_signature(self):
         """sync_backtest_cascading_data should be callable with correct args."""
-        from filter_app.components.backtest_panel import sync_backtest_cascading_data
+        from filter_app.backtest.panel import sync_backtest_cascading_data
         import inspect
         sig = inspect.signature(sync_backtest_cascading_data)
         params = list(sig.parameters.keys())

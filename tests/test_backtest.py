@@ -273,7 +273,7 @@ class TestGetBarDateFromDb:
     def test_returns_date_when_found(self):
         """查询到日期时返回字符串."""
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "filter_app"))
-        from filter_app.components.backtest_panel import _get_bar_date_from_db
+        from filter_app.backtest.panel import _get_bar_date_from_db
 
         mock_conn = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
@@ -286,7 +286,7 @@ class TestGetBarDateFromDb:
 
     def test_returns_empty_when_not_found(self):
         """无数据时返回空字符串."""
-        from filter_app.components.backtest_panel import _get_bar_date_from_db
+        from filter_app.backtest.panel import _get_bar_date_from_db
 
         mock_conn = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
@@ -307,7 +307,7 @@ class TestBacktestLogger:
         """log_mode_switch 写入一条 JSONL 记录."""
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "filter_app"))
         import json
-        from backtest_logger import log_mode_switch
+        from backtest.logger import log_mode_switch
 
         with patch("backtest_logger.LOG_DIR", tmp_path):
             log_mode_switch("AAPL", "enter", "60分钟", 500)
@@ -325,7 +325,7 @@ class TestBacktestLogger:
     def test_log_bar_navigation_writes_jsonl(self, tmp_path):
         """log_bar_navigation 写入 JSONL."""
         import json
-        from backtest_logger import log_bar_navigation
+        from backtest.logger import log_bar_navigation
 
         with patch("backtest_logger.LOG_DIR", tmp_path):
             log_bar_navigation("AAPL", "60分钟", 50, 500, "2026-06-15")
@@ -338,7 +338,7 @@ class TestBacktestLogger:
     def test_log_data_load_writes_jsonl(self, tmp_path):
         """log_data_load 写入 JSONL."""
         import json
-        from backtest_logger import log_data_load
+        from backtest.logger import log_data_load
 
         with patch("backtest_logger.LOG_DIR", tmp_path):
             log_data_load("MSFT", "1d", 120, "2026-05-01", elapsed_ms=150.5)
@@ -352,7 +352,7 @@ class TestBacktestLogger:
     def test_log_error_writes_jsonl(self, tmp_path):
         """log_error 写入错误 JSONL."""
         import json
-        from backtest_logger import log_error
+        from backtest.logger import log_error
 
         with patch("backtest_logger.LOG_DIR", tmp_path):
             log_error("TSLA", "_sync_to_display", "数据库连接超时")
@@ -364,7 +364,7 @@ class TestBacktestLogger:
 
     def test_log_dir_auto_created(self, tmp_path):
         """日志目录自动创建."""
-        from backtest_logger import _ensure_dir
+        from backtest.logger import _ensure_dir
 
         logs = tmp_path / "nested" / "backtest_logs"
         with patch("backtest_logger.LOG_DIR", logs):
@@ -604,7 +604,7 @@ class TestOnSliderChange:
 
     def _setup_ss(self, real_ss: dict, extra: dict | None = None) -> _DictSessionState:
         """将 real_ss 转为 backtest_panel 及 state 共享的 session_state。"""
-        import filter_app.components.backtest_panel as bp  # type: ignore[import-untyped]
+        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
         # _DictSessionState 同时支持 dict 存取和 attribute 存取
         ss = _DictSessionState(real_ss)
         if extra:
@@ -622,7 +622,7 @@ class TestOnSliderChange:
             _mock_state_st,
             {"_is_playing": False, "_bt_slider_pos": 42},
         )
-        from filter_app.components.backtest_panel import _on_slider_change  # type: ignore[import-untyped]
+        from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
         _on_slider_change()
         assert ss["_bar_index"] == 42
 
@@ -633,7 +633,7 @@ class TestOnSliderChange:
             {"_is_playing": False, "_bt_slider_pos": 42,
              "_fetched_ticker": "AAPL", "_min_tf": "日线"},
         )
-        from filter_app.components.backtest_panel import _on_slider_change  # type: ignore[import-untyped]
+        from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
         with patch("filter_app.components.backtest_panel._get_bar_date_from_db", return_value="2026-07-15"):
             _on_slider_change()
         assert ss["_bar_index"] == 42
@@ -645,7 +645,7 @@ class TestOnSliderChange:
             _mock_state_st,
             {"_is_playing": True, "_bt_slider_pos": 99, "_bar_index": 50},
         )
-        from filter_app.components.backtest_panel import _on_slider_change  # type: ignore[import-untyped]
+        from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
         _on_slider_change()
         assert ss["_bar_index"] == 50  # 保持原有值不变
 
@@ -654,7 +654,7 @@ class TestOnSliderChange:
     def test_on_slider_change_does_not_mutate_is_playing(self, _mock_state_st):
         """TC7: 非播放时 _on_slider_change 不修改 _is_playing."""
         self._setup_ss(_mock_state_st, {"_is_playing": False})
-        from filter_app.components.backtest_panel import _on_slider_change  # type: ignore[import-untyped]
+        from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
         _on_slider_change()
         assert AppState.get("_is_playing") is False
 
@@ -664,7 +664,7 @@ class TestOnSliderChange:
             _mock_state_st,
             {"_is_playing": False},
         )
-        from filter_app.components.backtest_panel import _on_slider_change  # type: ignore[import-untyped]
+        from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
         _on_slider_change()
         assert ss["_bar_index"] == 0
 
@@ -676,7 +676,7 @@ class TestOnSliderChange:
              "_fetched_ticker": "", "_min_tf": "",
              "_bt_cutoff_date": "old-date"},
         )
-        from filter_app.components.backtest_panel import _on_slider_change  # type: ignore[import-untyped]
+        from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
         _on_slider_change()
         assert ss["_bar_index"] == 42
         assert ss["_bt_cutoff_date"] == "old-date"
@@ -691,7 +691,7 @@ class TestOnSliderChange:
              "_fetched_ticker": "AAPL", "_min_tf": "日线",
              "_bt_cutoff_date": "old-date"},
         )
-        from filter_app.components.backtest_panel import _on_slider_change  # type: ignore[import-untyped]
+        from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
         with patch("filter_app.components.backtest_panel._get_bar_date_from_db", return_value=""):
             _on_slider_change()
         assert ss["_bar_index"] == 42
@@ -711,7 +711,7 @@ class TestRenderBacktestModeSlider:
 
     def _setup(self, real_ss: dict, extras: dict | None = None) -> dict:
         """准备 _DictSessionState 并让 backtest_panel / state 共享。"""
-        import filter_app.components.backtest_panel as bp  # type: ignore[import-untyped]
+        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
         ss = _DictSessionState(real_ss)
         if extras:
             ss.update(extras)
@@ -721,7 +721,7 @@ class TestRenderBacktestModeSlider:
 
     def _call_render(self, ss):
         """调用 _render_backtest_mode，patch radio 使其保持在回测模式，patch nav 避免按钮副作用。"""
-        import filter_app.components.backtest_panel as bp  # type: ignore[import-untyped]
+        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
         with patch.object(bp.st.sidebar, "radio", return_value="回测模式"), \
              patch.object(bp, "_render_backtest_nav"):
             bp._render_backtest_mode("美股 US", "AAPL", [{"tf": "日线", "n_pts": 120}])
@@ -735,7 +735,7 @@ class TestRenderBacktestModeSlider:
             {"_is_playing": True, "_bar_index": 100, "_min_tf_bar_count": 500,
              "_cb_mode": True, "_min_tf": "日线", "_fetched_ticker": "AAPL"},
         )
-        import filter_app.components.backtest_panel as bp  # type: ignore[import-untyped]
+        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
         with patch.object(bp.st.sidebar, "progress") as mock_progress, \
              patch.object(bp.st.sidebar, "slider") as mock_slider:
             self._call_render(ss)
@@ -750,7 +750,7 @@ class TestRenderBacktestModeSlider:
             {"_is_playing": False, "_bar_index": 100, "_min_tf_bar_count": 500,
              "_cb_mode": True, "_min_tf": "日线", "_fetched_ticker": "AAPL"},
         )
-        import filter_app.components.backtest_panel as bp  # type: ignore[import-untyped]
+        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
         with patch.object(bp.st.sidebar, "progress") as mock_progress, \
              patch.object(bp.st.sidebar, "slider") as mock_slider:
             self._call_render(ss)
@@ -764,7 +764,7 @@ class TestRenderBacktestModeSlider:
             {"_is_playing": False, "_bar_index": 100, "_min_tf_bar_count": 500,
              "_cb_mode": True, "_min_tf": "日线", "_fetched_ticker": "AAPL"},
         )
-        import filter_app.components.backtest_panel as bp  # type: ignore[import-untyped]
+        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
         with patch.object(bp.st.sidebar, "slider") as mock_slider:
             self._call_render(ss)
         mock_slider.assert_called_once()
@@ -782,7 +782,7 @@ class TestRenderBacktestModeSlider:
             {"_is_playing": False, "_bar_index": 0, "_min_tf_bar_count": 500,
              "_cb_mode": True, "_min_tf": "日线", "_fetched_ticker": "AAPL"},
         )
-        import filter_app.components.backtest_panel as bp  # type: ignore[import-untyped]
+        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
         with patch.object(bp.st.sidebar, "slider"):
             self._call_render(ss)
         assert ss["_bar_index"] == 500
@@ -796,7 +796,7 @@ class TestRenderBacktestModeSlider:
             {"_is_playing": False, "_bar_index": 0, "_min_tf_bar_count": 0,
              "_cb_mode": True, "_min_tf": "", "_fetched_ticker": ""},
         )
-        import filter_app.components.backtest_panel as bp  # type: ignore[import-untyped]
+        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
         with patch.object(bp.st.sidebar, "warning") as mock_warning, \
              patch.object(bp.st.sidebar, "slider") as mock_slider, \
              patch.object(bp.st.sidebar, "progress") as mock_progress:
@@ -812,7 +812,7 @@ class TestRenderBacktestModeSlider:
             {"_is_playing": False, "_bar_index": 500, "_min_tf_bar_count": 500,
              "_cb_mode": True, "_min_tf": "日线", "_fetched_ticker": "AAPL"},
         )
-        import filter_app.components.backtest_panel as bp  # type: ignore[import-untyped]
+        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
         with patch.object(bp.st.sidebar, "progress") as mock_progress, \
              patch.object(bp.st.sidebar, "slider") as mock_slider:
             self._call_render(ss)
@@ -829,7 +829,7 @@ class TestBacktestNavButtons:
     def _call_nav_button_fn(name: str, total_bars: int, min_n_pts: int,
                              real_ss: dict, extras: dict | None = None):
         """patch 掉 st.sidebar.button 按钮创建，仅触发按钮回调中的逻辑。"""
-        import filter_app.components.backtest_panel as bp  # type: ignore[import-untyped]
+        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
         ss = _DictSessionState(real_ss)
         if extras:
             ss.update(extras)
@@ -964,7 +964,7 @@ class TestRunBacktestPlay:
     @staticmethod
     def _call_play(real_ss: dict, extras: dict | None = None) -> _DictSessionState:
         """设置 session_state 并调用 _run_backtest_play. 返回执行后的 ss."""
-        import filter_app.components.backtest_panel as bp  # type: ignore[import-untyped]
+        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
         ss = _DictSessionState(real_ss)
         if extras:
             ss.update(extras)
@@ -1042,7 +1042,7 @@ class TestBacktestIntegration:
 
     def test_play_pause_drag_flow(self, _mock_state_st):
         """TC29: 完整播放-暂停-拖动流程."""
-        import filter_app.components.backtest_panel as bp  # type: ignore[import-untyped]
+        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
 
         # 1. 回测模式初始状态
         ss = _DictSessionState(_mock_state_st)
@@ -1090,7 +1090,7 @@ class TestUpdateCutoffAndRerun:
 
     def test_syncs_bt_slider_pos(self, _mock_state_st):
         """P0: _bar_index=10 → _update_cutoff_and_rerun() 后 _bt_slider_pos == 10."""
-        import filter_app.components.backtest_panel as bp
+        import filter_app.backtest.panel as bp
 
         ss = _DictSessionState(_mock_state_st)
         ss.update({
@@ -1109,7 +1109,7 @@ class TestUpdateCutoffAndRerun:
 
     def test_syncs_bt_slider_pos_before_cutoff_query(self, _mock_state_st):
         """P0: _bt_slider_pos 在 cutoff_date 查询之前已同步，查询使用更新后的 bar_index."""
-        import filter_app.components.backtest_panel as bp
+        import filter_app.backtest.panel as bp
 
         ss = _DictSessionState(_mock_state_st)
         ss.update({
@@ -1132,7 +1132,7 @@ class TestUpdateCutoffAndRerun:
 
     def test_nav_forward_syncs_widget_key(self, _mock_state_st):
         """P1: 前进按钮路径 — bar_index=5 → 前进到 6 → _bt_slider_pos == 6."""
-        import filter_app.components.backtest_panel as bp
+        import filter_app.backtest.panel as bp
 
         ss = _DictSessionState(_mock_state_st)
         ss.update({
@@ -1154,7 +1154,7 @@ class TestUpdateCutoffAndRerun:
 
     def test_play_path_not_affected(self, _mock_state_st):
         """P1: _is_playing=True 时 _on_slider_change 跳过，_run_backtest_play 不受 _bt_slider_pos 影响."""
-        import filter_app.components.backtest_panel as bp
+        import filter_app.backtest.panel as bp
 
         ss = _DictSessionState(_mock_state_st)
         ss.update({
@@ -1331,7 +1331,7 @@ class TestCheckpoint:
 
     def test_checkpoint_auto_save_interval(self, tmp_path):
         """验证 run() 按指定间隔自动保存断点。"""
-        from services.backtest_core import _make_json_safe
+        from backtest.engine import _make_json_safe
 
         configs = _make_minimal_configs()
         cp_path = str(tmp_path / "auto_checkpoint.json")
@@ -1453,7 +1453,7 @@ class TestCheckpoint:
 
 
 # 注册 BacktestRunner（模块顶层引用，便于测试使用）
-from filter_app.services.backtest_core import BacktestRunner  # noqa: E402
+from filter_app.backtest.engine import BacktestRunner  # noqa: E402
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1465,7 +1465,7 @@ class TestComputeBacktestMetrics:
 
     def test_known_sharpe(self):
         """构造确定性 PnL 曲线验证 Sharpe 计算。"""
-        from filter_app.services.backtest_metrics import compute_backtest_metrics
+        from filter_app.backtest.metrics import compute_backtest_metrics
 
         # 构造线性增长的 PnL: 每步涨 0.1%
         n = 252  # 一年
@@ -1483,7 +1483,7 @@ class TestComputeBacktestMetrics:
 
     def test_max_drawdown_calculation(self):
         """验证最大回撤计算。"""
-        from filter_app.services.backtest_metrics import compute_backtest_metrics
+        from filter_app.backtest.metrics import compute_backtest_metrics
 
         # 构造先涨后跌的 PnL: 100 → 120 → 80
         long_pnl = np.array([100.0, 110.0, 120.0, 100.0, 80.0, 90.0])
@@ -1501,7 +1501,7 @@ class TestComputeBacktestMetrics:
 
     def test_zero_trades(self):
         """空交易列表应返回合理默认值。"""
-        from filter_app.services.backtest_metrics import compute_backtest_metrics
+        from filter_app.backtest.metrics import compute_backtest_metrics
 
         long_pnl = np.array([100.0, 100.0, 100.0])
         short_pnl = np.array([100.0, 100.0, 100.0])
@@ -1519,7 +1519,7 @@ class TestComputeBacktestMetrics:
 
     def test_all_wins(self):
         """全部盈利的交易验证 profit_factor = inf。"""
-        from filter_app.services.backtest_metrics import compute_backtest_metrics
+        from filter_app.backtest.metrics import compute_backtest_metrics
 
         long_pnl = np.array([100.0, 105.0, 110.0])
         short_pnl = np.array([100.0, 100.0, 100.0])
@@ -1539,7 +1539,7 @@ class TestComputeBacktestMetrics:
 
     def test_empty_pnl_arrays(self):
         """单元素 PnL 数组应返回 _empty_metrics 默认值。"""
-        from filter_app.services.backtest_metrics import compute_backtest_metrics
+        from filter_app.backtest.metrics import compute_backtest_metrics
 
         long_pnl = np.array([100.0])
         short_pnl = np.array([100.0])
@@ -1555,7 +1555,7 @@ class TestComputeBacktestMetrics:
 
     def test_sortino_with_downside(self):
         """有下行波动时应产生合理的 Sortino 值。"""
-        from filter_app.services.backtest_metrics import compute_backtest_metrics
+        from filter_app.backtest.metrics import compute_backtest_metrics
 
         np.random.seed(42)
         n = 252

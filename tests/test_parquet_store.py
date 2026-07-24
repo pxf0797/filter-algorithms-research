@@ -22,7 +22,7 @@ if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
 from data.store import ParquetStore
-from services.event_recorder import CSVBuilder
+from backtest.recorder import CSVBuilder
 
 
 # ============================================================================
@@ -1175,7 +1175,7 @@ class TestViewLabelMapping:
 
     def test_event_recorder_metadata_contains_view_labels(self, tmp_path):
         """EventRecorder 的 metadata.json 也应包含 view_labels。"""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         config = {
             "ticker": "AAPL",
@@ -1557,7 +1557,7 @@ class TestLabelRegressionSuite:
         import glob
         import json
 
-        from filter_app.services.event_recorder import EventRecorder
+        from filter_app.backtest.recorder import EventRecorder
 
         configs = [
             {'tf': '15分钟', 'n_pts': 50},
@@ -2375,7 +2375,7 @@ class TestMultiTickerIsolation:
 
     def test_event_recorder_two_tickers_separate_dirs(self, tmp_path):
         """两个不同 ticker 的 EventRecorder 写入不同 session 目录。"""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         rec_a = EventRecorder(str(tmp_path), "AAPL")
         rec_b = EventRecorder(str(tmp_path), "TSLA")
@@ -2393,7 +2393,7 @@ class TestMultiTickerIsolation:
 
     def test_event_recorder_data_independent(self, tmp_path):
         """两个 ticker 的 EventRecorder 数据互不干扰。"""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         rec_a = EventRecorder(str(tmp_path), "AAPL")
         rec_b = EventRecorder(str(tmp_path), "TSLA")
@@ -2427,7 +2427,7 @@ class TestMultiTickerIsolation:
     def test_pipeline_capture_two_tickers_separate_dirs(self, tmp_path, monkeypatch):
         """两个不同 ticker 的 PipelineCapture 写入不同 session 目录。"""
         monkeypatch.setenv("PIPELINE_CAPTURE", "1")
-        from services.pipeline_capture import PipelineCapture
+        from backtest.pipeline import PipelineCapture
 
         cap_a = PipelineCapture(str(tmp_path), "AAPL", {})
         cap_b = PipelineCapture(str(tmp_path), "TSLA", {})
@@ -2446,7 +2446,7 @@ class TestMultiTickerIsolation:
     def test_pipeline_capture_data_independent(self, tmp_path, monkeypatch):
         """两个 ticker 的 PipelineCapture 数据互不干扰。"""
         monkeypatch.setenv("PIPELINE_CAPTURE", "1")
-        from services.pipeline_capture import PipelineCapture, PipelineStageData
+        from backtest.pipeline import PipelineCapture, PipelineStageData
 
         cap_a = PipelineCapture(str(tmp_path), "AAPL", {})
         cap_b = PipelineCapture(str(tmp_path), "TSLA", {})
@@ -2484,7 +2484,7 @@ class TestMultiTickerIsolation:
     def test_output_dirs_never_overlap_across_tickers(self, tmp_path):
         """跨 ticker 的输出目录永远不会重叠（同一服务类型内）。"""
         import time
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         # ParquetStore: AAPL vs TSLA → 不同目录
         ps_a = ParquetStore(str(tmp_path), "AAPL", [{"tf": "日线"}])
@@ -2742,7 +2742,7 @@ class TestPredPairsFallback:
     @staticmethod
     def _compute_strategy(t, filtered, all_pairs, pred_pairs, cfg=None):
         """Call the static method directly."""
-        from services.backtest_core import BacktestRunner
+        from backtest.engine import BacktestRunner
         schmitt = {"sig": np.zeros(len(t), dtype=int)}
         if cfg is None:
             cfg = {"show_strategy": True, "stop_loss_pct": 5.0, "n_ext": 10}
@@ -2847,7 +2847,7 @@ class TestPredPairsFallback:
         all_pairs = [(10, 20)]
         pred_pairs = [{"fit_result": {"a": 0.01, "b": -0.5, "c": 105}, "pair_end": 20}]
 
-        from services.backtest_core import BacktestRunner
+        from backtest.engine import BacktestRunner
         cfg = {"show_strategy": True, "stop_loss_pct": 5.0, "n_ext": 10}
         long_pnl, short_pnl, trades = BacktestRunner._compute_strategy_for_view(
             t, filtered, None, all_pairs, pred_pairs, cfg,

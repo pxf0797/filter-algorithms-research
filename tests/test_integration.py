@@ -590,10 +590,10 @@ def test_load_configs_from_valid_file(tmp_path):
     config_file = tmp_path / "test_config.json"
     config_file.write_text(json.dumps(config_data, ensure_ascii=False), encoding="utf-8")
 
-    # patch DB_PATH 避免 import backtest_cli 时连接真实 DB
+    # patch DB_PATH 避免 import backtest.cli 时连接真实 DB
     from unittest.mock import patch
     with patch("db.DB_PATH", tmp_path / "noop.db"):
-        from backtest_cli import _load_configs_from_file
+        from backtest.cli import _load_configs_from_file
     configs = _load_configs_from_file(str(config_file))
 
     assert len(configs) == 2
@@ -621,7 +621,7 @@ def test_load_configs_from_flat_preset_format(tmp_path):
 
     from unittest.mock import patch
     with patch("db.DB_PATH", tmp_path / "noop.db"):
-        from backtest_cli import _load_configs_from_file
+        from backtest.cli import _load_configs_from_file
     configs = _load_configs_from_file(str(config_file))
 
     assert len(configs) == 4, f"平铺格式应生成4个视图配置, 实际{len(configs)}"
@@ -636,6 +636,6 @@ def test_load_configs_missing_file_exits():
     """_load_configs_from_file：不存在的文件应触发 SystemExit"""
     from unittest.mock import patch
     with patch("db.DB_PATH", Path("/noop") / "noop.db"):
-        from backtest_cli import _load_configs_from_file
+        from backtest.cli import _load_configs_from_file
     with pytest.raises(SystemExit):
         _load_configs_from_file("/nonexistent/config_xyz.json")

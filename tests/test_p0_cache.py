@@ -59,7 +59,7 @@ class TestPipelineCache:
 
     def test_pipeline_cache_initialized(self):
         """BacktestRunner.__init__ 初始化 _pipeline_cache"""
-        from services.backtest_core import BacktestRunner
+        from backtest.engine import BacktestRunner
         runner = BacktestRunner("TEST", [{"tf": "日线", "n_pts": 120, "_fid": "sma", "pv": {"window": 11}}])
         assert hasattr(runner, "_pipeline_cache")
         assert isinstance(runner._pipeline_cache, dict)
@@ -67,7 +67,7 @@ class TestPipelineCache:
 
     def test_pipeline_cache_key_uniqueness(self):
         """不同 tf 的缓存键不冲突"""
-        from services.backtest_core import BacktestRunner
+        from backtest.engine import BacktestRunner
         runner = BacktestRunner("TEST", [
             {"tf": "日线", "n_pts": 120, "_fid": "sma", "pv": {"window": 11}},
         ])

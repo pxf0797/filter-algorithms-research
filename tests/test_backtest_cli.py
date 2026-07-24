@@ -24,14 +24,14 @@ class TestParseArgs:
 
     def test_default_no_save_data_false(self):
         """default: --no-save-data is False (ParquetStore enabled)."""
-        from filter_app.backtest_cli import parse_args
+        from filter_app.backtest.cli import parse_args
         with patch.object(sys, "argv", ["backtest_cli.py", "--ticker", "AAPL"]):
             args = parse_args()
         assert args.no_save_data is False
 
     def test_no_save_data_flag_true(self):
         """--no-save-data flag sets it to True."""
-        from filter_app.backtest_cli import parse_args
+        from filter_app.backtest.cli import parse_args
         with patch.object(sys, "argv",
                           ["backtest_cli.py", "--ticker", "03690.HK", "--no-save-data"]):
             args = parse_args()
@@ -39,14 +39,14 @@ class TestParseArgs:
 
     def test_checkpoint_interval_default(self):
         """--checkpoint-interval defaults to 100."""
-        from filter_app.backtest_cli import parse_args
+        from filter_app.backtest.cli import parse_args
         with patch.object(sys, "argv", ["backtest_cli.py", "--ticker", "AAPL"]):
             args = parse_args()
         assert args.checkpoint_interval == 100
 
     def test_checkpoint_interval_custom(self):
         """--checkpoint-interval 50 is parsed correctly."""
-        from filter_app.backtest_cli import parse_args
+        from filter_app.backtest.cli import parse_args
         with patch.object(sys, "argv",
                           ["backtest_cli.py", "--ticker", "AAPL",
                            "--checkpoint-interval", "50"]):
@@ -55,7 +55,7 @@ class TestParseArgs:
 
     def test_checkpoint_interval_zero(self):
         """--checkpoint-interval 0 disables auto-save."""
-        from filter_app.backtest_cli import parse_args
+        from filter_app.backtest.cli import parse_args
         with patch.object(sys, "argv",
                           ["backtest_cli.py", "--ticker", "AAPL",
                            "--checkpoint-interval", "0"]):
@@ -64,14 +64,14 @@ class TestParseArgs:
 
     def test_resume_default_none(self):
         """--resume defaults to None."""
-        from filter_app.backtest_cli import parse_args
+        from filter_app.backtest.cli import parse_args
         with patch.object(sys, "argv", ["backtest_cli.py", "--ticker", "AAPL"]):
             args = parse_args()
         assert args.resume is None
 
     def test_resume_with_path(self):
         """--resume takes a path argument."""
-        from filter_app.backtest_cli import parse_args
+        from filter_app.backtest.cli import parse_args
         with patch.object(sys, "argv",
                           ["backtest_cli.py", "--ticker", "AAPL",
                            "--resume", "/tmp/checkpoint.json"]):
@@ -109,7 +109,7 @@ def _run_main_with_mocks(cli_args: list, *, mock_runner=None, mock_store=None,
         if mock_store is not None:
             mock_store_cls.return_value = mock_store
 
-        from filter_app.backtest_cli import main
+        from filter_app.backtest.cli import main
         main()
 
     return mock_runner, mock_store_cls, mock_rec_cls

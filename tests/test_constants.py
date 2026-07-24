@@ -79,5 +79,5 @@ class TestImportConsistency:
 
     def test_backtest_core_re_exports_all_tfs(self):
         """backtest_core.py should import ALL_TFS from constants."""
-        from services.backtest_core import ALL_TFS as BC_ALL_TFS
+        from backtest.engine import ALL_TFS as BC_ALL_TFS
         assert BC_ALL_TFS == ALL_TFS

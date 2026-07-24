@@ -221,7 +221,7 @@ class TestJsonlFlushRemoval:
 
     def test_write_without_flush_data_integrity(self, tmp_path):
         """写入多行后, end_session 关闭文件后数据完整。"""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(str(tmp_path), "TEST")
         session_id = recorder.start_session({"configs": []})
@@ -260,7 +260,7 @@ class TestJsonlFlushRemoval:
 
     def test_empty_session_no_flush_crash(self, tmp_path):
         """空 session 不写入任何事件, end_session 不崩溃。"""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(str(tmp_path), "EMPTY")
         session_id = recorder.start_session({"configs": []})
@@ -313,7 +313,7 @@ class TestLoguruMigration:
 
     def test_backtest_cli_uses_logger(self):
         """backtest_cli.py 使用 logger 替代 print。"""
-        import backtest_cli
+        import backtest.cli
 
         source = Path(backtest_cli.__file__).read_text(encoding="utf-8")
         # 确认没有 print to stderr
@@ -387,7 +387,7 @@ class TestMagicStringsConstants:
     def test_backtest_cli_view_spec_consistent(self):
         """backtest_cli 中 _VIEW_SPECS 后缀映射与 constants 一致。"""
         from shared.constants import VIEW_SUFFIX_TO_CFG_KEY
-        from backtest_cli import _VIEW_SPECS
+        from backtest.cli import _VIEW_SPECS
 
         # 检查 _VIEW_SPECS 中每个 suffix 在 VIEW_SUFFIX_TO_CFG_KEY 中
         # 或 suffix 本身就是 cfg_key

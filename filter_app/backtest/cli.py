@@ -22,9 +22,9 @@ if _pkg_dir not in sys.path:
     sys.path.insert(0, _pkg_dir)
 
 # ── 项目内导入（与现有模块导入风格一致） ──
-from services.backtest_core import BacktestRunner
+from backtest.engine import BacktestRunner
 from shared.constants import ALL_TFS, DEFAULT_TFS
-from services.event_recorder import EventRecorder
+from backtest.recorder import EventRecorder
 from engine.filters import FILTERS
 from data.store import ParquetStore
 from data.config_db import apply_preset, list_presets

@@ -296,17 +296,17 @@ class TestBacktestPanelImport:
     """Verify the import path fix for backtest_panel in browse.app.py."""
 
     def test_new_import_succeeds(self):
-        """`from components.backtest_panel import ...` succeeds (new path)."""
-        from components.backtest_panel import render_backtest_panel, run_backtest_play
+        """`from backtest.panel import ...` succeeds (new path)."""
+        from backtest.panel import render_backtest_panel, run_backtest_play
         assert callable(render_backtest_panel)
         assert callable(run_backtest_play)
 
     def test_new_import_path_in_source(self):
-        """browse.app.py uses the correct `from components.backtest_panel` import."""
+        """browse.app.py uses the correct `from backtest.panel` import."""
         from pathlib import Path
         source = Path(browse.app.__file__).read_text()
-        assert "from components.backtest_panel import" in source, (
-            "browse.app.py should import from components.backtest_panel"
+        assert "from backtest.panel import" in source, (
+            "browse.app.py should import from backtest.panel"
         )
         assert "from filter_app.components.backtest_panel import" not in source, (
             "browse.app.py should NOT use old import path "
