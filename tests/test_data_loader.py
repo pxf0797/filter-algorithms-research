@@ -1,4 +1,4 @@
-"""Tests for filter_app.services.data_loader — target 70%+ coverage."""
+"""Tests for filter.services.data_loader — target 70%+ coverage."""
 
 from unittest.mock import patch, MagicMock
 from pathlib import Path
@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-# conftest.py adds filter_app/ to sys.path, so imports are: services.data_loader
+# conftest.py adds filter/ to sys.path, so imports are: services.data_loader
 # Patch paths also use services.data_loader.xxx
 
 
@@ -395,7 +395,7 @@ class TestSyncToDisplay:
         with patch("data.loader.query_kline",
                    return_value=mock_df), \
              patch("data.loader.Path") as mock_path_cls:
-            fake_path = tmp_path / "filter_app" / "data" / "loader.py"
+            fake_path = tmp_path / "filter" / "data" / "loader.py"
             mock_path_cls.return_value = fake_path
 
             from data.loader import _sync_to_display
@@ -501,7 +501,7 @@ class TestDisplayCacheIsolation:
         now = datetime.now()
         with patch("data.loader.query_kline", return_value=mock_df), \
              patch("data.loader.Path") as mock_path_cls:
-            fake_file = tmp_path / "filter_app" / "data" / "loader.py"
+            fake_file = tmp_path / "filter" / "data" / "loader.py"
             mock_path_cls.return_value = fake_file
 
             from data.loader import _sync_to_display
@@ -522,7 +522,7 @@ class TestDisplayCacheIsolation:
         now = datetime.now()
         with patch("data.loader.query_kline", return_value=mock_df), \
              patch("data.loader.Path") as mock_path_cls:
-            fake_file = tmp_path / "filter_app" / "data" / "loader.py"
+            fake_file = tmp_path / "filter" / "data" / "loader.py"
             mock_path_cls.return_value = fake_file
 
             from data.loader import _sync_to_display
@@ -546,7 +546,7 @@ class TestDisplayCacheIsolation:
         now = datetime.now()
         with patch("data.loader.query_kline", return_value=mock_df), \
              patch("data.loader.Path") as mock_path_cls:
-            fake_file = tmp_path / "filter_app" / "data" / "loader.py"
+            fake_file = tmp_path / "filter" / "data" / "loader.py"
             mock_path_cls.return_value = fake_file
 
             from data.loader import _sync_to_display
@@ -701,7 +701,7 @@ class TestDisplayCacheVersioning:
         import data.loader as dl
         monkeypatch.setattr(
             dl.Path, "__new__",
-            lambda cls, *args: Path(*args) if "filter_app" not in str(args)
+            lambda cls, *args: Path(*args) if "filter" not in str(args)
             else _fake_display_path(tmp_path, *args)
         )
         # 直接测试底层函数，绕过路径问题
@@ -745,7 +745,7 @@ class TestDisplayCacheVersioning:
         now = datetime.now()
         with patch("data.loader.query_kline", return_value=mock_df), \
              patch("data.loader.Path") as mock_path_cls:
-            fake_file = tmp_path / "filter_app" / "data" / "loader.py"
+            fake_file = tmp_path / "filter" / "data" / "loader.py"
             mock_path_cls.return_value = fake_file
 
             from data.loader import _sync_to_display, _version_path
@@ -1154,12 +1154,12 @@ class TestParquetPartitioning:
 
         with patch.object(dl, "query_kline", return_value=mock_df):
             # Patch __file__ of the module so Path(__file__).parent... hits tmp_path
-            fake_init = tmp_path / "filter_app" / "data" / "__init__.py"
+            fake_init = tmp_path / "filter" / "data" / "__init__.py"
             fake_init.parent.mkdir(parents=True, exist_ok=True)
             fake_init.touch()
             # Make data_loader.py's __file__ resolve relative to tmp_path
             orig_file = dl.__file__
-            dl.__file__ = str(tmp_path / "filter_app" / "data" / "loader.py")
+            dl.__file__ = str(tmp_path / "filter" / "data" / "loader.py")
 
             try:
                 ok, count = _sync_to_display("AAPL", "日线", n_pts=20)
@@ -1194,7 +1194,7 @@ class TestParquetPartitioning:
         # Redirect __file__ so display_root resolves to tmp_path
         # NOTE: _write_parquet lives in data.synth, not data.loader
         orig_file = syn.__file__
-        syn.__file__ = str(tmp_path / "filter_app" / "data" / "synth.py")
+        syn.__file__ = str(tmp_path / "filter" / "data" / "synth.py")
 
         try:
             ok = _write_parquet("日线", df, ticker_code="AAPL")

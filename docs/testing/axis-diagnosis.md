@@ -2,7 +2,7 @@
 
 ## 诊断方法
 
-1. 在 `filter_app/streamlit_app.py` 的 `_render_chart` 中完整复现 Step 9-10 的 figure 构造
+1. 在 `filter/streamlit_app.py` 的 `_render_chart` 中完整复现 Step 9-10 的 figure 构造
 2. 合成 60 根 bar 的股票数据，计算 savgol 滤波、施密特触发器、预测曲线、策略 PnL
 3. 配齐最复杂的 **8+1 行**布局（has_s + has_strategy + has_cross + has_alignment + has_feedback）
 4. 逐一打印每个 trace 的 `xaxis`/`yaxis` 引用，对照 layout 中存在的 axis 键名

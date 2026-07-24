@@ -1,10 +1,10 @@
-"""Tests for cascading bar synthesis — filter_app.services.data_loader"""
+"""Tests for cascading bar synthesis — filter.services.data_loader"""
 
 import pytest
 import pandas as pd
 import numpy as np
 
-# conftest.py adds filter_app/ to sys.path, so imports are: services.data_loader
+# conftest.py adds filter/ to sys.path, so imports are: services.data_loader
 
 
 # ---------------------------------------------------------------------------

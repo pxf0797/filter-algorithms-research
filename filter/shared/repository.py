@@ -1,5 +1,5 @@
 """
-filter_app/services/repository.py — 轻量 Repository 模式
+filter/services/repository.py — 轻量 Repository 模式
 
 不引入 ORM，保持原生 SQL。为预设管理提供面向对象的数据访问接口。
 """
@@ -7,7 +7,7 @@ filter_app/services/repository.py — 轻量 Repository 模式
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar, Optional, List, Dict, Any
 
-from data.config_db import (
+from filter.data.config_db import (
     list_presets,
     get_preset,
     get_preset_by_name,

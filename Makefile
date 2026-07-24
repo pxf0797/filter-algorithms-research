@@ -23,10 +23,10 @@ format:
 	ruff format .
 
 mypy:
-	mypy filter_app/ --ignore-missing-imports --follow-imports=skip
+	mypy filter/ --ignore-missing-imports --follow-imports=skip
 
 bandit:
-	bandit --skip B101,B104,B301 --recursive filter_app/
+	bandit --skip B101,B104,B301 --recursive filter/
 
 check: lint format mypy bandit
 	@echo "All checks passed."
@@ -35,7 +35,7 @@ clean:
 	find . -type d -name __pycache__ -exec rm -rf {} +
 
 run:
-	streamlit run filter_app/browse/app.py
+	streamlit run filter/browse/app.py
 
 changelog:
 	@echo "# Changelog\n" > CHANGELOG.md.tmp

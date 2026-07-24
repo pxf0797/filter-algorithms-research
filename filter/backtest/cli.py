@@ -3,9 +3,9 @@
 
 用法::
 
-    python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP
-    python -m filter_app.backtest_cli --ticker AAPL --config-file my_config.json
-    python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP --start-bar 500 --end-bar 1000 --quiet
+    python -m filter.backtest_cli --ticker 03690.HK --preset 3690_HK_DP
+    python -m filter.backtest_cli --ticker AAPL --config-file my_config.json
+    python -m filter.backtest_cli --ticker 03690.HK --preset 3690_HK_DP --start-bar 500 --end-bar 1000 --quiet
 """
 
 import argparse
@@ -16,19 +16,19 @@ from pathlib import Path
 from typing import Any, Dict, List
 from loguru import logger
 
-# ── 确保 filter_app 在 sys.path 上（支持 python -m filter_app.backtest.cli） ──
-_pkg_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# ── 确保项目根在 sys.path 上（支持 python -m filter.backtest.cli / 直接运行） ──
+_pkg_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if _pkg_dir not in sys.path:
     sys.path.insert(0, _pkg_dir)
 
 # ── 项目内导入（与现有模块导入风格一致） ──
-from backtest.engine import BacktestRunner
-from shared.constants import ALL_TFS, DEFAULT_TFS
-from backtest.recorder import EventRecorder
-from engine.filters import FILTERS
-from data.store import ParquetStore
-from data.config_db import apply_preset, list_presets
-from data.db import has_data, get_conn
+from filter.backtest.engine import BacktestRunner
+from filter.shared.constants import ALL_TFS, DEFAULT_TFS
+from filter.backtest.recorder import EventRecorder
+from filter.engine.filters import FILTERS
+from filter.data.store import ParquetStore
+from filter.data.config_db import apply_preset, list_presets
+from filter.data.db import has_data, get_conn
 
 # 视图参数映射（与 config_db.VIEW_PARAM_SPECS 对齐）
 # (preset_key_suffix, cfg_key, default)
@@ -63,10 +63,10 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP
-  python -m filter_app.backtest_cli --ticker AAPL --config-file my_config.json
-  python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP --start-bar 500 --end-bar 1000 --quiet
-  python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP --view-filter v0_日线
+  python -m filter.backtest_cli --ticker 03690.HK --preset 3690_HK_DP
+  python -m filter.backtest_cli --ticker AAPL --config-file my_config.json
+  python -m filter.backtest_cli --ticker 03690.HK --preset 3690_HK_DP --start-bar 500 --end-bar 1000 --quiet
+  python -m filter.backtest_cli --ticker 03690.HK --preset 3690_HK_DP --view-filter v0_日线
         """,
     )
 

@@ -1,4 +1,4 @@
-"""filter_app 类型化配置 — ViewConfig dataclass
+"""filter 类型化配置 — ViewConfig dataclass
 
 提供单视图完整配置的类型化表示，替代裸 ``cfg`` dict。
 渐进迁移：允许 ``ViewConfig`` 和旧 dict 共存。

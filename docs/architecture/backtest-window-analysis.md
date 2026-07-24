@@ -2,9 +2,9 @@
 
 分析日期: 2026-07-05
 源代码:
-- `/Users/xfpan/claude/filter_research/filter_app/services/data_loader.py`
-- `/Users/xfpan/claude/filter_research/filter_app/streamlit_app.py`
-- `/Users/xfpan/claude/filter_research/filter_app/db.py`
+- `/Users/xfpan/claude/filter_research/filter/services/data_loader.py`
+- `/Users/xfpan/claude/filter_research/filter/streamlit_app.py`
+- `/Users/xfpan/claude/filter_research/filter/db.py`
 
 ---
 
@@ -89,7 +89,7 @@
 
 ## 2. `_sync_to_display()` -- 核心数据同步函数
 
-**文件**: `/Users/xfpan/claude/filter_research/filter_app/services/data_loader.py:139-173`
+**文件**: `/Users/xfpan/claude/filter_research/filter/services/data_loader.py:139-173`
 
 这是数据从 SQLite 到 Parquet 缓存的桥梁。有两个截然不同的分支:
 
@@ -151,7 +151,7 @@ ORDER BY ts DESC LIMIT ?
 
 ## 3. `_load_chart_data()` -- 图表数据加载
 
-**文件**: `/Users/xfpan/claude/filter_research/filter_app/streamlit_app.py:115-172`
+**文件**: `/Users/xfpan/claude/filter_research/filter/streamlit_app.py:115-172`
 
 这是 `_render_chart()` → `_sync_to_display()` 之间的中间层。负责:
 - 调用 `_sync_to_display()` 写入 Parquet

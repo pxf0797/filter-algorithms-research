@@ -1,5 +1,5 @@
 """
-Performance regression benchmarks for filter_app critical paths.
+Performance regression benchmarks for filter critical paths.
 
 Uses pytest-benchmark (benchmark fixture).
 Run: python -m pytest tests/test_benchmark.py --benchmark-only

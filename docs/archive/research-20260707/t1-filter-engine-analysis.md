@@ -1,7 +1,7 @@
 # filter_engine.py 逐函数深度分析
 
 > **分析日期**: 2026-07-07
-> **源文件**: `/Users/xfpan/claude/filter_research/filter_app/services/filter_engine.py`
+> **源文件**: `/Users/xfpan/claude/filter_research/filter/services/filter_engine.py`
 > **分析方法**: 逐行源码阅读，追踪数据依赖链与状态传递
 
 ---

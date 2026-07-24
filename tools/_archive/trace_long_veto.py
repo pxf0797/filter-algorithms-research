@@ -6,7 +6,7 @@
 #       预期：应做多的 [16,37,51] 现在全部入场，被丢弃=[]。
 import sqlite3, sys
 import numpy as np
-sys.path.insert(0, "filter_app")
+sys.path.insert(0, "filter")
 from services.filter_engine import (
     FILTERS, _schmitt_trigger, _find_all_pairs, _fit_physics_parabola,
     _compute_strategy_pnl,

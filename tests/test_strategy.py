@@ -508,7 +508,7 @@ class TestSearchSortedConsistency:
 
     def test_align_pnl_searchsorted_consistency(self):
         """P0-1: _align_pnl_to_current_tf 的 searchsorted 与旧 np.where 等价。"""
-        from filter_app.engine.filters import _align_pnl_to_current_tf
+        from filter.engine.filters import _align_pnl_to_current_tf
 
         np.random.seed(42)
         n_higher = 50
@@ -557,7 +557,7 @@ class TestSearchSortedConsistency:
 
     def test_cross_period_markers_with_eod(self):
         """P0-2: eod 退场 marker 正确设置为窗口最后一个 bar。"""
-        from filter_app.engine.filters import _align_pnl_to_current_tf
+        from filter.engine.filters import _align_pnl_to_current_tf
 
         n_higher = 10
         n_current = 30

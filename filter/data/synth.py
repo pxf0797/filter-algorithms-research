@@ -15,7 +15,7 @@ from typing import Optional as _Optional
 
 import json as _json
 
-from shared.constants import ALL_TFS
+from filter.shared.constants import ALL_TFS
 
 # 模块级缓存：避免逐 bar 重复写入相同的 parquet 数据
 # key = (ticker_code, cutoff_date, n_pts_hash) → last results dict

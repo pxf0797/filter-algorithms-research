@@ -7,7 +7,7 @@
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-from browse.charts import (
+from filter.browse.charts import (
     _add_prediction_traces, _add_cross_pnl_subplot, _add_alignment_subplot,
     _draw_holding_bands, _add_bs_markers,
 )

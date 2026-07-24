@@ -1,6 +1,6 @@
 # Streamlit 回测状态还原可行性分析
 
-> 分析日期: 2026-07-18 | 代码版本: 当前 `filter_app/` 主干
+> 分析日期: 2026-07-18 | 代码版本: 当前 `filter/` 主干
 
 ---
 
@@ -135,7 +135,7 @@ metadata.json 已存储完整的 `view_configs`（滤波器参数、schmitt 参�
 **可以。** `BacktestRunner` 的核心方法是可以独立调用的：
 
 ```python
-from filter_app.services.backtest_core import BacktestRunner
+from filter.services.backtest_core import BacktestRunner
 
 runner = BacktestRunner("03690", configs)
 
@@ -197,7 +197,7 @@ output = runner._compute_pipeline_for_view(cfg, window)  # 步骤3: 管道计算
 新增 `replay_bar.py` 工具模块：
 
 ```python
-# filter_app/services/replay_bar.py
+# filter/services/replay_bar.py
 
 def replay_bar(
     ticker: str,

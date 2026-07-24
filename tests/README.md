@@ -215,7 +215,7 @@ tests/
 python -m pytest tests/ -v
 
 # 运行全部测试（含覆盖率报告）
-python -m pytest tests/ --cov=filter_app --cov-report=term-missing
+python -m pytest tests/ --cov=filter --cov-report=term-missing
 
 # 快速运行（短回溯）
 python -m pytest tests/ -v --tb=short
@@ -279,7 +279,7 @@ python -m pytest tests/test_filters.py::TestConstantSignal::test_sma_constant -v
 
 ```bash
 # HTML 覆盖率报告
-python -m pytest tests/ --cov=filter_app --cov-report=html
+python -m pytest tests/ --cov=filter --cov-report=html
 open htmlcov/index.html
 ```
 

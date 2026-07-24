@@ -58,7 +58,7 @@ cp .env.example .env
 make run
 
 # 方式二: 直接使用 streamlit
-streamlit run filter_app/browse/app.py
+streamlit run filter/browse/app.py
 
 # 方式三: Docker
 docker compose up --build -d
@@ -307,21 +307,21 @@ CLI 回测适用于批量运行、参数扫描和脚本化分析。
 
 ```bash
 # 模块方式运行
-python -m filter_app.backtest.cli --ticker 03690.HK --preset 3690_HK_DP
+python -m filter.backtest.cli --ticker 03690.HK --preset 3690_HK_DP
 
 # 从配置文件加载
-python -m filter_app.backtest.cli --ticker AAPL --config-file my_config.json
+python -m filter.backtest.cli --ticker AAPL --config-file my_config.json
 
 # 指定 bar 范围
-python -m filter_app.backtest.cli --ticker 03690.HK --preset 3690_HK_DP \
+python -m filter.backtest.cli --ticker 03690.HK --preset 3690_HK_DP \
     --start-bar 500 --end-bar 1000
 
 # 只运行单个视图
-python -m filter_app.backtest.cli --ticker 03690.HK --preset 3690_HK_DP \
+python -m filter.backtest.cli --ticker 03690.HK --preset 3690_HK_DP \
     --view-filter v0_日线
 
 # 静默模式
-python -m filter_app.backtest.cli --ticker 03690.HK --preset 3690_HK_DP --quiet
+python -m filter.backtest.cli --ticker 03690.HK --preset 3690_HK_DP --quiet
 ```
 
 ### 6.2 命令行参数
@@ -415,11 +415,11 @@ python -m filter_app.backtest.cli --ticker 03690.HK --preset 3690_HK_DP --quiet
 
 ```bash
 # 运行回测时自动保存断点（每 100 bar）
-python -m filter_app.backtest.cli --ticker 03690.HK --preset my_preset \
+python -m filter.backtest.cli --ticker 03690.HK --preset my_preset \
     --checkpoint-interval 100
 
 # 从断点恢复
-python -m filter_app.backtest.cli --ticker 03690.HK --preset my_preset \
+python -m filter.backtest.cli --ticker 03690.HK --preset my_preset \
     --resume backtest_output/03690.HK_checkpoint.json
 ```
 
@@ -455,7 +455,7 @@ CLI 回测完成后自动计算以下指标并记录日志：
 `BacktestCatalog` 类扫描 `backtest_output/` 目录，维护 `.catalog.json` 索引文件。
 
 ```python
-from filter_app.backtest.catalog import BacktestCatalog
+from filter.backtest.catalog import BacktestCatalog
 
 catalog = BacktestCatalog()
 
@@ -476,7 +476,7 @@ catalog.save_index()
 使用贝叶斯优化自动搜索最优参数：
 
 ```python
-from filter_app.backtest.optimizer import suggest_params, create_study, optimize_backtest_params
+from filter.backtest.optimizer import suggest_params, create_study, optimize_backtest_params
 
 # 定义参数搜索空间
 param_space = {
@@ -583,7 +583,7 @@ best_params, best_value = optimize_backtest_params(
 ### 9.1 增量拉取
 
 ```python
-from filter_app.data.fetcher import fetch_incremental
+from filter.data.fetcher import fetch_incremental
 
 # 增量拉取：只获取 DB 中最新日期之后的数据
 t, close, ohlc, ticker_full, dates, err = fetch_incremental(
@@ -594,7 +594,7 @@ t, close, ohlc, ticker_full, dates, err = fetch_incremental(
 ### 9.2 批量拉取全部周期
 
 ```python
-from filter_app.data.loader import _fetch_all_timeframes
+from filter.data.loader import _fetch_all_timeframes
 
 # 并行拉取全部 8 个周期数据，写入 DB
 results = _fetch_all_timeframes("港股 HK", "3690.HK")
@@ -605,7 +605,7 @@ for tf, (ok, detail) in results.items():
 ### 9.3 数据同步到显示缓存
 
 ```python
-from filter_app.data.loader import _sync_to_display, load_display_cache
+from filter.data.loader import _sync_to_display, load_display_cache
 
 # 同步到 Parquet 显示缓存
 ok, count = _sync_to_display("AAPL", "日线", n_pts=120)
@@ -636,13 +636,13 @@ make bandit        # 安全检查
 make check
 
 # 覆盖率报告
-pytest tests/ --ignore=tests/test_app_ui.py --cov=filter_app --cov-report=term
+pytest tests/ --ignore=tests/test_app_ui.py --cov=filter --cov-report=term
 ```
 
 ## 11. 常见问题
 
 **Q: 启动 Web 应用报错 "No module named 'streamlit_app'"？**
-A: 入口文件已从 `streamlit_app.py` 重构为 `browse/app.py`。请使用 `streamlit run filter_app/browse/app.py`。
+A: 入口文件已从 `streamlit_app.py` 重构为 `browse/app.py`。请使用 `streamlit run filter/browse/app.py`。
 
 **Q: 切换股票后数据没有更新？**
 A: 首次输入新代码会自动拉取。如需重新拉取，点击侧边栏 **刷新数据** 按钮，或开启 **自动刷新**。
@@ -675,7 +675,7 @@ A: 使用预设方案保存不同参数组合，通过预设下拉菜单快速�
 
 ```
 filter_research/
-├── filter_app/                    # 应用主目录
+├── filter/                    # 应用主目录
 │   ├── browse/                    # 浏览模式
 │   │   ├── app.py                 # 入口文件 (main)
 │   │   ├── sidebar.py             # 侧边栏 UI

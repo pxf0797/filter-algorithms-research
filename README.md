@@ -8,8 +8,8 @@
 
 ```bash
 cd filter_research
-pip install -r filter_app/requirements.txt
-streamlit run filter_app/browse/app.py
+pip install -r filter/requirements.txt
+streamlit run filter/browse/app.py
 ```
 
 浏览器自动打开 `http://localhost:8501`，侧边栏调节参数，关闭终端即停止服务。
@@ -183,7 +183,7 @@ pytest tests/ --ignore=tests/test_app_ui.py -x
 pytest tests/test_app_ui.py -v
 
 # 覆盖率报告
-pytest tests/ --ignore=tests/test_app_ui.py --cov=filter_app --cov-report=term
+pytest tests/ --ignore=tests/test_app_ui.py --cov=filter --cov-report=term
 ```
 
 当前测试：**623 个**（575 单元+集成 + 23 AppTest UI + 25 纯函数），覆盖率 **50%**。
@@ -202,7 +202,7 @@ pytest tests/ --ignore=tests/test_app_ui.py --cov=filter_app --cov-report=term
 
 ```
 filter_research/
-├── filter_app/                 # 应用主目录（Streamlit）
+├── filter/                 # 应用主目录（Streamlit）
 │   ├── components/
 │   │   ├── charts.py           # 图表渲染（Plotly 多子图 + 施密特/预测/PnL 轨迹）
 │   │   └── sidebar.py          # 侧边栏 UI（滤波器选择、参数滑块、视图配置）

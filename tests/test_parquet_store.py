@@ -16,8 +16,8 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-# Ensure filter_app is importable
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+# Ensure filter is importable
+_src = Path(__file__).resolve().parent.parent / "filter"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
@@ -1557,7 +1557,7 @@ class TestLabelRegressionSuite:
         import glob
         import json
 
-        from filter_app.backtest.recorder import EventRecorder
+        from filter.backtest.recorder import EventRecorder
 
         configs = [
             {'tf': '15分钟', 'n_pts': 50},

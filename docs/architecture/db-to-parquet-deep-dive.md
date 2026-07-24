@@ -593,9 +593,9 @@ df.to_parquet(display_dir / f"{tf}.parquet", index=False)
 **路径解析**：
 
 ```
-Path(__file__)                           = filter_app/services/data_loader.py
-.parent                                  = filter_app/services/
-.parent.parent                           = filter_app/
+Path(__file__)                           = filter/services/data_loader.py
+.parent                                  = filter/services/
+.parent.parent                           = filter/
 .parent.parent.parent                    = <project_root>/
 最终路径: <project_root>/data/display/{tf}.parquet
 ```
@@ -749,8 +749,8 @@ return _cached_fetch_stock(market, ticker_code, tf, n_pts)
 ```python
 display_path = Path(__file__).parent.parent / "data" / "display" / f"{tf}.parquet"
 ```
-- `Path(__file__)` = `filter_app/streamlit_app.py`
-- `.parent` = `filter_app/`
+- `Path(__file__)` = `filter/streamlit_app.py`
+- `.parent` = `filter/`
 - `.parent.parent` = `<project_root>/`
 - 与 `_sync_to_display()` 中的 `Path(__file__).parent.parent.parent / "data" / ...` 指向的是**同一个目录**
 

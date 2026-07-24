@@ -29,7 +29,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["filter_app"]
+source = ["filter"]
 omit = ["tests/*"]
 
 [tool.coverage.report]

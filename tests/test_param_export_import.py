@@ -382,7 +382,7 @@ class TestParamRegistryGuard:
         import re
         from pathlib import Path
         sidebar_src = (Path(__file__).resolve().parent.parent
-                       / "filter_app" / "browse" / "components_sidebar.py")
+                       / "filter" / "browse" / "components_sidebar.py")
         src = sidebar_src.read_text(encoding="utf-8")
         assigned = set(re.findall(r'cfg\["([a-z_0-9]+)"\]\s*=', src))
         non_persist = {"pv", "pv2"}          # 滤波器参数走独立(中文key)机制

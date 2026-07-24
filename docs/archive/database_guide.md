@@ -215,7 +215,7 @@ day_offset 存储在 session_state._day_offset
 
 ### 4.1 `db.py` 模块
 
-文件：`filter_app/db.py`
+文件：`filter/db.py`
 
 #### `init_db()`
 
@@ -316,7 +316,7 @@ def has_data(ticker: str) -> bool
 - 有历史数据（`has_data()` 为 True）-> 直接读取已有数据，不重新拉取
 
 ```python
-# filter_app/streamlit_app.py 第 914-923 行（原单文件版本）
+# filter/streamlit_app.py 第 914-923 行（原单文件版本）
 if ticker_code and ticker_code != st.session_state._fetched_ticker:
     if not has_data(ticker_code):
         # 自动获取全部周期

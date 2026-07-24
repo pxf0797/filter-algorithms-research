@@ -16,8 +16,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-# Ensure filter_app is importable
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+# Ensure filter is importable
+_src = Path(__file__).resolve().parent.parent / "filter"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 

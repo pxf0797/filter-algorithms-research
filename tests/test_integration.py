@@ -20,9 +20,9 @@ import pandas as pd
 import pytest
 
 # ---------------------------------------------------------------------------
-# Ensure import paths for filter_app/ package
+# Ensure import paths for filter/ package
 # ---------------------------------------------------------------------------
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+_src = Path(__file__).resolve().parent.parent / "filter"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
@@ -402,10 +402,10 @@ def test_cli_help_output():
     """subprocess 调用 backtest_cli --help 验证正常退出和帮助文本"""
     import subprocess
     import os
-    _pkg_dir = Path(__file__).resolve().parent.parent / "filter_app"
+    _pkg_dir = Path(__file__).resolve().parent.parent / "filter"
     env = os.environ.copy()
     result = subprocess.run(
-        [sys.executable, "-m", "filter_app.backtest.cli", "--help"],
+        [sys.executable, "-m", "filter.backtest.cli", "--help"],
         capture_output=True, text=True, timeout=30,
         cwd=str(_pkg_dir.parent),
         env=env,
@@ -420,10 +420,10 @@ def test_cli_missing_ticker_exits_nonzero():
     """缺少 --ticker 时 CLI 应非零退出"""
     import subprocess
     import os
-    _pkg_dir = Path(__file__).resolve().parent.parent / "filter_app"
+    _pkg_dir = Path(__file__).resolve().parent.parent / "filter"
     env = os.environ.copy()
     result = subprocess.run(
-        [sys.executable, "-m", "filter_app.backtest.cli"],
+        [sys.executable, "-m", "filter.backtest.cli"],
         capture_output=True, text=True, timeout=30,
         cwd=str(_pkg_dir.parent),
         env=env,
@@ -443,10 +443,10 @@ def test_cli_bad_preset_exits_nonzero(monkeypatch, tmp_path):
     import data.config_db as config_db
     config_db.init_config_tables()
 
-    _pkg_dir = Path(__file__).resolve().parent.parent / "filter_app"
+    _pkg_dir = Path(__file__).resolve().parent.parent / "filter"
     env = os.environ.copy()
     result = subprocess.run(
-        [sys.executable, "-m", "filter_app.backtest.cli",
+        [sys.executable, "-m", "filter.backtest.cli",
          "--ticker", "NONEXISTENT",
          "--preset", "NONEXISTENT_PRESET"],
         capture_output=True, text=True, timeout=30,
@@ -461,10 +461,10 @@ def test_cli_invalid_config_file_exits_nonzero():
     """--config-file 指定不存在的 JSON 文件时应非零退出"""
     import subprocess
     import os
-    _pkg_dir = Path(__file__).resolve().parent.parent / "filter_app"
+    _pkg_dir = Path(__file__).resolve().parent.parent / "filter"
     env = os.environ.copy()
     result = subprocess.run(
-        [sys.executable, "-m", "filter_app.backtest.cli",
+        [sys.executable, "-m", "filter.backtest.cli",
          "--ticker", "AAPL",
          "--config-file", "/nonexistent/path/config.json"],
         capture_output=True, text=True, timeout=30,

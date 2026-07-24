@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from filter_app.backtest.catalog import BacktestCatalog
+from filter.backtest.catalog import BacktestCatalog
 
 
 @pytest.fixture

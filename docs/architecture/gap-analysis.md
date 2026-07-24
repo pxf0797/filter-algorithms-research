@@ -7,7 +7,7 @@
 
 | # | 问题 | 严重度 | 影响 | 修复建议 |
 |---|------|--------|------|---------|
-| 1 | streamlit_app.py 入口文件缺失 | P0-CRITICAL | Docker 构建无法启动, make run 失败, CI 测试失败 | 统一入口路径为 `filter_app/browse/app.py`, 同步更新 Dockerfile, Makefile, test_app_smoke.py |
+| 1 | streamlit_app.py 入口文件缺失 | P0-CRITICAL | Docker 构建无法启动, make run 失败, CI 测试失败 | 统一入口路径为 `filter/browse/app.py`, 同步更新 Dockerfile, Makefile, test_app_smoke.py |
 | 2 | config_presets 表缺少 description 列 | P0-CRITICAL | FK 迁移后 get_preset_by_name 崩溃 | init_config_tables 增加 ALTER TABLE 补齐缺失列 |
 | 3 | pyproject.toml 版本落后于 git tag | P1-HIGH | CI 版本一致性检查失败, 打包错误 | 更新 version 为 3.5.0 或重新 tag |
 | 4 | CHANGELOG 缺少 v3.5.0 条目 | P1-HIGH | CI changelog-check 失败 | 运行 make changelog 或手动添加 |
@@ -19,10 +19,10 @@
 
 ### 1. streamlit_app.py 入口文件缺失 (P0-CRITICAL)
 
-- **现状**: 代码入口已重构为 `filter_app/browse/app.py`, 但 Dockerfile CMD 和 Makefile 仍引用 `filter_app/streamlit_app.py`（文件不存在）。
+- **现状**: 代码入口已重构为 `filter/browse/app.py`, 但 Dockerfile CMD 和 Makefile 仍引用 `filter/streamlit_app.py`（文件不存在）。
 - **根因**: 目录重构（components → browse）后, 入口文件路径变更但配置文件未同步更新。
 - **修复**:
-  1. Dockerfile 第 33 行: `streamlit run filter_app/streamlit_app.py` → `streamlit run filter_app/browse/app.py`
+  1. Dockerfile 第 33 行: `streamlit run filter/streamlit_app.py` → `streamlit run filter/browse/app.py`
   2. Makefile 第 38 行: 同上
   3. tests/test_app_smoke.py 第 14 行: 同上
 - **预估**: 3 处改动, 5 分钟.
@@ -50,7 +50,7 @@
 
 ### 5. charts.py 路径过期 (4 个测试) (P2-MEDIUM)
 
-- **现状**: `tests/test_charts.py` 第 275-300 行的 `TestRenderPlotlyHtml` 类中的 4 个测试引用 `filter_app/components/charts.py`, 但该文件已迁移至 `filter_app/browse/charts.py`。
+- **现状**: `tests/test_charts.py` 第 275-300 行的 `TestRenderPlotlyHtml` 类中的 4 个测试引用 `filter/components/charts.py`, 但该文件已迁移至 `filter/browse/charts.py`。
 - **根因**: 目录重构后测试未更新路径。
 - **修复**:
   - `_src / "components" / "charts.py"` → `_src / "browse" / "charts.py"` (3 处)
@@ -93,7 +93,7 @@
 **完备**。argparse 覆盖了所有必要参数（ticker, preset, config-file, start-bar, end-bar, output-dir, step-interval, resume, checkpoint-interval, view-filter, quiet, no-save-data）。错误处理充分（ticker 无数据、preset 不存在、bar 范围非法、断点恢复失败均有明确错误信息）。`--help` 输出友好且包含使用示例。
 
 ### 4. Web 完整性
-**合并为单页面应用**（`filter_app/browse/app.py`），通过侧边栏提供以下功能：
+**合并为单页面应用**（`filter/browse/app.py`），通过侧边栏提供以下功能：
 - 浏览: 4 视图 2x2 图表、参数配置
 - 回测: backtest panel（时间导航 + 级联数据同步 + 自动播放）
 - 数据: 健康检查、数据验证、DB 备份/恢复、导入/导出

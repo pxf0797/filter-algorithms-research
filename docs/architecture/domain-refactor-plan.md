@@ -372,7 +372,7 @@ main() [streamlit_app.py:609]
 ### 4.1 模块重组方案
 
 ```
-filter_app/
+filter/
 ├── browse/                    ← 浏览模式专属
 │   ├── __init__.py
 │   ├── app.py                 (streamlit_app.py 的精简入口，移除回测代码)

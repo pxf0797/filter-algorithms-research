@@ -2,7 +2,7 @@
 Shared pytest fixtures for filter_research tests.
 
 Mocks the `streamlit` module before any project imports so that pytest can
-import pure functions from filter_app/streamlit_app.py without triggering a
+import pure functions from filter/streamlit_app.py without triggering a
 Streamlit runtime environment.
 """
 
@@ -11,9 +11,9 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 # ---------------------------------------------------------------------------
-# Ensure the filter_app/ package directory is importable
+# Ensure the filter/ package directory is importable
 # ---------------------------------------------------------------------------
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+_src = Path(__file__).resolve().parent.parent / "filter"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 

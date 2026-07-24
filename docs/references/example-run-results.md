@@ -17,7 +17,7 @@
 
 ```bash
 cd /Users/xfpan/claude/filter_research
-python3 -m filter_app.backtest_cli \
+python3 -m filter.backtest_cli \
     --ticker AAPL \
     --preset AAPL_US \
     --start-bar 120 --end-bar 165 \

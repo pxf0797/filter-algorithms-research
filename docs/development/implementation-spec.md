@@ -5,7 +5,7 @@
 
 ---
 
-## 1. BacktestRunner (`filter_app/backtest_core.py`)
+## 1. BacktestRunner (`filter/backtest_core.py`)
 
 ### 1.1 模块职责
 
@@ -256,7 +256,7 @@ class ConfigError(BacktestError):
 
 ---
 
-## 2. EventRecorder (`filter_app/services/event_recorder.py`)
+## 2. EventRecorder (`filter/services/event_recorder.py`)
 
 ### 2.1 模块职责
 
@@ -467,7 +467,7 @@ def _write_json(path: Path, data: dict) -> None:
 
 ---
 
-## 3. CLI (`filter_app/backtest_cli.py`)
+## 3. CLI (`filter/backtest_cli.py`)
 
 ### 3.1 模块职责
 
@@ -481,7 +481,7 @@ import argparse
 def build_parser() -> argparse.ArgumentParser:
     """构建 CLI 参数解析器。"""
     parser = argparse.ArgumentParser(
-        prog="python -m filter_app.backtest_cli",
+        prog="python -m filter.backtest_cli",
         description="回测数据采集 CLI — 批量运行管道计算并输出 BS 变动事件流",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -646,7 +646,7 @@ def resolve_bar_range(
 
 ## 4. `pipeline_capture.py` 修改清单
 
-> 现有文件: `/Users/xfpan/claude/filter_research/filter_app/services/pipeline_capture.py` (293 行)
+> 现有文件: `/Users/xfpan/claude/filter_research/filter/services/pipeline_capture.py` (293 行)
 
 ### 4.1 不变部分
 
@@ -709,9 +709,9 @@ def resolve_bar_range(
 
 | 文件 | 路径 | 预估行数 | 说明 |
 |------|------|---------|------|
-| `backtest_core.py` | `filter_app/backtest_core.py` | ~350 行 | BacktestRunner 类 + BacktestError 异常类 |
-| `event_recorder.py` | `filter_app/services/event_recorder.py` | ~200 行 | EventRecorder 类 + JSONL 写入辅助函数 |
-| `backtest_cli.py` | `filter_app/backtest_cli.py` | ~180 行 | argparse + main() + 配置加载 + bar 范围解析 |
+| `backtest_core.py` | `filter/backtest_core.py` | ~350 行 | BacktestRunner 类 + BacktestError 异常类 |
+| `event_recorder.py` | `filter/services/event_recorder.py` | ~200 行 | EventRecorder 类 + JSONL 写入辅助函数 |
+| `backtest_cli.py` | `filter/backtest_cli.py` | ~180 行 | argparse + main() + 配置加载 + bar 范围解析 |
 
 **总计**: ~730 行新代码 + ~30 行既有文件修改。
 
@@ -723,7 +723,7 @@ def resolve_bar_range(
 
 ```bash
 # 使用 3690_HK_2 预设, 运行 5 步
-python -m filter_app.backtest_cli \
+python -m filter.backtest_cli \
     --ticker 03690.HK \
     --market "港股 HK" \
     --preset 3690_HK_2 \
@@ -743,7 +743,7 @@ python -m filter_app.backtest_cli \
 
 ```bash
 # 运行完整回测, 检查是否能复现 645x 级联放大案例
-python -m filter_app.backtest_cli \
+python -m filter.backtest_cli \
     --ticker 03690.HK \
     --market "港股 HK" \
     --preset 3690_HK_2 \
@@ -760,7 +760,7 @@ python -m filter_app.backtest_cli \
 
 ```bash
 # 启动 Streamlit 前设置 PIPELINE_CAPTURE=1
-PIPELINE_CAPTURE=1 streamlit run filter_app/streamlit_app.py
+PIPELINE_CAPTURE=1 streamlit run filter/streamlit_app.py
 ```
 
 **预期**:

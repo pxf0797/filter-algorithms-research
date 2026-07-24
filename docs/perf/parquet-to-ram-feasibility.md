@@ -177,7 +177,7 @@ def _cached_query_kline(ticker, tf, n_pts, day_offset=0):
 **风险**:
 - ⚠️ **过度工程**: 数据总量 ~36 KB, 用 DB 内存表属于"用火箭筒打蚊子"
 - **内存表不跨 rerun 持久**: `:memory:` 在连接关闭后消失。每次 rerun 需要重建。
-- **DuckDB 引入新依赖**: 需要在 filter_app 中加入 duckdb。现有项目只有 sqlite3 + pandas。
+- **DuckDB 引入新依赖**: 需要在 filter 中加入 duckdb。现有项目只有 sqlite3 + pandas。
 - 相对纯 DataFrame 方案没有额外收益
 
 **结论**: 不推荐。没有解决 file IO 的核心问题, 反而增加了复杂度。
@@ -309,16 +309,16 @@ Step 4: 更新测试
 
 | 标识 | 文件 | 行号 |
 |------|------|------|
-| `_sync_to_display` | `filter_app/services/data_loader.py` | 174 |
-| `_sync_all_cascading` | `filter_app/services/data_loader.py` | 735 |
-| `_write_parquet` | `filter_app/services/data_loader.py` | 711 |
-| `_load_chart_data` | `filter_app/streamlit_app.py` | 164 |
-| `clear_display_cache` | `filter_app/db.py` | 497 |
-| `query_kline` | `filter_app/db.py` | 118 |
-| `_cached_fetch_stock` | `filter_app/streamlit_app.py` | 66 |
-| `P1-4 门控` | `filter_app/streamlit_app.py` | 173-174, 215-216 |
-| 浏览模式 parquet 写入 | `filter_app/services/data_loader.py` | 225 |
-| 回测模式 parquet 写入 (循环) | `filter_app/services/data_loader.py` | 802 |
-| 回测 cascading 调用 | `filter_app/streamlit_app.py` | 1871 |
-| 浏览模式 _sync_to_display 调用 | `filter_app/streamlit_app.py` | 178 |
-| parquet 读取 | `filter_app/streamlit_app.py` | 187 |
+| `_sync_to_display` | `filter/services/data_loader.py` | 174 |
+| `_sync_all_cascading` | `filter/services/data_loader.py` | 735 |
+| `_write_parquet` | `filter/services/data_loader.py` | 711 |
+| `_load_chart_data` | `filter/streamlit_app.py` | 164 |
+| `clear_display_cache` | `filter/db.py` | 497 |
+| `query_kline` | `filter/db.py` | 118 |
+| `_cached_fetch_stock` | `filter/streamlit_app.py` | 66 |
+| `P1-4 门控` | `filter/streamlit_app.py` | 173-174, 215-216 |
+| 浏览模式 parquet 写入 | `filter/services/data_loader.py` | 225 |
+| 回测模式 parquet 写入 (循环) | `filter/services/data_loader.py` | 802 |
+| 回测 cascading 调用 | `filter/streamlit_app.py` | 1871 |
+| 浏览模式 _sync_to_display 调用 | `filter/streamlit_app.py` | 178 |
+| parquet 读取 | `filter/streamlit_app.py` | 187 |

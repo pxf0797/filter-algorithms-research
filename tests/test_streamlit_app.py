@@ -17,7 +17,7 @@ import pytest
 
 # ---------------------------------------------------------------------------
 # Remove the conftest mock so streamlit_app can import as a real module
-# conftest already added filter_app/ dir to sys.path, so the namespace package
+# conftest already added filter/ dir to sys.path, so the namespace package
 # resolves to our project dir (not site-packages).
 # ---------------------------------------------------------------------------
 _old_streamlit = sys.modules.pop("streamlit", None)
@@ -302,13 +302,13 @@ class TestBacktestPanelImport:
         assert callable(run_backtest_play)
 
     def test_new_import_path_in_source(self):
-        """browse.app.py uses the correct `from backtest.panel` import."""
+        """browse.app.py uses the correct `from filter.backtest.panel` import."""
         from pathlib import Path
         source = Path(browse.app.__file__).read_text()
-        assert "from backtest.panel import" in source, (
-            "browse.app.py should import from backtest.panel"
+        assert "from filter.backtest.panel import" in source, (
+            "browse.app.py should import from filter.backtest.panel"
         )
-        assert "from filter_app.components.backtest_panel import" not in source, (
+        assert "from filter.components.backtest_panel import" not in source, (
             "browse.app.py should NOT use old import path "
-            "filter_app.components.backtest_panel"
+            "filter.components.backtest_panel"
         )

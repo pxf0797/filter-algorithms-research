@@ -14,7 +14,7 @@
 |---|---|
 | 对应代码版本 | commit `1a4ecd7` |
 | 分支 | `docs/pnl-design-spec` |
-| 核心文件 | `filter_app/services/filter_engine.py`（1020 行） |
+| 核心文件 | `filter/services/filter_engine.py`（1020 行） |
 | 关键函数 | `_compute_strategy_pnl`（L649-860）、`_find_all_pairs`（L520-576） |
 | 直接调用方 | `_compute_strategy_display`（`streamlit_app.py` L287-289） |
 | 上游调用链 | `streamlit_app.py` L678 → `_compute_strategy_display`（L279）→ `_compute_strategy_pnl`（L287） |

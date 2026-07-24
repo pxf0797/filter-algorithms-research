@@ -26,14 +26,14 @@
 
 | 文件 | 行数 | 职责 |
 |------|------|------|
-| `filter_app/streamlit_app.py` | 1,259 | 页面编排，事件处理循环 |
-| `filter_app/services/filter_engine.py` | 710 | 10 种滤波器注册表 + 施密特触发器 + 策略 PnL |
-| `filter_app/components/charts.py` | 461 | Plotly 图表构建与渲染（含 CDN fallback + 超时机制） |
-| `filter_app/db.py` | 448 | K 线 upsert/query，健康检查，快照备份 |
-| `filter_app/config_db.py` | 420 | 预设 CRUD，导入/导出，变更历史 |
-| `filter_app/state.py` | 301 | AppState dataclass，视图配置管理 |
-| `filter_app/components/sidebar.py` | 240 | 市场/股票选择，预设管理，标签搜索 |
-| `filter_app/services/data_loader.py` | 166 | yfinance 数据获取，Parquet 缓存同步 |
+| `filter/streamlit_app.py` | 1,259 | 页面编排，事件处理循环 |
+| `filter/services/filter_engine.py` | 710 | 10 种滤波器注册表 + 施密特触发器 + 策略 PnL |
+| `filter/components/charts.py` | 461 | Plotly 图表构建与渲染（含 CDN fallback + 超时机制） |
+| `filter/db.py` | 448 | K 线 upsert/query，健康检查，快照备份 |
+| `filter/config_db.py` | 420 | 预设 CRUD，导入/导出，变更历史 |
+| `filter/state.py` | 301 | AppState dataclass，视图配置管理 |
+| `filter/components/sidebar.py` | 240 | 市场/股票选择，预设管理，标签搜索 |
+| `filter/services/data_loader.py` | 166 | yfinance 数据获取，Parquet 缓存同步 |
 
 ### 2.2 架构概览
 

@@ -1,9 +1,9 @@
 """
-Concurrency safety tests for filter_app ThreadPoolExecutor usage patterns.
+Concurrency safety tests for filter ThreadPoolExecutor usage patterns.
 
 Covers patterns found in:
-  - filter_app/services/backtest_core.py  (pipeline parallelism across views)
-  - filter_app/services/data_loader.py    (parallel timeframe fetching)
+  - filter/services/backtest_core.py  (pipeline parallelism across views)
+  - filter/services/data_loader.py    (parallel timeframe fetching)
 """
 
 import threading

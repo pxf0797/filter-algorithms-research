@@ -2,7 +2,7 @@
 
 审计日期: 2026-07-12
 审计范围: `tests/test_plan_a_api.py`, `tests/test_subplot_layout.py`, `tests/test_charts.py`, `tests/test_render_traces.py`, `tests/test_feedback_subplot.py`, `tests/test_strategy.py`, `tests/test_plan_a_e2e.py`, `tests/test_plan_a_gaps.py`
-源文件: `filter_app/streamlit_app.py`, `filter_app/components/charts.py`
+源文件: `filter/streamlit_app.py`, `filter/components/charts.py`
 
 ## 当前状态
 

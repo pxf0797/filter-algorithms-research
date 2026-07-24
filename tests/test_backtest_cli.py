@@ -9,10 +9,10 @@ from unittest.mock import MagicMock, patch, ANY
 
 import pytest
 
-# Ensure filter_app is importable
-_filter_app = Path(__file__).resolve().parent.parent / "filter_app"
-if str(_filter_app) not in sys.path:
-    sys.path.insert(0, str(_filter_app))
+# Ensure filter is importable
+_filter = Path(__file__).resolve().parent.parent / "filter"
+if str(_filter) not in sys.path:
+    sys.path.insert(0, str(_filter))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -24,14 +24,14 @@ class TestParseArgs:
 
     def test_default_no_save_data_false(self):
         """default: --no-save-data is False (ParquetStore enabled)."""
-        from filter_app.backtest.cli import parse_args
+        from filter.backtest.cli import parse_args
         with patch.object(sys, "argv", ["backtest_cli.py", "--ticker", "AAPL"]):
             args = parse_args()
         assert args.no_save_data is False
 
     def test_no_save_data_flag_true(self):
         """--no-save-data flag sets it to True."""
-        from filter_app.backtest.cli import parse_args
+        from filter.backtest.cli import parse_args
         with patch.object(sys, "argv",
                           ["backtest_cli.py", "--ticker", "03690.HK", "--no-save-data"]):
             args = parse_args()
@@ -39,14 +39,14 @@ class TestParseArgs:
 
     def test_checkpoint_interval_default(self):
         """--checkpoint-interval defaults to 100."""
-        from filter_app.backtest.cli import parse_args
+        from filter.backtest.cli import parse_args
         with patch.object(sys, "argv", ["backtest_cli.py", "--ticker", "AAPL"]):
             args = parse_args()
         assert args.checkpoint_interval == 100
 
     def test_checkpoint_interval_custom(self):
         """--checkpoint-interval 50 is parsed correctly."""
-        from filter_app.backtest.cli import parse_args
+        from filter.backtest.cli import parse_args
         with patch.object(sys, "argv",
                           ["backtest_cli.py", "--ticker", "AAPL",
                            "--checkpoint-interval", "50"]):
@@ -55,7 +55,7 @@ class TestParseArgs:
 
     def test_checkpoint_interval_zero(self):
         """--checkpoint-interval 0 disables auto-save."""
-        from filter_app.backtest.cli import parse_args
+        from filter.backtest.cli import parse_args
         with patch.object(sys, "argv",
                           ["backtest_cli.py", "--ticker", "AAPL",
                            "--checkpoint-interval", "0"]):
@@ -64,14 +64,14 @@ class TestParseArgs:
 
     def test_resume_default_none(self):
         """--resume defaults to None."""
-        from filter_app.backtest.cli import parse_args
+        from filter.backtest.cli import parse_args
         with patch.object(sys, "argv", ["backtest_cli.py", "--ticker", "AAPL"]):
             args = parse_args()
         assert args.resume is None
 
     def test_resume_with_path(self):
         """--resume takes a path argument."""
-        from filter_app.backtest.cli import parse_args
+        from filter.backtest.cli import parse_args
         with patch.object(sys, "argv",
                           ["backtest_cli.py", "--ticker", "AAPL",
                            "--resume", "/tmp/checkpoint.json"]):
@@ -96,20 +96,20 @@ def _run_main_with_mocks(cli_args: list, *, mock_runner=None, mock_store=None,
         mock_recorder = MagicMock()
         mock_recorder.start_session.return_value = "session-abc"
 
-    with patch("filter_app.backtest.cli.has_data", return_value=True), \
-         patch("filter_app.backtest.cli._get_total_bars", return_value=500), \
-         patch("filter_app.backtest.cli.Path.mkdir"), \
-         patch("filter_app.backtest.cli.BacktestRunner",
+    with patch("filter.backtest.cli.has_data", return_value=True), \
+         patch("filter.backtest.cli._get_total_bars", return_value=500), \
+         patch("filter.backtest.cli.Path.mkdir"), \
+         patch("filter.backtest.cli.BacktestRunner",
                return_value=mock_runner), \
-         patch("filter_app.backtest.cli.EventRecorder",
+         patch("filter.backtest.cli.EventRecorder",
                return_value=mock_recorder) as mock_rec_cls, \
-         patch("filter_app.backtest.cli.ParquetStore") as mock_store_cls, \
+         patch("filter.backtest.cli.ParquetStore") as mock_store_cls, \
          patch.object(sys, "argv", cli_args):
 
         if mock_store is not None:
             mock_store_cls.return_value = mock_store
 
-        from filter_app.backtest.cli import main
+        from filter.backtest.cli import main
         main()
 
     return mock_runner, mock_store_cls, mock_rec_cls
@@ -221,7 +221,7 @@ class TestCLISmoke:
 
         result = subprocess.run(
             [
-                "python", "-m", "filter_app.backtest.cli",
+                "python", "-m", "filter.backtest.cli",
             ],
             capture_output=True, text=True, timeout=15,
         )
@@ -239,7 +239,7 @@ class TestCLISmoke:
 
         result = subprocess.run(
             [
-                "python", "-m", "filter_app.backtest.cli", "--help",
+                "python", "-m", "filter.backtest.cli", "--help",
             ],
             capture_output=True, text=True, timeout=15,
         )
@@ -256,7 +256,7 @@ class TestCLISmoke:
         output_dir = tmp_path / "bt_output"
         result = subprocess.run(
             [
-                "python", "-m", "filter_app.backtest.cli",
+                "python", "-m", "filter.backtest.cli",
                 "--ticker", "AAPL",
                 "--start-bar", "0", "--end-bar", "10",
                 "--step-interval", "1",

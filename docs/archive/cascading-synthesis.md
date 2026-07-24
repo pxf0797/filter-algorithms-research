@@ -218,7 +218,7 @@ def _format_synth_date(cutoff_date: str, tf: str, db_rows: list[dict]) -> str:
 
 ### 4.2 主入口: `_sync_all_cascading()`
 
-**位置**: `filter_app/services/data_loader.py`
+**位置**: `filter/services/data_loader.py`
 
 ```python
 def _sync_all_cascading(

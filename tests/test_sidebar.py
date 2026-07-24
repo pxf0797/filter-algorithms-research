@@ -10,8 +10,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-# Ensure filter_app/ package is importable (conftest handles streamlit mock)
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+# Ensure filter/ package is importable (conftest handles streamlit mock)
+_src = Path(__file__).resolve().parent.parent / "filter"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 

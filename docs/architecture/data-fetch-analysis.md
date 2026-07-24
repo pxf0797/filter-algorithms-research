@@ -2,8 +2,8 @@
 
 分析日期: 2026-07-05
 源代码:
-- `/Users/xfpan/claude/filter_research/filter_app/services/data_loader.py`
-- `/Users/xfpan/claude/filter_research/filter_app/db.py`
+- `/Users/xfpan/claude/filter_research/filter/services/data_loader.py`
+- `/Users/xfpan/claude/filter_research/filter/db.py`
 
 ---
 

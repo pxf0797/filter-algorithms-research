@@ -204,11 +204,11 @@ class TestBacktestIntegration:
     """Verify isolated modules are integrable."""
 
     def test_metrics_module_importable(self):
-        from filter_app.backtest.metrics import compute_backtest_metrics
+        from filter.backtest.metrics import compute_backtest_metrics
         assert callable(compute_backtest_metrics)
 
     def test_metrics_computation(self):
-        from filter_app.backtest.metrics import compute_backtest_metrics
+        from filter.backtest.metrics import compute_backtest_metrics
 
         n = 100
         long_pnl = np.cumsum(np.random.randn(n) * 0.02) + 100.0
@@ -227,7 +227,7 @@ class TestBacktestIntegration:
         assert metrics["losing_trades"] == 2
 
     def test_metrics_empty_data(self):
-        from filter_app.backtest.metrics import compute_backtest_metrics
+        from filter.backtest.metrics import compute_backtest_metrics
 
         metrics = compute_backtest_metrics(
             np.array([100.0]), np.array([100.0]), [], 1,
@@ -236,7 +236,7 @@ class TestBacktestIntegration:
         assert metrics["total_trades"] == 0
 
     def test_metrics_single_long_trade(self):
-        from filter_app.backtest.metrics import compute_backtest_metrics
+        from filter.backtest.metrics import compute_backtest_metrics
 
         n = 50
         long_pnl = np.linspace(100, 108, n)
@@ -249,19 +249,19 @@ class TestBacktestIntegration:
         assert metrics["win_rate_pct"] == 100.0
 
     def test_catalog_module_importable(self):
-        from filter_app.backtest.catalog import BacktestCatalog
+        from filter.backtest.catalog import BacktestCatalog
         catalog = BacktestCatalog()
         assert catalog is not None
 
     def test_catalog_scan_empty(self, tmp_path):
-        from filter_app.backtest.catalog import BacktestCatalog
+        from filter.backtest.catalog import BacktestCatalog
         catalog = BacktestCatalog(base_dir=str(tmp_path))
         sessions = catalog.scan()
         assert isinstance(sessions, list)
 
     def test_backtestrunner_uses_pipeline(self):
         """Verify BacktestRunner._compute_filters delegates to engine.pipeline."""
-        from filter_app.backtest.engine import BacktestRunner
+        from filter.backtest.engine import BacktestRunner
         noisy = np.arange(100, dtype=float)
         t = np.arange(100, dtype=float)
         cfg = {"_fid": "sma", "pv": {"window": 11}}
@@ -271,7 +271,7 @@ class TestBacktestIntegration:
 
     def test_backtestrunner_schmitt_delegates(self):
         """Verify BacktestRunner._compute_schmitt_trigger delegates to pipeline."""
-        from filter_app.backtest.engine import BacktestRunner
+        from filter.backtest.engine import BacktestRunner
         filtered = np.sin(np.arange(200, dtype=float) / 20.0)
         t = np.arange(200, dtype=float)
         cfg = {"show_sch": True, "ew": 60, "ke": 0.15, "sm": 0.05}
@@ -281,7 +281,7 @@ class TestBacktestIntegration:
 
     def test_backtestrunner_prediction_delegates(self):
         """Verify BacktestRunner._compute_prediction_pairs delegates to pipeline."""
-        from filter_app.backtest.engine import BacktestRunner
+        from filter.backtest.engine import BacktestRunner
         t = np.arange(200, dtype=float)
         filtered = np.sin(t / 20.0)
         schmitt = {"sig": np.ones(200, dtype=int)}

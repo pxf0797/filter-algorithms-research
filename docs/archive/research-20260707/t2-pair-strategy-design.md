@@ -1,6 +1,6 @@
 # 以「多空对（Pair）」为单元的完整交易策略设计
 
-> 依据：T1 分析（`t1-pair-lifecycle-analysis.md`）+ 源码 `filter_app/services/filter_engine.py`
+> 依据：T1 分析（`t1-pair-lifecycle-analysis.md`）+ 源码 `filter/services/filter_engine.py`
 > 关键前提（T1 结论）：现有 `_find_all_pairs` **不返回半边 Pair**（`range(len(merged)-1)` 止于倒数第二段），当前实现事实上即「保守策略 A」——只在完成 Pair 的 `pair_end` 入场。本设计要在**不破坏这一保守语义的前提下，增量地把半边 Pair 纳入可交易范围，并补齐退出机制与多周期协同**。
 
 ---

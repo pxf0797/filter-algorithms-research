@@ -272,8 +272,8 @@ class TestGetBarDateFromDb:
 
     def test_returns_date_when_found(self):
         """查询到日期时返回字符串."""
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "filter_app"))
-        from filter_app.backtest.panel import _get_bar_date_from_db
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "filter"))
+        from filter.backtest.panel import _get_bar_date_from_db
 
         mock_conn = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
@@ -286,7 +286,7 @@ class TestGetBarDateFromDb:
 
     def test_returns_empty_when_not_found(self):
         """无数据时返回空字符串."""
-        from filter_app.backtest.panel import _get_bar_date_from_db
+        from filter.backtest.panel import _get_bar_date_from_db
 
         mock_conn = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
@@ -305,7 +305,7 @@ class TestBacktestLogger:
 
     def test_log_mode_switch_writes_jsonl(self, tmp_path):
         """log_mode_switch 写入一条 JSONL 记录."""
-        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "filter_app"))
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "filter"))
         import json
         from backtest.logger import log_mode_switch
 
@@ -604,7 +604,7 @@ class TestOnSliderChange:
 
     def _setup_ss(self, real_ss: dict, extra: dict | None = None) -> _DictSessionState:
         """将 real_ss 转为 backtest_panel 及 state 共享的 session_state。"""
-        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
+        import filter.backtest.panel as bp  # type: ignore[import-untyped]
         # _DictSessionState 同时支持 dict 存取和 attribute 存取
         ss = _DictSessionState(real_ss)
         if extra:
@@ -622,7 +622,7 @@ class TestOnSliderChange:
             _mock_state_st,
             {"_is_playing": False, "_bt_slider_pos": 42},
         )
-        from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
+        from filter.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
         _on_slider_change()
         assert ss["_bar_index"] == 42
 
@@ -633,8 +633,8 @@ class TestOnSliderChange:
             {"_is_playing": False, "_bt_slider_pos": 42,
              "_fetched_ticker": "AAPL", "_min_tf": "日线"},
         )
-        from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
-        with patch("filter_app.backtest.panel._get_bar_date_from_db", return_value="2026-07-15"):
+        from filter.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
+        with patch("filter.backtest.panel._get_bar_date_from_db", return_value="2026-07-15"):
             _on_slider_change()
         assert ss["_bar_index"] == 42
         assert ss["_bt_cutoff_date"] == "2026-07-15"
@@ -645,7 +645,7 @@ class TestOnSliderChange:
             _mock_state_st,
             {"_is_playing": True, "_bt_slider_pos": 99, "_bar_index": 50},
         )
-        from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
+        from filter.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
         _on_slider_change()
         assert ss["_bar_index"] == 50  # 保持原有值不变
 
@@ -654,7 +654,7 @@ class TestOnSliderChange:
     def test_on_slider_change_does_not_mutate_is_playing(self, _mock_state_st):
         """TC7: 非播放时 _on_slider_change 不修改 _is_playing."""
         self._setup_ss(_mock_state_st, {"_is_playing": False})
-        from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
+        from filter.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
         _on_slider_change()
         assert AppState.get("_is_playing") is False
 
@@ -664,7 +664,7 @@ class TestOnSliderChange:
             _mock_state_st,
             {"_is_playing": False},
         )
-        from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
+        from filter.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
         _on_slider_change()
         assert ss["_bar_index"] == 0
 
@@ -676,7 +676,7 @@ class TestOnSliderChange:
              "_fetched_ticker": "", "_min_tf": "",
              "_bt_cutoff_date": "old-date"},
         )
-        from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
+        from filter.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
         _on_slider_change()
         assert ss["_bar_index"] == 42
         assert ss["_bt_cutoff_date"] == "old-date"
@@ -691,8 +691,8 @@ class TestOnSliderChange:
              "_fetched_ticker": "AAPL", "_min_tf": "日线",
              "_bt_cutoff_date": "old-date"},
         )
-        from filter_app.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
-        with patch("filter_app.backtest.panel._get_bar_date_from_db", return_value=""):
+        from filter.backtest.panel import _on_slider_change  # type: ignore[import-untyped]
+        with patch("filter.backtest.panel._get_bar_date_from_db", return_value=""):
             _on_slider_change()
         assert ss["_bar_index"] == 42
         assert ss["_bt_cutoff_date"] == "old-date"
@@ -711,7 +711,7 @@ class TestRenderBacktestModeSlider:
 
     def _setup(self, real_ss: dict, extras: dict | None = None) -> dict:
         """准备 _DictSessionState 并让 backtest_panel / state 共享。"""
-        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
+        import filter.backtest.panel as bp  # type: ignore[import-untyped]
         ss = _DictSessionState(real_ss)
         if extras:
             ss.update(extras)
@@ -721,7 +721,7 @@ class TestRenderBacktestModeSlider:
 
     def _call_render(self, ss):
         """调用 _render_backtest_mode，patch radio 使其保持在回测模式，patch nav 避免按钮副作用。"""
-        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
+        import filter.backtest.panel as bp  # type: ignore[import-untyped]
         with patch.object(bp.st.sidebar, "radio", return_value="回测模式"), \
              patch.object(bp, "_render_backtest_nav"):
             bp._render_backtest_mode("美股 US", "AAPL", [{"tf": "日线", "n_pts": 120}])
@@ -735,7 +735,7 @@ class TestRenderBacktestModeSlider:
             {"_is_playing": True, "_bar_index": 100, "_min_tf_bar_count": 500,
              "_cb_mode": True, "_min_tf": "日线", "_fetched_ticker": "AAPL"},
         )
-        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
+        import filter.backtest.panel as bp  # type: ignore[import-untyped]
         with patch.object(bp.st.sidebar, "progress") as mock_progress, \
              patch.object(bp.st.sidebar, "slider") as mock_slider:
             self._call_render(ss)
@@ -750,7 +750,7 @@ class TestRenderBacktestModeSlider:
             {"_is_playing": False, "_bar_index": 100, "_min_tf_bar_count": 500,
              "_cb_mode": True, "_min_tf": "日线", "_fetched_ticker": "AAPL"},
         )
-        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
+        import filter.backtest.panel as bp  # type: ignore[import-untyped]
         with patch.object(bp.st.sidebar, "progress") as mock_progress, \
              patch.object(bp.st.sidebar, "slider") as mock_slider:
             self._call_render(ss)
@@ -764,7 +764,7 @@ class TestRenderBacktestModeSlider:
             {"_is_playing": False, "_bar_index": 100, "_min_tf_bar_count": 500,
              "_cb_mode": True, "_min_tf": "日线", "_fetched_ticker": "AAPL"},
         )
-        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
+        import filter.backtest.panel as bp  # type: ignore[import-untyped]
         with patch.object(bp.st.sidebar, "slider") as mock_slider:
             self._call_render(ss)
         mock_slider.assert_called_once()
@@ -782,7 +782,7 @@ class TestRenderBacktestModeSlider:
             {"_is_playing": False, "_bar_index": 0, "_min_tf_bar_count": 500,
              "_cb_mode": True, "_min_tf": "日线", "_fetched_ticker": "AAPL"},
         )
-        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
+        import filter.backtest.panel as bp  # type: ignore[import-untyped]
         with patch.object(bp.st.sidebar, "slider"):
             self._call_render(ss)
         assert ss["_bar_index"] == 500
@@ -796,7 +796,7 @@ class TestRenderBacktestModeSlider:
             {"_is_playing": False, "_bar_index": 0, "_min_tf_bar_count": 0,
              "_cb_mode": True, "_min_tf": "", "_fetched_ticker": ""},
         )
-        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
+        import filter.backtest.panel as bp  # type: ignore[import-untyped]
         with patch.object(bp.st.sidebar, "warning") as mock_warning, \
              patch.object(bp.st.sidebar, "slider") as mock_slider, \
              patch.object(bp.st.sidebar, "progress") as mock_progress:
@@ -812,7 +812,7 @@ class TestRenderBacktestModeSlider:
             {"_is_playing": False, "_bar_index": 500, "_min_tf_bar_count": 500,
              "_cb_mode": True, "_min_tf": "日线", "_fetched_ticker": "AAPL"},
         )
-        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
+        import filter.backtest.panel as bp  # type: ignore[import-untyped]
         with patch.object(bp.st.sidebar, "progress") as mock_progress, \
              patch.object(bp.st.sidebar, "slider") as mock_slider:
             self._call_render(ss)
@@ -829,7 +829,7 @@ class TestBacktestNavButtons:
     def _call_nav_button_fn(name: str, total_bars: int, min_n_pts: int,
                              real_ss: dict, extras: dict | None = None):
         """patch 掉 st.sidebar.button 按钮创建，仅触发按钮回调中的逻辑。"""
-        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
+        import filter.backtest.panel as bp  # type: ignore[import-untyped]
         ss = _DictSessionState(real_ss)
         if extras:
             ss.update(extras)
@@ -964,14 +964,14 @@ class TestRunBacktestPlay:
     @staticmethod
     def _call_play(real_ss: dict, extras: dict | None = None) -> _DictSessionState:
         """设置 session_state 并调用 _run_backtest_play. 返回执行后的 ss."""
-        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
+        import filter.backtest.panel as bp  # type: ignore[import-untyped]
         ss = _DictSessionState(real_ss)
         if extras:
             ss.update(extras)
         bp.st.session_state = ss
         state.st.session_state = ss
         # logger 已在 conftest mock 的 streamlit runtime 之外，需要 patch
-        with patch("filter_app.backtest.panel.logger"):
+        with patch("filter.backtest.panel.logger"):
             if extras and extras.get("_min_tf_bar_count", 0) > 0:
                 # 需要 cutt-off patch
                 pass
@@ -1042,7 +1042,7 @@ class TestBacktestIntegration:
 
     def test_play_pause_drag_flow(self, _mock_state_st):
         """TC29: 完整播放-暂停-拖动流程."""
-        import filter_app.backtest.panel as bp  # type: ignore[import-untyped]
+        import filter.backtest.panel as bp  # type: ignore[import-untyped]
 
         # 1. 回测模式初始状态
         ss = _DictSessionState(_mock_state_st)
@@ -1061,7 +1061,7 @@ class TestBacktestIntegration:
         ss["_is_playing"] = True
 
         # 3. 播放 5 帧
-        with patch("filter_app.backtest.panel.logger"):
+        with patch("filter.backtest.panel.logger"):
             for _ in range(5):
                 bp._run_backtest_play()
         assert ss["_bar_index"] == 505
@@ -1072,13 +1072,13 @@ class TestBacktestIntegration:
 
         # 5. 拖动 slider（期望 _get_bar_date_from_db 返回对应日期）
         ss["_bt_slider_pos"] = 300
-        with patch("filter_app.backtest.panel._get_bar_date_from_db", return_value="2026-06-15"):
+        with patch("filter.backtest.panel._get_bar_date_from_db", return_value="2026-06-15"):
             bp._on_slider_change()
         assert ss["_bar_index"] == 300
 
         # 6. 恢复播放
         ss["_is_playing"] = True
-        with patch("filter_app.backtest.panel.logger"):
+        with patch("filter.backtest.panel.logger"):
             bp._run_backtest_play()
         assert ss["_bar_index"] == 301  # 从 300 继续递增
 
@@ -1090,7 +1090,7 @@ class TestUpdateCutoffAndRerun:
 
     def test_syncs_bt_slider_pos(self, _mock_state_st):
         """P0: _bar_index=10 → _update_cutoff_and_rerun() 后 _bt_slider_pos == 10."""
-        import filter_app.backtest.panel as bp
+        import filter.backtest.panel as bp
 
         ss = _DictSessionState(_mock_state_st)
         ss.update({
@@ -1101,15 +1101,15 @@ class TestUpdateCutoffAndRerun:
         bp.st.session_state = ss
         state.st.session_state = ss
 
-        with patch("filter_app.backtest.panel._get_bar_date_from_db", return_value="2026-06-15"), \
-             patch("filter_app.backtest.panel.st.rerun"):
+        with patch("filter.backtest.panel._get_bar_date_from_db", return_value="2026-06-15"), \
+             patch("filter.backtest.panel.st.rerun"):
             bp._update_cutoff_and_rerun()
 
         assert ss["_bt_slider_pos"] == 10
 
     def test_syncs_bt_slider_pos_before_cutoff_query(self, _mock_state_st):
         """P0: _bt_slider_pos 在 cutoff_date 查询之前已同步，查询使用更新后的 bar_index."""
-        import filter_app.backtest.panel as bp
+        import filter.backtest.panel as bp
 
         ss = _DictSessionState(_mock_state_st)
         ss.update({
@@ -1121,8 +1121,8 @@ class TestUpdateCutoffAndRerun:
         bp.st.session_state = ss
         state.st.session_state = ss
 
-        with patch("filter_app.backtest.panel._get_bar_date_from_db") as mock_get_date, \
-             patch("filter_app.backtest.panel.st.rerun"):
+        with patch("filter.backtest.panel._get_bar_date_from_db") as mock_get_date, \
+             patch("filter.backtest.panel.st.rerun"):
             mock_get_date.return_value = "2026-07-01"
             bp._update_cutoff_and_rerun()
 
@@ -1132,7 +1132,7 @@ class TestUpdateCutoffAndRerun:
 
     def test_nav_forward_syncs_widget_key(self, _mock_state_st):
         """P1: 前进按钮路径 — bar_index=5 → 前进到 6 → _bt_slider_pos == 6."""
-        import filter_app.backtest.panel as bp
+        import filter.backtest.panel as bp
 
         ss = _DictSessionState(_mock_state_st)
         ss.update({
@@ -1146,15 +1146,15 @@ class TestUpdateCutoffAndRerun:
         # 模拟前进按钮操作
         ss["_bar_index"] = 6
 
-        with patch("filter_app.backtest.panel._get_bar_date_from_db", return_value="2026-06-20"), \
-             patch("filter_app.backtest.panel.st.rerun"):
+        with patch("filter.backtest.panel._get_bar_date_from_db", return_value="2026-06-20"), \
+             patch("filter.backtest.panel.st.rerun"):
             bp._update_cutoff_and_rerun()
 
         assert ss["_bt_slider_pos"] == 6
 
     def test_play_path_not_affected(self, _mock_state_st):
         """P1: _is_playing=True 时 _on_slider_change 跳过，_run_backtest_play 不受 _bt_slider_pos 影响."""
-        import filter_app.backtest.panel as bp
+        import filter.backtest.panel as bp
 
         ss = _DictSessionState(_mock_state_st)
         ss.update({
@@ -1170,14 +1170,14 @@ class TestUpdateCutoffAndRerun:
         state.st.session_state = ss
 
         # _on_slider_change 在播放时应该跳过
-        with patch("filter_app.backtest.panel.logger"):
+        with patch("filter.backtest.panel.logger"):
             bp._on_slider_change()
         # _bar_index 应保持不变（未被 on_change 改写）
         assert ss["_bar_index"] == 200
 
         # _run_backtest_play 递增 _bar_index，不受 _bt_slider_pos 干扰
-        with patch("filter_app.backtest.panel.logger"), \
-             patch("filter_app.backtest.panel._get_bar_date_from_db", return_value="2026-06-20"):
+        with patch("filter.backtest.panel.logger"), \
+             patch("filter.backtest.panel._get_bar_date_from_db", return_value="2026-06-20"):
             result = bp._run_backtest_play()
         assert result is True
         assert ss["_bar_index"] == 201  # 从 200 递增
@@ -1225,7 +1225,7 @@ class TestCheckpoint:
         configs = _make_minimal_configs()
         mock_conn = _make_mock_db_conn()
 
-        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
             r1 = BacktestRunner("TEST", configs)
             r2 = BacktestRunner("TEST", configs)
 
@@ -1236,13 +1236,13 @@ class TestCheckpoint:
         """不同配置产生不同哈希。"""
         mock_conn = _make_mock_db_conn()
 
-        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
             r1 = BacktestRunner("TEST", _make_minimal_configs())
 
         configs2 = _make_minimal_configs()
         configs2[0]["n_pts"] = 200  # 修改一个参数
 
-        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
             r2 = BacktestRunner("TEST", configs2)
 
         assert r1._config_hash() != r2._config_hash()
@@ -1252,7 +1252,7 @@ class TestCheckpoint:
         configs = _make_minimal_configs()
         mock_conn = _make_mock_db_conn()
 
-        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
             runner = BacktestRunner("TEST", configs)
 
         # 手动设置 EWMA 状态（模拟回测进行中）
@@ -1281,7 +1281,7 @@ class TestCheckpoint:
         assert saved["ewma_state"]["v0_日线"]["state"] == 1
 
         # 创建新 runner 并从断点恢复
-        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
             runner2 = BacktestRunner("TEST", configs)
 
         # 恢复前 EWMA 为空
@@ -1300,7 +1300,7 @@ class TestCheckpoint:
         configs = _make_minimal_configs()
         mock_conn = _make_mock_db_conn()
 
-        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
             runner = BacktestRunner("TEST", configs)
 
         runner._ewma_state = {"v0_日线": {"init_mu": 100.0, "init_sigma": 2.0, "state": 1, "dur": 0}}
@@ -1312,7 +1312,7 @@ class TestCheckpoint:
         configs2 = _make_minimal_configs()
         configs2[0]["n_pts"] = 999
 
-        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
             runner2 = BacktestRunner("TEST", configs2)
 
         with pytest.raises(ValueError, match="配置哈希不匹配"):
@@ -1323,7 +1323,7 @@ class TestCheckpoint:
         configs = _make_minimal_configs()
         mock_conn = _make_mock_db_conn()
 
-        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
             runner = BacktestRunner("TEST", configs)
 
         with pytest.raises(ValueError, match="断点文件不存在"):
@@ -1347,7 +1347,7 @@ class TestCheckpoint:
             "volume": 1000,
         }.get(k)
 
-        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
             runner = BacktestRunner("TEST", configs)
 
         # 手动注入 _get_bar_info 返回（避免真实 DB 查询）
@@ -1378,7 +1378,7 @@ class TestCheckpoint:
 
         mock_conn = _make_mock_db_conn(bar_count=20)
 
-        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
             runner = BacktestRunner("TEST", configs)
 
         runner._get_bar_info = lambda idx: {
@@ -1400,7 +1400,7 @@ class TestCheckpoint:
 
         mock_conn = _make_mock_db_conn(bar_count=20)
 
-        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
             runner = BacktestRunner("TEST", configs)
 
         runner._get_bar_info = lambda idx: {
@@ -1426,7 +1426,7 @@ class TestCheckpoint:
             json.dump(state, f)
 
         # 恢复
-        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
             runner2 = BacktestRunner("TEST", configs)
         resume_bar = runner2._restore_checkpoint(cp_path, configs)
         assert resume_bar == 5
@@ -1440,20 +1440,20 @@ class TestCheckpoint:
 
         mock_conn = _make_mock_db_conn(bar_count=20)
 
-        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
             runner = BacktestRunner("TEST", configs)
 
         # make runner save checkpoint with empty ewma
         runner.save_checkpoint(cp_path)
 
-        with patch("filter_app.backtest.engine.get_conn", return_value=mock_conn):
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
             runner2 = BacktestRunner("TEST", configs)
         resume_bar = runner2._restore_checkpoint(cp_path, configs)
         assert runner2._ewma_state == {}
 
 
 # 注册 BacktestRunner（模块顶层引用，便于测试使用）
-from filter_app.backtest.engine import BacktestRunner  # noqa: E402
+from filter.backtest.engine import BacktestRunner  # noqa: E402
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1465,7 +1465,7 @@ class TestComputeBacktestMetrics:
 
     def test_known_sharpe(self):
         """构造确定性 PnL 曲线验证 Sharpe 计算。"""
-        from filter_app.backtest.metrics import compute_backtest_metrics
+        from filter.backtest.metrics import compute_backtest_metrics
 
         # 构造线性增长的 PnL: 每步涨 0.1%
         n = 252  # 一年
@@ -1483,7 +1483,7 @@ class TestComputeBacktestMetrics:
 
     def test_max_drawdown_calculation(self):
         """验证最大回撤计算。"""
-        from filter_app.backtest.metrics import compute_backtest_metrics
+        from filter.backtest.metrics import compute_backtest_metrics
 
         # 构造先涨后跌的 PnL: 100 → 120 → 80
         long_pnl = np.array([100.0, 110.0, 120.0, 100.0, 80.0, 90.0])
@@ -1501,7 +1501,7 @@ class TestComputeBacktestMetrics:
 
     def test_zero_trades(self):
         """空交易列表应返回合理默认值。"""
-        from filter_app.backtest.metrics import compute_backtest_metrics
+        from filter.backtest.metrics import compute_backtest_metrics
 
         long_pnl = np.array([100.0, 100.0, 100.0])
         short_pnl = np.array([100.0, 100.0, 100.0])
@@ -1519,7 +1519,7 @@ class TestComputeBacktestMetrics:
 
     def test_all_wins(self):
         """全部盈利的交易验证 profit_factor = inf。"""
-        from filter_app.backtest.metrics import compute_backtest_metrics
+        from filter.backtest.metrics import compute_backtest_metrics
 
         long_pnl = np.array([100.0, 105.0, 110.0])
         short_pnl = np.array([100.0, 100.0, 100.0])
@@ -1539,7 +1539,7 @@ class TestComputeBacktestMetrics:
 
     def test_empty_pnl_arrays(self):
         """单元素 PnL 数组应返回 _empty_metrics 默认值。"""
-        from filter_app.backtest.metrics import compute_backtest_metrics
+        from filter.backtest.metrics import compute_backtest_metrics
 
         long_pnl = np.array([100.0])
         short_pnl = np.array([100.0])
@@ -1555,7 +1555,7 @@ class TestComputeBacktestMetrics:
 
     def test_sortino_with_downside(self):
         """有下行波动时应产生合理的 Sortino 值。"""
-        from filter_app.backtest.metrics import compute_backtest_metrics
+        from filter.backtest.metrics import compute_backtest_metrics
 
         np.random.seed(42)
         n = 252

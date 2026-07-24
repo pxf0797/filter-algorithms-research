@@ -21,13 +21,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-# 将 filter_app 加入搜索路径
+# 将 filter 加入搜索路径
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from filter_app.services.backtest_core import replay_bar
-from filter_app.config_db import get_preset_by_name
+from filter.backtest.engine import replay_bar
+from filter.config_db import get_preset_by_name
 
 
 # ── 序列化辅助 ──
@@ -97,8 +97,8 @@ def _load_configs_from_preset(preset_name: str) -> list[dict]:
 
     复用 ``backtest_cli._build_configs_from_params`` 的配置构造逻辑。
     """
-    from filter_app.config_db import apply_preset as _apply_preset_db
-    from filter_app.backtest_cli import _build_configs_from_params
+    from filter.config_db import apply_preset as _apply_preset_db
+    from filter.backtest_cli import _build_configs_from_params
 
     preset = get_preset_by_name(preset_name)
     if preset is None:

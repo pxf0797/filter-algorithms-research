@@ -53,7 +53,7 @@
 | `services/pipeline_capture.py` | 299 | 回测管道调试捕获 |
 | `services/bs_marker.py` | 200 | BS 买卖标记计算 |
 | `backtest_logger.py` | 76 | 回测操作日志 |
-| **filter_app 总计** | **~10,465** | -- |
+| **filter 总计** | **~10,465** | -- |
 
 ---
 
@@ -63,7 +63,7 @@
 
 ```
 filter_research/
-├── filter_app/              # ★ 应用主目录 (Streamlit + CLI)
+├── filter/              # ★ 应用主目录 (Streamlit + CLI)
 │   ├── streamlit_app.py     #   Web 入口 (1702 行)
 │   ├── backtest_cli.py      #   CLI 入口 (575 行)
 │   ├── backtest_logger.py   #   JSONL 日志 (76 行)
@@ -112,9 +112,9 @@ filter_research/
 
 | 目录 | 责任清晰度 | 评语 |
 |------|-----------|------|
-| `filter_app/` | **中等** | 混合了入口文件、数据层、状态管理、UI 组件和业务逻辑，缺乏 package 级别的模块边界 |
-| `filter_app/services/` | **良好** | 职责清晰，多数模块零项目内依赖（纯计算或纯持久化），高度可复用 |
-| `filter_app/components/` | **良好** | 仅 Streamlit UI 相关，但 `charts.py` 包含 HTML/JS 混合逻辑 |
+| `filter/` | **中等** | 混合了入口文件、数据层、状态管理、UI 组件和业务逻辑，缺乏 package 级别的模块边界 |
+| `filter/services/` | **良好** | 职责清晰，多数模块零项目内依赖（纯计算或纯持久化），高度可复用 |
+| `filter/components/` | **良好** | 仅 Streamlit UI 相关，但 `charts.py` 包含 HTML/JS 混合逻辑 |
 | `tests/` | **良好** | 31 个测试文件覆盖主要模块，但出现 `tests/unit/` 和 `tests/integration/` 的空目录 |
 | `tools/` | **中等** | 6 个独立脚本，功能有重叠 (如 `view_backtest.py` 与 `analyze_captured_backtest.py`)，缺乏统一入口 |
 | `web_tool/` | **良好** | 独立前端版本，零依赖 |
@@ -284,8 +284,8 @@ filter_research/
 
 | 入口 | 文件 | 启动方式 | 目标用户 |
 |------|------|---------|---------|
-| **Web** | `filter_app/streamlit_app.py` | `streamlit run` | 交互式分析用户 |
-| **CLI** | `filter_app/backtest_cli.py` | `python -m filter_app.backtest_cli` | 批量回测用户 |
+| **Web** | `filter/streamlit_app.py` | `streamlit run` | 交互式分析用户 |
+| **CLI** | `filter/backtest_cli.py` | `python -m filter.backtest_cli` | 批量回测用户 |
 | **纯前端** | `web_tool/index.html` | `python3 -m http.server 8765` | 零依赖体验 |
 
 根目录 `index.html` 仅做重定向：`index.html` → `web_tool/`
@@ -758,7 +758,7 @@ FILTERS["new_filter"] = {
 
 ## 附录: 文件清单索引
 
-### filter_app/ 源文件 (按职责分组)
+### filter/ 源文件 (按职责分组)
 
 **入口**
 - `streamlit_app.py` (1702行) -- Web 入口

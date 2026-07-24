@@ -1,11 +1,11 @@
 # web_tool
 
-独立的 Web 股票筛选工具（纯前端 JavaScript + HTML），与 `filter_app/` **无代码引用关系**。
+独立的 Web 股票筛选工具（纯前端 JavaScript + HTML），与 `filter/` **无代码引用关系**。
 
-## 与 filter_app 的关系
+## 与 filter 的关系
 
-- **filter_app/** — Python Streamlit 应用，多周期滤波分析 + 回测，功能更完整
-- **web_tool/** — 前端原型的筛选器验证工具，功能与 `filter_app` 的部分筛选逻辑重叠
+- **filter/** — Python Streamlit 应用，多周期滤波分析 + 回测，功能更完整
+- **web_tool/** — 前端原型的筛选器验证工具，功能与 `filter` 的部分筛选逻辑重叠
 
 两者功能有重叠（均涉及股票筛选），但代码独立、无相互引用。`web_tool/` 可视为早期原型或轻量替代。
 

@@ -10,7 +10,7 @@ import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 from typing import Any, Dict, Optional, Tuple
-from data.db import upsert_kline, query_kline, get_latest_date
+from filter.data.db import upsert_kline, query_kline, get_latest_date
 
 
 def fetch_incremental(market: str, code: str, tf: str, n_pts: int = 120,

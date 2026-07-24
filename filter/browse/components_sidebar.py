@@ -7,9 +7,9 @@
 """
 
 import streamlit as st
-from engine.filters import FILTERS
+from filter.engine.filters import FILTERS
 from typing import Any, Dict, Optional
-from shared.constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY
+from filter.shared.constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY
 
 
 def _compact_slider(label: str, pmin: float, pmax: float, pdefault: float,

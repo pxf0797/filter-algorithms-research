@@ -2,7 +2,7 @@
 
 > 分析日期: 2026-07-23
 > 分析范围: `/Users/xfpan/claude/filter_research`
-> 代码规模: 10,554 行 Python (filter_app), 35,329 行测试, 34 个测试文件
+> 代码规模: 10,554 行 Python (filter), 35,329 行测试, 34 个测试文件
 
 ---
 

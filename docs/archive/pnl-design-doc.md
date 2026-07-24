@@ -23,13 +23,13 @@
 |---|---|
 | 对应代码版本 | commit `1a4ecd7` |
 | 分支 | `docs/pnl-design-spec` |
-| 核心文件 | `filter_app/services/filter_engine.py`（1020 行） |
+| 核心文件 | `filter/services/filter_engine.py`（1020 行） |
 | 核心函数 | `_compute_strategy_pnl`（L649-860）、`_find_all_pairs`（L520-576） |
 | 跨周期辅助函数 | `_align_pnl_to_current_tf`（L867-974） |
 | 直接调用方 | `_compute_strategy_display`（`streamlit_app.py` L279-313，调用点 L287-289） |
 | 上游调用链 | `streamlit_app.py` L678 → `_compute_strategy_display`（L279）→ `_compute_strategy_pnl`（L287） |
 | 消费/渲染层 | `_add_pnl_traces`（`streamlit_app.py` L428-468）、`charts.py` 的 `_add_cross_pnl_subplot`（L351-396）、`_add_alignment_subplot`（L399-461） |
-| 配置来源 | `filter_app/state.py` VIEW_DEFAULTS（L70-87）、`filter_app/components/sidebar.py` |
+| 配置来源 | `filter/state.py` VIEW_DEFAULTS（L70-87）、`filter/components/sidebar.py` |
 
 ---
 
@@ -543,11 +543,11 @@ for i in range(n):
 
 | 文件 | 相关行 |
 |---|---|
-| `filter_app/services/filter_engine.py` | 649-860（`_compute_strategy_pnl`）、520-576（`_find_all_pairs`）、434/501-511（`_schmitt_trigger`）、867-974（`_align_pnl_to_current_tf`） |
-| `filter_app/streamlit_app.py` | 279-313（`_compute_strategy_display`）、428-468（`_add_pnl_traces`）、646-727（main 链路 steps 3-10） |
-| `filter_app/components/charts.py` | 262-275 / 278-307（进出场标记）、351-396（`_add_cross_pnl_subplot`）、399-461（`_add_alignment_subplot`） |
-| `filter_app/state.py` | 70-87（VIEW_DEFAULTS） |
-| `filter_app/components/sidebar.py` | 153 / 192 / 235-243（n_ext、stop_loss_pct 滑块） |
+| `filter/services/filter_engine.py` | 649-860（`_compute_strategy_pnl`）、520-576（`_find_all_pairs`）、434/501-511（`_schmitt_trigger`）、867-974（`_align_pnl_to_current_tf`） |
+| `filter/streamlit_app.py` | 279-313（`_compute_strategy_display`）、428-468（`_add_pnl_traces`）、646-727（main 链路 steps 3-10） |
+| `filter/components/charts.py` | 262-275 / 278-307（进出场标记）、351-396（`_add_cross_pnl_subplot`）、399-461（`_add_alignment_subplot`） |
+| `filter/state.py` | 70-87（VIEW_DEFAULTS） |
+| `filter/components/sidebar.py` | 153 / 192 / 235-243（n_ext、stop_loss_pct 滑块） |
 
 ### 9.4 本文档诚实边界
 

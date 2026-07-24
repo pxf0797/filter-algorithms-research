@@ -2,7 +2,7 @@
 
 ## 1. 关键代码段定位
 
-文件 `/Users/xfpan/claude/filter_research/filter_app/streamlit_app.py` 的 1641 行。
+文件 `/Users/xfpan/claude/filter_research/filter/streamlit_app.py` 的 1641 行。
 
 ### 1.1 前进下一个bar（⏵按钮）
 

@@ -14,18 +14,18 @@ class TestStockNameDedup:
 
     def test_stock_name_lookup_exists(self):
         """_stock_name_lookup should be importable from data_loader."""
-        from filter_app.data.loader import _stock_name_lookup
+        from filter.data.loader import _stock_name_lookup
         assert callable(_stock_name_lookup)
 
     def test_stock_name_lookup_empty_code(self):
         """Empty or whitespace-only code should return empty string."""
-        from filter_app.data.loader import _stock_name_lookup
+        from filter.data.loader import _stock_name_lookup
         assert _stock_name_lookup("美股 US", "") == ""
         assert _stock_name_lookup("美股 US", "  ") == ""
 
     def test_stock_name_lookup_us_format(self):
         """US market codes should pass through uppercased."""
-        from filter_app.data.loader import _stock_name_lookup
+        from filter.data.loader import _stock_name_lookup
         # This won't actually fetch from yfinance (network), but verifies format logic
         # by checking that the function doesn't crash on valid inputs
         result = _stock_name_lookup("美股 US", "aapl")
@@ -34,14 +34,14 @@ class TestStockNameDedup:
 
     def test_stock_name_lookup_a_share_shanghai(self):
         """A-share codes starting with '6' should get .SS suffix."""
-        from filter_app.data.loader import _stock_name_lookup
+        from filter.data.loader import _stock_name_lookup
         # Verify the market logic path doesn't crash
         result = _stock_name_lookup("A股(沪深)", "600519")
         assert isinstance(result, str)
 
     def test_stock_name_lookup_hk_format(self):
         """HK market codes should be zero-filled to 4 digits with .HK suffix."""
-        from filter_app.data.loader import _stock_name_lookup
+        from filter.data.loader import _stock_name_lookup
         result = _stock_name_lookup("港股 HK", "0700")
         assert isinstance(result, str)
 
@@ -54,7 +54,7 @@ class TestStockNameDedup:
         Only one line should remain.
         """
         import inspect
-        from filter_app.data.loader import _stock_name_lookup
+        from filter.data.loader import _stock_name_lookup
         source = inspect.getsource(_stock_name_lookup)
         # Count occurrences of the .SS/.SZ logic
         count = source.count('".SS" if code[0]')
@@ -73,7 +73,7 @@ class TestImportHygiene:
         # We use compile to check syntax without executing Streamlit code
         import ast
         from pathlib import Path
-        app_path = Path(__file__).parent.parent / "filter_app" / "browse" / "app.py"
+        app_path = Path(__file__).parent.parent / "filter" / "browse" / "app.py"
         source = app_path.read_text(encoding="utf-8")
         try:
             ast.parse(source)
@@ -82,18 +82,18 @@ class TestImportHygiene:
 
     def test_data_loader_imports(self):
         """data_loader module should import without error."""
-        from filter_app.data import loader
+        from filter.data import loader
         assert hasattr(loader, "_stock_name_lookup")
 
     def test_sidebar_sections_imports(self):
         """sidebar module should import without error."""
-        from filter_app.browse import sidebar
+        from filter.browse import sidebar
         # The module itself should import cleanly with expected exports
         assert hasattr(sidebar, "_render_param_panels")
 
     def test_backtest_panel_imports(self):
         """backtest_panel module should import without error."""
-        from filter_app.backtest import panel
+        from filter.backtest import panel
         assert hasattr(panel, "render_backtest_panel")
         assert hasattr(panel, "run_backtest_play")
         assert hasattr(panel, "sync_backtest_cascading_data")
@@ -102,7 +102,7 @@ class TestImportHygiene:
         """Verify dead top-level imports are removed from browse/app.py source."""
         from pathlib import Path
         import ast
-        app_path = Path(__file__).parent.parent / "filter_app" / "browse" / "app.py"
+        app_path = Path(__file__).parent.parent / "filter" / "browse" / "app.py"
         source = app_path.read_text(encoding="utf-8")
 
         # Parse top-level imports
@@ -136,15 +136,15 @@ class TestImportHygiene:
         assert "yfinance" not in top_level_imports, \
             "Dead import 'yfinance' still present in browse/app.py"
 
-        # log_data_load should still be there (now at backtest.logger per P2 restructure)
-        assert "backtest.logger.log_data_load" in top_level_imports, \
+        # log_data_load should still be there (now at filter.backtest.logger per P2 restructure)
+        assert "filter.backtest.logger.log_data_load" in top_level_imports, \
             "'log_data_load' was incorrectly removed"
         assert "log_data_load" in source, "'log_data_load' was incorrectly removed"
 
     def test_sidebar_dead_functions_removed(self):
         """Verify dead functions are removed from browse/sidebar.py."""
         from pathlib import Path
-        sidebar_path = Path(__file__).parent.parent / "filter_app" / "browse" / "sidebar.py"
+        sidebar_path = Path(__file__).parent.parent / "filter" / "browse" / "sidebar.py"
         source = sidebar_path.read_text(encoding="utf-8")
 
         assert "def _render_market_ticker" not in source, \
@@ -154,7 +154,7 @@ class TestImportHygiene:
 
     def test_sync_backtest_cascading_data_signature(self):
         """sync_backtest_cascading_data should be callable with correct args."""
-        from filter_app.backtest.panel import sync_backtest_cascading_data
+        from filter.backtest.panel import sync_backtest_cascading_data
         import inspect
         sig = inspect.signature(sync_backtest_cascading_data)
         params = list(sig.parameters.keys())
@@ -213,9 +213,9 @@ class TestWebToolDocs:
         assert readme.exists(), "web_tool/README.md not found"
 
     def test_readme_documents_independence(self):
-        """README should note that web_tool and filter_app are independent."""
+        """README should note that web_tool and filter are independent."""
         from pathlib import Path
         readme = Path(__file__).parent.parent / "web_tool" / "README.md"
         content = readme.read_text(encoding="utf-8")
-        assert "无代码引用关系" in content or "filter_app" in content.lower(), \
-            "README should document relationship to filter_app"
+        assert "无代码引用关系" in content or "filter" in content.lower(), \
+            "README should document relationship to filter"

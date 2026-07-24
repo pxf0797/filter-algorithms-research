@@ -1,7 +1,7 @@
 """
 Property-based tests (hypothesis) for filter engine mathematical invariants.
 
-Tests for filter_app/services/filter_engine.py core filter functions.
+Tests for filter/services/filter_engine.py core filter functions.
 """
 
 import numpy as np

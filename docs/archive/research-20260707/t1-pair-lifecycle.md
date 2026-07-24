@@ -1,6 +1,6 @@
 # 多空对（Pair）生命周期、窗口滑动影响与半边 Pair 可靠性分析
 
-> 代码依据：`filter_app/services/filter_engine.py`
+> 代码依据：`filter/services/filter_engine.py`
 > - `_schmitt_trigger`（行 434-517，状态机 483-514）
 > - `_find_all_pairs`（行 520-576）
 > - `_compute_strategy_pnl`（行 649-860，Pair 消费逻辑 700-841）

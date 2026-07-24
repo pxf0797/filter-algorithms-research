@@ -1,4 +1,4 @@
-"""Test filter_app.constants — verify constant consistency and completeness."""
+"""Test filter.constants — verify constant consistency and completeness."""
 
 import pytest
 from shared.constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY, TF_INTERVAL

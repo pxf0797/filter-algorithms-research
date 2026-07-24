@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from engine.signals import (
+from filter.engine.signals import (
     compute_bs_markers, _compute_from_trades_filtered, _compute_own_from_trades,
     _find_date_index,
     TF_LOWER, get_lower_tfs,

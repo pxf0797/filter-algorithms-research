@@ -246,8 +246,8 @@ yfinance 在不同时间拉取同一 ticker+周期 的历史数据，可能返�
 
 | 文件 | 内容 |
 |------|------|
-| `filter_app/db.py` | SQLite 数据层：schema、upsert、query、健康检查、快照、校验、更新 |
-| `filter_app/streamlit_app.py` | 数据拉取 (`_fetch_stock`, `_fetch_all_timeframes`)、UI (健康检查/校验/备份/导入导出) |
+| `filter/db.py` | SQLite 数据层：schema、upsert、query、健康检查、快照、校验、更新 |
+| `filter/streamlit_app.py` | 数据拉取 (`_fetch_stock`, `_fetch_all_timeframes`)、UI (健康检查/校验/备份/导入导出) |
 | `data/market.db` | SQLite 数据库（运行时生成，不提交 Git） |
 | `data/snapshots/` | 数据库快照（运行时生成，不提交 Git） |
 | `data/display/` | Parquet 渲染缓存（运行时生成，不提交 Git） |

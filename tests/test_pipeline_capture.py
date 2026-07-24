@@ -20,9 +20,9 @@ import pandas as pd
 import pytest
 
 # ---------------------------------------------------------------------------
-# Ensure filter_app is importable
+# Ensure filter is importable
 # ---------------------------------------------------------------------------
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+_src = Path(__file__).resolve().parent.parent / "filter"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 

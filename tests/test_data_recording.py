@@ -24,9 +24,9 @@ import numpy as np
 import pandas as pd
 
 # ---------------------------------------------------------------------------
-# Make filter_app importable (mirrors conftest.py approach)
+# Make filter importable (mirrors conftest.py approach)
 # ---------------------------------------------------------------------------
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+_src = Path(__file__).resolve().parent.parent / "filter"
 import sys
 
 if str(_src) not in sys.path:

@@ -4,7 +4,7 @@ Tests for Optuna-based parameter optimizer.
 import optuna
 import pytest
 
-from filter_app.backtest.optimizer import (
+from filter.backtest.optimizer import (
     create_study,
     optimize_backtest_params,
     suggest_params,

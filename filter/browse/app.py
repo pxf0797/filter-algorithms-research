@@ -4,6 +4,12 @@
 入口文件：页面布局 + session_state初始化 + st.fragment 包装
 """
 
+import sys
+from pathlib import Path
+_filter_root = Path(__file__).resolve().parent.parent.parent
+if str(_filter_root) not in sys.path:
+    sys.path.insert(0, str(_filter_root))
+
 import sqlite3
 import time
 from loguru import logger
@@ -12,52 +18,52 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-from data.config_db import (init_config_tables, list_presets, apply_preset,
+from filter.data.config_db import (init_config_tables, list_presets, apply_preset,
                         save_preset, delete_preset, rename_preset,
                         get_history,
                         import_json_files_as_presets, VIEW_PARAM_SPECS)
-from data.db import (init_db, get_date_range, has_data,
+from filter.data.db import (init_db, get_date_range, has_data,
                 check_data_health, get_db_size_mb, snapshot_db, list_snapshots,
                 restore_snapshot, prune_snapshots, clear_display_cache,
                 checkpoint_wal, validate_db, compare_with_db, force_update_kline,
                 DB_PATH)
 
 # --- Import from new modules ---
-from engine.filters import (
+from filter.engine.filters import (
     _find_all_pairs,
     _compute_strategy_pnl, _align_pnl_to_current_tf, _compute_holding_masks,
 )
-from engine.pipeline import compute_filters, compute_schmitt_trigger, compute_prediction_pairs
-from data.loader import (
+from filter.engine.pipeline import compute_filters, compute_schmitt_trigger, compute_prediction_pairs
+from filter.data.loader import (
     _fetch_all_timeframes, _fetch_stock, _sync_to_display,
     load_display_cache, _stock_name_lookup,
 )
-from browse.charts import (
+from filter.browse.charts import (
     _render_plotly, _add_prediction_traces,
     _add_cross_pnl_subplot, _add_alignment_subplot,
     _draw_holding_bands, _add_bs_markers,
 )
-from browse.chart_builder import (
+from filter.browse.chart_builder import (
     _date_markers, _determine_subplot_layout, _insert_feedback_row,
     _add_main_price_traces, _add_residual_traces, _add_schmitt_traces,
     _add_pnl_traces, _add_feedback_subplot,
 )
-from browse.sidebar import (
+from filter.browse.sidebar import (
     _handle_pending_apply, _render_config_import, _handle_initial_fetch,
     _render_refresh_row, _render_preset_selector, _render_health_check,
     _render_data_validation, _render_filter_selectors, _render_param_panels,
     _render_db_backup, _view_export_params, _render_export_config,
     _render_config_history, _render_db_import_export, _run_auto_refresh,
 )
-from engine.signals import compute_bs_markers, get_lower_tfs
-from browse.components_sidebar import (
+from filter.engine.signals import compute_bs_markers, get_lower_tfs
+from filter.browse.components_sidebar import (
     _render_params, ALL_TFS, DEFAULT_TFS, TF_HIERARCHY,
 )
-from shared.constants import TF_INTERVAL
-from shared.state import AppState
-from backtest.pipeline import PipelineCapture, PipelineStageData
-from backtest.logger import log_data_load
-from backtest.panel import render_backtest_panel, run_backtest_play, sync_backtest_cascading_data
+from filter.shared.constants import TF_INTERVAL
+from filter.shared.state import AppState
+from filter.backtest.pipeline import PipelineCapture, PipelineStageData
+from filter.backtest.logger import log_data_load
+from filter.backtest.panel import render_backtest_panel, run_backtest_play, sync_backtest_cascading_data
 
 # ---------------------------------------------------------------------------
 # Page config (must be the first Streamlit command)

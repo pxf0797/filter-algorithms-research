@@ -9,8 +9,8 @@
 注意:
 - conftest.py 将 streamlit mock 为 MagicMock, 因此 AppTest 必须
   在 fixture 内部延迟导入 (否则 conftest 会遮蔽真实 streamlit 包)。
-- AppTest 在当前工作目录解析 import, 因此 fixture 中 chdir 到 filter_app/
-  并将 filter_app/ 加入 sys.path。
+- AppTest 在当前工作目录解析 import, 因此 fixture 中 chdir 到 filter/
+  并将 filter/ 加入 sys.path。
 """
 import os
 import sys
@@ -25,7 +25,7 @@ def app():
     # 2. 延迟导入 AppTest (此时 streamlit 已恢复)
     from streamlit.testing.v1 import AppTest
 
-    _app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "filter_app"))
+    _app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "filter"))
     _script = os.path.join(_app_dir, "streamlit_app.py")
     sys.path.insert(0, _app_dir)
     cwd = os.getcwd()
@@ -79,7 +79,7 @@ def _fresh_app():
     _fix_streamlit()
     from streamlit.testing.v1 import AppTest
 
-    _app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "filter_app"))
+    _app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "filter"))
     _script = os.path.join(_app_dir, "streamlit_app.py")
     sys.path.insert(0, _app_dir)
     cwd = os.getcwd()

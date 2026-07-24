@@ -162,7 +162,7 @@ if int(marker[0]) == view_last_idx:    # 非 bar_index
 ### 5.1 全部参数
 
 ```bash
-python -m filter_app.backtest_cli --help
+python -m filter.backtest_cli --help
 ```
 
 | 参数 | 类型 | 默认值 | 含义 | 示例 |
@@ -184,37 +184,37 @@ python -m filter_app.backtest_cli --help
 
 ```bash
 # 基础用法：用预设配置回测（Parquet 数据默认保存）
-python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP
+python -m filter.backtest_cli --ticker 03690.HK --preset 3690_HK_DP
 
 # 用 JSON 配置文件回测
-python -m filter_app.backtest_cli --ticker AAPL --config-file my_config.json
+python -m filter.backtest_cli --ticker AAPL --config-file my_config.json
 
 # 不保存 Parquet/CSV（仅 JSONL 事件流）
-python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP --no-save-data
+python -m filter.backtest_cli --ticker 03690.HK --preset 3690_HK_DP --no-save-data
 
 # 限制 bar 范围（跳过预热期，加速调试）
-python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP \
+python -m filter.backtest_cli --ticker 03690.HK --preset 3690_HK_DP \
   --start-bar 500 --end-bar 1000 --quiet
 
 # 只运行单个视图
-python -m filter_app.backtest_cli --ticker 03690.HK --preset 3690_HK_DP \
+python -m filter.backtest_cli --ticker 03690.HK --preset 3690_HK_DP \
   --view-filter v0_日线
 
 # 指定输出目录 + 跳 bar 加速
-python -m filter_app.backtest_cli --ticker AAPL --preset 3690_HK_DP \
+python -m filter.backtest_cli --ticker AAPL --preset 3690_HK_DP \
   --output-dir ./my_results --step-interval 5
 
 # 启用断点自动保存（每 200 bar 保存一次，崩溃后可恢复）
-python -m filter_app.backtest_cli --ticker AAPL --preset 3690_HK_DP \
+python -m filter.backtest_cli --ticker AAPL --preset 3690_HK_DP \
   --checkpoint-interval 200
 
 # 从断点恢复回测
-python -m filter_app.backtest_cli --ticker AAPL --preset 3690_HK_DP \
+python -m filter.backtest_cli --ticker AAPL --preset 3690_HK_DP \
   --resume backtest_output/AAPL_checkpoint.json
 
 # 批量回测（shell 循环）
 for ticker in AAPL GOOGL MSFT; do
-  python -m filter_app.backtest_cli --ticker $ticker --config-file my_config.json --quiet
+  python -m filter.backtest_cli --ticker $ticker --config-file my_config.json --quiet
 done
 ```
 

@@ -12,7 +12,7 @@ from pathlib import Path
 
 # ── Project root ──────────────────────────────────────────────────────────
 PROJECT = Path(__file__).resolve().parent.parent
-FILTER_APP = PROJECT / "filter_app"
+FILTER_APP = PROJECT / "filter"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -36,7 +36,7 @@ class TestPackageStructure:
             assert _has_init(pkg), f"Missing __init__.py in {pkg}"
 
     def test_root_has_init(self):
-        assert (FILTER_APP / "__init__.py").exists(), "Missing filter_app/__init__.py"
+        assert (FILTER_APP / "__init__.py").exists(), "Missing filter/__init__.py"
 
     def test_old_dirs_removed(self):
         """services/ and components/ directories no longer exist."""
@@ -103,17 +103,17 @@ class TestImports:
         assert BacktestCatalog is not None
 
 
-# ── 3. filter_app top-level re-exports work ──────────────────────────────
+# ── 3. filter top-level re-exports work ──────────────────────────────
 
 class TestTopLevelReexports:
     def test_view_config(self):
-        from filter_app import ViewConfig
+        from filter import ViewConfig
         assert ViewConfig is not None
 
     def test_all_tfs(self):
-        from filter_app import ALL_TFS
+        from filter import ALL_TFS
         assert isinstance(ALL_TFS, (list, tuple))
 
     def test_filters(self):
-        from filter_app import FILTERS
+        from filter import FILTERS
         assert isinstance(FILTERS, dict)

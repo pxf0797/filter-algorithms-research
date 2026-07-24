@@ -1,5 +1,5 @@
 """
-tests/test_db.py — 完整单元测试覆盖 filter_app/db.py 模块
+tests/test_db.py — 完整单元测试覆盖 filter/db.py 模块
 
 覆盖全部 16 个函数：
   init_db, upsert_kline, query_kline, get_date_range, has_data,
@@ -940,7 +940,7 @@ class TestPragmaOptimization:
 
     def test_mmap_size_set(self):
         """get_conn() 应设置 mmap_size。"""
-        from filter_app.data.db import get_conn
+        from filter.data.db import get_conn
 
         conn = get_conn()
         try:
@@ -952,7 +952,7 @@ class TestPragmaOptimization:
 
     def test_temp_store_memory(self):
         """get_conn() 应设置 temp_store=MEMORY。"""
-        from filter_app.data.db import get_conn
+        from filter.data.db import get_conn
 
         conn = get_conn()
         try:
@@ -964,7 +964,7 @@ class TestPragmaOptimization:
 
     def test_cache_size_set(self):
         """get_conn() 应设置 cache_size 为负值（KB）。"""
-        from filter_app.data.db import get_conn
+        from filter.data.db import get_conn
 
         conn = get_conn()
         try:
@@ -976,7 +976,7 @@ class TestPragmaOptimization:
 
     def test_busy_timeout_set(self):
         """get_conn() 应设置 busy_timeout。"""
-        from filter_app.data.db import get_conn
+        from filter.data.db import get_conn
 
         conn = get_conn()
         try:
@@ -995,7 +995,7 @@ class TestForceUpdateBatch:
 
     def test_force_update_deletes_overlapping(self, db_target):
         """force_update_kline 应正确删除重叠时间戳并插入新数据。"""
-        from filter_app.data.db import force_update_kline, query_kline
+        from filter.data.db import force_update_kline, query_kline
 
         _, db_path = db_target
 
@@ -1022,7 +1022,7 @@ class TestForceUpdateBatch:
 
     def test_force_update_empty_records(self, db_target):
         """空 DataFrame 的 force_update 不应报错。"""
-        from filter_app.data.db import force_update_kline
+        from filter.data.db import force_update_kline
 
         import pandas as pd
         df_empty = pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])

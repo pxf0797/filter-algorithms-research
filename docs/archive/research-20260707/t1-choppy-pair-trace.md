@@ -1,7 +1,7 @@
 # t1 — 断续多空对（[+1,0,+1,0,-1] 类）代码逐行追踪
 
 > 方法：直接执行 `filter_engine.py` 的 `_find_all_pairs` 逻辑（`/tmp/trace_pairs.py`，与源码逐行一致），中间值由代码产出而非推理。对照文档 `docs/backtesting/half-pair-trading-strategy-v3.md`。
-> 追踪对象源码：`/Users/xfpan/claude/filter_research/filter_app/services/filter_engine.py`
+> 追踪对象源码：`/Users/xfpan/claude/filter_research/filter/services/filter_engine.py`
 > - `_find_all_pairs`：L520–576
 > - `_schmitt_trigger`：L434–517
 > - `_compute_strategy_pnl`（入场/离场实现）：L649–860

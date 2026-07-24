@@ -15,17 +15,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional, Tuple
 from loguru import logger
 
-from engine.filters import (
+from filter.engine.filters import (
     _find_all_pairs,
     _compute_strategy_pnl,
     _align_pnl_to_current_tf,
     _compute_holding_masks,
 )
-from engine.pipeline import compute_filters, compute_schmitt_trigger, compute_prediction_pairs
-from data.loader import _sync_all_cascading, load_display_cache
-from engine.signals import compute_bs_markers
-from data.db import get_conn
-from shared.constants import ALL_TFS, TF_HIERARCHY
+from filter.engine.pipeline import compute_filters, compute_schmitt_trigger, compute_prediction_pairs
+from filter.data.loader import _sync_all_cascading, load_display_cache
+from filter.engine.signals import compute_bs_markers
+from filter.data.db import get_conn
+from filter.shared.constants import ALL_TFS, TF_HIERARCHY
 
 
 class BacktestRunner:
@@ -300,7 +300,7 @@ class BacktestRunner:
 
         # ── 自动更新 catalog 索引 ──
         try:
-            from filter_app.backtest.catalog import BacktestCatalog
+            from filter.backtest.catalog import BacktestCatalog
             catalog = BacktestCatalog()
             catalog.save_index()
             logger.debug("Backtest catalog index updated")
@@ -1042,7 +1042,7 @@ def _compute_and_log_metrics(results: list[dict], ticker: str) -> None:
         return
 
     try:
-        from filter_app.backtest.metrics import compute_backtest_metrics
+        from filter.backtest.metrics import compute_backtest_metrics
     except ImportError:
         logger.debug("backtest.metrics module not available, skipping metrics")
         return
