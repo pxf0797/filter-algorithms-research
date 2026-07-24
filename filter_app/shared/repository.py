@@ -7,7 +7,7 @@ filter_app/services/repository.py — 轻量 Repository 模式
 from abc import ABC, abstractmethod
 from typing import Generic, TypeVar, Optional, List, Dict, Any
 
-from config_db import (
+from data.config_db import (
     list_presets,
     get_preset,
     get_preset_by_name,

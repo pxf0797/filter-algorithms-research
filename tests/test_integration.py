@@ -50,7 +50,7 @@ def test_data_pipeline_e2e(monkeypatch, tmp_path):
     db_path = tmp_path / "test_market.db"
     monkeypatch.setattr("db.DB_PATH", db_path)
 
-    import db
+    import data.db
     db.init_db()
 
     # ── 构造 OHLC DataFrame ──
@@ -101,7 +101,7 @@ def test_config_preset_lifecycle(tmp_path):
     config_dir.mkdir()
 
     with patch("config_db._CONFIG_DB_PATH", db_path), patch("config_db._CONFIG_DIR", config_dir):
-        import config_db
+        import data.config_db
         config_db.init_config_tables()
 
         # ── 保存2个预设 ──
@@ -440,7 +440,7 @@ def test_cli_bad_preset_exits_nonzero(monkeypatch, tmp_path):
     db_path = tmp_path / "config_empty.db"
     monkeypatch.setattr("config_db._CONFIG_DB_PATH", db_path)
     # 初始化空 config tables
-    import config_db
+    import data.config_db
     config_db.init_config_tables()
 
     _pkg_dir = Path(__file__).resolve().parent.parent / "filter_app"
@@ -485,7 +485,7 @@ def test_config_db_init_creates_correct_schema(monkeypatch, tmp_path):
     db_path = tmp_path / "config.db"
     monkeypatch.setattr("config_db._CONFIG_DB_PATH", db_path)
 
-    import config_db
+    import data.config_db
     config_db.init_config_tables()
 
     # 验证所有3张表存在
@@ -514,7 +514,7 @@ def test_config_db_init_idempotent(monkeypatch, tmp_path):
     db_path = tmp_path / "config.db"
     monkeypatch.setattr("config_db._CONFIG_DB_PATH", db_path)
 
-    import config_db
+    import data.config_db
     config_db.init_config_tables()
     # 第二次调用不应抛异常
     config_db.init_config_tables()
@@ -534,7 +534,7 @@ def test_db_init_idempotent(monkeypatch, tmp_path):
     """db.init_db() 多次调用应是幂等的（不抛异常）"""
     db_path = tmp_path / "market.db"
     monkeypatch.setattr("db.DB_PATH", db_path)
-    import db
+    import data.db
     # 第一次
     db.init_db()
     # 第二次（验证不抛异常也不破坏 schema）

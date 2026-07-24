@@ -22,7 +22,7 @@ _src = Path(__file__).resolve().parent.parent / "filter_app"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
-import config_db as cfg
+import data.config_db as cfg
 
 
 @pytest.fixture(autouse=True)

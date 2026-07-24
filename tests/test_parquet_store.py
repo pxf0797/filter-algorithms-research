@@ -21,7 +21,7 @@ _src = Path(__file__).resolve().parent.parent / "filter_app"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
-from services.parquet_store import ParquetStore
+from data.store import ParquetStore
 from services.event_recorder import CSVBuilder
 
 
@@ -1938,14 +1938,14 @@ class TestSchemaValidation:
     @staticmethod
     def _build_expected_schema(n_views: int = 4) -> pa.Schema:
         """Build a reference schema with *n_views* views."""
-        from services.parquet_store import _build_full_schema
+        from data.store import _build_full_schema
         return _build_full_schema([f"v{i}" for i in range(n_views)])
 
     @staticmethod
     def _build_valid_table(n_views: int = 4, n_rows: int = 3) -> pa.Table:
         """Build a table that passes validation for *n_views* views."""
         import pyarrow as pa
-        from services.parquet_store import _build_full_schema
+        from data.store import _build_full_schema
 
         schema = _build_full_schema([f"v{i}" for i in range(n_views)])
         columns: dict[str, list] = {f.name: [] for f in schema}
@@ -1972,7 +1972,7 @@ class TestSchemaValidation:
 
     def test_valid_schema_passes(self):
         """validate_schema returns no issues for a correctly-typed table."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema()
         table = self._build_valid_table()
@@ -1981,7 +1981,7 @@ class TestSchemaValidation:
 
     def test_valid_schema_with_fewer_views(self):
         """2-view schema also validates correctly."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema(n_views=2)
         table = self._build_valid_table(n_views=2)
@@ -1992,7 +1992,7 @@ class TestSchemaValidation:
 
     def test_missing_column_detected(self):
         """A table with a column removed from the expected schema is flagged."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema()
         table = self._build_valid_table()
@@ -2007,7 +2007,7 @@ class TestSchemaValidation:
 
     def test_multiple_missing_columns(self):
         """Multiple missing columns are all reported."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema(n_views=2)
         table = self._build_valid_table(n_views=2)
@@ -2026,7 +2026,7 @@ class TestSchemaValidation:
 
     def test_extra_column_detected(self):
         """Extra columns are flagged but do not raise."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema()
         table = self._build_valid_table()
@@ -2042,7 +2042,7 @@ class TestSchemaValidation:
 
     def test_extra_column_does_not_raise(self):
         """validate_schema returns issues rather than raising — callers decide."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema()
         table = self._build_valid_table()
@@ -2059,7 +2059,7 @@ class TestSchemaValidation:
 
     def test_type_mismatch_detected(self):
         """A column with the wrong type is flagged."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema()
         table = self._build_valid_table()
@@ -2079,7 +2079,7 @@ class TestSchemaValidation:
 
     def test_multiple_type_mismatches(self):
         """Multiple type mismatches are all reported."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema(n_views=2)
         table = self._build_valid_table(n_views=2)
@@ -2106,7 +2106,7 @@ class TestSchemaValidation:
 
     def test_empty_table_validates(self):
         """A table with zero rows but correct schema passes validation."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema()
         empty = self._build_valid_table(n_rows=0)
@@ -2115,7 +2115,7 @@ class TestSchemaValidation:
 
     def test_empty_table_missing_column_detected(self):
         """A zero-row table missing a column is still flagged."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema()
         empty = self._build_valid_table(n_rows=0)
@@ -2162,7 +2162,7 @@ class TestSchemaValidation:
 
     def test_load_parquet_valid_file(self, tmp_path):
         """load_parquet loads and validates a correct file without error."""
-        from services.parquet_store import load_parquet
+        from data.store import load_parquet
 
         schema = self._build_expected_schema()
         table = self._build_valid_table()
@@ -2176,7 +2176,7 @@ class TestSchemaValidation:
 
     def test_load_parquet_invalid_file_raises(self, tmp_path):
         """load_parquet raises ValueError when schema does not match."""
-        from services.parquet_store import load_parquet
+        from data.store import load_parquet
 
         schema = self._build_expected_schema()
         table = self._build_valid_table()
@@ -2256,7 +2256,7 @@ class TestSchemaValidation:
 
     def test_wrong_total_column_count(self):
         """A table with a different column count triggers the count mismatch issue."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema(n_views=4)
         # Build a 4-view schema but validate against a 2-view one
@@ -2930,14 +2930,14 @@ class TestBSDateBasedMatching:
 
     def test_date_matching_handles_none_marker_date(self):
         """_date_matches 在 marker_date=None 时返回 False（不抛异常）。"""
-        from services.parquet_store import _date_matches
+        from data.store import _date_matches
         assert _date_matches(None, pd.Timestamp("2024-01-01")) is False
         assert _date_matches(pd.Timestamp("2024-01-01"), None) is False
         assert _date_matches(None, None) is False
 
     def test_date_matching_handles_mismatched_formats(self):
         """_date_matches 能处理不同格式的日期输入。"""
-        from services.parquet_store import _date_matches
+        from data.store import _date_matches
 
         # Timestamp vs string
         assert _date_matches(
@@ -2963,14 +2963,14 @@ class TestBSDateBasedMatching:
 
     def test_current_bar_date_returns_none_for_missing_dates(self):
         """_current_bar_date 在 view_data 无 dates 时返回 None。"""
-        from services.parquet_store import _current_bar_date
+        from data.store import _current_bar_date
         assert _current_bar_date({}) is None
         assert _current_bar_date({"dates": None}) is None
         assert _current_bar_date({"dates": []}) is None
 
     def test_current_bar_date_returns_last_timestamp(self):
         """_current_bar_date 返回 dates 数组的最后一个元素作为 pd.Timestamp。"""
-        from services.parquet_store import _current_bar_date
+        from data.store import _current_bar_date
         dates = pd.DatetimeIndex([
             "2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04",
         ])

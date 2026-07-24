@@ -57,7 +57,7 @@ class TestIterrowsReplacement:
     @pytest.fixture
     def db_env(self, tmp_path):
         """初始化临时 DB 环境。"""
-        import db
+        import data.db
         db_path = tmp_path / "test_market.db"
         db.DB_PATH = db_path
         db.SNAPSHOT_DIR = tmp_path / "snapshots"
@@ -282,7 +282,7 @@ class TestLoguruMigration:
     def test_db_module_prints_to_logger(self, capsys):
         """db.py __main__ 块使用 logger 而非 print。"""
         # 导入后重新执行 __name__ == "__main__" 块
-        import db
+        import data.db
         import runpy
         # 不直接运行整个模块, 而是验证 print 已被替换
         # 检查模块级代码中不再有裸 print 调用（排除注释和文档字符串）
@@ -412,7 +412,7 @@ class TestRegressionExistingDb:
 
     def test_upsert_then_query_roundtrip(self, tmp_path):
         """upsert → query 往返数据一致。"""
-        import db
+        import data.db
         db_path = tmp_path / "test_market.db"
         db.DB_PATH = db_path
         db.SNAPSHOT_DIR = tmp_path / "snapshots"
@@ -429,7 +429,7 @@ class TestRegressionExistingDb:
 
     def test_multi_timeframe_isolation(self, tmp_path):
         """同 ticker 不同 tf 数据互不干扰。"""
-        import db
+        import data.db
         db_path = tmp_path / "test_market.db"
         db.DB_PATH = db_path
         db.SNAPSHOT_DIR = tmp_path / "snapshots"

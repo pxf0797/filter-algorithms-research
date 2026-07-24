@@ -5,7 +5,7 @@ import numpy as np
 from unittest.mock import MagicMock, patch
 import sys
 
-from config_db import VIEW_PARAM_SPECS
+from data.config_db import VIEW_PARAM_SPECS
 
 # ============================================================
 # 1. 导出完整性：所有必需参数都出现在导出JSON中
@@ -405,7 +405,7 @@ class TestParamRegistryGuard:
         import streamlit as st
         fake_state = {"v0_pnlfb": True, "v1_pnlfb": False, "v0_tf": "60m"}
         monkeypatch.setattr(st, "session_state", fake_state, raising=False)
-        from config_db import collect_current_params
+        from data.config_db import collect_current_params
         params = collect_current_params()
         assert params.get("v0_pnlfb") is True
         assert params.get("v1_pnlfb") is False

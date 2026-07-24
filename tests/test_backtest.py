@@ -103,7 +103,7 @@ class TestSyncToDisplay:
 
     def test_cutoff_date_query_includes_cutoff(self, tmp_path):
         """传入 cutoff_date 时 SQL 包含 cutoff_date 参数."""
-        from services.data_loader import _sync_to_display
+        from data.loader import _sync_to_display
 
         mock_conn = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
@@ -135,7 +135,7 @@ class TestSyncToDisplay:
 
     def test_cutoff_no_results_returns_false(self):
         """cutoff_date 查询无结果时返回 (False, 0)."""
-        from services.data_loader import _sync_to_display
+        from data.loader import _sync_to_display
 
         mock_conn = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
@@ -149,7 +149,7 @@ class TestSyncToDisplay:
 
     def test_no_cutoff_uses_browse_mode(self):
         """不传 cutoff_date 走浏览模式 query_kline 路径."""
-        from services.data_loader import _sync_to_display
+        from data.loader import _sync_to_display
         import pandas as pd
 
         with patch("services.data_loader.query_kline", return_value=pd.DataFrame()) as mock_query:
@@ -161,7 +161,7 @@ class TestSyncToDisplay:
 
     def test_sync_false_triggers_api_fallback(self):
         """_sync_to_display 返回 ok=False 表示需要 API 回退."""
-        from services.data_loader import _sync_to_display
+        from data.loader import _sync_to_display
 
         mock_conn = MagicMock()
         mock_conn.__enter__.return_value = mock_conn
@@ -174,7 +174,7 @@ class TestSyncToDisplay:
 
     def test_cutoff_date_truncates_to_n_pts(self, tmp_path):
         """cutoff_date 查询返回恰好 n_pts 条."""
-        from services.data_loader import _sync_to_display
+        from data.loader import _sync_to_display
 
         n_pts = 3
         mock_rows = [
@@ -206,7 +206,7 @@ class TestBacktestEdgeCases:
 
     def test_high_tf_insufficient_data(self):
         """高周期在 cutoff_date 前无数据返回 (False, 0)."""
-        from services.data_loader import _sync_to_display
+        from data.loader import _sync_to_display
 
         mock_conn = MagicMock()
         mock_conn.__enter__.return_value = mock_conn

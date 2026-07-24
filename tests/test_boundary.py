@@ -10,7 +10,7 @@ from engine.filters import (
     _fit_parabolic, _fit_physics_parabola, _schmitt_trigger,
     apply_sma, apply_ema, FILTERS,
 )
-from services.data_loader import _stock_name_lookup
+from data.loader import _stock_name_lookup
 from components.sidebar import TF_HIERARCHY, ALL_TFS
 
 

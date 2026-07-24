@@ -13,7 +13,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from loguru import logger
 from typing import Any, Dict, Optional, Tuple
-from db import upsert_kline, query_kline, get_latest_date
+from data.db import upsert_kline, query_kline, get_latest_date
 from shared.constants import ALL_TFS
 
 # 模块级缓存：避免逐 bar 重复写入相同的 parquet 数据
@@ -505,7 +505,7 @@ def _sync_to_display(ticker_code: str, tf: str, n_pts: int = 120,
 
     if cutoff_date is not None:
         # 回测模式：查询截止到 cutoff_date 的最后 n_pts 条，按日期对齐
-        from db import get_conn
+        from data.db import get_conn
         with get_conn() as conn:
             rows = conn.execute(
                 """SELECT ts, open, high, low, close, volume
@@ -724,7 +724,7 @@ def _query_tf_from_db(ticker_code: str, tf: str, cutoff_date: str, n_pts: int) -
     list
         dict 列表，每项包含 Date/Open/High/Low/Close/Volume 字段，按时间升序排列。
     """
-    from db import get_conn
+    from data.db import get_conn
     with get_conn() as conn:
         rows = conn.execute(
             """SELECT ts, open, high, low, close, volume
@@ -758,7 +758,7 @@ def _query_tf_for_period(ticker_code: str, tf: str, period_start: str, period_en
     list
         dict 列表，每项包含 Date/Open/High/Low/Close/Volume 字段，按时间升序排列。
     """
-    from db import get_conn
+    from data.db import get_conn
     with get_conn() as conn:
         rows = conn.execute(
             """SELECT ts, open, high, low, close, volume

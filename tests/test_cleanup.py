@@ -14,18 +14,18 @@ class TestStockNameDedup:
 
     def test_stock_name_lookup_exists(self):
         """_stock_name_lookup should be importable from data_loader."""
-        from filter_app.services.data_loader import _stock_name_lookup
+        from filter_app.data.loader import _stock_name_lookup
         assert callable(_stock_name_lookup)
 
     def test_stock_name_lookup_empty_code(self):
         """Empty or whitespace-only code should return empty string."""
-        from filter_app.services.data_loader import _stock_name_lookup
+        from filter_app.data.loader import _stock_name_lookup
         assert _stock_name_lookup("美股 US", "") == ""
         assert _stock_name_lookup("美股 US", "  ") == ""
 
     def test_stock_name_lookup_us_format(self):
         """US market codes should pass through uppercased."""
-        from filter_app.services.data_loader import _stock_name_lookup
+        from filter_app.data.loader import _stock_name_lookup
         # This won't actually fetch from yfinance (network), but verifies format logic
         # by checking that the function doesn't crash on valid inputs
         result = _stock_name_lookup("美股 US", "aapl")
@@ -34,14 +34,14 @@ class TestStockNameDedup:
 
     def test_stock_name_lookup_a_share_shanghai(self):
         """A-share codes starting with '6' should get .SS suffix."""
-        from filter_app.services.data_loader import _stock_name_lookup
+        from filter_app.data.loader import _stock_name_lookup
         # Verify the market logic path doesn't crash
         result = _stock_name_lookup("A股(沪深)", "600519")
         assert isinstance(result, str)
 
     def test_stock_name_lookup_hk_format(self):
         """HK market codes should be zero-filled to 4 digits with .HK suffix."""
-        from filter_app.services.data_loader import _stock_name_lookup
+        from filter_app.data.loader import _stock_name_lookup
         result = _stock_name_lookup("港股 HK", "0700")
         assert isinstance(result, str)
 
@@ -54,7 +54,7 @@ class TestStockNameDedup:
         Only one line should remain.
         """
         import inspect
-        from filter_app.services.data_loader import _stock_name_lookup
+        from filter_app.data.loader import _stock_name_lookup
         source = inspect.getsource(_stock_name_lookup)
         # Count occurrences of the .SS/.SZ logic
         count = source.count('".SS" if code[0]')
