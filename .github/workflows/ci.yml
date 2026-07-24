@@ -13,6 +13,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-lint-${{ hashFiles('filter_app/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-lint-
       - run: pip install ruff
       - run: ruff check . --ignore=E501,F841
 
@@ -24,16 +30,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: ${{ matrix.python-version }}}
+        with: {python-version: '${{ matrix.python-version }}'}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('filter_app/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
       - run: pip install -r filter_app/requirements.txt pytest pytest-cov
       # <6s: fast unit tests per TEST_TIMES.md
-      - run: python -m pytest tests/test_param_export_import.py
-               tests/test_state.py tests/test_integration_flows.py
-               tests/test_preset_ui_actions.py tests/test_data_loader.py
-               tests/test_config_db.py tests/test_alignment.py
-               tests/test_constants.py tests/test_config.py
-               tests/test_filters.py tests/test_db.py
-               tests/test_app_smoke.py -q --tb=short
+      - run: >
+          python -m pytest tests/test_param_export_import.py
+          tests/test_state.py tests/test_integration_flows.py
+          tests/test_preset_ui_actions.py tests/test_data_loader.py
+          tests/test_config_db.py tests/test_alignment.py
+          tests/test_constants.py tests/test_config.py
+          tests/test_filters.py tests/test_db.py
+          tests/test_app_smoke.py -q --tb=short
+          --junitxml=fast-test-results.xml
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fast-test-report-${{ matrix.python-version }}
+          path: fast-test-results.xml
 
   medium-tests:
     runs-on: ubuntu-latest
@@ -44,19 +64,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: ${{ matrix.python-version }}}
+        with: {python-version: '${{ matrix.python-version }}'}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('filter_app/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
       - run: pip install -r filter_app/requirements.txt pytest pytest-cov pytest-xdist
       # <30s: integration tests, can run in parallel via xdist
-      - run: python -m pytest tests/test_signals.py tests/test_sidebar.py
-               tests/test_integration.py tests/test_strategy.py
-               tests/test_boundary.py tests/test_streamlit_app.py
-               tests/test_preset_ui.py tests/test_charts.py
-               tests/test_chart_builder.py tests/test_backtest_cli.py
-               tests/test_benchmark.py tests/test_p0_cache.py
-               tests/test_p2_cleanup.py tests/test_render_traces.py
-               tests/test_html_overlay.py tests/test_feedback_subplot.py
-               tests/test_subplot_layout.py
-               -n auto -q --tb=short
+      - run: >
+          python -m pytest tests/test_signals.py tests/test_sidebar.py
+          tests/test_integration.py tests/test_strategy.py
+          tests/test_boundary.py tests/test_streamlit_app.py
+          tests/test_preset_ui.py tests/test_charts.py
+          tests/test_chart_builder.py tests/test_backtest_cli.py
+          tests/test_benchmark.py tests/test_p0_cache.py
+          tests/test_p2_cleanup.py tests/test_render_traces.py
+          tests/test_html_overlay.py tests/test_feedback_subplot.py
+          tests/test_subplot_layout.py
+          -n auto -q --tb=short
+          --junitxml=medium-test-results.xml
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: medium-test-report-${{ matrix.python-version }}
+          path: medium-test-results.xml
 
   slow-tests:
     runs-on: ubuntu-latest
@@ -67,14 +101,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: ${{ matrix.python-version }}}
+        with: {python-version: '${{ matrix.python-version }}'}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('filter_app/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
       - run: pip install -r filter_app/requirements.txt pytest pytest-cov
       # ~101s: heavy tests (backtest, pipeline, UI) per TEST_TIMES.md
-      - run: python -m pytest tests/test_backtest.py
-               tests/test_parquet_store.py tests/test_cascading_synthesis.py
-               tests/test_pipeline_capture.py tests/test_data_recording.py
-               tests/test_app_ui.py tests/test_view_backtest_multiticker.py
-               -q --tb=short
+      - run: >
+          python -m pytest tests/test_backtest.py
+          tests/test_parquet_store.py tests/test_cascading_synthesis.py
+          tests/test_pipeline_capture.py tests/test_data_recording.py
+          tests/test_app_ui.py tests/test_view_backtest_multiticker.py
+          -q --tb=short
+          --junitxml=slow-test-results.xml
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: slow-test-report-${{ matrix.python-version }}
+          path: slow-test-results.xml
+
+  test-summary:
+    runs-on: ubuntu-latest
+    needs: [fast-tests, medium-tests, slow-tests]
+    if: always()
+    steps:
+      - name: Publish test summary
+        uses: dorny/test-reporter@v1
+        with:
+          name: pytest-results
+          path: '*-test-results.xml'
+          reporter: java-junit
 
   coverage:
     runs-on: ubuntu-latest
@@ -83,10 +143,29 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-coverage-${{ hashFiles('filter_app/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-coverage-
       - run: pip install -r filter_app/requirements.txt pytest pytest-cov
       - run: python -m pytest tests/ --ignore=tests/test_app_ui.py
                --cov=filter_app --cov-report=term
                --cov-fail-under=55 -q --tb=short
+
+  docker-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image (verify only)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: ghcr.io/${{ github.repository }}:ci-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   build-and-push:
     runs-on: ubuntu-latest
