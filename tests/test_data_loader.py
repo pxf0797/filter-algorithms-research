@@ -387,9 +387,11 @@ class TestFetchStock:
 class TestSyncToDisplay:
 
     def test_normal_sync(self, tmp_path):
-        """正常写入 display parquet."""
+        """正常写入 display parquet（时间分区路径）。"""
         df = _mock_ohlc_df(days=20)
         mock_df = _query_result(df)
+        from datetime import datetime
+        now = datetime.now()
         with patch("services.data_loader.query_kline",
                    return_value=mock_df), \
              patch("services.data_loader.Path") as mock_path_cls:
@@ -401,9 +403,12 @@ class TestSyncToDisplay:
             assert ok is True
             assert count == 20
 
-            # Verify parquet file was created in ticker-scoped directory
-            parquet_path = tmp_path / "data" / "display" / "AAPL" / "日线.parquet"
-            assert parquet_path.exists()
+            # Verify parquet file was created in time-partitioned directory
+            parquet_path = (
+                tmp_path / "data" / "display" / "AAPL"
+                / f"{now.year:04d}" / f"{now.month:02d}" / "AAPL_日线.parquet"
+            )
+            assert parquet_path.exists(), f"Expected partitioned path {parquet_path}"
             loaded = pd.read_parquet(parquet_path)
             assert len(loaded) == 20
 
@@ -484,14 +489,16 @@ class TestFetchAllTimeframes:
 class TestDisplayCacheIsolation:
     """测试显示缓存的 ticker 隔离。
 
-    确保 ``data/display/{ticker_code}/{tf}.parquet`` 格式不会退化回
-    ``data/display/{tf}.parquet``（此前已修复的 bug）。
+    确保 ``data/display/{ticker_code}/YYYY/MM/{ticker_code}_{tf}.parquet``
+    分区格式不会退化回 ``data/display/{tf}.parquet``（此前已修复的 bug）。
     """
 
     def test_parquet_path_includes_ticker(self, tmp_path):
-        """_sync_to_display 写入 ``data/display/{ticker}/{tf}.parquet``。"""
+        """_sync_to_display 写入 ``data/display/{ticker}/YYYY/MM/{ticker}_{tf}.parquet``。"""
         df = _mock_ohlc_df(days=20)
         mock_df = _query_result(df)
+        from datetime import datetime
+        now = datetime.now()
         with patch("services.data_loader.query_kline", return_value=mock_df), \
              patch("services.data_loader.Path") as mock_path_cls:
             fake_file = tmp_path / "filter_app" / "services" / "data_loader.py"
@@ -501,13 +508,18 @@ class TestDisplayCacheIsolation:
             ok, _ = _sync_to_display("AAPL", "日线", n_pts=20)
             assert ok is True
 
-            expected = tmp_path / "data" / "display" / "AAPL" / "日线.parquet"
+            expected = (
+                tmp_path / "data" / "display" / "AAPL"
+                / f"{now.year:04d}" / f"{now.month:02d}" / "AAPL_日线.parquet"
+            )
             assert expected.exists(), f"Expected {expected} to exist"
 
     def test_different_tickers_different_dirs(self, tmp_path):
-        """不同 ticker 写入不同目录，互不覆盖。"""
+        """不同 ticker 写入不同分区目录，互不覆盖。"""
         df = _mock_ohlc_df(days=20)
         mock_df = _query_result(df)
+        from datetime import datetime
+        now = datetime.now()
         with patch("services.data_loader.query_kline", return_value=mock_df), \
              patch("services.data_loader.Path") as mock_path_cls:
             fake_file = tmp_path / "filter_app" / "services" / "data_loader.py"
@@ -521,15 +533,17 @@ class TestDisplayCacheIsolation:
             tsla_dir = tmp_path / "data" / "display" / "TSLA"
             assert aapl_dir.exists(), "AAPL display dir should exist"
             assert tsla_dir.exists(), "TSLA display dir should exist"
-            assert (aapl_dir / "日线.parquet").exists()
-            assert (tsla_dir / "日线.parquet").exists()
+            assert (aapl_dir / f"{now.year:04d}" / f"{now.month:02d}" / "AAPL_日线.parquet").exists()
+            assert (tsla_dir / f"{now.year:04d}" / f"{now.month:02d}" / "TSLA_日线.parquet").exists()
 
     def test_path_format_does_not_regress(self, tmp_path):
-        """回归测试：路径格式是 ``display/{ticker}/{tf}.parquet`` 而非
-        ``display/{tf}.parquet``（此前 bug 的回归防护）。
+        """回归测试：路径格式是 ``display/{ticker}/YYYY/MM/{ticker}_{tf}.parquet``
+        而非 ``display/{tf}.parquet``（此前 bug 的回归防护）。
         """
         df = _mock_ohlc_df(days=20)
         mock_df = _query_result(df)
+        from datetime import datetime
+        now = datetime.now()
         with patch("services.data_loader.query_kline", return_value=mock_df), \
              patch("services.data_loader.Path") as mock_path_cls:
             fake_file = tmp_path / "filter_app" / "services" / "data_loader.py"
@@ -545,10 +559,13 @@ class TestDisplayCacheIsolation:
                 f"Regression: found parquet at display root: {root_parquets}. "
                 f"Files must be in ticker-scoped subdirectories."
             )
-            # 确认 ticker 子目录存在
+            # 确认分区路径存在
             ticker_dir = display_root / "000001.SZ"
             assert ticker_dir.exists()
-            assert (ticker_dir / "60分钟.parquet").exists()
+            assert (
+                ticker_dir / f"{now.year:04d}" / f"{now.month:02d}"
+                / "000001.SZ_60分钟.parquet"
+            ).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -721,9 +738,11 @@ class TestDisplayCacheVersioning:
         assert not _version_path(parquet_path).exists()
 
     def test_sync_to_display_saves_version(self, tmp_path):
-        """_sync_to_display 写入后自动保存 version 文件。"""
+        """_sync_to_display 写入后自动保存 version 文件到分区路径。"""
         df = _mock_ohlc_df(days=20)
         mock_df = _query_result(df)
+        from datetime import datetime
+        now = datetime.now()
         with patch("services.data_loader.query_kline", return_value=mock_df), \
              patch("services.data_loader.Path") as mock_path_cls:
             fake_file = tmp_path / "filter_app" / "services" / "data_loader.py"
@@ -733,7 +752,10 @@ class TestDisplayCacheVersioning:
             ok, count = _sync_to_display("AAPL", "日线", n_pts=20)
             assert ok is True
 
-            parquet_path = tmp_path / "data" / "display" / "AAPL" / "日线.parquet"
+            parquet_path = (
+                tmp_path / "data" / "display" / "AAPL"
+                / f"{now.year:04d}" / f"{now.month:02d}" / "AAPL_日线.parquet"
+            )
             vp = _version_path(parquet_path)
             assert vp.exists(), f"Expected {vp} to exist after _sync_to_display"
             import json
@@ -763,6 +785,189 @@ class TestDisplayCacheVersioning:
         assert _is_cache_valid(parquet_path) is False
 
 
+# ---------------------------------------------------------------------------
+# Incremental Fetch — 增量数据拉取测试
+# ---------------------------------------------------------------------------
+
+class TestIncrementalFetch:
+    """测试 fetch_incremental 和 _fetch_stock(incremental=True) 的增量拉取逻辑。"""
+
+    @staticmethod
+    def _mock_query_result(days=50):
+        """Generate mock query_kline output with sample data."""
+        dates = pd.date_range("2024-01-01", periods=days, freq="D")
+        np.random.seed(42)
+        return pd.DataFrame({
+            "Date": dates,
+            "Open": np.random.randn(days) + 100,
+            "High": np.random.randn(days) + 101,
+            "Low": np.random.randn(days) + 99,
+            "Close": np.random.randn(days) + 100,
+            "Volume": np.random.randint(1000, 10000, days),
+        })
+
+    def test_fetch_incremental_delegates_to_fetch_stock(self):
+        """fetch_incremental 正确委托到 _fetch_stock(incremental=True)。"""
+        mock_df = _mock_ohlc_df(days=30)
+        with patch("services.data_loader._fetch_stock") as mock_fetch:
+            mock_fetch.return_value = (
+                np.arange(30, dtype=float),
+                mock_df["Close"].values,
+                mock_df,
+                "AAPL",
+                None,
+                pd.to_datetime(mock_df.index),
+            )
+            from services.data_loader import fetch_incremental
+            result = fetch_incremental("美股 US", "AAPL", "日线", n_pts=30)
+            assert result[4] is None  # no error
+            mock_fetch.assert_called_once_with(
+                "美股 US", "AAPL", "日线", 30,
+                force_period=None, incremental=True,
+            )
+
+    def test_fetch_stock_incremental_no_db_data_falls_back_to_period(self):
+        """DB无数据时 incremental 回退到 period 全量拉取。"""
+        mock_df = _mock_ohlc_df(days=20)
+        with patch("services.data_loader.yf.download",
+                   return_value=mock_df) as mock_dl, \
+             patch("services.data_loader.get_latest_date",
+                   return_value=None), \
+             patch("services.data_loader.upsert_kline"), \
+             patch("services.data_loader.query_kline",
+                   return_value=_query_result(mock_df)):
+            from services.data_loader import _fetch_stock
+            _, _, _, _, err, _ = _fetch_stock(
+                "美股 US", "AAPL", "日线", 20, incremental=True,
+            )
+            assert err is None
+            _, call_kw = mock_dl.call_args
+            assert "period" in call_kw
+            assert call_kw["period"] == "3mo"
+
+    def test_fetch_stock_incremental_with_db_data_uses_start(self):
+        """DB有数据时 incremental 模式使用 start= 参数。"""
+        mock_df = _mock_ohlc_df(days=10)
+        with patch("services.data_loader.yf.download",
+                   return_value=mock_df) as mock_dl, \
+             patch("services.data_loader.get_latest_date",
+                   return_value="2024-01-15"), \
+             patch("services.data_loader.upsert_kline"), \
+             patch("services.data_loader.query_kline",
+                   return_value=_query_result(mock_df)):
+            from services.data_loader import _fetch_stock
+            _, _, _, _, err, _ = _fetch_stock(
+                "美股 US", "AAPL", "日线", 10, incremental=True,
+            )
+            assert err is None
+            _, call_kw = mock_dl.call_args
+            assert "start" in call_kw
+            assert call_kw["start"] == "2024-01-15"
+            assert "period" not in call_kw
+
+    def test_fetch_stock_non_incremental_uses_period(self):
+        """incremental=False（默认）时正常使用 period 参数。"""
+        mock_df = _mock_ohlc_df(days=20)
+        with patch("services.data_loader.yf.download",
+                   return_value=mock_df) as mock_dl, \
+             patch("services.data_loader.upsert_kline"), \
+             patch("services.data_loader.query_kline",
+                   return_value=_query_result(mock_df)):
+            from services.data_loader import _fetch_stock
+            _, _, _, _, err, _ = _fetch_stock(
+                "美股 US", "AAPL", "日线", 20, incremental=False,
+            )
+            assert err is None
+            _, call_kw = mock_dl.call_args
+            assert "period" in call_kw
+            assert "start" not in call_kw
+
+    def test_incremental_with_timezone_timestamp(self):
+        """DB中时间戳带时区时 last_date[:10] 仍正确提取日期部分。"""
+        mock_df = _mock_ohlc_df(days=5)
+        with patch("services.data_loader.yf.download",
+                   return_value=mock_df) as mock_dl, \
+             patch("services.data_loader.get_latest_date",
+                   return_value="2024-06-15T14:30:00+08:00"), \
+             patch("services.data_loader.upsert_kline"), \
+             patch("services.data_loader.query_kline",
+                   return_value=_query_result(mock_df)):
+            from services.data_loader import _fetch_stock
+            _, _, _, _, err, _ = _fetch_stock(
+                "A股(沪深)", "000001", "60分钟", 10, incremental=True,
+            )
+            assert err is None
+            _, call_kw = mock_dl.call_args
+            assert call_kw["start"] == "2024-06-15"
+
+    def test_incremental_hk_ticker(self):
+        """港股 ticker 增量拉取正确工作。"""
+        mock_df = _mock_ohlc_df(days=15)
+        with patch("services.data_loader.yf.download",
+                   return_value=mock_df) as mock_dl, \
+             patch("services.data_loader.get_latest_date",
+                   return_value="2024-03-10"), \
+             patch("services.data_loader.upsert_kline"), \
+             patch("services.data_loader.query_kline",
+                   return_value=_query_result(mock_df)):
+            from services.data_loader import _fetch_stock
+            _, _, _, _, err, _ = _fetch_stock(
+                "港股 HK", "0700", "日线", 15, incremental=True,
+            )
+            assert err is None
+            _, call_kw = mock_dl.call_args
+            assert call_kw["start"] == "2024-03-10"
+
+    def test_incremental_force_period_overrides(self):
+        """incremental 模式下 force_period 仍遵循，不影响 start 逻辑。"""
+        mock_df = _mock_ohlc_df(days=10)
+        with patch("services.data_loader.yf.download",
+                   return_value=mock_df) as mock_dl, \
+             patch("services.data_loader.get_latest_date",
+                   return_value="2024-01-01"), \
+             patch("services.data_loader.upsert_kline"), \
+             patch("services.data_loader.query_kline",
+                   return_value=_query_result(mock_df)):
+            from services.data_loader import _fetch_stock
+            _, _, _, _, err, _ = _fetch_stock(
+                "美股 US", "AAPL", "日线", 10,
+                force_period="1y", incremental=True,
+            )
+            assert err is None
+            _, call_kw = mock_dl.call_args
+            # DB有数据时用 start，忽略 period
+            assert call_kw["start"] == "2024-01-01"
+
+    def test_upsert_called_after_incremental_fetch(self):
+        """增量拉取后仍调用 upsert_kline 写入 DB。"""
+        mock_df = _mock_ohlc_df(days=10)
+        with patch("services.data_loader.yf.download",
+                   return_value=mock_df), \
+             patch("services.data_loader.get_latest_date",
+                   return_value="2024-01-01"), \
+             patch("services.data_loader.upsert_kline") as mock_upsert, \
+             patch("services.data_loader.query_kline",
+                   return_value=_query_result(mock_df)):
+            from services.data_loader import _fetch_stock
+            _, _, _, _, err, _ = _fetch_stock(
+                "美股 US", "AAPL", "日线", 10, incremental=True,
+            )
+            assert err is None
+            mock_upsert.assert_called_once()
+
+    def test_incremental_empty_download_returns_no_data(self):
+        """增量拉取时 yfinance 返回空数据（如周末/节假日）返回无数据错误。"""
+        with patch("services.data_loader.yf.download",
+                   return_value=pd.DataFrame()), \
+             patch("services.data_loader.get_latest_date",
+                   return_value="2024-01-15"):
+            from services.data_loader import _fetch_stock
+            _, _, _, full, err, _ = _fetch_stock(
+                "美股 US", "AAPL", "日线", 10, incremental=True,
+            )
+            assert err and "无数据" in err
+
+
 # Smoke tests: module-level import does not crash
 # ---------------------------------------------------------------------------
 
@@ -782,3 +987,229 @@ class TestModule:
         assert hasattr(data_loader, "_invalidate_cache")
         assert hasattr(data_loader, "load_display_cache")
         assert hasattr(data_loader, "_version_path")
+
+
+# ---------------------------------------------------------------------------
+# Parquet Time Partitioning — 时间分区路径生成 & 回退 & 范围扫描
+# ---------------------------------------------------------------------------
+
+class TestParquetPartitioning:
+    """测试 parquet 时间分区（YYYY/MM）路径生成、新旧路径回退与时间范围扫描。"""
+
+    def test_partitioned_path_format(self):
+        """分区路径生成：格式为 base/ticker/YYYY/MM/ticker_tf.parquet。"""
+        from services.data_loader import _partitioned_path
+        from datetime import datetime
+
+        dt = datetime(2026, 7, 15, 10, 30)
+        path = _partitioned_path("/data/display", "AAPL", "日线", dt=dt)
+        assert path == "/data/display/AAPL/2026/07/AAPL_日线.parquet"
+
+    def test_partitioned_path_default_now(self):
+        """不传 dt 时使用当前时间。"""
+        from services.data_loader import _partitioned_path
+        from datetime import datetime
+
+        path = _partitioned_path("/data/display", "TSLA", "60分钟")
+        now = datetime.now()
+        expected = f"/data/display/TSLA/{now.year:04d}/{now.month:02d}/TSLA_60分钟.parquet"
+        assert path == expected
+
+    def test_partitioned_path_single_digit_month(self):
+        """月份为个位数时补零（如 3 → 03）。"""
+        from services.data_loader import _partitioned_path
+        from datetime import datetime
+
+        dt = datetime(2026, 3, 1)
+        path = _partitioned_path("/base", "000001", "周线", dt=dt)
+        assert "/2026/03/" in path
+        assert path == "/base/000001/2026/03/000001_周线.parquet"
+
+    def test_resolve_read_path_new_path_found(self, tmp_path):
+        """新分区路径存在时直接返回。"""
+        from services.data_loader import _resolve_read_path, _partitioned_path
+        from datetime import datetime
+
+        dt = datetime(2026, 7, 1)
+        new_path = _partitioned_path(str(tmp_path), "AAPL", "日线", dt=dt)
+        Path(new_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(new_path).touch()
+
+        resolved = _resolve_read_path(str(tmp_path), "AAPL", "日线")
+        assert resolved == new_path
+
+    def test_resolve_read_path_fallback_to_old(self, tmp_path):
+        """分区路径不存在、旧平铺路径存在时回退。"""
+        from services.data_loader import _resolve_read_path
+
+        old_dir = tmp_path / "AAPL"
+        old_dir.mkdir(parents=True, exist_ok=True)
+        old_file = old_dir / "日线.parquet"
+        old_file.touch()
+
+        resolved = _resolve_read_path(str(tmp_path), "AAPL", "日线")
+        assert resolved == str(old_file)
+
+    def test_resolve_read_path_history_partition(self, tmp_path):
+        """当前月份分区不存在但历史月份分区存在时扫描命中。"""
+        from services.data_loader import _resolve_read_path
+
+        # Create a partition in an old month
+        old_partition = tmp_path / "AAPL" / "2026" / "06" / "AAPL_日线.parquet"
+        old_partition.parent.mkdir(parents=True, exist_ok=True)
+        old_partition.touch()
+
+        resolved = _resolve_read_path(str(tmp_path), "AAPL", "日线")
+        # Should find the historical partition (current month 07 doesn't exist)
+        assert resolved == str(old_partition)
+
+    def test_resolve_read_path_new_priority_over_old(self, tmp_path):
+        """同时存在新旧路径时，新分区路径优先。"""
+        from services.data_loader import _resolve_read_path, _partitioned_path
+        from datetime import datetime
+
+        dt = datetime(2026, 7, 1)
+        new_path = _partitioned_path(str(tmp_path), "AAPL", "日线", dt=dt)
+        new_path_p = Path(new_path)
+        new_path_p.parent.mkdir(parents=True, exist_ok=True)
+        new_path_p.touch()
+
+        old_path = tmp_path / "AAPL" / "日线.parquet"
+        old_path.parent.mkdir(parents=True, exist_ok=True)
+        old_path.touch()
+
+        resolved = _resolve_read_path(str(tmp_path), "AAPL", "日线")
+        assert resolved == new_path
+
+    def test_resolve_read_path_none_exists_returns_new(self, tmp_path):
+        """文件完全不存在时返回当前月份分区路径。"""
+        from services.data_loader import _resolve_read_path
+
+        resolved = _resolve_read_path(str(tmp_path), "NONEXIST", "日线")
+        assert "NONEXIST_日线.parquet" in resolved
+        assert "/2026/07/" in resolved or f"/{Path(resolved).parent.parent.name}/" in resolved
+
+    def test_scan_partitions_for_range_empty(self, tmp_path):
+        """空目录返回空列表。"""
+        from services.data_loader import _scan_partitions_for_range
+        from datetime import datetime
+
+        result = _scan_partitions_for_range(
+            str(tmp_path), "AAPL", "日线",
+            datetime(2026, 1, 1), datetime(2026, 12, 31),
+        )
+        assert result == []
+
+    def test_scan_partitions_for_range_matching(self, tmp_path):
+        """扫描命中指定时间范围内的分区。"""
+        from services.data_loader import _scan_partitions_for_range
+        from datetime import datetime
+
+        # Create partitions in different months
+        for m in [1, 3, 5]:
+            p = tmp_path / "AAPL" / f"2026/{m:02d}" / "AAPL_日线.parquet"
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.touch()
+
+        # Query range [2026-02, 2026-04] — only month 3 should match
+        result = _scan_partitions_for_range(
+            str(tmp_path), "AAPL", "日线",
+            datetime(2026, 2, 1), datetime(2026, 4, 30),
+        )
+        assert len(result) == 1
+        assert "2026/03/" in result[0]
+
+    def test_scan_partitions_for_range_ticker_isolation(self, tmp_path):
+        """不同 ticker 的分区不互相干扰。"""
+        from services.data_loader import _scan_partitions_for_range
+        from datetime import datetime
+
+        # AAPL has data in July
+        p1 = tmp_path / "AAPL" / "2026" / "07" / "AAPL_日线.parquet"
+        p1.parent.mkdir(parents=True, exist_ok=True)
+        p1.touch()
+
+        # TSLA has data in July too
+        p2 = tmp_path / "TSLA" / "2026" / "07" / "TSLA_日线.parquet"
+        p2.parent.mkdir(parents=True, exist_ok=True)
+        p2.touch()
+
+        result = _scan_partitions_for_range(
+            str(tmp_path), "AAPL", "日线",
+            datetime(2026, 1, 1), datetime(2026, 12, 31),
+        )
+        assert len(result) == 1
+        assert "AAPL" in result[0]
+
+    def test_sync_to_display_uses_partitioned_path(self, tmp_path, monkeypatch):
+        """_sync_to_display 写入分区路径格式。"""
+        from services.data_loader import _sync_to_display
+
+        df = _mock_ohlc_df(days=20)
+        mock_df = _query_result(df)
+
+        # Redirect display root to tmp_path
+        display_root = tmp_path / "data" / "display"
+        import services.data_loader as dl
+
+        with patch.object(dl, "query_kline", return_value=mock_df):
+            # Patch __file__ of the module so Path(__file__).parent... hits tmp_path
+            fake_init = tmp_path / "filter_app" / "services" / "__init__.py"
+            fake_init.parent.mkdir(parents=True, exist_ok=True)
+            fake_init.touch()
+            # Make data_loader.py's __file__ resolve relative to tmp_path
+            orig_file = dl.__file__
+            dl.__file__ = str(tmp_path / "filter_app" / "services" / "data_loader.py")
+
+            try:
+                ok, count = _sync_to_display("AAPL", "日线", n_pts=20)
+                assert ok is True
+                assert count == 20
+
+                # Old flat path should NOT exist
+                old_path = display_root / "AAPL" / "日线.parquet"
+                assert not old_path.exists(), f"Old path {old_path} should NOT exist"
+
+                # Partitioned file should exist under AAPL/YYYY/MM/
+                import os
+                found = False
+                aapl_dir = display_root / "AAPL"
+                if aapl_dir.exists():
+                    for root, dirs, files in os.walk(str(aapl_dir)):
+                        if "AAPL_日线.parquet" in files:
+                            found = True
+                            break
+                assert found, "Partitioned parquet file should exist under AAPL/YYYY/MM/"
+            finally:
+                dl.__file__ = orig_file
+
+    def test_write_parquet_uses_partitioned_path(self, tmp_path, monkeypatch):
+        """_write_parquet 写入分区路径格式。"""
+        from services.data_loader import _write_parquet
+
+        df = _mock_ohlc_df(days=20)
+        display_root = tmp_path / "data" / "display"
+        import services.data_loader as dl
+
+        # Redirect __file__ so display_root resolves to tmp_path
+        orig_file = dl.__file__
+        dl.__file__ = str(tmp_path / "filter_app" / "services" / "data_loader.py")
+
+        try:
+            ok = _write_parquet("日线", df, ticker_code="AAPL")
+            assert ok is True
+
+            old_path = display_root / "AAPL" / "日线.parquet"
+            assert not old_path.exists(), f"Old path {old_path} should NOT exist"
+
+            import os
+            found = False
+            aapl_dir = display_root / "AAPL"
+            if aapl_dir.exists():
+                for root, dirs, files in os.walk(str(aapl_dir)):
+                    if "AAPL_日线.parquet" in files:
+                        found = True
+                        break
+            assert found, "Partitioned parquet file should exist"
+        finally:
+            dl.__file__ = orig_file

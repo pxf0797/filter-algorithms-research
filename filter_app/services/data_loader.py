@@ -278,6 +278,33 @@ def load_display_cache(ticker_code: str, tf: str) -> Optional[pd.DataFrame]:
         return None
 
 
+def fetch_incremental(market: str, code: str, tf: str, n_pts: int = 120,
+                      force_period: Optional[str] = None):
+    """增量拉取：检查DB中已有最新日期，仅拉取其后数据。避免全量重复下载。
+
+    DB有数据时从 last_date 开始增量拉取；无数据时回退到全量拉取。
+
+    Parameters
+    ----------
+    market : str
+        市场标识，如 "A股(沪深)"、"港股 HK" 等。
+    code : str
+        股票代码。
+    tf : str
+        周期名称，如 "日线"、"60分钟" 等。
+    n_pts : int
+        需要返回的数据点数。
+    force_period : Optional[str]
+        强制指定 yfinance 的 period 参数。
+
+    Returns
+    -------
+    Tuple
+        与 _fetch_stock 相同的返回元组。
+    """
+    return _fetch_stock(market, code, tf, n_pts, force_period=force_period, incremental=True)
+
+
 def _fetch_all_timeframes(market: str, code: str) -> Dict[str, Tuple[bool, Any]]:
     """获取某股票全部8个周期的数据，并行写入DB。返回成功/失败统计。
 
@@ -320,7 +347,8 @@ def _fetch_all_timeframes(market: str, code: str) -> Dict[str, Tuple[bool, Any]]
 
 
 def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
-                 force_period: Optional[str] = None) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[pd.DataFrame], Optional[str], Optional[str], Optional[pd.DatetimeIndex]]:
+                 force_period: Optional[str] = None,
+                 incremental: bool = False) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[pd.DataFrame], Optional[str], Optional[str], Optional[pd.DatetimeIndex]]:
     """从yfinance获取股票数据并写入DB。
 
     Parameters
@@ -335,6 +363,8 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
         需要返回的数据点数。
     force_period : Optional[str]
         强制指定 yfinance 的 period 参数，覆盖自动计算。
+    incremental : bool
+        增量模式：检查DB最新日期，仅拉取其后数据。DB无数据时回退全量拉取。
 
     Returns
     -------
@@ -390,7 +420,16 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
     else:  # 季线
         period = "max"
 
-    data = yf.download(full, period=period, interval=interval, progress=False)
+    # ── 增量路径：DB有数据时从 last_date 开始，否则全量 ──
+    if incremental:
+        last_date = get_latest_date(code, tf)
+        if last_date:
+            start_str = last_date[:10]  # 取日期部分 "YYYY-MM-DD"
+            data = yf.download(full, start=start_str, interval=interval, progress=False)
+        else:
+            data = yf.download(full, period=period, interval=interval, progress=False)
+    else:
+        data = yf.download(full, period=period, interval=interval, progress=False)
     if data.empty:
         return None, None, None, full, f"无数据: {full}", None
 
@@ -457,8 +496,12 @@ def _sync_to_display(ticker_code: str, tf: str, n_pts: int = 120,
     Tuple[bool, int]
         (是否成功, 写入的数据条数)。
     """
-    display_base = Path(__file__).parent.parent.parent / "data" / "display" / ticker_code
-    display_base.mkdir(parents=True, exist_ok=True)
+    display_root = Path(__file__).parent.parent.parent / "data" / "display"
+    now = datetime.now()
+    partitioned = (
+        display_root / ticker_code / f"{now.year:04d}" / f"{now.month:02d}"
+        / f"{ticker_code}_{tf}.parquet"
+    )
 
     if cutoff_date is not None:
         # 回测模式：查询截止到 cutoff_date 的最后 n_pts 条，按日期对齐
@@ -473,8 +516,9 @@ def _sync_to_display(ticker_code: str, tf: str, n_pts: int = 120,
         if rows:
             rows.reverse()  # DESC → ASC
             df = pd.DataFrame(rows, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
-            df.to_parquet(display_base / f"{tf}.parquet", index=False)
-            _save_version(display_base / f"{tf}.parquet")
+            partitioned.parent.mkdir(parents=True, exist_ok=True)
+            df.to_parquet(partitioned, index=False)
+            _save_version(partitioned)
             return True, len(df)
         return False, 0
 
@@ -483,8 +527,9 @@ def _sync_to_display(ticker_code: str, tf: str, n_pts: int = 120,
     if len(df) < 5:
         return False, len(df)
     df["Date"] = pd.to_datetime(df["Date"])
-    df.to_parquet(display_base / f"{tf}.parquet", index=False)
-    _save_version(display_base / f"{tf}.parquet")
+    partitioned.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(partitioned, index=False)
+    _save_version(partitioned)
     return True, len(df)
 
 
@@ -973,7 +1018,9 @@ def _build_output_df(db_rows: list, synthesized_bar: _Optional[dict], n_pts: int
     return pd.DataFrame(data, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
 
 def _write_parquet(tf: str, df: pd.DataFrame, ticker_code: str = "") -> bool:
-    """将 DataFrame 写入 data/display/{ticker_code}/{tf}.parquet 文件。
+    """将 DataFrame 写入时间分区 parquet 文件。
+
+    写入 ``data/display/{ticker_code}/{YYYY}/{MM}/{ticker_code}_{tf}.parquet``。
 
     Parameters
     ----------
@@ -990,11 +1037,13 @@ def _write_parquet(tf: str, df: pd.DataFrame, ticker_code: str = "") -> bool:
         写入成功返回 True，失败返回 False。
     """
     try:
-        display_dir = (
-            Path(__file__).parent.parent.parent / "data" / "display" / ticker_code
+        display_root = Path(__file__).parent.parent.parent / "data" / "display"
+        now = datetime.now()
+        parquet_path = (
+            display_root / ticker_code / f"{now.year:04d}" / f"{now.month:02d}"
+            / f"{ticker_code}_{tf}.parquet"
         )
-        display_dir.mkdir(parents=True, exist_ok=True)
-        parquet_path = display_dir / f"{tf}.parquet"
+        parquet_path.parent.mkdir(parents=True, exist_ok=True)
         df.to_parquet(parquet_path, index=False)
         _save_version(parquet_path)
         return True
