@@ -4,6 +4,7 @@
 依赖: filter_engine (纯计算)、Streamlit (仅_st_import)
 """
 
+import functools
 import json
 import uuid
 from pathlib import Path
@@ -12,6 +13,19 @@ import streamlit as st
 import plotly.graph_objects as go
 
 from services.filter_engine import _compute_holding_masks
+
+# ---------------------------------------------------------------------------
+# Module-level constants
+# ---------------------------------------------------------------------------
+_PLOTLY_CDN = "https://cdn.plot.ly/plotly-2.35.2.min.js"
+_PLOTLY_CDN_FALLBACK = "https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js"
+
+
+@functools.lru_cache(maxsize=1)
+def _get_chart_js() -> str:
+    """Cached read of the crosshair JavaScript file (read once, reused across all views)."""
+    _js_path = Path(__file__).parent.parent / "static" / "charts.js"
+    return _js_path.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -42,9 +56,8 @@ def _render_plotly(fig, height=750, dates=None) -> None:
     figure_json = json.dumps(fig_dict, cls=PlotlyJSONEncoder)
     div_id = f"plot-{uuid.uuid4().hex[:8]}"
 
-    # Load crosshair JS from file (extracted from inline template)
-    _js_path = Path(__file__).parent.parent / "static" / "charts.js"
-    _js_code = _js_path.read_text(encoding="utf-8")
+    # Load crosshair JS from cached file read (avoids disk I/O on every chart render)
+    _js_code = _get_chart_js()
     _js_code = _js_code.replace("__DIV_ID__", div_id)
     _js_code = _js_code.replace("__FIGURE_JSON__", figure_json)
 
@@ -52,8 +65,8 @@ def _render_plotly(fig, height=750, dates=None) -> None:
 <html>
 <head>
 <meta charset="utf-8">
-<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"
-    onerror="this.onerror=null;this.src='https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js';window._plotlyCdnFailed=true"></script>
+<script src="{_PLOTLY_CDN}"
+    onerror="this.onerror=null;this.src='{_PLOTLY_CDN_FALLBACK}';window._plotlyCdnFailed=true"></script>
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 html, body {{ width: 100%; height: 100%; overflow: hidden; }}

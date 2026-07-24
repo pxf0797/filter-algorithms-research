@@ -169,13 +169,15 @@ def _render_preset_selector(market, ticker_code) -> None:
         st.sidebar.caption(f"💡 {p['description']}")
         c1, c2, c3, c4 = st.sidebar.columns([1.2, 1, 1, 0.8])
         with c1:
-            if st.button("✅ 应用", key="apply_preset", use_container_width=True):
+            # P2-opt: on_click callback — Streamlit auto-reruns, no explicit st.rerun() needed
+            def _apply_preset_cb():
                 params = apply_preset(p["preset_id"])
                 if params:
                     logger.info(f"Preset applied: {p['name']} ({len(params)} params)")
                     AppState.set("_pending_apply_params", params)
                     st.toast(f"已应用: {p['name']}")
-                    st.rerun()
+            st.button("✅ 应用", key="apply_preset", use_container_width=True,
+                      on_click=_apply_preset_cb)
         with c2:
             if st.button("📝 更新", key="update_preset_btn", use_container_width=True):
                 AppState.set("_preset_action", "update")
@@ -202,6 +204,7 @@ def _render_preset_selector(market, ticker_code) -> None:
             st.sidebar.caption("这会将当前所有参数写入该预设。")
             cc1, cc2 = st.sidebar.columns(2)
             with cc1:
+                # P2-opt: Streamlit auto-reruns after button click — no st.rerun() needed
                 if st.button("确认覆盖", key="update_confirm_btn", use_container_width=True):
                     from config_db import collect_current_params
                     import json as _json
@@ -213,7 +216,6 @@ def _render_preset_selector(market, ticker_code) -> None:
                     st.toast(f"已更新: {target['name']}")
                     AppState.pop("_preset_action")
                     AppState.pop("_preset_action_id")
-                    st.rerun()
             with cc2:
                 # P1-4: on_click callback — Streamlit auto-reruns after callback
                 st.button("取消", key="update_cancel_btn", use_container_width=True,
@@ -225,13 +227,13 @@ def _render_preset_selector(market, ticker_code) -> None:
                                              key="rename_input_val")
             cc1, cc2 = st.sidebar.columns(2)
             with cc1:
+                # P2-opt: Streamlit auto-reruns after button click — no st.rerun() needed
                 if st.button("确认重命名", key="rename_confirm_btn", use_container_width=True):
                     if new_name.strip() and new_name.strip() != target["name"]:
                         rename_preset(target["preset_id"], new_name.strip())
                         st.toast(f"已重命名: {target['name']} → {new_name.strip()}")
                         AppState.pop("_preset_action")
                         AppState.pop("_preset_action_id")
-                        st.rerun()
                     elif new_name.strip() == target["name"]:
                         st.warning("名称未变化")
                     else:
@@ -245,12 +247,14 @@ def _render_preset_selector(market, ticker_code) -> None:
             st.sidebar.error(f"确认删除 **{target['name']}**？此操作不可恢复。")
             cc1, cc2 = st.sidebar.columns(2)
             with cc1:
-                if st.button("确认删除", key="delete_confirm_btn", use_container_width=True):
+                # P2-opt: on_click callback — Streamlit auto-reruns, no explicit st.rerun()
+                def _delete_confirm_cb():
                     delete_preset(target["preset_id"])
                     st.toast(f"已删除: {target['name']}")
                     AppState.pop("_preset_action")
                     AppState.pop("_preset_action_id")
-                    st.rerun()
+                st.button("确认删除", key="delete_confirm_btn", use_container_width=True,
+                          on_click=_delete_confirm_cb)
             with cc2:
                 # P1-4: on_click callback — Streamlit auto-reruns after callback
                 st.button("取消", key="delete_cancel_btn", use_container_width=True,
@@ -272,6 +276,7 @@ def _render_preset_selector(market, ticker_code) -> None:
         overwrite = False
         if selected_preset:
             overwrite = st.checkbox(f"覆盖「{selected_preset['name']}」", key="overwrite_preset")
+        # P2-opt: Streamlit auto-reruns after button click — no st.rerun() needed
         if st.button("💾 保存", key="save_preset_btn", use_container_width=True):
             if new_name.strip():
                 from config_db import collect_current_params
@@ -286,7 +291,6 @@ def _render_preset_selector(market, ticker_code) -> None:
                             category=cat)
                 st.toast(f"已保存: {target_name}")
                 AppState.set("_pending_reset_overwrite", True)
-                st.rerun()
             else:
                 st.error("请输入预设名称")
 
@@ -395,12 +399,11 @@ def _render_data_validation(market, ticker_code) -> None:
                                         updated += 1
                                 except Exception as e:
                                     logger.warning(f"Force update {tf} failed: {e}")
+                        # P2-opt: Streamlit auto-reruns after button click — no st.rerun() needed
                         if updated > 0:
                             st.cache_data.clear()
                             clear_display_cache()
                             st.success(f"已更新 {updated} 个周期，页面将刷新")
-                            time.sleep(0.5)
-                            st.rerun()
                         else:
                             st.warning("没有周期被更新")
 
@@ -479,6 +482,7 @@ def _render_db_backup() -> None:
                                         format_func=lambda i: snap_labels[i], key="restore_select")
             c_r1, c_r2 = st.columns([1, 1])
             with c_r1:
+                # P2-opt: Streamlit auto-reruns after button click — no st.rerun() needed
                 if st.button("恢复到此备份", key="restore_btn", use_container_width=True):
                     try:
                         restore_snapshot(snapshots[selected_idx][0])
@@ -487,20 +491,16 @@ def _render_db_backup() -> None:
                         AppState.set("_fetched_ticker", "")
                         logger.info(f"Snapshot restored: {snap_labels[selected_idx]}")
                         st.success("已恢复，页面将刷新")
-                        time.sleep(0.5)
-                        st.rerun()
                     except Exception as e:
                         logger.error(f"Snapshot restore failed: {e}", exc_info=True)
                         st.error(f"恢复失败: {e}")
             with c_r2:
-                if st.button("删除此备份", key="del_snap_btn", use_container_width=True):
-                    try:
-                        os.remove(snapshots[selected_idx][0])
-                        logger.info(f"Snapshot deleted: {snap_labels[selected_idx]}")
-                        st.rerun()
-                    except Exception as e:
-                        logger.warning(f"Snapshot deletion failed: {e}")
-                        st.error(f"删除失败: {e}")
+                # P2-opt: on_click callback — Streamlit auto-reruns, no explicit st.rerun()
+                st.button("删除此备份", key="del_snap_btn", use_container_width=True,
+                          on_click=lambda idx=selected_idx: (
+                              os.remove(snapshots[idx][0]),
+                              logger.info(f"Snapshot deleted: {snap_labels[idx]}"),
+                          ))
 
 
 def _view_export_params(cfg, i) -> dict:
