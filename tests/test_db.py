@@ -327,6 +327,33 @@ class TestHelpers:
         db_module, _ = db_target
         assert db_module.has_data("NODATA") is False
 
+    def test_get_latest_date_has_data(self, populate_kline):
+        """有数据时返回最新时间戳。"""
+        db_module, _ = populate_kline
+        result = db_module.get_latest_date("AAPL", "日线")
+        assert result is not None
+        assert "2026-07" in result  # 50 days from 2026-06-01
+
+    def test_get_latest_date_no_data(self, db_target):
+        """无数据时返回 None。"""
+        db_module, _ = db_target
+        assert db_module.get_latest_date("NODATA", "日线") is None
+
+    def test_get_latest_date_specific_timeframe(self, populate_kline):
+        """指定周期正确返回该周期的最后时间戳。"""
+        db_module, _ = populate_kline
+        result = db_module.get_latest_date("AAPL", "60分钟")
+        assert result is not None
+        # 60分钟数据从 2026-06-01 开始，60条
+        assert "2026-06" in result
+
+    def test_get_latest_date_wrong_timeframe(self, populate_kline):
+        """数据存在但周期不匹配时返回 None。"""
+        db_module, _ = populate_kline
+        # MSFT only has 日线, not 60分钟
+        result = db_module.get_latest_date("MSFT", "60分钟")
+        assert result is None
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 5. TestCheckDataHealth
