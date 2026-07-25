@@ -66,6 +66,22 @@ class TestDefaultTFs:
         for tf in DEFAULT_TFS:
             assert tf in ALL_TFS, f"{tf} 不在 ALL_TFS 中"
 
+    def test_default_tfs_sorted_coarse_to_fine(self):
+        """P0: DEFAULT_TFS 应按 ALL_TFS 索引降序（粗→细），确保 v0=coarsest, v3=finest.
+
+        这是多周期视图索引的约定：
+        - v0 = coarsest (highest ALL_TFS index) → 日线
+        - v3 = finest   (lowest ALL_TFS index)  → 5分钟
+
+        违反此约定会导致周期倒转，使 v0 滤波值出现在过高频周期上，
+        而新高周期视图（日/周线）出现台阶状数据。
+        """
+        indices = [ALL_TFS.index(tf) for tf in DEFAULT_TFS]
+        assert indices == sorted(indices, reverse=True), (
+            f"DEFAULT_TFS 应按 ALL_TFS 索引降序排列(粗→细)，"
+            f"当前 indices={indices}，期望={sorted(indices, reverse=True)}"
+        )
+
 
 # ===================================================================
 # SECTION 2 — TF_HIERARCHY 层次映射

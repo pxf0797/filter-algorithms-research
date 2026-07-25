@@ -74,6 +74,18 @@ class BacktestRunner:
         )
         self._min_tf: str = self._tfs_in_use[0]  # ALL_TFS 索引最小 = 最精细
 
+        # P0: 检测 v0~v2 是否按粗→细排列（view idx 0 = coarsest main period）
+        # 违反此约定会导致 v0 滤波值出现在错误周期上（如 v0=15min 而非日线）
+        _tf_ix = [ALL_TFS.index(c["tf"]) for c in configs]
+        if len(_tf_ix) >= 3 and (
+            _tf_ix[0] < _tf_ix[1] or _tf_ix[1] < _tf_ix[2]
+        ):
+            logger.warning(
+                "configs 视图排序可能违反粗→细约定(v0=coarsest, v3=finest): "
+                "tf_indices={}, 回测输出列周期分配可能不正确",
+                _tf_ix,
+            )
+
         # 每 TF 的最大 n_pts（多个视图可能共享同一 TF）
         self._tf_n_pts: dict[str, int] = {}
         for cfg in configs:

@@ -1573,3 +1573,78 @@ class TestComputeBacktestMetrics:
         import math
         assert not math.isnan(result["sortino_ratio"])
         assert not math.isinf(result["sortino_ratio"])
+
+
+# ── TestEngineViewOrdering ─────────────────────────────────────────────────────
+
+
+class TestEngineViewOrdering:
+    """P0: 引擎视图应遵循「粗→细」排序约定，v0=coarsest, v3=finest。
+
+    约定来源: DEFAULT_TFS 按 ALL_TFS 索引降序排列,
+    确保回测输出列 v0_filtered 对应主低频周期(日线),
+    v3_filtered 对应最高频周期。
+    """
+
+    def test_build_default_configs_sorted_coarse_to_fine(self):
+        """默认配置应按 ALL_TFS 降序 (粗→细) 排列."""
+        from filter.shared.constants import ALL_TFS, DEFAULT_TFS
+        from filter.backtest.cli import _build_default_configs
+
+        configs = _build_default_configs("TEST_TICKER")
+        assert len(configs) == 4
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in configs]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"默认配置应粗→细排列, indices={tf_indices}"
+        )
+
+    def test_build_configs_from_params_respects_period_ordering(self):
+        """从预设参数构建的配置应保持粗→细排列."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.cli import _build_configs_from_params
+
+        # 模拟预设参数: v0=coarsest, v3=finest
+        params = {
+            "global_f": "savgol",
+            "global_dual": True,
+            "global_f2": "ema",
+            "v0_tf": "日线", "v0_n": 60, "v0_ke": 0.15, "v0_sm": 0.05,
+            "v1_tf": "60分钟", "v1_n": 60, "v1_ke": 0.1, "v1_sm": 0.05,
+            "v2_tf": "15分钟", "v2_n": 50, "v2_ke": 0.1, "v2_sm": 0.05,
+            "v3_tf": "5分钟", "v3_n": 50, "v3_ke": 0.1, "v3_sm": 0.05,
+        }
+
+        configs = _build_configs_from_params(params)
+        assert len(configs) == 4
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in configs]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"预设配置应粗→细排列, indices={tf_indices}, "
+            f"期望={sorted(tf_indices, reverse=True)}"
+        )
+
+    def test_engine_min_tf_is_finest_in_use(self, tmp_path):
+        """_min_tf 应为 ALL_TFS 索引最小的周期 (最精细)."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.engine import BacktestRunner
+        from unittest.mock import patch
+
+        configs = [
+            {"tf": "日线",  "n_pts": 60, "_fid": "sma", "_dual": False},
+            {"tf": "15分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "60分钟", "n_pts": 60, "_fid": "sma", "_dual": False},
+        ]
+
+        with patch.object(BacktestRunner, "_query_bar_count", return_value=1000), \
+             patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
+            runner = BacktestRunner("3690", configs)
+
+        # 最精细的应是 15分钟 (ALL_TFS index=2)
+        assert runner._min_tf == "15分钟", (
+            f"_min_tf 应为 '15分钟', 实为 '{runner._min_tf}'"
+        )
+        # _tfs_in_use 应按 ALL_TFS 升序 (细→粗)
+        assert runner._tfs_in_use == ["15分钟", "60分钟", "日线"], (
+            f"_tfs_in_use 应细→粗排列, 实为 {runner._tfs_in_use}"
+        )

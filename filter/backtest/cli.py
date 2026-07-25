@@ -171,6 +171,18 @@ def _build_configs_from_params(params: dict) -> list:
 
         configs.append(cfg)
 
+    # P0: 检测构建的 configs 是否按粗→细排列 (v0=coarsest main period)
+    # 检查 v0~v2 的 ALL_TFS 索引是否严格降序,
+    # 忽略 v3(可能为周线/月线等更长周期用于上下文), 避免误报
+    _indices = [ALL_TFS.index(c["tf"]) for c in configs]
+    if len(_indices) >= 3 and (
+        _indices[0] < _indices[1] or _indices[1] < _indices[2]
+    ):
+        logger.warning(
+            "预设 configs 视图排序违反粗→细约定(v0=coarsest, v3=finest): "
+            "tf_indices={}, 回测输出列周期可能不正确", _indices,
+        )
+
     return configs
 
 
