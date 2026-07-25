@@ -1144,6 +1144,9 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         const arr = col(data, v + '_' + posType);
         const sampled = sampledIndices.map(i => {
           const val = arr[i];
+          // NaN, null, undefined → 0 (空仓). Guard against sparse position arrays
+          // where missing bars may have been serialized as null.
+          if (val == null) return 0;
           return (val === true || val === 1) ? (posType === 'long_pos' ? 1 : 2) : 0;
         });
         rows.push(sampled);
@@ -1429,6 +1432,8 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       const arr = col(data, v + '_' + posType);
       const sampled = sampledIndices.map(function(i) {
         const val = arr[i];
+        // NaN, null, undefined → 0 (空仓)
+        if (val == null) return 0;
         return (val === true || val === 1) ? (posType === 'long_pos' ? 1 : 2) : 0;
       });
       hRows.push(sampled);
@@ -1863,7 +1868,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         '<button class="btn-reselect" onclick="location.reload()">重新选择文件</button>';
     }
 
-    // Render all sections
+    // ── Phase 1: Quick charts (rendered synchronously, visible within one frame) ──
     buildOverview(data);
     buildSchemaTable();
     buildFilteredOverview(data);
@@ -1872,22 +1877,36 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     buildMultiTickerPnl();
     buildHeatmap(data);
 
-    // Per-period dashboards (unified subplot: 4 rows, shared x-axis)
-    // Purge old chart state before rebuilding (handles file re-upload scenario)
-    VIEWS.forEach(function(v) {
-      Plotly.purge('chart-dash-' + v);
-    });
-    VIEWS.forEach(function(v) {
-      buildPeriodDashboard(data, v, viewLabels[v]);
+    // ── Phase 2: Per-view period dashboards (progressive — heaviest, deferred to let
+    //    the browser paint Phase 1 first. Each dashboard renders one frame apart to
+    //    spread GPU work and avoid UI freeze on large datasets.) ──
+    VIEWS.forEach(function(v, idx) {
+      setTimeout(function() {
+        try {
+          Plotly.purge('chart-dash-' + v);
+          buildPeriodDashboard(data, v, viewLabels[v]);
+        } catch(e) {
+          console.error('buildPeriodDashboard failed for ' + v, e);
+          var el = document.getElementById('chart-dash-' + v);
+          if (el) el.innerHTML = '<div style="padding:40px;text-align:center;color:var(--red)">渲染失败 (' + v + ')</div>';
+        }
+      }, 120 + idx * 100);
     });
 
-    // ── Cross-dashboard x-axis sync: when user zooms/pans one period dashboard,
-    // sync xaxis4 range to the other three dashboards ──
-    (function() {
-      var _syncGuard = false; // prevent infinite relayout loop
+    // ── Phase 3: Trades chart + data table (after dashboards) ──
+    var _phase3Ms = 120 + VIEWS.length * 100 + 80;
+    setTimeout(function() {
+      try { buildTrades(data); } catch(e) { console.error('buildTrades failed', e); }
+      try { buildTable(data); } catch(e) { console.error('buildTable failed', e); }
+    }, _phase3Ms);
+
+    // ── Cross-dashboard x-axis sync (after all dashboards rendered) ──
+    //   When user zooms/pans one period dashboard, sync xaxis4 range to the others.
+    setTimeout(function() {
+      var _syncGuard = false;
       VIEWS.forEach(function(v) {
         var divEl = document.getElementById('chart-dash-' + v);
-        // Remove old listener to avoid duplicates on re-upload
+        if (!divEl) return;
         if (divEl._relayoutHandler) divEl.removeListener('plotly_relayout', divEl._relayoutHandler);
         divEl._relayoutHandler = function(eventData) {
           if (_syncGuard) return;
@@ -1906,10 +1925,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         };
         divEl.on('plotly_relayout', divEl._relayoutHandler);
       });
-    })();
-
-    buildTrades(data);
-    buildTable(data);
+    }, _phase3Ms + 120);
   }
 
   // ========== Drag & Drop + File Upload ==========
