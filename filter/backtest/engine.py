@@ -168,11 +168,6 @@ class BacktestRunner:
 
         results: list[dict] = []
 
-        # P0-5: 回测开始前一次性预同步级联合成数据
-        # 用 end_bar 对应的 cutoff_date（最远的）合成一次，避免逐 bar 重写 parquet
-        end_info = self._get_bar_info(min(end_bar - 1, len(self._bar_info_cache) - 1))
-        self._sync_data(end_info["cutoff_date"])
-
         for bar_index in range(start_bar, end_bar, step_interval):
             bar_info = self._get_bar_info(bar_index)
             cutoff_date = bar_info["cutoff_date"]
@@ -181,8 +176,8 @@ class BacktestRunner:
                 bar_index, cutoff_date,
             )
 
-            # 1) 数据已在循环前一次性同步，逐 bar 不再调用 _sync_data
-            # （如需逐 bar 精确截止，设置环境变量 BACKTEST_PRESYNC=0）
+            # 1) 逐 bar 级联合成，恢复粗TF部分K线随时间变化
+            self._sync_data(cutoff_date)
 
             # 2) 逐视图加载窗口数据并运行管道（按 TF 从粗到细排序）
             view_outputs: dict[str, dict] = {}
@@ -490,9 +485,9 @@ class BacktestRunner:
     def _sync_data(self, cutoff_date: str) -> None:
         """同步数据到 display parquet（级联合成）。
 
-        调用 ``_sync_all_cascading`` 将所有在用 TF 的全量历史数据写入
-        ``data/display/{tf}.parquet``。使用 ``sync_all=True`` 拉取全量数据，
-        由 ``_load_window_data`` 按 bar 自行窗口化。
+        调用 ``_sync_all_cascading`` 将所有在用 TF 的数据写入
+        ``data/display/{tf}.parquet``。使用默认 ``sync_all=False``（fetch_limit=n_pts
+        + truncate=True），确保每 bar 的粗TF部分K线独立合成、filtered值随时间变化。
 
         Parameters
         ----------
@@ -505,7 +500,9 @@ class BacktestRunner:
             cutoff_date,
             self._min_tf,
             n_pts=self._tf_n_pts,
-            sync_all=True,
+            # per-bar 模式：不传 sync_all，让 _sync_all_cascading 使用默认
+            # sync_all=False，即 fetch_limit=n_pts + truncate=True，确保每 bar
+            # 的粗TF部分K线独立合成、filtered 值随时间正常变化。
         )
         failed = [tf for tf, ok in results.items() if not ok]
         if failed:
