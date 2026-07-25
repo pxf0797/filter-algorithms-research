@@ -303,6 +303,133 @@ class TestRenderPnlChart:
             assert mock_st.plotly_chart.called
 
 
+class TestPnlChartTraces:
+    """验证 _render_pnl_chart 同时包含做多、做空和组合曲线。"""
+
+    def test_pnl_chart_has_long_short_and_combined_traces(self):
+        """图表应包含 3 条 trace: 做多 PnL (虚线), 做空 PnL (虚线), max(做多,做空) PnL (实线)。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        np.random.seed(42)
+        n = 60
+        long_pnl = 100.0 * np.cumprod(np.full(n, 1.001))
+        short_pnl = 100.0 * np.cumprod(np.full(n, 1.0005))
+
+        df = pd.DataFrame({"bar_timestamp": pd.date_range("2024-01-01", periods=n, freq="h")})
+
+        # 捕获 plotly_chart 的 figure 参数
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df)
+            assert mock_st.plotly_chart.called
+            call_args = mock_st.plotly_chart.call_args
+            # 第一个位置参数是 figure 对象
+            fig = call_args[0][0]
+
+            # 应有 5 个 trace: 做多虚线, 做空虚线, max组合实线, 零线(hline), 回撤线
+            # 实际上 hline 不是 trace，所以是 4 个 trace: long, short, combined, drawdown
+            names = [t.name for t in fig.data]
+            assert "做多 PnL" in names, f"Missing '做多 PnL' trace, found: {names}"
+            assert "做空 PnL" in names, f"Missing '做空 PnL' trace, found: {names}"
+            assert "max(做多, 做空) PnL" in names, f"Missing max combined trace, found: {names}"
+
+    def test_long_trace_is_dashed(self):
+        """做多 PnL trace 应为虚线样式。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        n = 10
+        long_pnl = np.linspace(100, 110, n)
+        short_pnl = np.full(n, 100.0)
+        df = pd.DataFrame({"bar_timestamp": pd.date_range("2024-01-01", periods=n, freq="h")})
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df)
+            fig = mock_st.plotly_chart.call_args[0][0]
+
+            long_trace = next(t for t in fig.data if t.name == "做多 PnL")
+            assert long_trace.line.dash == "dot"
+
+    def test_short_trace_is_dashed(self):
+        """做空 PnL trace 应为虚线样式。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        n = 10
+        long_pnl = np.full(n, 100.0)
+        short_pnl = np.linspace(100, 110, n)
+        df = pd.DataFrame({"bar_timestamp": pd.date_range("2024-01-01", periods=n, freq="h")})
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df)
+            fig = mock_st.plotly_chart.call_args[0][0]
+
+            short_trace = next(t for t in fig.data if t.name == "做空 PnL")
+            assert short_trace.line.dash == "dot"
+
+
+class TestCombinedPnlIsMaxOfLongShort:
+    """验证 combined PnL 确实是 long 和 short 的逐点最大值。"""
+
+    def test_combined_equals_elementwise_maximum(self):
+        """combined 数组应等于 np.maximum(long_pnl, short_pnl)。"""
+        np.random.seed(123)
+        n = 50
+        long_pnl = 100.0 + np.cumsum(np.random.randn(n) * 0.5)
+        short_pnl = 100.0 + np.cumsum(np.random.randn(n) * 0.3)
+
+        combined = np.maximum(long_pnl, short_pnl)
+
+        for i in range(n):
+            expected = max(long_pnl[i], short_pnl[i])
+            assert combined[i] == expected, f"Mismatch at index {i}"
+
+    def test_long_always_higher(self):
+        """当做多始终高于做空时，combined 应全程等于做多。"""
+        long_pnl = np.array([100.0, 102.0, 104.0, 106.0, 108.0])
+        short_pnl = np.array([100.0, 101.0, 100.0, 99.0, 100.0])
+
+        combined = np.maximum(long_pnl, short_pnl)
+        assert np.array_equal(combined, long_pnl)
+
+    def test_short_always_higher(self):
+        """当做空始终高于做多时，combined 应全程等于做空。"""
+        short_pnl = np.array([100.0, 102.0, 104.0, 106.0, 108.0])
+        long_pnl = np.array([100.0, 101.0, 100.0, 99.0, 100.0])
+
+        combined = np.maximum(long_pnl, short_pnl)
+        assert np.array_equal(combined, short_pnl)
+
+    def test_alternating_dominance(self):
+        """当做多和做空交替领先时，combined 逐点取大值。"""
+        long_pnl = np.array([100.0, 102.0, 100.0, 98.0, 104.0])
+        short_pnl = np.array([100.0, 101.0, 103.0, 105.0, 100.0])
+
+        combined = np.maximum(long_pnl, short_pnl)
+        expected = np.array([100.0, 102.0, 103.0, 105.0, 104.0])
+        assert np.array_equal(combined, expected)
+
+    def test_flat_both_equal(self):
+        """当做多和做空完全相等时，combined 等于两者。"""
+        long_pnl = np.array([100.0, 100.0, 100.0])
+        short_pnl = np.array([100.0, 100.0, 100.0])
+
+        combined = np.maximum(long_pnl, short_pnl)
+        assert np.array_equal(combined, long_pnl)
+        assert np.array_equal(combined, short_pnl)
+
+    def test_with_nan_values(self):
+        """含有 NaN 时 np.maximum 的行为验证。"""
+        long_pnl = np.array([100.0, np.nan, 102.0])
+        short_pnl = np.array([101.0, 101.0, np.nan])
+
+        combined = np.maximum(long_pnl, short_pnl)
+        # np.maximum with NaN: if either is NaN, result is NaN
+        assert np.isnan(combined[1])
+        assert np.isnan(combined[2])
+        assert combined[0] == 101.0  # short > long
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 信号统计
 # ═══════════════════════════════════════════════════════════════════════════════

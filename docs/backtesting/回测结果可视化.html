@@ -1185,7 +1185,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     var hmTickVals = [], hmTickTexts = [];
     for (var hi = 0; hi < sampledBarIdx.length; hi += hmTickStep) {
       hmTickVals.push(sampledBarIdx[hi]);
-      hmTickTexts.push(sampledTs[hi] ? sampledTs[hi].substring(0, 16) : '');
+      hmTickTexts.push(cleanSampledTs[hi] ? cleanSampledTs[hi].substring(0, 16) : '');
     }
 
     const layout = {
@@ -1890,11 +1890,11 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
           var el = document.getElementById('chart-dash-' + v);
           if (el) el.innerHTML = '<div style="padding:40px;text-align:center;color:var(--red)">渲染失败 (' + v + ')</div>';
         }
-      }, 120 + idx * 100);
+      }, 200 + idx * 100);
     });
 
     // ── Phase 3: Trades chart + data table (after dashboards) ──
-    var _phase3Ms = 120 + VIEWS.length * 100 + 80;
+    var _phase3Ms = 200 + VIEWS.length * 100 + 80;
     setTimeout(function() {
       try { buildTrades(data); } catch(e) { console.error('buildTrades failed', e); }
       try { buildTable(data); } catch(e) { console.error('buildTable failed', e); }
@@ -1907,7 +1907,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       VIEWS.forEach(function(v) {
         var divEl = document.getElementById('chart-dash-' + v);
         if (!divEl) return;
-        if (divEl._relayoutHandler) divEl.removeListener('plotly_relayout', divEl._relayoutHandler);
+        if (divEl._relayoutHandler) divEl.removeAllListeners('plotly_relayout');
         divEl._relayoutHandler = function(eventData) {
           if (_syncGuard) return;
           var range0 = eventData['xaxis4.range[0]'];

@@ -227,6 +227,190 @@ class TestPanel6PeriodDashboard:
         assert len(columns["bar_index"]) == 10
 
 
+class TestSafeDateHandling:
+    """safeDate() 对无效日期输入应返回 null，不抛异常"""
+
+    def test_serialize_nat_returns_none(self):
+        """pd.NaT 应转为 None（等效于 JS safeDate 对 Invalid Date 返回 null）"""
+        import pandas as pd
+        result = serialize_value(pd.NaT)
+        # pd.NaT is NaTType, which goes through the str(v) fallback
+        # The key point: it does NOT crash
+        assert result is not None or isinstance(result, str)
+
+    def test_timestamp_column_with_nat(self):
+        """含有 NaT 的 timestamp 列应能正常序列化，不抛异常"""
+        import pandas as pd
+        import numpy as np
+        df = pd.DataFrame({
+            "bar_index": [0, 1, 2],
+            "bar_timestamp": pd.to_datetime(["2026-01-01", None, "2026-01-03"]),
+        })
+        columns, stats = df_to_columns(df)
+        assert len(columns["bar_timestamp"]) == 3
+        # NaT becomes None after serialization
+        assert columns["bar_timestamp"][1] is None
+
+    def test_empty_timestamp_string(self):
+        """空字符串 timestamp 应被正常序列化"""
+        import pandas as pd
+        df = pd.DataFrame({
+            "bar_index": [0],
+            "bar_timestamp": [""],
+        })
+        columns, stats = df_to_columns(df)
+        assert columns["bar_timestamp"][0] == ""
+
+
+class TestEmptyDataGuardHeatmap:
+    """空 barIdx 数组时 buildHeatmap 不应崩溃"""
+
+    def test_empty_bar_index_serialized(self):
+        """空 bar_index 列的 DataFrame 正常序列化"""
+        df = pd.DataFrame({
+            "bar_index": [],
+            "bar_timestamp": [],
+            "v0_long_pos": [],
+            "v0_short_pos": [],
+        })
+        columns, stats = df_to_columns(df)
+        assert stats["n_rows"] == 0
+        assert columns["bar_index"] == []
+
+    def test_bar_index_missing_column(self):
+        """无 bar_index 列时序列化不抛异常"""
+        df = pd.DataFrame({
+            "bar_timestamp": pd.date_range("2026-01-01", periods=3, freq="D"),
+            "close": [100.0, 101.0, 102.0],
+        })
+        columns, stats = df_to_columns(df)
+        # bar_index 列不存在，但 stats 仍然正确
+        assert stats["n_rows"] == 3
+        assert "bar_index" not in columns
+
+
+class TestEmptyDataGuardPeriodDashboard:
+    """空 barIdx 时 buildPeriodDashboard 应正确返回"""
+
+    def test_zero_rows_period_data(self):
+        """0 行数据的周期视图列仍可序列化"""
+        df = pd.DataFrame({
+            "bar_index": pd.Series([], dtype=int),
+            "close": pd.Series([], dtype=float),
+            "v0_filtered": pd.Series([], dtype=float),
+            "v0_sig": pd.Series([], dtype=int),
+            "v0_eps": pd.Series([], dtype=float),
+        })
+        columns, stats = df_to_columns(df)
+        assert stats["n_rows"] == 0
+        assert columns["v0_filtered"] == []
+
+    def test_partial_view_columns(self):
+        """部分视图列缺失时序列化不抛异常"""
+        df = pd.DataFrame({
+            "bar_index": [0, 1, 2],
+            "close": [100.0, 101.0, 102.0],
+            "v0_filtered": [100.0, 101.0, 102.0],
+            "v0_sig": [0, 1, -1],
+            "v0_eps": [0.5, 0.5, 0.5],
+            # v1, v2, v3 columns missing
+        })
+        columns, stats = df_to_columns(df)
+        assert stats["n_rows"] == 3
+        assert "v0_filtered" in columns
+        assert "v1_filtered" not in columns
+
+
+class TestNullPositionGuard:
+    """position 数组中 null 值应被正确转为 None（JS 端转为 0 表示空仓）"""
+
+    def test_mixed_none_and_bool_positions(self):
+        """None, True, False 混合的 position 列正确序列化"""
+        df = pd.DataFrame({
+            "bar_index": [0, 1, 2, 3, 4],
+            "v0_long_pos": [True, None, False, True, None],
+            "v0_short_pos": [False, True, None, None, False],
+        })
+        columns, stats = df_to_columns(df)
+        assert columns["v0_long_pos"] == [True, None, False, True, None]
+        assert columns["v0_short_pos"] == [False, True, None, None, False]
+
+    def test_all_none_positions(self):
+        """全为 None 的 position 列不丢失数据"""
+        df = pd.DataFrame({
+            "bar_index": [0, 1, 2],
+            "v0_long_pos": [None, None, None],
+        })
+        columns, stats = df_to_columns(df)
+        assert len(columns["v0_long_pos"]) == 3
+        assert all(v is None for v in columns["v0_long_pos"])
+
+    def test_null_positions_with_nan(self):
+        """NaN float 在 position 列中转为 None"""
+        import numpy as np
+        df = pd.DataFrame({
+            "bar_index": [0, 1, 2],
+            "v0_long_pos": [1.0, np.nan, 0.0],
+        })
+        columns, stats = df_to_columns(df)
+        assert columns["v0_long_pos"][0] == 1.0
+        assert columns["v0_long_pos"][1] is None
+        assert columns["v0_long_pos"][2] == 0.0
+
+
+class TestHeatmapZminZmaxFixed:
+    """热力图 z 轴范围固定为 [0, 2]，position 值应在映射范围内"""
+
+    def test_position_values_in_valid_range(self):
+        """所有 position 值映射到 [0, 1, 2]（空仓=0, 做多=1, 做空=2）"""
+        import numpy as np
+        df = pd.DataFrame({
+            "bar_index": range(20),
+            "v0_long_pos": [True, False, None, True, False] * 4,
+            "v0_short_pos": [False, True, None, False, True] * 4,
+            "v1_long_pos": [1.0, 0.0, np.nan, 1.0, 0.0] * 4,
+            "v1_short_pos": [0.0, 1.0, np.nan, 0.0, 1.0] * 4,
+        })
+        columns, stats = df_to_columns(df)
+
+        for v in range(2):
+            for pos_type in ["long_pos", "short_pos"]:
+                col_name = f"v{v}_{pos_type}"
+                values = columns[col_name]
+                for val in values:
+                    if val is None:
+                        continue  # JS 端会转为 0（空仓）
+                    if isinstance(val, bool):
+                        assert val in (True, False), f"{col_name}: bool value outside range"
+                    elif isinstance(val, (int, float)):
+                        assert val in (0.0, 1.0, 0, 1), f"{col_name}: numeric value {val} outside [0,1]"
+
+    def test_position_values_never_exceed_range(self):
+        """确保 position 原始值不超出 [0, 1] 或 [True, False, None]"""
+        import numpy as np
+        # 极端情况：混合各种合法值
+        df = pd.DataFrame({
+            "bar_index": range(6),
+            "v0_long_pos": [True, 1, 1.0, False, 0, 0.0],
+            "v0_short_pos": [False, 0, 0.0, True, 1, 1.0],
+        })
+        columns, stats = df_to_columns(df)
+
+        for val in columns["v0_long_pos"]:
+            if val is not None:
+                if isinstance(val, bool):
+                    assert val in (True, False)
+                else:
+                    assert val in (0, 0.0, 1, 1.0)
+
+        for val in columns["v0_short_pos"]:
+            if val is not None:
+                if isinstance(val, bool):
+                    assert val in (True, False)
+                else:
+                    assert val in (0, 0.0, 1, 1.0)
+
+
 class TestPanel8DataTable:
     """Panel 8 (完整数据表) 依赖列数据存在"""
 

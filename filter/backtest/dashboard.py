@@ -201,7 +201,15 @@ def _render_pnl_chart(
     short_pnl: np.ndarray,
     df: pd.DataFrame,
 ) -> None:
-    """渲染 PnL 累积曲线和回撤图。"""
+    """渲染 PnL 累积曲线和回撤图。
+
+    ``combined = np.maximum(long_pnl, short_pnl)`` 在每根 bar 上取做多和做空
+    PnL 的逐点最大值。这反映"选择对的方向"的理想收益 —— 信号切换时曲线可能不连续
+    (从做多 PnL 跳变到做空 PnL)，不代表实盘可实现的收益。
+
+    为提供完整的上下文，此图同时用虚线绘制 ``long_pnl`` 和 ``short_pnl``
+    两条独立曲线。
+    """
     st.subheader("PnL 曲线")
 
     combined = np.maximum(long_pnl, short_pnl)
@@ -217,14 +225,38 @@ def _render_pnl_chart(
 
     # PnL 曲线
     x_vals = list(range(len(cum_pnl)))
+
+    # 做多 / 做空独立曲线 (虚线)
+    fig.add_trace(
+        go.Scatter(
+            x=x_vals, y=long_pnl - 100.0,
+            mode="lines",
+            name="做多 PnL",
+            line=dict(color="#3fb950", width=1, dash="dot"),
+            opacity=0.5,
+        ),
+        row=1, col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=x_vals, y=short_pnl - 100.0,
+            mode="lines",
+            name="做空 PnL",
+            line=dict(color="#f85149", width=1, dash="dot"),
+            opacity=0.5,
+        ),
+        row=1, col=1,
+    )
+
+    # max 组合曲线 (实线)
     fig.add_trace(
         go.Scatter(
             x=x_vals, y=cum_pnl,
             mode="lines",
-            name="累计 PnL",
-            line=dict(color="#3fb950", width=2),
+            name="max(做多, 做空) PnL",
+            line=dict(color="#58a6ff", width=2),
             fill="tozeroy",
-            fillcolor="rgba(63,185,80,0.1)",
+            fillcolor="rgba(88,166,255,0.08)",
         ),
         row=1, col=1,
     )

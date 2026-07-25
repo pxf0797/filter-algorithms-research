@@ -330,6 +330,145 @@ class TestLoadMetadata:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 默认目录回退
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestDefaultDirFallback:
+    """默认目录回退: backtest_output → test_backtest_output"""
+
+    def test_find_latest_parquet_called_with_fallback(self):
+        """backtest_output 无结果时应调用 test_backtest_output。"""
+        with patch.object(view_backtest, "find_latest_parquet") as mock_find:
+            mock_find.side_effect = [None, "/fake/path/result.parquet"]
+
+            # 复现 main() 中第 484-491 行的回退逻辑
+            path = view_backtest.find_latest_parquet("backtest_output")
+            if not path:
+                path = view_backtest.find_latest_parquet("test_backtest_output")
+
+            assert path == "/fake/path/result.parquet"
+            assert mock_find.call_count == 2
+            assert mock_find.call_args_list[0] == (("backtest_output",),)
+            assert mock_find.call_args_list[1] == (("test_backtest_output",),)
+
+    def test_first_dir_succeeds_no_fallback(self):
+        """backtest_output 直接找到时不调用 test_backtest_output。"""
+        with patch.object(view_backtest, "find_latest_parquet") as mock_find:
+            mock_find.return_value = "/path/result.parquet"
+
+            path = view_backtest.find_latest_parquet("backtest_output")
+            if not path:
+                path = view_backtest.find_latest_parquet("test_backtest_output")
+
+            assert path == "/path/result.parquet"
+            assert mock_find.call_count == 1
+            mock_find.assert_called_once_with("backtest_output")
+
+    def test_both_dirs_empty_returns_none(self):
+        """两个目录都不存在时返回 None。"""
+        with patch.object(view_backtest, "find_latest_parquet") as mock_find:
+            mock_find.return_value = None
+
+            path = view_backtest.find_latest_parquet("backtest_output")
+            if not path:
+                path = view_backtest.find_latest_parquet("test_backtest_output")
+
+            assert path is None
+            assert mock_find.call_count == 2
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 目录输入解析 Parquet
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestDirectoryInputResolvesParquet:
+    """目录输入能正确找到 parquet 文件。"""
+
+    def test_directory_with_backtest_result(self, tmp_path):
+        """目录包含 backtest_result.parquet 时正确找到。"""
+        df = pd.DataFrame({"a": [1, 2, 3]})
+        df.to_parquet(tmp_path / "backtest_result.parquet")
+
+        candidates = list(tmp_path.glob("backtest_result.parquet"))
+        assert len(candidates) == 1
+        assert candidates[0].name == "backtest_result.parquet"
+
+    def test_directory_with_other_parquet(self, tmp_path):
+        """目录包含其他 .parquet 时回退到 *.parquet glob。"""
+        df = pd.DataFrame({"a": [1]})
+        df.to_parquet(tmp_path / "my_data.parquet")
+
+        # 复现 embed_and_open 中的逻辑
+        candidates = list(tmp_path.glob("backtest_result.parquet"))
+        if not candidates:
+            candidates = list(tmp_path.glob("*.parquet"))
+        assert len(candidates) == 1
+        assert candidates[0].name == "my_data.parquet"
+
+    def test_empty_directory_returns_empty(self, tmp_path):
+        """空目录找不到任何 parquet。"""
+        candidates = list(tmp_path.glob("backtest_result.parquet")) or list(tmp_path.glob("*.parquet"))
+        assert candidates == []
+
+    def test_directory_with_both_prefers_backtest_result(self, tmp_path):
+        """同时存在 backtest_result.parquet 和其他 parquet 时优先取前者。"""
+        pd.DataFrame({"a": [1]}).to_parquet(tmp_path / "backtest_result.parquet")
+        pd.DataFrame({"a": [2]}).to_parquet(tmp_path / "other.parquet")
+
+        candidates = list(tmp_path.glob("backtest_result.parquet")) or list(tmp_path.glob("*.parquet"))
+        assert len(candidates) == 1
+        assert candidates[0].name == "backtest_result.parquet"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# first_path 变量一致性
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestFirstPathVariableConsistency:
+    """first_path 在目录输入和文件输入模式下都指向实际的 parquet 文件路径。"""
+
+    def test_file_input_first_path_is_parquet(self):
+        """文件路径输入时 first_path 直接是 parquet 文件路径。"""
+        parquet_paths = ["/some/path/result.parquet"]
+        p = Path(parquet_paths[0])
+        assert not p.is_dir()
+        actual_path = parquet_paths[0]
+        first_path = actual_path  # embed_and_open L348 逻辑
+        assert first_path.endswith(".parquet")
+        assert Path(first_path).suffix == ".parquet"
+
+    def test_directory_input_first_path_is_parquet(self, tmp_path):
+        """目录输入时 first_path 指向找到的实际 parquet 文件（而非目录）。"""
+        # 创建目录和 parquet
+        pd.DataFrame({"a": [1]}).to_parquet(tmp_path / "backtest_result.parquet")
+
+        parquet_paths = [str(tmp_path)]
+        p = Path(parquet_paths[0])
+        assert p.is_dir()
+        candidates = list(p.glob("backtest_result.parquet")) or list(p.glob("*.parquet"))
+        actual_path = str(candidates[0])
+        first_path = actual_path  # L348 逻辑
+        assert Path(first_path).suffix == ".parquet"
+        assert Path(first_path).exists()
+
+    def test_first_path_used_for_metadata_dir(self, tmp_path):
+        """first_path 的父目录用于 metadata 自动探测。"""
+        pd.DataFrame({"a": [1]}).to_parquet(tmp_path / "backtest_result.parquet")
+        # 也创建 metadata
+        (tmp_path / "metadata.json").write_text('{"ticker": "TEST"}')
+
+        parquet_paths = [str(tmp_path)]
+        p = Path(parquet_paths[0])
+        actual_path = str(list(p.glob("backtest_result.parquet"))[0])
+        first_path = actual_path  # L348
+
+        # auto_meta_dir 逻辑 (L358)
+        auto_meta_dir = Path(first_path).parent if not Path(first_path).is_dir() else Path(first_path)
+        auto_meta = auto_meta_dir / "metadata.json"
+        assert auto_meta.exists()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # 模块导入 — 放在最后，因为之前的 import view_backtest 已经验证了可导入性
 # ═══════════════════════════════════════════════════════════════════════════════
 

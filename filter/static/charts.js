@@ -1,6 +1,18 @@
 /* ============================================================================
  * Plotly cross-subplot crosshair helper
  *
+ * Shared by two independent rendering paths:
+ *   1. Streamlit embed:  filter/browse/charts.py _render_plotly()
+ *      Injects __DIV_ID__ and __FIGURE_JSON__ placeholders.
+ *      DIV ID format: chart-{random suffix} (auto-generated per render).
+ *   2. Standalone HTML:  docs/backtesting/回测结果可视化.html
+ *      Loaded via view_backtest.py with window.BACKTEST_DATA pre-injected.
+ *      DIV ID format: chart-dash-v{N}, chart-heatmap, chart-overview,
+ *                     chart-signals, chart-pnl, chart-multi-pnl,
+ *                     chart-trades, chart-filtered-overview.
+ *      Global vars: window.BACKTEST_DATA, window.BACKTEST_STATS,
+ *                   window.BACKTEST_METADATA, window._DIV_ID_.
+ *
  * Injected arguments (replaced by Python renderer):
  *   __DIV_ID__      — unique DOM element id
  *   __FIGURE_JSON__ — serialized Plotly figure (data + layout)
