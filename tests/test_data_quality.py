@@ -16,8 +16,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-# Ensure filter_app is importable
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+# Ensure filter is importable
+_src = Path(__file__).resolve().parent.parent / "filter"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
@@ -143,7 +143,7 @@ class TestStatisticalDistribution:
         np.random.seed(42)
         x = np.arange(200, dtype=float)
         noisy = np.sin(x / 5.0) + np.random.randn(200) * 0.3
-        from services.filter_engine import apply_savgol
+        from engine.filters import apply_savgol
         filtered = apply_savgol(noisy, x, window=21, order=2)
         assert np.std(filtered) < np.std(noisy), (
             f"滤波后标准差 {np.std(filtered):.4f} >= 原始 {np.std(noisy):.4f}"
@@ -196,8 +196,8 @@ class TestEmptyDataHandling:
     def test_empty_query_returns_empty_df(self, monkeypatch, tmp_path):
         """无数据 ticker 查询返回空 DataFrame"""
         db_path = tmp_path / "empty.db"
-        monkeypatch.setattr("db.DB_PATH", db_path)
-        import db
+        monkeypatch.setattr("data.db.DB_PATH", db_path)
+        import data.db as db
         db.init_db()
         result = db.query_kline("NONEXISTENT", "日线", n_pts=50)
         assert isinstance(result, pd.DataFrame)
@@ -211,7 +211,7 @@ class TestEmptyDataHandling:
         signal = np.random.randn(n)
         signal[10:15] = np.nan  # 插入 NaN 段
 
-        from services.filter_engine import apply_sma
+        from engine.filters import apply_sma
         # SMA 在 NaN 附近应返回 NaN 或产生安全结果
         result = apply_sma(signal, x, window=5)
         assert len(result) == n, "输出长度应等于输入长度"

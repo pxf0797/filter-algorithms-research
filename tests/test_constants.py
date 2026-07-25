@@ -1,7 +1,7 @@
-"""Test filter_app.constants — verify constant consistency and completeness."""
+"""Test filter.constants — verify constant consistency and completeness."""
 
 import pytest
-from constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY, TF_INTERVAL
+from shared.constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY, TF_INTERVAL
 
 
 class TestAllTfs:
@@ -69,15 +69,15 @@ class TestTfInterval:
 class TestImportConsistency:
     def test_constants_importable(self):
         """Verify all constants are importable from their primary module."""
-        from constants import ALL_TFS as c1, DEFAULT_TFS as c2, TF_HIERARCHY as c3, TF_INTERVAL as c4
+        from shared.constants import ALL_TFS as c1, DEFAULT_TFS as c2, TF_HIERARCHY as c3, TF_INTERVAL as c4
         assert len(c1) == 8
 
     def test_sidebar_re_exports_all_tfs(self):
         """sidebar.py should re-export ALL_TFS from constants."""
-        from components.sidebar import ALL_TFS as S_ALL_TFS
+        from browse.components_sidebar import ALL_TFS as S_ALL_TFS
         assert S_ALL_TFS == ALL_TFS
 
     def test_backtest_core_re_exports_all_tfs(self):
         """backtest_core.py should import ALL_TFS from constants."""
-        from services.backtest_core import ALL_TFS as BC_ALL_TFS
+        from backtest.engine import ALL_TFS as BC_ALL_TFS
         assert BC_ALL_TFS == ALL_TFS

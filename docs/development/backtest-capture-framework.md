@@ -543,7 +543,7 @@ v0_filtered, v0_sig, v0_sig_dur, v0_eps, v0_mu_v, v0_sigma_v, ...
 
 ```bash
 # 最小可用命令
-python -m filter_app.backtest_cli \
+python -m filter.backtest_cli \
     --ticker 03690.HK \
     --market "港股 HK" \
     --preset 3690_HK_2 \
@@ -552,7 +552,7 @@ python -m filter_app.backtest_cli \
     --output-dir ./backtest_output/
 
 # 完整参数
-python -m filter_app.backtest_cli \
+python -m filter.backtest_cli \
     --ticker AAPL \
     --market "美股 US" \
     --preset default \
@@ -601,8 +601,8 @@ Streamlit UI                     CLI
 
 | 步骤 | 产出 | 改动量 |
 |------|------|--------|
-| Step 1: 抽取回测核心 | `filter_app/backtest_core.py` | ~400 行新文件，`state.py` +30 行修改 |
-| Step 2: CLI 入口 | `filter_app/backtest_cli.py` | ~200 行新文件 |
+| Step 1: 抽取回测核心 | `filter/backtest_core.py` | ~400 行新文件，`state.py` +30 行修改 |
+| Step 2: CLI 入口 | `filter/backtest_cli.py` | ~200 行新文件 |
 | Step 3: 事件记录 | `services/event_recorder.py` | ~200 行新文件 |
 | Step 4: 兼容性验证 | 无新文件 | ~20 行可选修改 |
 
@@ -651,9 +651,9 @@ class BacktestRunner:
 
 | # | 功能 | 预估工作量 | 产出 |
 |---|------|-----------|------|
-| 🎯 1 | `BacktestRunner` 类 -- 从 `_render_chart()` 抽取纯计算管线；每步返回 `bar_timestamp`（从 kline 表 `ts` 字段获取） | 1-2 天 | `filter_app/backtest_core.py` |
+| 🎯 1 | `BacktestRunner` 类 -- 从 `_render_chart()` 抽取纯计算管线；每步返回 `bar_timestamp`（从 kline 表 `ts` 字段获取） | 1-2 天 | `filter/backtest_core.py` |
 | 🎯 2 | `AppState` dict fallback -- CLI 中替代 `st.session_state` | 0.5 天 | `state.py` 改动 |
-| 🎯 3 | CLI 入口 -- argparse 参数解析 + 配置加载 | 0.5 天 | `filter_app/backtest_cli.py` |
+| 🎯 3 | CLI 入口 -- argparse 参数解析 + 配置加载 | 0.5 天 | `filter/backtest_cli.py` |
 | 🎯 4 | Event Recorder + CSVBuilder -- BS 变动事件生成 + events.jsonl 写入 + CSV 内存累积（end_session 时 pandas 一次性写入） | 1 天 | `services/event_recorder.py` |
 | 🎯 5 | Filter Tail Recorder -- filter_tail.jsonl 写入 | 0.5 天 | 同上文件 |
 | 🎯 6 | 端到端验证 -- `3690_HK_2` 预设，重现 645x 级联放大 | 1 天 | 分析脚本 |
@@ -689,7 +689,7 @@ class BacktestRunner:
 ### 10.2 变更追踪
 
 - **框架设计文档**：纳入 `docs/` 目录，作为项目架构文档的一部分
-- **新增代码**（`backtest_core.py`, `backtest_cli.py`, `event_recorder.py`）：纳入 `filter_app/` 目录，正常跟踪
+- **新增代码**（`backtest_core.py`, `backtest_cli.py`, `event_recorder.py`）：纳入 `filter/` 目录，正常跟踪
 - **回测输出**（`backtest_output/`）：加入 `.gitignore`，不纳入版本控制
 - **分支策略**：功能开发在独立分支进行，合并至 `master` 前通过 PR 审查
 

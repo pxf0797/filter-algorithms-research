@@ -5,7 +5,7 @@ import numpy as np
 from unittest.mock import MagicMock, patch
 import sys
 
-from config_db import VIEW_PARAM_SPECS
+from data.config_db import VIEW_PARAM_SPECS
 
 # ============================================================
 # 1. 导出完整性：所有必需参数都出现在导出JSON中
@@ -43,7 +43,7 @@ class TestExportCompleteness:
 
     def test_all_per_view_keys_exported(self):
         """导出函数(registry 驱动)包含每个视图的全部参数(含新增 pnlfb)"""
-        from streamlit_app import _view_export_params
+        from browse.app import _view_export_params
         # 合成一个含全部 cfg 键的视图配置
         cfg = {cfg_key: (default if default is not None else "x")
                for _, cfg_key, default in VIEW_PARAM_SPECS}
@@ -382,7 +382,7 @@ class TestParamRegistryGuard:
         import re
         from pathlib import Path
         sidebar_src = (Path(__file__).resolve().parent.parent
-                       / "filter_app" / "components" / "sidebar.py")
+                       / "filter" / "browse" / "components_sidebar.py")
         src = sidebar_src.read_text(encoding="utf-8")
         assigned = set(re.findall(r'cfg\["([a-z_0-9]+)"\]\s*=', src))
         non_persist = {"pv", "pv2"}          # 滤波器参数走独立(中文key)机制
@@ -396,7 +396,7 @@ class TestParamRegistryGuard:
 
     def test_export_helper_covers_pnlfb(self):
         """JSON 导出函数包含 v{i}_pnlfb。"""
-        from streamlit_app import _view_export_params
+        from browse.app import _view_export_params
         out = _view_export_params({"show_pnl_feedback": True}, 2)
         assert out["v2_pnlfb"] is True
 
@@ -405,14 +405,14 @@ class TestParamRegistryGuard:
         import streamlit as st
         fake_state = {"v0_pnlfb": True, "v1_pnlfb": False, "v0_tf": "60m"}
         monkeypatch.setattr(st, "session_state", fake_state, raising=False)
-        from config_db import collect_current_params
+        from data.config_db import collect_current_params
         params = collect_current_params()
         assert params.get("v0_pnlfb") is True
         assert params.get("v1_pnlfb") is False
 
     def test_json_roundtrip_pnlfb(self):
         """JSON 导出→序列化→读回：pnlfb 值被保留。"""
-        from streamlit_app import _view_export_params
+        from browse.app import _view_export_params
         exported = _view_export_params({"show_pnl_feedback": True}, 0)
         blob = json.loads(json.dumps(exported))     # 模拟 download→upload
         assert blob["v0_pnlfb"] is True

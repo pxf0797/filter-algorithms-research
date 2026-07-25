@@ -7,7 +7,7 @@
 import numpy as np
 import pandas as pd
 from plotly.subplots import make_subplots
-from streamlit_app import (
+from browse.app import (
     _add_main_price_traces, _add_residual_traces, _add_pnl_traces,
 )
 

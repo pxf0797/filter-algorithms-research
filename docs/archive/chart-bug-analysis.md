@@ -3,7 +3,7 @@
 ## 1. 问题范围
 
 - **问题**: 图表渲染后显示空白，无 plotly 图表也 fallback 提示
-- **影响文件**: `filter_app/components/charts.py`
+- **影响文件**: `filter/components/charts.py`
 - **影响函数**: `_render_plotly()` (第 17-201 行)
 - **定位结果**: 问题精确隔离到 **H4 (commit `3d16b16`)**，H5 (commit `118e775`) 在 H4 bug 修复后本身逻辑无问题
 
@@ -26,7 +26,7 @@
 
 ### 3.1 完整代码 Diff
 
-`git diff 23d3123..3d16b16 -- filter_app/components/charts.py` 的关键变更:
+`git diff 23d3123..3d16b16 -- filter/components/charts.py` 的关键变更:
 
 ```diff
  <div id="{div_id}"></div>
@@ -159,7 +159,7 @@ fallback 的 style.display='block' 也从未执行 → fallback UI 不显示
 
 ### 4.1 完整代码 Diff
 
-`git diff 3d16b16..118e775 -- filter_app/components/charts.py`:
+`git diff 3d16b16..118e775 -- filter/components/charts.py`:
 
 ```diff
      }});
@@ -308,7 +308,7 @@ setTimeout(function() {
 
 ### 6.3 具体编辑操作
 
-文件: `/Users/xfpan/claude/filter_research/filter_app/components/charts.py`
+文件: `/Users/xfpan/claude/filter_research/filter/components/charts.py`
 
 在第 97 行 `<script>` 之后添加一行 `(function() {{`:
 
@@ -328,7 +328,7 @@ var _fallbackEl = document.getElementById('plotly-fallback-{div_id}');
 ### 6.4 验证方法
 
 1. **静态检查**: 确认 `(function() {{` 和 `}})();` 配对，且之间无裸 `return;` 在全局作用域
-2. **Python 导入测试**: `python -c "from filter_app.components.charts import _render_plotly"` — 应通过
+2. **Python 导入测试**: `python -c "from filter.components.charts import _render_plotly"` — 应通过
 3. **渲染验证**: 启动 Streamlit 应用，查看图表是否正常显示
 4. **JS 语法检查**: 将 `.format()` 处理后的 HTML 中 `<script>` 内容复制到浏览器 Console 或 Node.js 执行，确认无语法错误
 

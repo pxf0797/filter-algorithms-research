@@ -322,6 +322,7 @@ def embed_and_open(parquet_paths: list[str], metadata_path: str | None, html_tem
     """核心流程：读数据 → 序列化 → 嵌入 HTML → 打开浏览器。支持多 Ticker。"""
     is_multi = len(parquet_paths) > 1
     multi_data = None
+    first_path = parquet_paths[0]  # used for metadata auto-detection below
 
     if is_multi:
         print(f"[1/4] 读取多 Ticker 数据: {len(parquet_paths)} 个路径")
@@ -331,12 +332,22 @@ def embed_and_open(parquet_paths: list[str], metadata_path: str | None, html_tem
         columns = multi_data["data"][first_ticker]["columns"]
         stats = multi_data["data"][first_ticker]["stats"]
     else:
-        print(f"[1/4] 读取 Parquet: {parquet_paths[0]}")
-        columns, stats = load_parquet(parquet_paths[0])
+        # 单个路径：可能是目录也可能是 .parquet 文件
+        p = Path(parquet_paths[0])
+        if p.is_dir():
+            candidates = list(p.glob("backtest_result.parquet")) or list(p.glob("*.parquet"))
+            if not candidates:
+                print(f"错误：在 {p} 中找不到 parquet 文件", file=sys.stderr)
+                sys.exit(1)
+            actual_path = str(candidates[0])
+        else:
+            actual_path = parquet_paths[0]
+        print(f"[1/4] 读取 Parquet: {actual_path}")
+        columns, stats = load_parquet(actual_path)
         print(f"       {stats['n_rows']} 行 x {stats['n_cols']} 列")
+        first_path = actual_path  # 指向实际 parquet 文件，供 metadata 探测使用
 
     metadata = None
-    first_path = parquet_paths[0]
     if metadata_path:
         print(f"[2/4] 读取 Metadata: {metadata_path}")
         metadata = load_metadata(metadata_path)
@@ -470,8 +481,10 @@ def main():
     elif args.parquet:
         parquet_paths = list(args.parquet)
     else:
-        # 默认在当前目录下找
-        path = find_latest_parquet("test_backtest_output")
+        # 默认在当前目录下找，优先 backtest_output，回退到 test_backtest_output
+        path = find_latest_parquet("backtest_output")
+        if not path:
+            path = find_latest_parquet("test_backtest_output")
         if not path:
             print("错误：请指定 parquet 文件路径、使用 --latest 或 --all", file=sys.stderr)
             sys.exit(1)

@@ -1,13 +1,13 @@
 """
 Property-based tests (hypothesis) for filter engine mathematical invariants.
 
-Tests for filter_app/services/filter_engine.py core filter functions.
+Tests for filter/services/filter_engine.py core filter functions.
 """
 
 import numpy as np
 import pytest
 from hypothesis import given, settings, strategies as st
-from services.filter_engine import (
+from engine.filters import (
     apply_sma, apply_ema, apply_wma, apply_alma,
     apply_savgol, apply_kalman, apply_butterworth,
     apply_gaussian, apply_median, apply_lowess,

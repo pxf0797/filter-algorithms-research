@@ -21,10 +21,10 @@ def repo_with_db():
     """创建临时 config.db，初始化表，返回 PresetRepository 实例。"""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "config.db"
-        with patch("config_db._CONFIG_DB_PATH", db_path):
-            import config_db
+        with patch("data.config_db._CONFIG_DB_PATH", db_path):
+            import data.config_db as config_db
             config_db.init_config_tables()
-            from services.repository import PresetRepository
+            from shared.repository import PresetRepository
             yield PresetRepository()
 
 
@@ -42,13 +42,13 @@ class TestBaseRepository:
 
     def test_cannot_instantiate_abstract(self):
         """直接实例化抽象类应抛出 TypeError。"""
-        from services.repository import BaseRepository
+        from shared.repository import BaseRepository
         with pytest.raises(TypeError, match="abstract"):
             BaseRepository()  # type: ignore[abstract]
 
     def test_concrete_subclass_instantiates(self):
         """实现所有抽象方法的子类可实例化。"""
-        from services.repository import BaseRepository
+        from shared.repository import BaseRepository
 
         class Impl(BaseRepository[int]):
             def get_by_id(self, id):
@@ -67,7 +67,7 @@ class TestBaseRepository:
 
     def test_missing_abstract_raises(self):
         """缺少任一抽象方法的子类无法实例化。"""
-        from services.repository import BaseRepository
+        from shared.repository import BaseRepository
 
         class Incomplete(BaseRepository[int]):
             def get_by_id(self, id):
@@ -251,7 +251,7 @@ class TestPresetRepositoryIsolation:
 
     def test_repo_and_raw_share_data(self, repo_with_db, sample_params):
         """Repository 与原始 config_db 函数共享同一数据库。"""
-        import config_db
+        import data.config_db as config_db
 
         # 通过 repo 写入
         pid = repo_with_db.save({"name": "shared_test", "params_json": sample_params,

@@ -18,8 +18,8 @@ Tests cover the non-Streamlit parts:
 import sys
 from pathlib import Path
 
-# Ensure filter_app/ package is importable (conftest handles streamlit mock)
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+# Ensure filter/ package is importable (conftest handles streamlit mock)
+_src = Path(__file__).resolve().parent.parent / "filter"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
@@ -32,7 +32,8 @@ import pytest
 
 
 # Module under test
-from components.charts import (
+from browse.charts import (
+    _contiguous_runs,
     _render_entry_marker,
     _render_exit_marker_with_label,
     _render_pnl_curves,
@@ -272,17 +273,17 @@ class TestRenderPlotlyHtml:
 
     def test_cdn_url_in_html(self):
         """源码中应包含 Plotly CDN URL."""
-        source = Path(_src / "components" / "charts.py").read_text()
+        source = Path(_src / "browse" / "charts.py").read_text()
         assert "https://cdn.plot.ly/plotly-2.35.2.min.js" in source
 
     def test_cdn_fallback_url(self):
         """应有 CDNJS fallback URL."""
-        source = Path(_src / "components" / "charts.py").read_text()
+        source = Path(_src / "browse" / "charts.py").read_text()
         assert "cdnjs.cloudflare.com/ajax/libs/plotly.js" in source
 
     def test_html_contains_date_tip_div(self):
         """HTML 模板应包含 date-tip div."""
-        source = Path(_src / "components" / "charts.py").read_text()
+        source = Path(_src / "browse" / "charts.py").read_text()
         assert "date-tip-" in source
 
     def test_html_contains_crosshair_logic(self):
@@ -293,7 +294,7 @@ class TestRenderPlotlyHtml:
         2. charts.js 包含 crosshair 逻辑
         """
         # charts.py 应从外部 JS 文件读取（而非内联）
-        py_source = Path(_src / "components" / "charts.py").read_text()
+        py_source = Path(_src / "browse" / "charts.py").read_text()
         assert "charts.js" in py_source, "charts.py 应从 charts.js 文件读取 JS"
 
         # JS 文件应包含 crosshair 核心逻辑
@@ -305,7 +306,7 @@ class TestRenderPlotlyHtml:
 
     def test_fallback_html_structure(self):
         """H4: _render_plotly 输出包含 plotly-fallback div + IIFE 结构."""
-        from components.charts import _render_plotly
+        from browse.charts import _render_plotly
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=[1, 2, 3], y=[1, 2, 3]))
@@ -336,7 +337,7 @@ class TestRenderPlotlyHtml:
     # -----------------------------------------------------------------
     def test_timeout_safety_check(self):
         """H5: 输出包含 5秒 setTimeout 安全检查."""
-        from components.charts import _render_plotly
+        from browse.charts import _render_plotly
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=[1, 2, 3], y=[1, 2, 3]))
@@ -363,7 +364,7 @@ class TestRenderPlotlyHtml:
     # -----------------------------------------------------------------
     def test_iife_wrapping_is_valid(self):
         """修复验证: (function() { 和 })(); 配对，return 在函数内."""
-        from components.charts import _render_plotly
+        from browse.charts import _render_plotly
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=[1, 2, 3], y=[1, 2, 3]))
@@ -435,7 +436,7 @@ class TestRenderPlotlySerialization:
         # 向第一个 trace 的 y 中注入 NaN
         fig.data[0].y = np.array([1.0, float("nan"), 3.0, float("nan"), 5.0])
 
-        from components.charts import _render_plotly
+        from browse.charts import _render_plotly
         _render_plotly(fig)
 
         assert "html" in captured
@@ -461,7 +462,7 @@ class TestRenderPlotlySerialization:
         fig = _make_fig()
         fig.data[0].y = np.array([1.0, float("inf"), 3.0, float("-inf"), 5.0])
 
-        from components.charts import _render_plotly
+        from browse.charts import _render_plotly
         _render_plotly(fig)
 
         assert "html" in captured
@@ -486,7 +487,7 @@ class TestRenderPlotlySerialization:
         fig = go.Figure()  # 完全空白的 figure
         fig.add_trace(go.Scatter(x=[], y=[]))
 
-        from components.charts import _render_plotly
+        from browse.charts import _render_plotly
         _render_plotly(fig)
 
         assert "html" in captured
@@ -505,7 +506,7 @@ class TestRenderPlotlySerialization:
         fig = _make_fig()
         dates = [datetime(2026, 1, 1), datetime(2026, 1, 2)]
 
-        from components.charts import _render_plotly
+        from browse.charts import _render_plotly
         _render_plotly(fig, dates=dates)
 
         assert "html" in captured
@@ -513,9 +514,140 @@ class TestRenderPlotlySerialization:
 
 
 # ===================================================================
-# SECTION 13 — _add_cross_pnl_subplot with trades
+# SECTION 13 — _contiguous_runs edge cases
 # ===================================================================
 
+class TestContiguousRunsEdgeCases:
+    """_contiguous_runs 边缘条件."""
+
+    def test_empty_array(self):
+        """空数组返回空列表."""
+        result = _contiguous_runs(np.array([], dtype=bool))
+        assert result == []
+
+    def test_all_true_long(self):
+        """全 True 长数组返回单个连续段."""
+        mask = np.ones(100, dtype=bool)
+        result = _contiguous_runs(mask)
+        assert result == [(0, 99)]
+
+    def test_all_false_long(self):
+        """全 False 长数组返回空列表."""
+        mask = np.zeros(50, dtype=bool)
+        result = _contiguous_runs(mask)
+        assert result == []
+
+    def test_single_true(self):
+        """单元素 True 返回 [(0, 0)]. """
+        result = _contiguous_runs(np.array([True]))
+        assert result == [(0, 0)]
+
+    def test_single_false(self):
+        """单元素 False 返回 []. """
+        result = _contiguous_runs(np.array([False]))
+        assert result == []
+
+    def test_start_with_true_end_with_true(self):
+        """以 True 开始和结束的数组."""
+        mask = np.array([True, True, False, True])
+        result = _contiguous_runs(mask)
+        assert result == [(0, 1), (3, 3)]
+
+    def test_only_one_false_in_middle(self):
+        """中段一个 False."""
+        mask = np.array([True, True, True, False, True, True])
+        result = _contiguous_runs(mask)
+        assert result == [(0, 2), (4, 5)]
+
+
 # ===================================================================
-# SECTION 14 — _add_schmitt_traces (from streamlit_app.py)
+# SECTION 14 — _render_entry_marker edge cases
 # ===================================================================
+
+class TestRenderEntryMarkerEdgeCases:
+    """_render_entry_marker 边界条件."""
+
+    def test_out_of_bounds_low(self):
+        """bar_idx < 0 返回 None."""
+        t = np.arange(10, dtype=float)
+        result = _render_entry_marker(t, -1, 100.0, row=2)
+        assert result is None
+
+    def test_out_of_bounds_high(self):
+        """bar_idx >= len(t) 返回 None."""
+        t = np.arange(10, dtype=float)
+        result = _render_entry_marker(t, 10, 100.0, row=2)
+        assert result is None
+
+    def test_out_of_bounds_way_high(self):
+        """bar_idx 远超数组长度时返回 None."""
+        t = np.arange(5, dtype=float)
+        result = _render_entry_marker(t, 999, 100.0, row=1)
+        assert result is None
+
+    def test_valid_first_index(self):
+        """bar_idx=0 有效."""
+        t = np.array([100.0, 101.0, 102.0])
+        result = _render_entry_marker(t, 0, 100.0, row=1)
+        assert result is not None
+        assert result["type"] == "scattergl"
+        assert result["mode"] == "markers"
+
+    def test_valid_last_index(self):
+        """bar_idx=len(t)-1 有效."""
+        t = np.array([100.0, 101.0, 102.0])
+        result = _render_entry_marker(t, 2, 102.0, row=1)
+        assert result is not None
+        assert result["marker"]["symbol"] == "triangle-up"
+
+
+# ===================================================================
+# SECTION 15 — CDN fallback validation
+# ===================================================================
+
+class TestCdnFallback:
+    """CDN fallback URL 验证."""
+
+    def test_cdn_fallback_url_present(self):
+        """HTML 输出中应同时包含 CDN URL 和 fallback URL."""
+        source = Path(_src / "browse" / "charts.py").read_text()
+        assert "onerror=" in source, "应包含 CDN onerror fallback 逻辑"
+        assert "_PLOTLY_CDN" in source, "应定义主 CDN URL"
+        assert "_PLOTLY_CDN_FALLBACK" in source, "应定义 fallback CDN URL"
+
+    def test_cdn_js_in_html_output(self, monkeypatch):
+        """_render_plotly 输出 HTML 中包含 CDN script 标签."""
+        captured = {}
+        def _capture_html(html, **kw):
+            captured["html"] = html
+            return MagicMock()
+        import streamlit as st
+        monkeypatch.setattr(st.components.v1, "html", _capture_html)
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[1, 2], y=[1, 2]))
+        from browse.charts import _render_plotly
+        _render_plotly(fig, height=300)
+
+        html = captured.get("html", "")
+        assert "cdn.plot.ly" in html
+        assert "cdnjs.cloudflare.com" in html
+        assert "onerror=" in html
+
+    def test_fallback_div_in_html_output(self, monkeypatch):
+        """输出包含加载失败的 fallback div."""
+        captured = {}
+        def _capture_html(html, **kw):
+            captured["html"] = html
+            return MagicMock()
+        import streamlit as st
+        monkeypatch.setattr(st.components.v1, "html", _capture_html)
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[1, 2], y=[1, 2]))
+        from browse.charts import _render_plotly
+        _render_plotly(fig, height=300)
+
+        html = captured.get("html", "")
+        assert "plotly-fallback-" in html
+        assert "加载失败" in html

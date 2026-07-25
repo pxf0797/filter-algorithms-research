@@ -5,13 +5,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from services.filter_engine import (
+from engine.filters import (
     _compute_strategy_pnl, _find_all_pairs, _align_pnl_to_current_tf,
     _fit_parabolic, _fit_physics_parabola, _schmitt_trigger,
     apply_sma, apply_ema, FILTERS,
 )
-from services.data_loader import _stock_name_lookup
-from components.sidebar import TF_HIERARCHY, ALL_TFS
+from data.loader import _stock_name_lookup
+from browse.components_sidebar import TF_HIERARCHY, ALL_TFS
 
 
 # =========================================================================

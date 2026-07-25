@@ -22,9 +22,9 @@ def temp_config_db():
     """创建临时 config.db 并初始化表，返回 config_db 模块引用。"""
     with tempfile.TemporaryDirectory() as tmpdir:
         db_path = Path(tmpdir) / "config.db"
-        with patch("config_db._CONFIG_DB_PATH", db_path):
+        with patch("data.config_db._CONFIG_DB_PATH", db_path):
             # 重新加载模块以重置内部连接缓存可能绑定的路径
-            import config_db
+            import data.config_db as config_db
             config_db.init_config_tables()
             yield config_db
 
@@ -43,7 +43,7 @@ class TestInitConfigTables:
 
     def test_creates_tables(self, temp_config_db):
         """验证 3 张表被创建。"""
-        import config_db
+        import data.config_db as config_db
         conn = sqlite3.connect(str(config_db._CONFIG_DB_PATH))
         tables = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
@@ -58,10 +58,51 @@ class TestInitConfigTables:
 
     def test_idempotent(self, temp_config_db):
         """重复调用 init_config_tables 不报错。"""
-        import config_db
+        import data.config_db as config_db
         # 第一次在 fixture 中已调，再调两次
         config_db.init_config_tables()
         config_db.init_config_tables()  # 不应抛出异常
+
+    def test_description_column_migration(self, tmp_path):
+        """旧版 DB 无 description 列时，init_config_tables 自动添加。"""
+        import data.config_db as config_db
+
+        db_path = tmp_path / "config_no_desc.db"
+        with patch("data.config_db._CONFIG_DB_PATH", db_path):
+            # 模拟旧版 schema：建表时无 description 列
+            conn = sqlite3.connect(str(db_path))
+            conn.executescript("""
+                CREATE TABLE config_presets (
+                    preset_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name         TEXT    NOT NULL UNIQUE,
+                    category     TEXT    DEFAULT '通用',
+                    params_json  TEXT    NOT NULL,
+                    created_at   TEXT    DEFAULT (datetime('now','localtime')),
+                    updated_at   TEXT    DEFAULT (datetime('now','localtime'))
+                );
+                INSERT INTO config_presets(name, params_json) VALUES('old_preset','{"v":1}');
+                CREATE TABLE config_ticker (
+                    ticker       TEXT    NOT NULL,
+                    variant      TEXT    NOT NULL DEFAULT 'single',
+                    market       TEXT    DEFAULT '',
+                    preset_id    INTEGER,
+                    params_json  TEXT    DEFAULT '',
+                    updated_at   TEXT    DEFAULT (datetime('now','localtime')),
+                    PRIMARY KEY (ticker, variant)
+                );
+            """)
+            conn.commit()
+            conn.close()
+
+            # 跑迁移 — 应自动添加 description 列
+            config_db.init_config_tables()
+
+            # 验证 description 列已存在且有默认值
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            row = conn.execute("SELECT * FROM config_presets WHERE name='old_preset'").fetchone()
+            conn.close()
+            assert dict(row).get("description") == ""
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -73,14 +114,14 @@ class TestPresetCRUD:
 
     def test_save_new_preset(self, temp_config_db, sample_params_json):
         """保存新预设，返回 preset_id。"""
-        import config_db
+        import data.config_db as config_db
         pid = config_db.save_preset("test_algo", sample_params_json)
         assert isinstance(pid, int)
         assert pid > 0
 
     def test_save_update_existing(self, temp_config_db, sample_params_json):
         """同名保存触发 UPDATE，返回同一 preset_id。"""
-        import config_db
+        import data.config_db as config_db
         pid1 = config_db.save_preset("my_algo", sample_params_json, category="单滤波")
         pid2 = config_db.save_preset("my_algo", json.dumps({"x": 1}), category="双滤波")
         assert pid1 == pid2  # 同一 ID
@@ -91,7 +132,7 @@ class TestPresetCRUD:
 
     def test_list_presets_all(self, temp_config_db):
         """列出全部预设。"""
-        import config_db
+        import data.config_db as config_db
         config_db.save_preset("a", "{}")
         config_db.save_preset("b", "{}")
         presets = config_db.list_presets()
@@ -99,7 +140,7 @@ class TestPresetCRUD:
 
     def test_list_presets_by_category(self, temp_config_db):
         """按分类过滤。"""
-        import config_db
+        import data.config_db as config_db
         config_db.save_preset("a1", "{}", category="单滤波")
         config_db.save_preset("a2", "{}", category="双滤波")
         config_db.save_preset("a3", "{}", category="单滤波")
@@ -110,7 +151,7 @@ class TestPresetCRUD:
 
     def test_get_preset(self, temp_config_db, sample_params_json):
         """按 ID 获取预设。"""
-        import config_db
+        import data.config_db as config_db
         pid = config_db.save_preset("get_test", sample_params_json,
                                     description="desc", category="测试")
         p = config_db.get_preset(pid)
@@ -121,7 +162,7 @@ class TestPresetCRUD:
 
     def test_get_preset_by_name(self, temp_config_db, sample_params_json):
         """按名称获取预设。"""
-        import config_db
+        import data.config_db as config_db
         config_db.save_preset("name_test", sample_params_json)
         p = config_db.get_preset_by_name("name_test")
         assert p is not None
@@ -129,20 +170,20 @@ class TestPresetCRUD:
 
     def test_get_preset_not_found(self, temp_config_db):
         """不存在的预设返回 None。"""
-        import config_db
+        import data.config_db as config_db
         assert config_db.get_preset(99999) is None
         assert config_db.get_preset_by_name("nonexistent") is None
 
     def test_delete_preset(self, temp_config_db, sample_params_json):
         """删除后查不到。"""
-        import config_db
+        import data.config_db as config_db
         pid = config_db.save_preset("to_delete", sample_params_json)
         config_db.delete_preset(pid)
         assert config_db.get_preset(pid) is None
 
     def test_rename_preset(self, temp_config_db, sample_params_json):
         """重命名后 list/get 都反映新名称。"""
-        import config_db
+        import data.config_db as config_db
         pid = config_db.save_preset("old_name", sample_params_json)
         config_db.rename_preset(pid, "new_name")
         p = config_db.get_preset(pid)
@@ -153,7 +194,7 @@ class TestPresetCRUD:
 
     def test_rename_to_existing_name(self, temp_config_db, sample_params_json):
         """重名应返回 None（名称唯一性检查，P1-2 修复后不再抛异常）。"""
-        import config_db
+        import data.config_db as config_db
         config_db.save_preset("first", sample_params_json)
         pid2 = config_db.save_preset("second", sample_params_json)
         result = config_db.rename_preset(pid2, "first")
@@ -161,7 +202,7 @@ class TestPresetCRUD:
 
     def test_apply_preset(self, temp_config_db):
         """apply_preset 返回解析后的 dict。"""
-        import config_db
+        import data.config_db as config_db
         params = {"ma": 10, "std": 2.5}
         pid = config_db.save_preset("apply_test", json.dumps(params))
         result = config_db.apply_preset(pid)
@@ -169,14 +210,14 @@ class TestPresetCRUD:
 
     def test_apply_preset_invalid_json(self, temp_config_db):
         """非法 JSON 在 save_preset 阶段即被拒绝（P1-5 修复）。"""
-        import config_db
+        import data.config_db as config_db
         import pytest
         with pytest.raises(ValueError, match="有效的 JSON"):
             config_db.save_preset("bad_json", "{not valid}")
 
     def test_apply_preset_not_found(self, temp_config_db):
         """不存在的 preset 返回 None。"""
-        import config_db
+        import data.config_db as config_db
         assert config_db.apply_preset(99999) is None
 
 
@@ -189,7 +230,7 @@ class TestTickerConfig:
 
     def test_save_and_load_ticker_config(self, temp_config_db):
         """保存后能完整读出。"""
-        import config_db
+        import data.config_db as config_db
         params = json.dumps({"sma": 20, "ema": 10})
         config_db.save_ticker_config("AAPL", "US", "single",
                                      params_json=params, preset_id=None)
@@ -202,7 +243,7 @@ class TestTickerConfig:
 
     def test_save_with_preset_id(self, temp_config_db):
         """包含 preset_id 的保存。"""
-        import config_db
+        import data.config_db as config_db
         pid = config_db.save_preset("ref", "{}")
         config_db.save_ticker_config("MSFT", "US", "single",
                                      params_json="{}", preset_id=pid)
@@ -211,7 +252,7 @@ class TestTickerConfig:
 
     def test_load_nonexistent_ticker(self, temp_config_db):
         """不存在的 ticker 返回 None。"""
-        import config_db
+        import data.config_db as config_db
         assert config_db.load_ticker_config("NOEXIST") is None
 
 
@@ -224,7 +265,7 @@ class TestHistory:
 
     def test_record_and_get_history(self, temp_config_db):
         """写入历史后能按序读出。"""
-        import config_db
+        import data.config_db as config_db
         import time
         # 先创建 ticker 记录（FOREIGN KEY 约束）
         config_db.save_ticker_config("AAPL", "US", "single", params_json='{"a":1}')
@@ -248,7 +289,7 @@ class TestHistory:
 
     def test_history_with_preset_id(self, temp_config_db):
         """带 preset_id 的历史记录。"""
-        import config_db
+        import data.config_db as config_db
         config_db.save_ticker_config("AAPL", "US", "single", params_json="{}")
         pid = config_db.save_preset("hist_preset", '{"x":1}')
         config_db.record_history("AAPL", "single", "{}", '{"x":1}',
@@ -261,7 +302,7 @@ class TestHistory:
 
     def test_history_returns_explicit_columns(self, temp_config_db):
         """get_history 返回显式列名（不含 SELECT *）。"""
-        import config_db
+        import data.config_db as config_db
         config_db.save_ticker_config("AAPL", "US", "single", params_json="{}")
         config_db.record_history("AAPL", "single", "", "{}", source="test")
         history = config_db.get_history("AAPL")
@@ -273,12 +314,12 @@ class TestHistory:
 
     def test_history_empty_for_new_ticker(self, temp_config_db):
         """从未记录过的 ticker 返回空列表。"""
-        import config_db
+        import data.config_db as config_db
         assert config_db.get_history("UNKNOWN") == []
 
     def test_history_default_limit(self, temp_config_db):
         """默认 limit 为 20。过多记录只返回最近 20 条。"""
-        import config_db
+        import data.config_db as config_db
         config_db.save_ticker_config("AAPL", "US", "single", params_json="{}")
         for i in range(25):
             config_db.record_history("AAPL", "single", "", f'{{"i":{i}}}',
@@ -297,7 +338,7 @@ class TestImportJSONFiles:
 
     def test_import_creates_presets(self, temp_config_db):
         """mock _CONFIG_DIR 指向临时目录，导入后生成预设。"""
-        import config_db
+        import data.config_db as config_db
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg_dir = Path(tmpdir)
@@ -309,7 +350,7 @@ class TestImportJSONFiles:
             (cfg_dir / "0700_HK_QS.json").write_text(
                 json.dumps({"ticker": "0700", "market": "HK", "rsi": 14}))
 
-            with patch("config_db._CONFIG_DIR", cfg_dir):
+            with patch("data.config_db._CONFIG_DIR", cfg_dir):
                 n, _ = config_db.import_json_files_as_presets()
 
         assert n == 3
@@ -324,7 +365,7 @@ class TestImportJSONFiles:
 
     def test_import_skips_existing(self, temp_config_db):
         """已存在的预设不覆盖（force=False）。"""
-        import config_db
+        import data.config_db as config_db
 
         # 先手动保存同名预设
         config_db.save_preset("EXISTING", json.dumps({"original": True}),
@@ -335,7 +376,7 @@ class TestImportJSONFiles:
             (cfg_dir / "EXISTING.json").write_text(
                 json.dumps({"ticker": "N", "market": "US", "new": True}))
 
-            with patch("config_db._CONFIG_DIR", cfg_dir):
+            with patch("data.config_db._CONFIG_DIR", cfg_dir):
                 n, _ = config_db.import_json_files_as_presets(force=False)
 
         assert n == 0  # 跳过了
@@ -344,7 +385,7 @@ class TestImportJSONFiles:
 
     def test_import_force_overwrite(self, temp_config_db):
         """force=True 时覆盖同名预设（param 内容来自新文件）。"""
-        import config_db
+        import data.config_db as config_db
 
         config_db.save_preset("OVERWRITE_ME", json.dumps({"original": True}),
                               category="手动")
@@ -354,7 +395,7 @@ class TestImportJSONFiles:
             (cfg_dir / "OVERWRITE_ME.json").write_text(
                 json.dumps({"ticker": "N", "market": "US", "new": True}))
 
-            with patch("config_db._CONFIG_DIR", cfg_dir):
+            with patch("data.config_db._CONFIG_DIR", cfg_dir):
                 n, _ = config_db.import_json_files_as_presets(force=True)
 
         assert n == 1
@@ -366,15 +407,15 @@ class TestImportJSONFiles:
 
     def test_import_empty_dir(self, temp_config_db):
         """config 目录不存在时返回 0。"""
-        import config_db
+        import data.config_db as config_db
 
-        with patch("config_db._CONFIG_DIR", Path("/nonexistent_dir_xyz")):
+        with patch("data.config_db._CONFIG_DIR", Path("/nonexistent_dir_xyz")):
             n, _ = config_db.import_json_files_as_presets()
         assert n == 0
 
     def test_import_skips_bad_json(self, temp_config_db):
         """非法的 JSON 文件被静默跳过。"""
-        import config_db
+        import data.config_db as config_db
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg_dir = Path(tmpdir)
@@ -383,7 +424,7 @@ class TestImportJSONFiles:
             (cfg_dir / "bad.json").write_text("not valid json at all")
             (cfg_dir / "empty.json").write_text("")
 
-            with patch("config_db._CONFIG_DIR", cfg_dir):
+            with patch("data.config_db._CONFIG_DIR", cfg_dir):
                 n, _ = config_db.import_json_files_as_presets()
 
         assert n == 1  # 只导入了一个
@@ -408,7 +449,7 @@ class TestCollectCurrentParams:
     def test_collects_global_keys(self, temp_config_db):
         """收集 market, ticker 等全局 key。"""
         import streamlit as st
-        import config_db
+        import data.config_db as config_db
 
         st.session_state["market"] = "US"
         st.session_state["ticker"] = "AAPL"
@@ -426,7 +467,7 @@ class TestCollectCurrentParams:
     def test_collects_view_params(self, temp_config_db):
         """收集 v0_tf, v0_n 等视图参数。"""
         import streamlit as st
-        import config_db
+        import data.config_db as config_db
 
         st.session_state["v0_tf"] = "1h"
         st.session_state["v0_n"] = 100
@@ -444,7 +485,7 @@ class TestCollectCurrentParams:
     def test_collects_filter_params(self, temp_config_db):
         """收集中文 key 的滤波器参数。"""
         import streamlit as st
-        import config_db
+        import data.config_db as config_db
 
         st.session_state["窗口大小_1"] = 10
         st.session_state["跨度_EMA"] = 5
@@ -472,7 +513,7 @@ class TestCollectCurrentParams:
     def test_ignores_unrelated_keys(self, temp_config_db):
         """session_state 中无关的 key 不被收集。"""
         import streamlit as st
-        import config_db
+        import data.config_db as config_db
 
         st.session_state["market"] = "HK"
         st.session_state["unrelated"] = "should_not_appear"
@@ -485,7 +526,7 @@ class TestCollectCurrentParams:
 
     def test_empty_session_state(self, temp_config_db):
         """空 session_state 返回空 dict。"""
-        import config_db
+        import data.config_db as config_db
         params = config_db.collect_current_params()
         assert params == {}
 
@@ -499,7 +540,7 @@ class TestSavePresetValidation:
 
     def test_empty_name_raises_value_error(self, temp_config_db):
         """空字符串或纯空白名称抛出 ValueError。"""
-        import config_db
+        import data.config_db as config_db
         with pytest.raises(ValueError, match="名称不能为空"):
             config_db.save_preset("", "{}")
         with pytest.raises(ValueError, match="名称不能为空"):
@@ -507,7 +548,7 @@ class TestSavePresetValidation:
 
     def test_invalid_json_raises_value_error(self, temp_config_db):
         """无效 JSON 字符串抛出 ValueError（P1-5 修复）。"""
-        import config_db
+        import data.config_db as config_db
         with pytest.raises(ValueError, match="有效的 JSON"):
             config_db.save_preset("bad_json", "{invalid")
         with pytest.raises(ValueError, match="有效的 JSON"):
@@ -515,14 +556,14 @@ class TestSavePresetValidation:
 
     def test_valid_save_returns_int(self, temp_config_db, sample_params_json):
         """正常保存返回 int 类型的 preset_id。"""
-        import config_db
+        import data.config_db as config_db
         pid = config_db.save_preset("valid_test", sample_params_json)
         assert isinstance(pid, int)
         assert pid > 0
 
     def test_overwrite_returns_same_preset_id(self, temp_config_db, sample_params_json):
         """覆盖已有名称返回相同 preset_id，内容更新。"""
-        import config_db
+        import data.config_db as config_db
         pid1 = config_db.save_preset("overwrite_v", sample_params_json)
         pid2 = config_db.save_preset("overwrite_v", json.dumps({"new": "data"}))
         assert pid1 == pid2
@@ -539,7 +580,7 @@ class TestDeletePresetReturnValue:
 
     def test_delete_existing_returns_true(self, temp_config_db, sample_params_json):
         """删除存在预设返回 True，且记录消失。"""
-        import config_db
+        import data.config_db as config_db
         pid = config_db.save_preset("del_me", sample_params_json)
         result = config_db.delete_preset(pid)
         assert result is True
@@ -547,13 +588,13 @@ class TestDeletePresetReturnValue:
 
     def test_delete_nonexistent_returns_false(self, temp_config_db):
         """删除不存在预设返回 False。"""
-        import config_db
+        import data.config_db as config_db
         result = config_db.delete_preset(99999)
         assert result is False
 
     def test_delete_referenced_preset_sets_null(self, temp_config_db, sample_params_json):
         """删除被 ticker 引用的预设，外键 ON DELETE SET NULL 生效（P0-2 修复）。"""
-        import config_db
+        import data.config_db as config_db
         pid = config_db.save_preset("fk_test", sample_params_json)
         config_db.save_ticker_config("AAPL", "US", "single",
                                      params_json="{}", preset_id=pid)
@@ -571,7 +612,7 @@ class TestDeletePresetReturnValue:
 
     def test_delete_preset_rowcount_zero_returns_false(self, temp_config_db, sample_params_json):
         """模拟 DELETE rowcount=0 时返回 False（行 205 不可达分支）。"""
-        import config_db
+        import data.config_db as config_db
         pid = config_db.save_preset("rowcount_test", sample_params_json)
 
         from contextlib import contextmanager
@@ -619,7 +660,7 @@ class TestDeletePresetReturnValue:
             finally:
                 conn.close()
 
-        with patch("config_db._get_conn", delete_patched_get_conn):
+        with patch("data.config_db._get_conn", delete_patched_get_conn):
             result = config_db.delete_preset(pid)
 
         assert result is False
@@ -635,7 +676,7 @@ class TestRenamePresetValidation:
 
     def test_rename_to_existing_name_returns_none(self, temp_config_db, sample_params_json):
         """重命名为已存在名称返回 None（P1-2 唯一性检查）。"""
-        import config_db
+        import data.config_db as config_db
         config_db.save_preset("first", sample_params_json)
         pid2 = config_db.save_preset("second", sample_params_json)
         result = config_db.rename_preset(pid2, "first")
@@ -646,7 +687,7 @@ class TestRenamePresetValidation:
 
     def test_rename_to_empty_string_returns_none(self, temp_config_db, sample_params_json):
         """重命名为空字符串返回 None（P1-6 空名称校验）。"""
-        import config_db
+        import data.config_db as config_db
         pid = config_db.save_preset("valid", sample_params_json)
         result = config_db.rename_preset(pid, "")
         assert result is None
@@ -658,13 +699,13 @@ class TestRenamePresetValidation:
 
     def test_rename_nonexistent_preset_returns_none(self, temp_config_db):
         """重命名不存在的 preset_id 返回 None。"""
-        import config_db
+        import data.config_db as config_db
         result = config_db.rename_preset(99999, "anything")
         assert result is None
 
     def test_rename_success_returns_new_name(self, temp_config_db, sample_params_json):
         """重命名成功返回新名称字符串。"""
-        import config_db
+        import data.config_db as config_db
         pid = config_db.save_preset("old", sample_params_json)
         result = config_db.rename_preset(pid, "new_name")
         assert result == "new_name"
@@ -681,14 +722,14 @@ class TestImportJsonFilesReturnValue:
 
     def test_returns_tuple_of_count_and_errors(self, temp_config_db):
         """验证返回 (int, list) 元组结构。"""
-        import config_db
+        import data.config_db as config_db
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg_dir = Path(tmpdir)
             (cfg_dir / "good.json").write_text(
                 json.dumps({"ticker": "AAPL", "market": "US"}))
 
-            with patch("config_db._CONFIG_DIR", cfg_dir):
+            with patch("data.config_db._CONFIG_DIR", cfg_dir):
                 result = config_db.import_json_files_as_presets()
 
         assert isinstance(result, tuple)
@@ -701,13 +742,13 @@ class TestImportJsonFilesReturnValue:
 
     def test_invalid_json_in_errors_not_raised(self, temp_config_db):
         """无效 JSON 文件不抛异常，出现在 errors 列表中（P0-1 错误收集）。"""
-        import config_db
+        import data.config_db as config_db
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg_dir = Path(tmpdir)
             (cfg_dir / "bad.json").write_text("this is not json!!")
 
-            with patch("config_db._CONFIG_DIR", cfg_dir):
+            with patch("data.config_db._CONFIG_DIR", cfg_dir):
                 count, errors = config_db.import_json_files_as_presets()
 
         assert count == 0
@@ -717,7 +758,7 @@ class TestImportJsonFilesReturnValue:
 
     def test_mixed_valid_and_invalid(self, temp_config_db):
         """混合有效和无效文件，count 只计成功，errors 列出失败。"""
-        import config_db
+        import data.config_db as config_db
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg_dir = Path(tmpdir)
@@ -727,7 +768,7 @@ class TestImportJsonFilesReturnValue:
             (cfg_dir / "also_ok.json").write_text(
                 json.dumps({"ticker": "T2", "market": "HK"}))
 
-            with patch("config_db._CONFIG_DIR", cfg_dir):
+            with patch("data.config_db._CONFIG_DIR", cfg_dir):
                 count, errors = config_db.import_json_files_as_presets()
 
         assert count == 2
@@ -744,7 +785,7 @@ class TestGetConnException:
 
     def test_exception_triggers_rollback(self, temp_config_db):
         """with _get_conn() 内抛出异常 → rollback 不报错且连接关闭。"""
-        import config_db
+        import data.config_db as config_db
 
         # 先写入一条记录
         config_db.save_preset("survivor", "{}")
@@ -772,7 +813,7 @@ class TestTickerConfigEdgeCases:
 
     def test_save_with_nonexistent_preset_sets_null(self, temp_config_db):
         """preset_id 不存在时自动置 NULL（行 274-275）。"""
-        import config_db
+        import data.config_db as config_db
         config_db.save_ticker_config("AAPL", "US", "single",
                                      params_json="{}",
                                      preset_id=99999)  # 不存在
@@ -790,7 +831,7 @@ class TestApplyPresetEdgeCases:
 
     def test_apply_preset_corrupted_json_returns_none(self, temp_config_db):
         """params_json 损坏时 apply_preset 返回 None。"""
-        import config_db
+        import data.config_db as config_db
         # 跳过 save_preset 的校验，直接写库模拟日期轮换后 JSON 损坏
         pid = config_db.save_preset("corrupt_later", '{"valid": true}')
         import sqlite3
@@ -814,16 +855,16 @@ class TestImportJsonFilesEdgeCases:
 
     def test_import_db_save_failure_reported(self, temp_config_db):
         """文件读取成功但存入数据库失败时，出现在 errors 中。"""
-        import config_db
+        import data.config_db as config_db
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg_dir = Path(tmpdir)
             (cfg_dir / "valid.json").write_text(
                 json.dumps({"ticker": "OK", "market": "US"}))
 
-            with patch("config_db._CONFIG_DIR", cfg_dir):
+            with patch("data.config_db._CONFIG_DIR", cfg_dir):
                 # mock save_preset 抛异常模拟写入失败
-                with patch("config_db.save_preset",
+                with patch("data.config_db.save_preset",
                            side_effect=RuntimeError("db full")):
                     count, errors = config_db.import_json_files_as_presets()
 
@@ -834,13 +875,13 @@ class TestImportJsonFilesEdgeCases:
 
     def test_import_invalid_json_empty_file(self, temp_config_db):
         """空文件被报为读取/解析失败。"""
-        import config_db
+        import data.config_db as config_db
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg_dir = Path(tmpdir)
             (cfg_dir / "empty.json").write_text("")
 
-            with patch("config_db._CONFIG_DIR", cfg_dir):
+            with patch("data.config_db._CONFIG_DIR", cfg_dir):
                 count, errors = config_db.import_json_files_as_presets()
 
         assert count == 0
@@ -857,14 +898,14 @@ class TestDeletePresetWithJsonFile:
 
     def test_delete_preset_removes_json_file(self, temp_config_db):
         """删除预设时，config 目录下同名 JSON 被同步删除。"""
-        import config_db
+        import data.config_db as config_db
 
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg_dir = Path(tmpdir)
             json_path = cfg_dir / "sync_delete.json"
             json_path.write_text('{"ticker": "T", "market": "US"}')
 
-            with patch("config_db._CONFIG_DIR", cfg_dir):
+            with patch("data.config_db._CONFIG_DIR", cfg_dir):
                 pid = config_db.save_preset("sync_delete", '{"ticker": "T"}')
                 assert json_path.exists()
                 result = config_db.delete_preset(pid)
@@ -873,9 +914,9 @@ class TestDeletePresetWithJsonFile:
 
     def test_delete_preset_no_json_file(self, temp_config_db):
         """删除预设时，config 目录下无同名 JSON 文件也不报错。"""
-        import config_db
+        import data.config_db as config_db
 
-        with patch("config_db._CONFIG_DIR", Path("/nonexistent_config")):
+        with patch("data.config_db._CONFIG_DIR", Path("/nonexistent_config")):
             pid = config_db.save_preset("no_json", "{}")
             result = config_db.delete_preset(pid)
             assert result is True
@@ -890,10 +931,10 @@ class TestInitConfigTablesMigration:
 
     def test_fk_migration_on_old_schema(self, tmp_path):
         """老版 schema（无 ON DELETE）init 后表仍正常可用。"""
-        import config_db
+        import data.config_db as config_db
 
         db_path = tmp_path / "config_migrate.db"
-        with patch("config_db._CONFIG_DB_PATH", db_path):
+        with patch("data.config_db._CONFIG_DB_PATH", db_path):
             # 模拟旧版 schema：先建 config_presets，再建 config_ticker（无 ON DELETE）
             conn = sqlite3.connect(str(db_path))
             conn.execute("PRAGMA foreign_keys=ON")
@@ -930,10 +971,10 @@ class TestInitConfigTablesMigration:
 
     def test_fk_migration_forced_path(self, tmp_path):
         """通过自定义 Connection 子类强制触发 FK 迁移路径。"""
-        import config_db
+        import data.config_db as config_db
 
         db_path = tmp_path / "config_force_migrate.db"
-        with patch("config_db._CONFIG_DB_PATH", db_path):
+        with patch("data.config_db._CONFIG_DB_PATH", db_path):
             # 创建旧版表（无 ON DELETE）
             conn = sqlite3.connect(str(db_path))
             conn.execute("PRAGMA foreign_keys=ON")
@@ -941,7 +982,10 @@ class TestInitConfigTablesMigration:
                 CREATE TABLE config_presets (
                     preset_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL UNIQUE,
-                    params_json TEXT NOT NULL
+                    category TEXT DEFAULT '通用',
+                    params_json TEXT NOT NULL,
+                    created_at TEXT DEFAULT (datetime('now','localtime')),
+                    updated_at TEXT DEFAULT (datetime('now','localtime'))
                 );
                 INSERT INTO config_presets(name, params_json) VALUES('p1','{"v":1}');
                 CREATE TABLE config_ticker (
@@ -1010,7 +1054,7 @@ class TestInitConfigTablesMigration:
                 finally:
                     conn.close()
 
-            with patch("config_db._get_conn", patched_get_conn):
+            with patch("data.config_db._get_conn", patched_get_conn):
                 config_db.init_config_tables()
 
             # 迁移后数据仍存在
@@ -1018,7 +1062,7 @@ class TestInitConfigTablesMigration:
 
     def test_no_migration_needed(self, temp_config_db):
         """已是最新 schema 时，不触发迁移代码。"""
-        import config_db
+        import data.config_db as config_db
         # 二次调用，不触发迁移（已在 fixture 中初始化）
         config_db.init_config_tables()
 
@@ -1032,7 +1076,7 @@ class TestMainBlock:
 
     def test_main_block_execution(self, tmp_path):
         """直接模拟 __main__ 代码块中的语句执行。"""
-        import config_db
+        import data.config_db as config_db
 
         data_dir = tmp_path / "data"
         data_dir.mkdir()
@@ -1042,9 +1086,9 @@ class TestMainBlock:
             json.dumps({"ticker": "OK", "market": "US"}))
         (config_dir / "bad.json").write_text("not valid json!!")
 
-        with patch("config_db._CONFIG_DB_PATH", data_dir / "config.db"):
-            with patch("config_db._CONFIG_DIR", config_dir):
-                from db import init_db
+        with patch("data.config_db._CONFIG_DB_PATH", data_dir / "config.db"):
+            with patch("data.config_db._CONFIG_DIR", config_dir):
+                from data.db import init_db
                 init_db()
                 config_db.init_config_tables()
                 n, errs = config_db.import_json_files_as_presets(force=True)

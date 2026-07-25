@@ -152,12 +152,12 @@ higher_tf long_pnl/short_pnl → _align_pnl_to_current_tf
 ### 第一批: 阻断性修复 (P0)
 
 1. **P0-1: 修复 EventRecorder `sig`/`eps` 键路径 BUG**
-   - 文件: `filter_app/services/event_recorder.py` 第 321-322 行
+   - 文件: `filter/services/event_recorder.py` 第 321-322 行
    - 改动: `schmitt = view_data.get("schmitt", {}); sig = schmitt.get("sig"); eps = schmitt.get("eps")`
    - 预计: 2 行改动，零风险
 
 2. **P0-4: BacktestRunner 返回 `v` 和 `a`**
-   - 文件: `filter_app/services/backtest_core.py` `_compute_schmitt_trigger` (line 481-513) 和 `_compute_pipeline_for_view` (line 411-424)
+   - 文件: `filter/services/backtest_core.py` `_compute_schmitt_trigger` (line 481-513) 和 `_compute_pipeline_for_view` (line 411-424)
    - 改动: 在 schmitt dict 中增加 `"v": v, "a": a` 字段
    - 影响: PipelineCapture 可删除 `_render_chart` 中的重复计算(lines 864-865); EventRecorder 获得 `v`/`a` 数据源
 

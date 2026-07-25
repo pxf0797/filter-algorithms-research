@@ -1,6 +1,6 @@
 # data_loader.py 数据流与级联合成深度分析
 
-> 文件: `/Users/xfpan/claude/filter_research/filter_app/services/data_loader.py`
+> 文件: `/Users/xfpan/claude/filter_research/filter/services/data_loader.py`
 > 分析日期: 2026-07-07
 
 ---

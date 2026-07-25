@@ -5,11 +5,11 @@ Reproduces _render_chart's figure construction and checks all trace axis referen
 
 Usage:
   cd /Users/xfpan/claude/filter_research
-  PYTHONPATH=filter_app:$PYTHONPATH python3 diagnose_axis.py
+  PYTHONPATH=filter:$PYTHONPATH python3 diagnose_axis.py
 """
 
 import sys, os, json
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "filter_app"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "filter"))
 
 # ---- Mock streamlit before any project imports ----
 import types

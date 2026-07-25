@@ -10,7 +10,7 @@
 
 ### 1.1 回测主循环 (最热路径)
 
-**文件**: `filter_app/services/backtest_core.py`, 行 158-244
+**文件**: `filter/services/backtest_core.py`, 行 158-244
 
 `BacktestRunner.run()` 是整个系统的最热路径，在回测模式下对每个 bar 索引执行完整管道。每个 bar 执行流程：
 
@@ -29,7 +29,7 @@ bar_index → _sync_data() → _load_window_data() → _compute_pipeline_for_vie
 
 ### 1.2 策略 PnL 计算
 
-**文件**: `filter_app/services/filter_engine.py`, 行 673-876
+**文件**: `filter/services/filter_engine.py`, 行 673-876
 
 `_compute_strategy_pnl()` 对每个交易对执行纯 Python `for` 循环遍历 bar，每个 bar 都做价格比对。在 4 个视图中，这个函数每次回测步骤被调用 4 次。
 
@@ -43,7 +43,7 @@ for i in range(entry_idx, exit_idx + 1):   # Python 级别逐 bar 遍历
 
 ### 1.3 施密特触发器
 
-**文件**: `filter_app/services/filter_engine.py`, 行 434-534
+**文件**: `filter/services/filter_engine.py`, 行 434-534
 
 `_schmitt_trigger()` 包含 3 个顺序 Python `for` 循环：
 1. 行 487-490: EWMA 波动率计算 (逐点循环)
@@ -53,7 +53,7 @@ for i in range(entry_idx, exit_idx + 1):   # Python 级别逐 bar 遍历
 
 ### 1.4 卡尔曼滤波
 
-**文件**: `filter_app/services/filter_engine.py`, 行 157-198
+**文件**: `filter/services/filter_engine.py`, 行 157-198
 
 `apply_kalman()` 使用纯 Python `for i in range(n)` 循环实现逐点卡尔曼滤波更新（行 184-197），无法利用向量化加速。numpy 的矩阵运算 (`F @ x`, `P @ F @ P.T`) 在循环内部进行，每次迭代都创建新的 numpy 数组对象。
 
@@ -63,7 +63,7 @@ for i in range(entry_idx, exit_idx + 1):   # Python 级别逐 bar 遍历
 
 ### 2.1 Pandas iterrows() 反模式 (高影响)
 
-**文件**: `filter_app/db.py`
+**文件**: `filter/db.py`
 
 三处使用了 `df.iterrows()`，每次调用都创建 Python 逐行迭代器：
 
@@ -79,7 +79,7 @@ for i in range(entry_idx, exit_idx + 1):   # Python 级别逐 bar 遍历
 
 ### 2.2 apply_ema 不必要的 DataFrame 转换
 
-**文件**: `filter_app/services/filter_engine.py`, 行 49-66
+**文件**: `filter/services/filter_engine.py`, 行 49-66
 
 ```python
 def apply_ema(signal, t, span):
@@ -92,7 +92,7 @@ def apply_ema(signal, t, span):
 
 ### 2.3 db.py 中无深拷贝风险 (低影响)
 
-经检查 `filter_app/services/` 目录下的代码没有使用 `deepcopy` 或 `copy.deepcopy`。这是一项正面发现，说明开发团队已经意识到避免不必要拷贝。
+经检查 `filter/services/` 目录下的代码没有使用 `deepcopy` 或 `copy.deepcopy`。这是一项正面发现，说明开发团队已经意识到避免不必要拷贝。
 
 ### 2.4 NumPy 使用质量 (中等)
 
@@ -108,7 +108,7 @@ def apply_ema(signal, t, span):
 
 ### 3.1 回测逐 bar 重复 Parquet 写入 (关键瓶颈)
 
-**文件**: `filter_app/services/backtest_core.py`, 行 431-455 和 `filter_app/services/data_loader.py`, 行 737-818
+**文件**: `filter/services/backtest_core.py`, 行 431-455 和 `filter/services/data_loader.py`, 行 737-818
 
 回测模式的主循环结构：
 ```
@@ -130,7 +130,7 @@ for bar_index in range(start_bar, end_bar):
 
 ### 3.2 EventRecorder 同步 JSONL 写入
 
-**文件**: `filter_app/services/event_recorder.py`, 行 392-469
+**文件**: `filter/services/event_recorder.py`, 行 392-469
 
 `record_step()` 每次调用：
 - 打开 5 个 JSONL 文件句柄
@@ -143,7 +143,7 @@ for bar_index in range(start_bar, end_bar):
 
 ### 3.3 DB 连接模式
 
-**文件**: `filter_app/db.py`, 行 19 和 `filter_app/streamlit_app.py`, 行 862-878
+**文件**: `filter/db.py`, 行 19 和 `filter/streamlit_app.py`, 行 862-878
 
 两个独立的 DB 连接管理策略共存：
 - `db.py:get_conn()` — 每次调用创建新连接（用于 services/ 模块）
@@ -159,7 +159,7 @@ for bar_index in range(start_bar, end_bar):
 
 ### 4.1 Streamlit 缓存 (UI 模式良好，回测模式缺失)
 
-**文件**: `filter_app/streamlit_app.py`
+**文件**: `filter/streamlit_app.py`
 
 Streamlit UI 模式有良好的缓存层：
 
@@ -173,7 +173,7 @@ Streamlit UI 模式有良好的缓存层：
 
 ### 4.2 回测模式零缓存 (严重问题)
 
-**文件**: `filter_app/services/backtest_core.py`
+**文件**: `filter/services/backtest_core.py`
 
 BacktestRunner 的回测管道(`_compute_pipeline_for_view`)完全不使用缓存：
 - 没有 `functools.lru_cache`
@@ -189,7 +189,7 @@ BacktestRunner 的回测管道(`_compute_pipeline_for_view`)完全不使用缓�
 
 ### 4.3 Parquet 显示缓存 (未命中已存在数据)
 
-**文件**: `filter_app/services/data_loader.py`, 行 737-818
+**文件**: `filter/services/data_loader.py`, 行 737-818
 
 `_sync_all_cascading()` 在回测模式下每步都重新写入所有 TF 的 parquet 文件，即使 DB 中数据未变。没有检查 parquet 文件是否已是最新版本（如通过 MD5 或时间戳比较）。
 
@@ -201,7 +201,7 @@ BacktestRunner 的回测管道(`_compute_pipeline_for_view`)完全不使用缓�
 
 整个项目**仅有一处并发**：
 
-**文件**: `filter_app/services/data_loader.py`, 行 52-56
+**文件**: `filter/services/data_loader.py`, 行 52-56
 
 ```python
 with ThreadPoolExecutor(max_workers=8) as exec:
@@ -214,7 +214,7 @@ with ThreadPoolExecutor(max_workers=8) as exec:
 
 ### 5.2 回测循环：纯粹串行
 
-**文件**: `filter_app/services/backtest_core.py`, 行 158
+**文件**: `filter/services/backtest_core.py`, 行 158
 
 ```python
 for bar_index in range(start_bar, end_bar, step_interval):
@@ -243,7 +243,7 @@ for bar_index in range(start_bar, end_bar, step_interval):
 
 ### 6.1 CSVBuilder 全量内存累积
 
-**文件**: `filter_app/services/event_recorder.py`, 行 29-310
+**文件**: `filter/services/event_recorder.py`, 行 29-310
 
 `CSVBuilder._rows` 是一个 dict[int, dict]，存储**所有 bar** 的数据。对于 5000 bar 回测 × 4 视图 × 每视图约 15 列 = 约 300,000 个标量值。每个 Python dict 条目有 key + value + overhead（约 72 字节），总计约 **20-50 MB**。
 
@@ -253,7 +253,7 @@ for bar_index in range(start_bar, end_bar, step_interval):
 
 ### 6.2 ParquetStore 缓冲区无限增长
 
-**文件**: `filter_app/services/parquet_store.py`, 行 189-191
+**文件**: `filter/services/parquet_store.py`, 行 189-191
 
 ```python
 self._saved_buffer_size = self._buffer_size
@@ -264,7 +264,7 @@ self._buffer_size = 10_000_000   # 1千万! 实际上禁用了分块写入
 
 ### 6.3 管道输出持有完整数组
 
-**文件**: `filter_app/services/backtest_core.py`, 行 579-599
+**文件**: `filter/services/backtest_core.py`, 行 579-599
 
 `_compute_pipeline_for_view()` 返回的 dict 包含长数组的引用（`t`, `noisy`, `filtered`, `filtered2`, `long_pnl`, `short_pnl` 等），每个约 120 * 8 字节 = ~1KB。`run()` 的结果列表 `results` 持有所有步的完整数据，对于 1000 步 = 约 4 视图 × 1KB × 6 数组 × 1000 = **~24 MB**。这是合理的，但如果有 10000 步则达 240 MB。
 
@@ -278,7 +278,7 @@ self._buffer_size = 10_000_000   # 1千万! 实际上禁用了分块写入
 
 ### 7.1 _align_pnl_to_current_tf — O(n*m) 线性搜索 (严重)
 
-**文件**: `filter_app/services/filter_engine.py`, 行 947-953
+**文件**: `filter/services/filter_engine.py`, 行 947-953
 
 ```python
 for i in range(n):  # 当前周期的每个 bar
@@ -292,7 +292,7 @@ n = 当前周期 bar 数 (~120)，m = 较高周期 bar 数 (~120)，总复杂度
 
 ### 7.2 bs_marker._find_date_index — 线性扫描 O(n)
 
-**文件**: `filter_app/services/bs_marker.py`, 行 56-58
+**文件**: `filter/services/bs_marker.py`, 行 56-58
 
 ```python
 for i, d in enumerate(dates_idx):  # 线性扫描
@@ -304,7 +304,7 @@ for i, d in enumerate(dates_idx):  # 线性扫描
 
 ### 7.3 ParquetStore._apply_pending_events — O(R * V * E) 嵌套循环
 
-**文件**: `filter_app/services/parquet_store.py`, 行 609-648
+**文件**: `filter/services/parquet_store.py`, 行 609-648
 
 ```python
 for row in self._buffer:                    # O(R) — 所有缓冲行
@@ -319,7 +319,7 @@ for row in self._buffer:                    # O(R) — 所有缓冲行
 
 ### 7.4 _compute_strategy_pnl 的 forward fill — 两次 O(n) 遍历
 
-**文件**: `filter_app/services/filter_engine.py`, 行 860-874
+**文件**: `filter/services/filter_engine.py`, 行 860-874
 
 ```python
 # 做多曲线前向填充
@@ -353,7 +353,7 @@ for i in range(n):          # O(n)
 
 ### 8.1 模块导入开销
 
-**文件**: `filter_app/streamlit_app.py`, 行 1-59
+**文件**: `filter/streamlit_app.py`, 行 1-59
 
 Streamlit 启动加载以下重量级模块：
 - `yfinance` (~1.5s 首次导入，含网络栈初始化)
@@ -378,7 +378,7 @@ Streamlit 启动加载以下重量级模块：
 
 ### 8.3 回测 CLI 启动
 
-**文件**: `filter_app/backtest_cli.py`
+**文件**: `filter/backtest_cli.py`
 
 CLI 模式较简洁：导入模块 → 解析参数 → 校验 ticker → 创建 runner → 运行。导入耗时与 Streamlit 相同（3-5s），但无需 Streamlit 框架启动。
 

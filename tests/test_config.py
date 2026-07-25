@@ -1,7 +1,7 @@
-"""Test filter_app.config — ViewConfig dataclass creation, serialization, defaults."""
+"""Test filter.config — ViewConfig dataclass creation, serialization, defaults."""
 
 import pytest
-from config import ViewConfig
+from shared.config import ViewConfig
 
 
 class TestViewConfigDefaults:

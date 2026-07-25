@@ -295,8 +295,8 @@ P1-3 (合成链断裂) + P1-4 (回退路径)
 
 | 文件 | 需修改的问题 |
 |------|------------|
-| `filter_app/services/data_loader.py` | P1-1, P1-3, P1-5, P2-4, P2-6 |
-| `filter_app/streamlit_app.py` | P1-1, P1-2, P1-4, P2-2 |
+| `filter/services/data_loader.py` | P1-1, P1-3, P1-5, P2-4, P2-6 |
+| `filter/streamlit_app.py` | P1-1, P1-2, P1-4, P2-2 |
 
 ---
 

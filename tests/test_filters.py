@@ -11,7 +11,7 @@ import pytest
 # Import module under test
 # ---------------------------------------------------------------------------
 # Filter functions moved to services/filter_engine in Phase 2 modularization
-from services.filter_engine import (
+from engine.filters import (
     apply_sma, apply_ema, apply_wma, apply_alma,
     apply_savgol, apply_kalman, apply_butterworth,
     apply_gaussian, apply_median, apply_lowess,

@@ -17,11 +17,11 @@ from pathlib import Path
 
 import pytest
 
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+_src = Path(__file__).resolve().parent.parent / "filter"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
-import config_db as cfg
+import data.config_db as cfg
 
 
 @pytest.fixture(autouse=True)
@@ -714,7 +714,7 @@ class TestWidgetKeyConflictPrevention:
         ss["overwrite_preset"] = True
         monkeypatch.setattr(streamlit, "session_state", ss)
 
-        from config_db import collect_current_params
+        from data.config_db import collect_current_params
         params = collect_current_params()
         assert "overwrite_preset" not in params
 

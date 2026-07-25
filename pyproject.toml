@@ -8,12 +8,13 @@ ignore = ["E501"]
 
 [project]
 name = "filter-research"
-version = "3.4.0"
+version = "3.5.0"
 description = "多周期股票滤波分析工具"
 requires-python = ">=3.11"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+norecursedirs = ["_archive", "__pycache__", ".hypothesis"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
@@ -28,7 +29,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["filter_app"]
+source = ["filter"]
 omit = ["tests/*"]
 
 [tool.coverage.report]

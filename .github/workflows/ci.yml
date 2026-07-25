@@ -16,7 +16,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-lint-${{ hashFiles('filter_app/requirements.txt') }}
+          key: ${{ runner.os }}-pip-lint-${{ hashFiles('filter/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-lint-
       - run: pip install ruff
@@ -34,10 +34,10 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('filter_app/requirements.txt') }}
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('filter/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-${{ matrix.python-version }}-
-      - run: pip install -r filter_app/requirements.txt pytest pytest-cov
+      - run: pip install -r filter/requirements.txt pytest pytest-cov
       # <6s: fast unit tests per TEST_TIMES.md
       - run: >
           python -m pytest tests/test_param_export_import.py
@@ -68,10 +68,10 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('filter_app/requirements.txt') }}
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('filter/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-${{ matrix.python-version }}-
-      - run: pip install -r filter_app/requirements.txt pytest pytest-cov pytest-xdist
+      - run: pip install -r filter/requirements.txt pytest pytest-cov pytest-xdist
       # <30s: integration tests, can run in parallel via xdist
       - run: >
           python -m pytest tests/test_signals.py tests/test_sidebar.py
@@ -116,10 +116,10 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('filter_app/requirements.txt') }}
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('filter/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-${{ matrix.python-version }}-
-      - run: pip install -r filter_app/requirements.txt pytest pytest-cov
+      - run: pip install -r filter/requirements.txt pytest pytest-cov
       # ~101s: heavy tests (backtest, pipeline, UI) per TEST_TIMES.md
       - run: >
           python -m pytest tests/test_backtest.py
@@ -157,12 +157,12 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-coverage-${{ hashFiles('filter_app/requirements.txt') }}
+          key: ${{ runner.os }}-pip-coverage-${{ hashFiles('filter/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-coverage-
-      - run: pip install -r filter_app/requirements.txt pytest pytest-cov
+      - run: pip install -r filter/requirements.txt pytest pytest-cov
       - run: python -m pytest tests/ --ignore=tests/test_app_ui.py
-               --cov=filter_app --cov-report=term
+               --cov=filter --cov-report=term
                --cov-fail-under=55 -q --tb=short
 
   changelog-check:

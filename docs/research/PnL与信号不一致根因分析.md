@@ -110,7 +110,7 @@
 
 **严重程度**: 高 — 导致回测起始阶段信号与 PnL 完全脱节
 
-**位置**: `filter_app/services/filter_engine.py`, `_find_all_pairs()` 函数，行 537-593
+**位置**: `filter/services/filter_engine.py`, `_find_all_pairs()` 函数，行 537-593
 
 **机制**:
 
@@ -152,7 +152,7 @@ pairs = [(3, 8)]  ← 只有一对, pair_end=8, sig_t[8]=-1 → 做空
 
 **严重程度**: 高 — 即使信号正常，PnL 也可以完全不响应
 
-**位置**: `filter_app/services/backtest_core.py`, `_compute_strategy_for_view()` 函数，行 789-796
+**位置**: `filter/services/backtest_core.py`, `_compute_strategy_for_view()` 函数，行 789-796
 
 **机制**:
 
@@ -194,8 +194,8 @@ if not show_strategy or schmitt is None or len(pred_pairs) == 0:
 **这是 T1 根因四和 T2 根因一的合并**
 
 **位置**:
-- `filter_app/services/parquet_store.py`, 行 362-371
-- `filter_app/services/event_recorder.py`, 行 75-85
+- `filter/services/parquet_store.py`, 行 362-371
+- `filter/services/event_recorder.py`, 行 75-85
 
 **机制**:
 
@@ -321,7 +321,7 @@ bar 51: sig=-1, pnl_long=108.3 (freeze), pnl_short=99.8
 
 **严重程度**: 低 — 影响 BS 标记列的语义清晰度
 
-**位置**: `filter_app/services/parquet_store.py`, 行 514-521
+**位置**: `filter/services/parquet_store.py`, 行 514-521
 
 **机制**:
 
@@ -423,17 +423,17 @@ PnL 曲线与信号对比图表的"不一致"并非单一 bug，而是**五个�
 
 | 文件 (绝对路径) | 关键行号 | 涉及根因 |
 |----------------|----------|---------|
-| `/Users/xfpan/claude/filter_research/filter_app/services/filter_engine.py` | 537-593 | P0: `_find_all_pairs()` 配对逻辑 |
-| `/Users/xfpan/claude/filter_research/filter_app/services/filter_engine.py` | 666-868 | P0/P1: `_compute_strategy_pnl()` 交易计算 |
-| `/Users/xfpan/claude/filter_research/filter_app/services/filter_engine.py` | 727-731 | 方向判定: `is_long = (sig_t[pair_end] == 1)` |
-| `/Users/xfpan/claude/filter_research/filter_app/services/filter_engine.py` | 875-995 | P4: `_align_pnl_to_current_tf` |
-| `/Users/xfpan/claude/filter_research/filter_app/services/filter_engine.py` | 998-1043 | P4: `_compute_holding_masks` |
-| `/Users/xfpan/claude/filter_research/filter_app/services/backtest_core.py` | 789-796 | P1: pred_pairs 空数据回退 |
-| `/Users/xfpan/claude/filter_research/filter_app/services/parquet_store.py` | 362-371 | P2: PnL Freeze (ParquetStore) |
-| `/Users/xfpan/claude/filter_research/filter_app/services/parquet_store.py` | 514-521 | P5: BS Marker <= 匹配 |
-| `/Users/xfpan/claude/filter_research/filter_app/services/event_recorder.py` | 75-85 | P2: PnL Freeze (CSVBuilder) |
-| `/Users/xfpan/claude/filter_research/filter_app/services/event_recorder.py` | 136-138 | {v}_sig 列生成 |
-| `/Users/xfpan/claude/filter_research/filter_app/services/event_recorder.py` | 188-196 | {v}_pnl_long/short 列生成 |
+| `/Users/xfpan/claude/filter_research/filter/services/filter_engine.py` | 537-593 | P0: `_find_all_pairs()` 配对逻辑 |
+| `/Users/xfpan/claude/filter_research/filter/services/filter_engine.py` | 666-868 | P0/P1: `_compute_strategy_pnl()` 交易计算 |
+| `/Users/xfpan/claude/filter_research/filter/services/filter_engine.py` | 727-731 | 方向判定: `is_long = (sig_t[pair_end] == 1)` |
+| `/Users/xfpan/claude/filter_research/filter/services/filter_engine.py` | 875-995 | P4: `_align_pnl_to_current_tf` |
+| `/Users/xfpan/claude/filter_research/filter/services/filter_engine.py` | 998-1043 | P4: `_compute_holding_masks` |
+| `/Users/xfpan/claude/filter_research/filter/services/backtest_core.py` | 789-796 | P1: pred_pairs 空数据回退 |
+| `/Users/xfpan/claude/filter_research/filter/services/parquet_store.py` | 362-371 | P2: PnL Freeze (ParquetStore) |
+| `/Users/xfpan/claude/filter_research/filter/services/parquet_store.py` | 514-521 | P5: BS Marker <= 匹配 |
+| `/Users/xfpan/claude/filter_research/filter/services/event_recorder.py` | 75-85 | P2: PnL Freeze (CSVBuilder) |
+| `/Users/xfpan/claude/filter_research/filter/services/event_recorder.py` | 136-138 | {v}_sig 列生成 |
+| `/Users/xfpan/claude/filter_research/filter/services/event_recorder.py` | 188-196 | {v}_pnl_long/short 列生成 |
 | `/Users/xfpan/claude/filter_research/docs/backtesting/回测结果可视化.html` | 625-745 | 信号对比图表渲染 (Section 3) |
 | `/Users/xfpan/claude/filter_research/docs/backtesting/回测结果可视化.html` | 749-823 | PnL 曲线图渲染 (Section 4) |
 | `/Users/xfpan/claude/filter_research/docs/backtesting/回测结果可视化.html` | 978-985 | 持仓热力图渲染 (Section 5) |

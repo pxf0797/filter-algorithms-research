@@ -16,13 +16,13 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
-# Ensure filter_app is importable
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+# Ensure filter is importable
+_src = Path(__file__).resolve().parent.parent / "filter"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
-from services.parquet_store import ParquetStore
-from services.event_recorder import CSVBuilder
+from data.store import ParquetStore
+from backtest.recorder import CSVBuilder
 
 
 # ============================================================================
@@ -177,7 +177,7 @@ class TestExtractViewColumns:
         """BS entry markers now use post-hoc join; _extract_view_columns returns NA."""
         view_data = make_mock_view_data(n_pts=51, has_entry=True)
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == ""  # per-bar matching removed
+        assert cols["v0_bs_entry"] is None  # per-bar matching removed
 
     def test_bs_entry_marker_at_last_bar(self):
         """BS markers filled by post-hoc join; per-bar returns NA."""
@@ -186,13 +186,13 @@ class TestExtractViewColumns:
             (49, "B", "green", view_data["dates"][49])
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == ""
+        assert cols["v0_bs_entry"] is None
 
     def test_bs_entry_marker_none(self):
         """No entry markers: default to empty string."""
         view_data = make_mock_view_data(has_entry=False, has_exit=False)
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == ""
+        assert cols["v0_bs_entry"] is None
 
     def test_bs_entry_marker_past_last_bar_not_found(self):
         """Entry marker at bar 200 with view_last_idx=119: should NOT match."""
@@ -201,7 +201,7 @@ class TestExtractViewColumns:
             (200, "B", "green", "2024-01-15", "2024-01-15")
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == ""
+        assert cols["v0_bs_entry"] is None
 
     # ── BS exit markers ────────────────────────────────────────────────
 
@@ -209,7 +209,7 @@ class TestExtractViewColumns:
         """BS exit markers now use post-hoc join; per-bar returns NA."""
         view_data = make_mock_view_data(n_pts=101, has_exit=True)
         cols = self._extract(view_data)
-        assert cols["v0_bs_exit"] == ""
+        assert cols["v0_bs_exit"] is None
 
     # ── trade matching ─────────────────────────────────────────────────
 
@@ -222,9 +222,9 @@ class TestExtractViewColumns:
              "return_pct": 5.0, "exit_reason": "take_profit"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_trade_entry_matching(self):
         """Trade entries now filled by post-hoc join; per-bar returns NA."""
@@ -234,9 +234,9 @@ class TestExtractViewColumns:
             {"type": "long", "entry_idx": 50, "exit_idx": None}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_trade_with_entry_past_view_last_idx(self):
         """Trade with entry_idx=200 > view_last_idx=119: should NOT match."""
@@ -245,7 +245,7 @@ class TestExtractViewColumns:
             {"type": "long", "entry_idx": 200, "exit_idx": None}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
 
     def test_trade_completed_before_current_bar(self):
         """Trade completed (entry + exit) before current bar → ""，不显示 exit。"""
@@ -253,9 +253,9 @@ class TestExtractViewColumns:
         cols = self._extract(view_data)
         # has_exit=True → trade with entry=50, exit=100 at view=119
         # Trade completed 19 bars ago; NOT at current bar → ""
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     # ── multiple markers ───────────────────────────────────────────────
 
@@ -269,7 +269,7 @@ class TestExtractViewColumns:
             (50, "S", "red", d[50]),  # same bar, later marker
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == ""  # per-bar matching removed
+        assert cols["v0_bs_entry"] is None  # per-bar matching removed
 
     def test_multiple_trades_last_active_wins(self):
         """Multiple trades: active state computed by post-hoc join; per-bar returns NA."""
@@ -280,9 +280,9 @@ class TestExtractViewColumns:
             {"type": "short", "entry_idx": 40, "exit_idx": None},
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     # ── edge: empty / None data ────────────────────────────────────────
 
@@ -307,11 +307,11 @@ class TestExtractViewColumns:
         assert np.isnan(cols["v0_pnl_short"])
         assert cols["v0_long_pos"] == _BOOL_FALSE
         assert cols["v0_short_pos"] == _BOOL_FALSE
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
-        assert cols["v0_bs_entry"] == ""
-        assert cols["v0_bs_exit"] == ""
+        assert cols["v0_trade_reason"] is None
+        assert cols["v0_bs_entry"] is None
+        assert cols["v0_bs_exit"] is None
 
     def test_schmitt_none(self):
         """schmitt is None: sig and eps return default values."""
@@ -334,25 +334,25 @@ class TestExtractViewColumns:
         view_data = make_mock_view_data()
         view_data["trade_records"] = []
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_bs_markers_empty_dict(self):
         """bs_markers has empty entry/exit lists: BS columns return defaults."""
         view_data = make_mock_view_data()
         view_data["bs_markers"] = {"entry_markers": [], "exit_markers": []}
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == ""
-        assert cols["v0_bs_exit"] == ""
+        assert cols["v0_bs_entry"] is None
+        assert cols["v0_bs_exit"] is None
 
     def test_bs_markers_none(self):
         """bs_markers is None: BS columns return defaults."""
         view_data = make_mock_view_data()
         view_data["bs_markers"] = None
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == ""
-        assert cols["v0_bs_exit"] == ""
+        assert cols["v0_bs_entry"] is None
+        assert cols["v0_bs_exit"] is None
 
     # ── positions ──────────────────────────────────────────────────────
 
@@ -656,7 +656,7 @@ class TestBSMarkerRegression:
             (49, "B", "green", view_data["dates"][49])
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == ""
+        assert cols["v0_bs_entry"] is None
 
     def test_bs_entry_before_last_bar(self):
         """Per-bar matching removed; always returns NA."""
@@ -665,7 +665,7 @@ class TestBSMarkerRegression:
             (118, "B", "green", view_data["dates"][118])
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == ""
+        assert cols["v0_bs_entry"] is None
 
     def test_bs_entry_far_from_last_bar(self):
         """Per-bar matching removed; always returns NA."""
@@ -674,7 +674,7 @@ class TestBSMarkerRegression:
             (10, "B", "green", view_data["dates"][10])
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == ""
+        assert cols["v0_bs_entry"] is None
 
     def test_bs_entry_multiple_before_last(self):
         """Per-bar matching removed; always returns NA."""
@@ -686,7 +686,7 @@ class TestBSMarkerRegression:
             (120, "B", "green", d[120]),
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == ""
+        assert cols["v0_bs_entry"] is None
 
     def test_bs_exit_multiple_before_last(self):
         """Per-bar matching removed; always returns NA."""
@@ -698,7 +698,7 @@ class TestBSMarkerRegression:
             (120, "S", "red", "stop_loss", d[120]),
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_exit"] == ""
+        assert cols["v0_bs_exit"] is None
 
 
 # ============================================================================
@@ -724,7 +724,7 @@ class TestBSMarkerEventSemantics:
             (50, "B", "green", view_data["dates"][50]),
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == ""
+        assert cols["v0_bs_entry"] is None
 
     def test_bar_after_trade_has_no_marker(self):
         """Per-bar matching removed; always returns NA."""
@@ -733,7 +733,7 @@ class TestBSMarkerEventSemantics:
             (50, "B", "green", view_data["dates"][50]),
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == ""
+        assert cols["v0_bs_entry"] is None
 
     def test_bar_before_trade_has_no_marker(self):
         """Per-bar matching removed; always returns NA."""
@@ -743,7 +743,7 @@ class TestBSMarkerEventSemantics:
             (50, "B", "green", future_date),
         ]
         cols = self._extract(view_data)
-        assert cols["v0_bs_entry"] == ""
+        assert cols["v0_bs_entry"] is None
 
     def test_multiple_trades_markers_on_distinct_bars(self):
         """Per-bar matching removed; always returns NA."""
@@ -754,7 +754,7 @@ class TestBSMarkerEventSemantics:
             (30, "B", "green", d30[30]),
         ]
         cols_30 = self._extract(view_30)
-        assert cols_30["v0_bs_entry"] == ""
+        assert cols_30["v0_bs_entry"] is None
 
         # bar 35
         view_35 = make_mock_view_data(n_pts=36, has_entry=False)
@@ -763,7 +763,7 @@ class TestBSMarkerEventSemantics:
             (30, "B", "green", d35[30]),
         ]
         cols_35 = self._extract(view_35)
-        assert cols_35["v0_bs_entry"] == ""
+        assert cols_35["v0_bs_entry"] is None
 
         # bar 60
         view_60 = make_mock_view_data(n_pts=61, has_entry=False)
@@ -773,7 +773,7 @@ class TestBSMarkerEventSemantics:
             (60, "S", "red", d60[60]),
         ]
         cols_60 = self._extract(view_60)
-        assert cols_60["v0_bs_entry"] == ""
+        assert cols_60["v0_bs_entry"] is None
 
     def test_exit_marker_event_semantics(self):
         """Per-bar matching removed; always returns NA."""
@@ -784,7 +784,7 @@ class TestBSMarkerEventSemantics:
             (100, "S", "red", "take_profit", d100[100]),
         ]
         cols_100 = self._extract(view_100)
-        assert cols_100["v0_bs_exit"] == ""
+        assert cols_100["v0_bs_exit"] is None
 
         # bar 101
         view_101 = make_mock_view_data(n_pts=102, has_entry=False, has_exit=False)
@@ -793,7 +793,7 @@ class TestBSMarkerEventSemantics:
             (100, "S", "red", "take_profit", d101[100]),
         ]
         cols_101 = self._extract(view_101)
-        assert cols_101["v0_bs_exit"] == ""
+        assert cols_101["v0_bs_exit"] is None
 
 
 class TestTradeMatchingRegression:
@@ -814,9 +814,9 @@ class TestTradeMatchingRegression:
             {"type": "long", "entry_idx": 114, "exit_idx": None}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_trade_entry_active_eod_exit(self):
         """Per-bar matching removed; always returns NA."""
@@ -826,9 +826,9 @@ class TestTradeMatchingRegression:
              "return_pct": 1.0, "exit_reason": "eod"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_trade_exit_at_current_bar(self):
         """Per-bar matching removed; always returns NA."""
@@ -838,9 +838,9 @@ class TestTradeMatchingRegression:
              "return_pct": 3.5, "exit_reason": "take_profit"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_trade_exit_at_current_bar_stop_loss(self):
         """Per-bar matching removed; always returns NA."""
@@ -850,9 +850,9 @@ class TestTradeMatchingRegression:
              "return_pct": -2.0, "exit_reason": "stop_loss"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_trade_completed_before_current_bar(self):
         """Per-bar matching removed; always returns NA."""
@@ -862,9 +862,9 @@ class TestTradeMatchingRegression:
              "return_pct": 2.0, "exit_reason": "stop_loss"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_trade_same_bar_entry_exit_past(self):
         """Per-bar matching removed; always returns NA."""
@@ -874,7 +874,7 @@ class TestTradeMatchingRegression:
              "return_pct": -1.5, "exit_reason": "stop_loss"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
 
     def test_trade_exit_priority_at_current_bar(self):
         """Per-bar matching removed; always returns NA."""
@@ -884,9 +884,9 @@ class TestTradeMatchingRegression:
              "return_pct": -1.0, "exit_reason": "stop_loss"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_multiple_trades_active_last_wins(self):
         """Per-bar matching removed; always returns NA."""
@@ -897,7 +897,7 @@ class TestTradeMatchingRegression:
             {"type": "short", "entry_idx": 40, "exit_idx": None},
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
 
 
 # ============================================================================
@@ -1175,7 +1175,7 @@ class TestViewLabelMapping:
 
     def test_event_recorder_metadata_contains_view_labels(self, tmp_path):
         """EventRecorder 的 metadata.json 也应包含 view_labels。"""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         config = {
             "ticker": "AAPL",
@@ -1396,9 +1396,9 @@ class TestTradeFixRegression:
             {"type": "long", "entry_idx": 80, "exit_idx": None}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_trade_entry_short_when_active_short(self):
         """Per-bar matching removed; always returns NA."""
@@ -1407,7 +1407,7 @@ class TestTradeFixRegression:
             {"type": "short", "entry_idx": 60, "exit_idx": None}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
 
     def test_trade_exit_only_at_exact_exit_bar(self):
         """Per-bar matching removed; always returns NA."""
@@ -1417,9 +1417,9 @@ class TestTradeFixRegression:
              "return_pct": 3.0, "exit_reason": "take_profit"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_trade_exit_not_shown_when_eod(self):
         """Per-bar matching removed; always returns NA."""
@@ -1429,9 +1429,9 @@ class TestTradeFixRegression:
              "return_pct": 1.5, "exit_reason": "eod"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_trade_exit_not_shown_before_exact_bar(self):
         """Per-bar matching removed; always returns NA."""
@@ -1441,16 +1441,16 @@ class TestTradeFixRegression:
              "return_pct": 2.0, "exit_reason": "stop_loss"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
 
     def test_trade_empty_when_no_active_trade(self):
         """Per-bar matching removed; always returns NA."""
         view_data = make_mock_view_data(n_pts=120, has_entry=False, has_exit=False)
         view_data["trade_records"] = []
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_trade_empty_when_all_completed(self):
         """Per-bar matching removed; always returns NA."""
@@ -1462,9 +1462,9 @@ class TestTradeFixRegression:
              "return_pct": -0.5, "exit_reason": "b"},
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_trade_entry_past_view_last_idx_not_matched(self):
         """Per-bar matching removed; always returns NA."""
@@ -1473,7 +1473,7 @@ class TestTradeFixRegression:
             {"type": "short", "entry_idx": 200, "exit_idx": None}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
 
     def test_exit_priority_over_entry_at_current_bar(self):
         """Per-bar matching removed; always returns NA."""
@@ -1483,9 +1483,9 @@ class TestTradeFixRegression:
              "return_pct": -1.0, "exit_reason": "stop_loss"}
         ]
         cols = self._extract(view_data)
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
 
 # ============================================================================
@@ -1557,7 +1557,7 @@ class TestLabelRegressionSuite:
         import glob
         import json
 
-        from filter_app.services.event_recorder import EventRecorder
+        from filter.backtest.recorder import EventRecorder
 
         configs = [
             {'tf': '15分钟', 'n_pts': 50},
@@ -1938,14 +1938,14 @@ class TestSchemaValidation:
     @staticmethod
     def _build_expected_schema(n_views: int = 4) -> pa.Schema:
         """Build a reference schema with *n_views* views."""
-        from services.parquet_store import _build_full_schema
+        from data.store import _build_full_schema
         return _build_full_schema([f"v{i}" for i in range(n_views)])
 
     @staticmethod
     def _build_valid_table(n_views: int = 4, n_rows: int = 3) -> pa.Table:
         """Build a table that passes validation for *n_views* views."""
         import pyarrow as pa
-        from services.parquet_store import _build_full_schema
+        from data.store import _build_full_schema
 
         schema = _build_full_schema([f"v{i}" for i in range(n_views)])
         columns: dict[str, list] = {f.name: [] for f in schema}
@@ -1972,7 +1972,7 @@ class TestSchemaValidation:
 
     def test_valid_schema_passes(self):
         """validate_schema returns no issues for a correctly-typed table."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema()
         table = self._build_valid_table()
@@ -1981,7 +1981,7 @@ class TestSchemaValidation:
 
     def test_valid_schema_with_fewer_views(self):
         """2-view schema also validates correctly."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema(n_views=2)
         table = self._build_valid_table(n_views=2)
@@ -1992,7 +1992,7 @@ class TestSchemaValidation:
 
     def test_missing_column_detected(self):
         """A table with a column removed from the expected schema is flagged."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema()
         table = self._build_valid_table()
@@ -2007,7 +2007,7 @@ class TestSchemaValidation:
 
     def test_multiple_missing_columns(self):
         """Multiple missing columns are all reported."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema(n_views=2)
         table = self._build_valid_table(n_views=2)
@@ -2026,7 +2026,7 @@ class TestSchemaValidation:
 
     def test_extra_column_detected(self):
         """Extra columns are flagged but do not raise."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema()
         table = self._build_valid_table()
@@ -2042,7 +2042,7 @@ class TestSchemaValidation:
 
     def test_extra_column_does_not_raise(self):
         """validate_schema returns issues rather than raising — callers decide."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema()
         table = self._build_valid_table()
@@ -2059,7 +2059,7 @@ class TestSchemaValidation:
 
     def test_type_mismatch_detected(self):
         """A column with the wrong type is flagged."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema()
         table = self._build_valid_table()
@@ -2079,7 +2079,7 @@ class TestSchemaValidation:
 
     def test_multiple_type_mismatches(self):
         """Multiple type mismatches are all reported."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema(n_views=2)
         table = self._build_valid_table(n_views=2)
@@ -2106,7 +2106,7 @@ class TestSchemaValidation:
 
     def test_empty_table_validates(self):
         """A table with zero rows but correct schema passes validation."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema()
         empty = self._build_valid_table(n_rows=0)
@@ -2115,7 +2115,7 @@ class TestSchemaValidation:
 
     def test_empty_table_missing_column_detected(self):
         """A zero-row table missing a column is still flagged."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema()
         empty = self._build_valid_table(n_rows=0)
@@ -2162,7 +2162,7 @@ class TestSchemaValidation:
 
     def test_load_parquet_valid_file(self, tmp_path):
         """load_parquet loads and validates a correct file without error."""
-        from services.parquet_store import load_parquet
+        from data.store import load_parquet
 
         schema = self._build_expected_schema()
         table = self._build_valid_table()
@@ -2176,7 +2176,7 @@ class TestSchemaValidation:
 
     def test_load_parquet_invalid_file_raises(self, tmp_path):
         """load_parquet raises ValueError when schema does not match."""
-        from services.parquet_store import load_parquet
+        from data.store import load_parquet
 
         schema = self._build_expected_schema()
         table = self._build_valid_table()
@@ -2256,7 +2256,7 @@ class TestSchemaValidation:
 
     def test_wrong_total_column_count(self):
         """A table with a different column count triggers the count mismatch issue."""
-        from services.parquet_store import validate_schema
+        from data.store import validate_schema
 
         schema = self._build_expected_schema(n_views=4)
         # Build a 4-view schema but validate against a 2-view one
@@ -2375,7 +2375,7 @@ class TestMultiTickerIsolation:
 
     def test_event_recorder_two_tickers_separate_dirs(self, tmp_path):
         """两个不同 ticker 的 EventRecorder 写入不同 session 目录。"""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         rec_a = EventRecorder(str(tmp_path), "AAPL")
         rec_b = EventRecorder(str(tmp_path), "TSLA")
@@ -2393,7 +2393,7 @@ class TestMultiTickerIsolation:
 
     def test_event_recorder_data_independent(self, tmp_path):
         """两个 ticker 的 EventRecorder 数据互不干扰。"""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         rec_a = EventRecorder(str(tmp_path), "AAPL")
         rec_b = EventRecorder(str(tmp_path), "TSLA")
@@ -2427,7 +2427,7 @@ class TestMultiTickerIsolation:
     def test_pipeline_capture_two_tickers_separate_dirs(self, tmp_path, monkeypatch):
         """两个不同 ticker 的 PipelineCapture 写入不同 session 目录。"""
         monkeypatch.setenv("PIPELINE_CAPTURE", "1")
-        from services.pipeline_capture import PipelineCapture
+        from backtest.pipeline import PipelineCapture
 
         cap_a = PipelineCapture(str(tmp_path), "AAPL", {})
         cap_b = PipelineCapture(str(tmp_path), "TSLA", {})
@@ -2446,7 +2446,7 @@ class TestMultiTickerIsolation:
     def test_pipeline_capture_data_independent(self, tmp_path, monkeypatch):
         """两个 ticker 的 PipelineCapture 数据互不干扰。"""
         monkeypatch.setenv("PIPELINE_CAPTURE", "1")
-        from services.pipeline_capture import PipelineCapture, PipelineStageData
+        from backtest.pipeline import PipelineCapture, PipelineStageData
 
         cap_a = PipelineCapture(str(tmp_path), "AAPL", {})
         cap_b = PipelineCapture(str(tmp_path), "TSLA", {})
@@ -2484,7 +2484,7 @@ class TestMultiTickerIsolation:
     def test_output_dirs_never_overlap_across_tickers(self, tmp_path):
         """跨 ticker 的输出目录永远不会重叠（同一服务类型内）。"""
         import time
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         # ParquetStore: AAPL vs TSLA → 不同目录
         ps_a = ParquetStore(str(tmp_path), "AAPL", [{"tf": "日线"}])
@@ -2674,8 +2674,8 @@ class TestBSMarkerConsecutiveEvents:
             (49, "S", "red", "take_profit", d50[49]),
         ]
         cols_50 = self._extract(view_50)
-        assert cols_50["v0_bs_entry"] == ""
-        assert cols_50["v0_bs_exit"] == ""
+        assert cols_50["v0_bs_entry"] is None
+        assert cols_50["v0_bs_exit"] is None
 
         view_49 = make_mock_view_data(n_pts=50, has_entry=False)
         d49 = view_49["dates"]
@@ -2686,8 +2686,8 @@ class TestBSMarkerConsecutiveEvents:
             (49, "S", "red", "take_profit", d49[49]),
         ]
         cols_49 = self._extract(view_49)
-        assert cols_49["v0_bs_entry"] == ""
-        assert cols_49["v0_bs_exit"] == ""
+        assert cols_49["v0_bs_entry"] is None
+        assert cols_49["v0_bs_exit"] is None
 
     def test_multiple_b_markers_on_distinct_bars(self):
         """Per-bar matching removed; always returns NA."""
@@ -2699,7 +2699,7 @@ class TestBSMarkerConsecutiveEvents:
             (60, "B", "green", d60[60]),
         ]
         cols_60 = self._extract(view_60)
-        assert cols_60["v0_bs_entry"] == ""
+        assert cols_60["v0_bs_entry"] is None
 
         view_45 = make_mock_view_data(n_pts=46, has_entry=False)
         d45 = view_45["dates"]
@@ -2708,7 +2708,7 @@ class TestBSMarkerConsecutiveEvents:
             (45, "B", "green", d45[45]),
         ]
         cols_45 = self._extract(view_45)
-        assert cols_45["v0_bs_entry"] == ""
+        assert cols_45["v0_bs_entry"] is None
 
     def test_mixed_entry_exit_sequence(self):
         """Per-bar matching removed; always returns NA."""
@@ -2722,8 +2722,8 @@ class TestBSMarkerConsecutiveEvents:
             (60, "S", "green", "take_profit", d80[60]),
         ]
         cols_80 = self._extract(view_80)
-        assert cols_80["v0_bs_entry"] == ""
-        assert cols_80["v0_bs_exit"] == ""
+        assert cols_80["v0_bs_entry"] is None
+        assert cols_80["v0_bs_exit"] is None
 
 
 # ============================================================================
@@ -2742,7 +2742,7 @@ class TestPredPairsFallback:
     @staticmethod
     def _compute_strategy(t, filtered, all_pairs, pred_pairs, cfg=None):
         """Call the static method directly."""
-        from services.backtest_core import BacktestRunner
+        from backtest.engine import BacktestRunner
         schmitt = {"sig": np.zeros(len(t), dtype=int)}
         if cfg is None:
             cfg = {"show_strategy": True, "stop_loss_pct": 5.0, "n_ext": 10}
@@ -2847,7 +2847,7 @@ class TestPredPairsFallback:
         all_pairs = [(10, 20)]
         pred_pairs = [{"fit_result": {"a": 0.01, "b": -0.5, "c": 105}, "pair_end": 20}]
 
-        from services.backtest_core import BacktestRunner
+        from backtest.engine import BacktestRunner
         cfg = {"show_strategy": True, "stop_loss_pct": 5.0, "n_ext": 10}
         long_pnl, short_pnl, trades = BacktestRunner._compute_strategy_for_view(
             t, filtered, None, all_pairs, pred_pairs, cfg,
@@ -2889,7 +2889,7 @@ class TestBSDateBasedMatching:
         # Pass bar_date=d[50] so date matching finds the marker even though
         # view_last_idx=99 and bar_idx=50
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[50]))
-        assert cols["v0_bs_entry"] == ""  # per-bar matching removed
+        assert cols["v0_bs_entry"] is None  # per-bar matching removed
 
     def test_bs_exit_via_bar_date(self):
         """通过 bar_date 匹配 BS exit marker。"""
@@ -2899,7 +2899,7 @@ class TestBSDateBasedMatching:
             (30, "S", "red", "stop_loss", d[30]),
         ]
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[30]))
-        assert cols["v0_bs_exit"] == ""  # per-bar matching removed
+        assert cols["v0_bs_exit"] is None  # per-bar matching removed
 
     def test_bs_entry_not_matched_when_bar_date_mismatch(self):
         """bar_date 与 marker date 不匹配时不应找到 marker。"""
@@ -2910,13 +2910,13 @@ class TestBSDateBasedMatching:
         ]
         # bar_date is d[99], marker is at d[50] → no match
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[99]))
-        assert cols["v0_bs_entry"] == ""
+        assert cols["v0_bs_entry"] is None
 
     def test_bs_entry_bar_date_none_falls_back_to_current_bar_date(self):
         """bar_date=None 时回退到 _current_bar_date(view_data) 进行匹配。"""
         view_data = make_mock_view_data(n_pts=51, has_entry=True)
         cols = self._extract(view_data, bar_date=None)
-        assert cols["v0_bs_entry"] == ""  # per-bar matching removed
+        assert cols["v0_bs_entry"] is None  # per-bar matching removed
 
     def test_bs_entry_bar_date_none_falls_back_to_index_matching(self):
         """Per-bar matching removed; always returns NA."""
@@ -2926,18 +2926,18 @@ class TestBSDateBasedMatching:
             (50, "B", "green", "2024-01-01"),
         ]
         cols = self._extract(view_data, bar_date=None)
-        assert cols["v0_bs_entry"] == ""  # per-bar matching removed
+        assert cols["v0_bs_entry"] is None  # per-bar matching removed
 
     def test_date_matching_handles_none_marker_date(self):
         """_date_matches 在 marker_date=None 时返回 False（不抛异常）。"""
-        from services.parquet_store import _date_matches
+        from data.store import _date_matches
         assert _date_matches(None, pd.Timestamp("2024-01-01")) is False
         assert _date_matches(pd.Timestamp("2024-01-01"), None) is False
         assert _date_matches(None, None) is False
 
     def test_date_matching_handles_mismatched_formats(self):
         """_date_matches 能处理不同格式的日期输入。"""
-        from services.parquet_store import _date_matches
+        from data.store import _date_matches
 
         # Timestamp vs string
         assert _date_matches(
@@ -2963,14 +2963,14 @@ class TestBSDateBasedMatching:
 
     def test_current_bar_date_returns_none_for_missing_dates(self):
         """_current_bar_date 在 view_data 无 dates 时返回 None。"""
-        from services.parquet_store import _current_bar_date
+        from data.store import _current_bar_date
         assert _current_bar_date({}) is None
         assert _current_bar_date({"dates": None}) is None
         assert _current_bar_date({"dates": []}) is None
 
     def test_current_bar_date_returns_last_timestamp(self):
         """_current_bar_date 返回 dates 数组的最后一个元素作为 pd.Timestamp。"""
-        from services.parquet_store import _current_bar_date
+        from data.store import _current_bar_date
         dates = pd.DatetimeIndex([
             "2024-01-01", "2024-01-02", "2024-01-03", "2024-01-04",
         ])
@@ -3006,9 +3006,9 @@ class TestTradeDateBasedMatching:
              "return_pct": 3.5, "exit_reason": "take_profit"}
         ]
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[50]))
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_trade_exit_date_mismatch_not_matched(self):
         """Per-bar matching removed; always returns NA."""
@@ -3019,7 +3019,7 @@ class TestTradeDateBasedMatching:
              "return_pct": 3.5, "exit_reason": "take_profit"}
         ]
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[99]))
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
 
     def test_trade_return_populated_on_exit_via_date_match(self):
         """Per-bar matching removed; always returns NA."""
@@ -3030,9 +3030,9 @@ class TestTradeDateBasedMatching:
              "return_pct": -2.5, "exit_reason": "stop_loss"}
         ]
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[80]))
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_trade_reason_populated_on_exit_via_date_match(self):
         """Per-bar matching removed; always returns NA."""
@@ -3043,9 +3043,9 @@ class TestTradeDateBasedMatching:
              "return_pct": 1.2, "exit_reason": "take_profit"}
         ]
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[70]))
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_eod_exit_not_matched_even_with_date_match(self):
         """Per-bar matching removed; always returns NA."""
@@ -3056,9 +3056,9 @@ class TestTradeDateBasedMatching:
              "return_pct": 2.0, "exit_reason": "eod"}
         ]
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[70]))
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_date_matching_handles_none_dates_gracefully(self):
         """Per-bar matching removed; always returns NA."""
@@ -3069,9 +3069,9 @@ class TestTradeDateBasedMatching:
              "return_pct": -1.0, "exit_reason": "stop_loss"}
         ]
         cols = self._extract(view_data, bar_date=pd.Timestamp("2024-06-15"))
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None
 
     def test_date_matching_handles_exit_idx_out_of_bounds(self):
         """Per-bar matching removed; always returns NA."""
@@ -3082,6 +3082,6 @@ class TestTradeDateBasedMatching:
              "return_pct": 1.0, "exit_reason": "take_profit"}
         ]
         cols = self._extract(view_data, bar_date=pd.Timestamp(d[49]))
-        assert cols["v0_trade"] == ""
+        assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
-        assert cols["v0_trade_reason"] == ""
+        assert cols["v0_trade_reason"] is None

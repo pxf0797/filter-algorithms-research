@@ -114,8 +114,8 @@ filter_research 是一个多周期股票滤波分析工具，代码规模约 10,
 | 1.1 | **修复 test_param_export_import.py 硬编码路径** | `tests/test_param_export_import.py:20` | 0.5h | pytest 绿 |
 | 1.2 | **修复 7 个测试失败 + 4 个错误** | `tests/test_param_export_import.py`, `tests/` | 2h | `pytest tests/test_param_export_import.py -v` 全绿 |
 | 1.3 | **生成 lock 文件** | 项目根目录 | 0.5h | `pip freeze > requirements.lock` |
-| 1.4 | **修复 backtest_cli.py 裸异常吞没** | `filter_app/backtest_cli.py:338` | 0.5h | 手动触发无数据 ticker，确认 stderr 有日志 |
-| 1.5 | **修复 config_db.py 裸 except** | `filter_app/config_db.py:41` | 0.5h | 代码审查 |
+| 1.4 | **修复 backtest_cli.py 裸异常吞没** | `filter/backtest_cli.py:338` | 0.5h | 手动触发无数据 ticker，确认 stderr 有日志 |
+| 1.5 | **修复 config_db.py 裸 except** | `filter/config_db.py:41` | 0.5h | 代码审查 |
 
 **Phase 1 产出**: CI 全绿，lock 文件就绪，关键错误处理修复。
 
@@ -129,9 +129,9 @@ filter_research 是一个多周期股票滤波分析工具，代码规模约 10,
 |---|------|---------|---------|---------|
 | 2.1 | **回测 I/O 优化：内存内数据窗口** | `services/backtest_core.py:431-455` | 4h | 5x-10x 回测吞吐 |
 | 2.2 | **回测增量计算** | `services/backtest_core.py:513-599`, `services/filter_engine.py` | 6h | 3x-5x 管道吞吐 |
-| 2.3 | **拆分 streamlit_app.py** → `chart_builder.py` + `sidebar_sections.py` | `filter_app/` | 12h | 可维护性翻倍 |
-| 2.4 | **提取 constants.py + TimeFrame 枚举** | 新建 `filter_app/constants.py` | 2h | 消除 4 处常量重复 |
-| 2.5 | **ViewConfig dataclass** | `state.py` 或新建 `filter_app/models.py` | 4h | 类型安全 |
+| 2.3 | **拆分 streamlit_app.py** → `chart_builder.py` + `sidebar_sections.py` | `filter/` | 12h | 可维护性翻倍 |
+| 2.4 | **提取 constants.py + TimeFrame 枚举** | 新建 `filter/constants.py` | 2h | 消除 4 处常量重复 |
+| 2.5 | **ViewConfig dataclass** | `state.py` 或新建 `filter/models.py` | 4h | 类型安全 |
 | 2.6 | **Docker 多阶段构建 + .dockerignore** | `Dockerfile`, 新建 `.dockerignore` | 2h | 镜像缩小 60%+ |
 | 2.7 | **CI/CD 修复**（合并测试步骤、锁定 mypy、修复 ruff 规则） | `pyproject.toml`, `.github/workflows/` | 3h | CI 有效性和速度 |
 
@@ -168,7 +168,7 @@ filter_research 是一个多周期股票滤波分析工具，代码规模约 10,
 | 4.2 | **定义 Protocol/ABC 抽象层** | `services/`, `components/` | 12h | 架构灵活性 |
 | 4.3 | **双轨状态管理统一为 AppState** | `state.py`, `streamlit_app.py` | 6h | 认知负担降低 |
 | 4.4 | **Python/HTML 混合渲染分离** | `components/charts.py` | 4h | 可测试性 + 可维护性 |
-| 4.5 | **自定义异常类体系** | 新建 `filter_app/exceptions.py` | 2h | 错误处理精确度 |
+| 4.5 | **自定义异常类体系** | 新建 `filter/exceptions.py` | 2h | 错误处理精确度 |
 | 4.6 | **环境变量统一管理** | `.env` 体系 | 2h | 部署灵活性 |
 
 **Phase 4 产出**: 架构评分 5.0 → 7.5+，生产就绪。
@@ -183,7 +183,7 @@ filter_research 是一个多周期股票滤波分析工具，代码规模约 10,
 |---|------|------|------|------|
 | QW-1 | **替换 iterrows() 为 itertuples()** | `db.py:86,559,626` | `for row in df.itertuples():` 替代 `for _, row in df.iterrows():` | 20min |
 | QW-2 | **修复硬编码路径** | `test_param_export_import.py:20` | `CONFIG_PATH = Path(__file__).parent.parent / "config" / "3690_HK_DP.json"` | 15min |
-| QW-3 | **提取 ALL_TFS 到 constants.py** | 新建 `filter_app/constants.py` | 定义 `ALL_TFS`，4 个文件改为 `from constants import ALL_TFS` | 15min |
+| QW-3 | **提取 ALL_TFS 到 constants.py** | 新建 `filter/constants.py` | 定义 `ALL_TFS`，4 个文件改为 `from constants import ALL_TFS` | 15min |
 | QW-4 | **apply_ema 去 DataFrame** | `filter_engine.py:66` | `pd.Series(signal).ewm(span=span, adjust=False).mean().to_numpy()` | 10min |
 | QW-5 | **移除 JSONL flush()** | `event_recorder.py:712` | 删除 `fp.flush()` 调用，依赖 OS buffer 管理 | 5min |
 

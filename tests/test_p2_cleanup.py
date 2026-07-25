@@ -57,7 +57,7 @@ class TestIterrowsReplacement:
     @pytest.fixture
     def db_env(self, tmp_path):
         """初始化临时 DB 环境。"""
-        import db
+        import data.db as db
         db_path = tmp_path / "test_market.db"
         db.DB_PATH = db_path
         db.SNAPSHOT_DIR = tmp_path / "snapshots"
@@ -221,7 +221,7 @@ class TestJsonlFlushRemoval:
 
     def test_write_without_flush_data_integrity(self, tmp_path):
         """写入多行后, end_session 关闭文件后数据完整。"""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(str(tmp_path), "TEST")
         session_id = recorder.start_session({"configs": []})
@@ -260,7 +260,7 @@ class TestJsonlFlushRemoval:
 
     def test_empty_session_no_flush_crash(self, tmp_path):
         """空 session 不写入任何事件, end_session 不崩溃。"""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(str(tmp_path), "EMPTY")
         session_id = recorder.start_session({"configs": []})
@@ -282,7 +282,7 @@ class TestLoguruMigration:
     def test_db_module_prints_to_logger(self, capsys):
         """db.py __main__ 块使用 logger 而非 print。"""
         # 导入后重新执行 __name__ == "__main__" 块
-        import db
+        import data.db as db
         import runpy
         # 不直接运行整个模块, 而是验证 print 已被替换
         # 检查模块级代码中不再有裸 print 调用（排除注释和文档字符串）
@@ -293,10 +293,10 @@ class TestLoguruMigration:
         assert 'print("DB initialized:' not in source
 
     def test_parquet_store_uses_logger(self):
-        """parquet_store.py 使用 logger.warning 替代 print。"""
-        from services import parquet_store
+        """store.py 使用 logger.warning 替代 print。"""
+        from data import store
 
-        source = Path(parquet_store.__file__).read_text(encoding="utf-8")
+        source = Path(store.__file__).read_text(encoding="utf-8")
         # 确认 import logger
         assert "from loguru import logger" in source
         # 确认没有裸 print 调用（文档字符串和注释除外）
@@ -313,7 +313,7 @@ class TestLoguruMigration:
 
     def test_backtest_cli_uses_logger(self):
         """backtest_cli.py 使用 logger 替代 print。"""
-        import backtest_cli
+        import backtest.cli as backtest_cli
 
         source = Path(backtest_cli.__file__).read_text(encoding="utf-8")
         # 确认没有 print to stderr
@@ -360,18 +360,18 @@ class TestMagicStringsConstants:
 
     def test_default_tf_constant(self):
         """DEFAULT_TF 值为 '日线' 且在 ALL_TFS 中。"""
-        from constants import DEFAULT_TF, ALL_TFS
+        from shared.constants import DEFAULT_TF, ALL_TFS
         assert DEFAULT_TF == "日线"
         assert DEFAULT_TF in ALL_TFS
 
     def test_view_key_prefix_constant(self):
         """VIEW_KEY_PREFIX 值为 'v'。"""
-        from constants import VIEW_KEY_PREFIX
+        from shared.constants import VIEW_KEY_PREFIX
         assert VIEW_KEY_PREFIX == "v"
 
     def test_view_suffix_mapping_completeness(self):
         """VIEW_SUFFIX_TO_CFG_KEY 包含常见映射。"""
-        from constants import VIEW_SUFFIX_TO_CFG_KEY
+        from shared.constants import VIEW_SUFFIX_TO_CFG_KEY
         assert VIEW_SUFFIX_TO_CFG_KEY["n"] == "n_pts"
         assert VIEW_SUFFIX_TO_CFG_KEY["sch"] == "show_sch"
         assert VIEW_SUFFIX_TO_CFG_KEY["pred"] == "show_pred"
@@ -380,14 +380,14 @@ class TestMagicStringsConstants:
 
     def test_state_view_prefix_consistent(self):
         """state.py 中 ViewState._PREFIX 与 constants.VIEW_KEY_PREFIX 一致。"""
-        from constants import VIEW_KEY_PREFIX
-        from state import ViewState
+        from shared.constants import VIEW_KEY_PREFIX
+        from shared.state import ViewState
         assert ViewState._PREFIX == VIEW_KEY_PREFIX
 
     def test_backtest_cli_view_spec_consistent(self):
         """backtest_cli 中 _VIEW_SPECS 后缀映射与 constants 一致。"""
-        from constants import VIEW_SUFFIX_TO_CFG_KEY
-        from backtest_cli import _VIEW_SPECS
+        from shared.constants import VIEW_SUFFIX_TO_CFG_KEY
+        from backtest.cli import _VIEW_SPECS
 
         # 检查 _VIEW_SPECS 中每个 suffix 在 VIEW_SUFFIX_TO_CFG_KEY 中
         # 或 suffix 本身就是 cfg_key
@@ -412,7 +412,7 @@ class TestRegressionExistingDb:
 
     def test_upsert_then_query_roundtrip(self, tmp_path):
         """upsert → query 往返数据一致。"""
-        import db
+        import data.db as db
         db_path = tmp_path / "test_market.db"
         db.DB_PATH = db_path
         db.SNAPSHOT_DIR = tmp_path / "snapshots"
@@ -429,7 +429,7 @@ class TestRegressionExistingDb:
 
     def test_multi_timeframe_isolation(self, tmp_path):
         """同 ticker 不同 tf 数据互不干扰。"""
-        import db
+        import data.db as db
         db_path = tmp_path / "test_market.db"
         db.DB_PATH = db_path
         db.SNAPSHOT_DIR = tmp_path / "snapshots"

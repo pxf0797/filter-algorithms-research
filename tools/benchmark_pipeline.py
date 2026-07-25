@@ -34,10 +34,10 @@ from loguru import logger
 logger.remove()
 logger.add(sys.stderr, level="WARNING")
 
-# ── Ensure filter_app is importable ──────────────────────────────────────────
+# ── Ensure filter is importable ──────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-FILTER_APP = PROJECT_ROOT / "filter_app"
-# Both are needed: PROJECT_ROOT for "import filter_app.services.*", and
+FILTER_APP = PROJECT_ROOT / "filter"
+# Both are needed: PROJECT_ROOT for "import filter.backtest.*", and
 # FILTER_APP for intra-package imports like "from db import ..." within services.
 for _p in (str(PROJECT_ROOT), str(FILTER_APP)):
     if _p not in sys.path:
@@ -105,7 +105,7 @@ def format_ms(sec: float) -> str:
 def benchmark_runner(n_bars: int) -> dict | None:
     """Benchmark BacktestRunner.run().  Returns None if DB/ticker unavailable."""
     try:
-        from filter_app.services.backtest_core import BacktestRunner
+        from filter.backtest.engine import BacktestRunner
     except Exception:
         return {"error": "import failed", "skipped": True}
 
@@ -144,7 +144,7 @@ def benchmark_runner(n_bars: int) -> dict | None:
 
 def benchmark_filter(n_bars: int) -> dict:
     """Benchmark raw filter (SMA) computation speed."""
-    from filter_app.services.filter_engine import FILTERS
+    from filter.engine.filters import FILTERS
 
     noisy = generate_random_walk(n_bars)
     t_arr = np.arange(n_bars, dtype=float)
@@ -172,7 +172,7 @@ def benchmark_filter(n_bars: int) -> dict:
 
 def benchmark_schmitt(n_bars: int) -> dict:
     """Benchmark schmitt trigger computation speed."""
-    from filter_app.services.filter_engine import FILTERS, _schmitt_trigger
+    from filter.engine.filters import FILTERS, _schmitt_trigger
 
     noisy = generate_random_walk(n_bars)
     t_arr = np.arange(n_bars, dtype=float)
@@ -301,8 +301,8 @@ def benchmark_parquet_read(n_rows: int) -> dict:
 
 def benchmark_event_recording(n_events: int) -> dict:
     """Benchmark EventRecorder.record_step() latency."""
-    from filter_app.services.event_recorder import EventRecorder
-    from filter_app.services.filter_engine import FILTERS
+    from filter.backtest.recorder import EventRecorder
+    from filter.engine.filters import FILTERS
 
     noisy = generate_random_walk(60)
     t_arr = np.arange(60, dtype=float)

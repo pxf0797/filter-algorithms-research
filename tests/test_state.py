@@ -1,4 +1,4 @@
-"""Tests for filter_app.state -- AppState session_state management.
+"""Tests for filter.state -- AppState session_state management.
 
 The conftest.py mocks `streamlit` as a MagicMock, which shadows the real
 package name in sys.modules.  Since state.py guards with
@@ -17,7 +17,7 @@ _old_streamlit = sys.modules.pop("streamlit", None)
 
 # Now import state.py as a standalone module (conftest.py already added
 # its parent dir to sys.path).
-import state  # noqa: E402
+import shared.state as state  # noqa: E402
 
 # Restore the mock into sys.modules so conftest's other behavior still works
 sys.modules["streamlit"] = _old_streamlit

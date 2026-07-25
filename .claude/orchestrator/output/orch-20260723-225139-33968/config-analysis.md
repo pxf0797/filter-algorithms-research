@@ -51,7 +51,7 @@
 FROM python:3.12-slim                    # 基础镜像 ~150MB
 WORKDIR /app
 RUN groupadd -r streamlit ...            # 非 root 用户 ✓
-COPY filter_app/requirements.txt .       # 层缓存优化 ✓
+COPY filter/requirements.txt .       # 层缓存优化 ✓
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .                                 # 复制全部项目文件 ✗
 RUN chown -R streamlit:streamlit /app
@@ -84,7 +84,7 @@ CMD ["streamlit", "run", ...]
 # ---- 构建阶段 ----
 FROM python:3.12-slim AS builder
 WORKDIR /app
-COPY filter_app/requirements.txt .
+COPY filter/requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
 
 # ---- 运行阶段 ----
@@ -96,7 +96,7 @@ RUN groupadd -r streamlit && useradd -r -g streamlit -m -u 1000 streamlit
 COPY --from=builder /root/.local /home/streamlit/.local
 
 # 只复制运行时需要的代码
-COPY filter_app/ ./filter_app/
+COPY filter/ ./filter/
 
 # 创建 volume 挂载点
 RUN mkdir -p /app/data /app/config && chown -R streamlit:streamlit /app
@@ -106,7 +106,7 @@ USER streamlit
 EXPOSE 8501
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8501/_stcore/health')" || exit 1
-CMD ["streamlit", "run", "filter_app/streamlit_app.py", \
+CMD ["streamlit", "run", "filter/streamlit_app.py", \
      "--server.port=8501", "--server.address=0.0.0.0", \
      "--server.headless=true", "--browser.gatherUsageStats=false"]
 ```
@@ -120,7 +120,7 @@ CMD ["streamlit", "run", "filter_app/streamlit_app.py", \
 
 如果不想大改，只需修改 3 处：
 1. 在 `.dockerignore` 中增加: `tests/`, `docs/`, `tools/`, `backtest_output/`, `*.md`
-2. 将 `COPY . .` 改为 `COPY filter_app/ ./filter_app/`
+2. 将 `COPY . .` 改为 `COPY filter/ ./filter/`
 3. 在 docker-compose.yml 中删除重复的 `healthcheck:` 块
 
 ### 2.4 docker-compose.yml 评估
@@ -283,7 +283,7 @@ repos:
 |------|------|------|
 | `pyproject.toml` | 项目元数据 + ruff/pytest/coverage 配置 | 缺 `[build-system]` 和 `[project.dependencies]` |
 | `pytest.ini` | pytest 运行配置 | **与 pyproject.toml 中的 pytest 配置重复** |
-| `filter_app/requirements.txt` | Python 依赖 | 无 hash 锁定 |
+| `filter/requirements.txt` | Python 依赖 | 无 hash 锁定 |
 | `.pre-commit-config.yaml` | Git 提交前检查 | 缺少安全相关 hooks |
 | `.env.example` | 环境变量模板 | 仅 2 个变量 |
 | `Dockerfile` | 容器构建定义 | 单阶段，未优化 |
@@ -487,7 +487,7 @@ Internet → Nginx/Caddy (:443, TLS) → Streamlit (:8501, internal)
 |------|------|---------------|------|
 | 镜像大小 | ~600-800MB | ~350-500MB | -35% |
 | 构建层数 | 7 | 6 | -1 |
-| 生产代码大小 | 包含 tests/docs/tools | 仅 filter_app/ | -60%+ |
+| 生产代码大小 | 包含 tests/docs/tools | 仅 filter/ | -60%+ |
 | 攻击面 | 含 pip 缓存 | 无 pip 缓存 | 减少 |
 | pip 层缓存命中 | 代码变更时失效 | 代码变更不影响 pip 层 | 更稳定 |
 | 安全扫描耗时 | 正常 | 减少 30% | 更快 |

@@ -4,7 +4,7 @@
 > （`dd_clear`/`dd_recover`、清仓/恢复、迟滞带、actual 权益曲线）**已弃用，不再实现**。
 > 最终落地为**纯持仓状态显示**：在 PnL 下方以两条状态轨展示 Layer 0 实际成交区间——
 > 绿=做多持仓 / 红=做空持仓 / 空白=不持，**无任何 PnL 反馈门控、无百分比轴**。
-> 实现见 `filter_app/streamlit_app.py::_add_feedback_subplot`。以下正文保留作历史设计记录。
+> 实现见 `filter/streamlit_app.py::_add_feedback_subplot`。以下正文保留作历史设计记录。
 
 > **状态：完整设计文档（草案），供落地与迭代。** 承接 v0 骨架（`pnl-feedback-position-process-v0.md`），
 > 依据反馈定稿三条约束：①**二值持仓**（只有持仓/清仓，无加减仓）；②**多空分离**（绿做多、红做空，各一套独立 gate）；

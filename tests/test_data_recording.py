@@ -24,9 +24,9 @@ import numpy as np
 import pandas as pd
 
 # ---------------------------------------------------------------------------
-# Make filter_app importable (mirrors conftest.py approach)
+# Make filter importable (mirrors conftest.py approach)
 # ---------------------------------------------------------------------------
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+_src = Path(__file__).resolve().parent.parent / "filter"
 import sys
 
 if str(_src) not in sys.path:
@@ -197,7 +197,7 @@ class TestEventRecorder(unittest.TestCase):
 
     def test_session_creates_directory_structure(self):
         """start_session creates session dir with metadata.json."""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(output_dir=self.tmpdir, ticker="TEST")
         session_id = recorder.start_session(config={"preset": "test"})
@@ -225,7 +225,7 @@ class TestEventRecorder(unittest.TestCase):
 
     def test_record_step_writes_valid_jsonl(self):
         """Every line in each output JSONL is valid JSON."""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(output_dir=self.tmpdir, ticker="TEST")
         recorder.start_session(config={})
@@ -267,7 +267,7 @@ class TestEventRecorder(unittest.TestCase):
 
     def test_bs_compare_first_step_all_added(self):
         """On first step, all BS markers should be classified as bs_added."""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(output_dir=self.tmpdir, ticker="TEST")
         recorder.start_session(config={})
@@ -302,7 +302,7 @@ class TestEventRecorder(unittest.TestCase):
 
     def test_bs_compare_stable_markers(self):
         """Unchanged BS markers produce bs_stable events."""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(output_dir=self.tmpdir, ticker="TEST")
         recorder.start_session(config={})
@@ -341,7 +341,7 @@ class TestEventRecorder(unittest.TestCase):
 
     def test_bs_compare_removed_markers(self):
         """Markers that disappear between steps are classified as bs_removed."""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(output_dir=self.tmpdir, ticker="TEST")
         recorder.start_session(config={})
@@ -387,7 +387,7 @@ class TestEventRecorder(unittest.TestCase):
         the snapshot contains sig_counts.  It will currently FAIL — confirming
         the bug.
         """
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(output_dir=self.tmpdir, ticker="TEST")
         recorder.start_session(config={})
@@ -432,7 +432,7 @@ class TestEventRecorder(unittest.TestCase):
 
     def test_filter_tail_has_cutoff_date(self):
         """filter_tail.jsonl entries MUST contain cutoff_date (Fix 2)."""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(output_dir=self.tmpdir, ticker="TEST")
         recorder.start_session(config={})
@@ -468,7 +468,7 @@ class TestEventRecorder(unittest.TestCase):
         verifies the gap exists. When P1-1 is fixed, the snapshot should
         contain mu_v_tail and sigma_v_tail.
         """
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(output_dir=self.tmpdir, ticker="TEST")
         recorder.start_session(config={})
@@ -513,7 +513,7 @@ class TestEventRecorder(unittest.TestCase):
         This test verifies that the events flow exists but lacks full snapshots.
         When P1-7 is fixed, bs_full_snapshot events should appear.
         """
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(output_dir=self.tmpdir, ticker="TEST")
         recorder.start_session(config={})
@@ -555,7 +555,7 @@ class TestEventRecorder(unittest.TestCase):
 
     def test_multiple_views_produce_independent_records(self):
         """Each view's data flows into the same JSONL files with distinct view tags."""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(output_dir=self.tmpdir, ticker="TEST")
         recorder.start_session(config={})
@@ -601,7 +601,7 @@ class TestEventRecorder(unittest.TestCase):
         confirm it is silently dropped. When P0-2 is fixed, a price_snapshot
         or noisy_tail field should appear.
         """
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(output_dir=self.tmpdir, ticker="TEST")
         recorder.start_session(config={})
@@ -762,7 +762,7 @@ class TestTraceability(unittest.TestCase):
 
     def _run_mini_pipeline(self, steps: int = 3):
         """Run a mini pipeline through EventRecorder and return output dir."""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         recorder = EventRecorder(output_dir=self.tmpdir, ticker="TRACE")
         recorder.start_session(config={})
@@ -901,7 +901,7 @@ class TestCSVBuilder(unittest.TestCase):
 
     def test_accumulate_creates_row_with_base_columns(self):
         """验证基础列存在: bar_index, bar_timestamp, close, open, high, low, volume"""
-        from services.event_recorder import CSVBuilder
+        from backtest.recorder import CSVBuilder
 
         builder = CSVBuilder()
         bar_idx, bar_ts, ohlcv, views_data = _make_csv_accumulate_data(
@@ -924,7 +924,7 @@ class TestCSVBuilder(unittest.TestCase):
         """验证每视图 15 列存在: _filtered, _sig, _eps, _mu_v, _sigma_v,
         _sig_dur, _pair_count, _trade_count, _bs_entry, _bs_exit,
         _long_pos, _short_pos, _trade, _trade_reason, _trade_return"""
-        from services.event_recorder import CSVBuilder
+        from backtest.recorder import CSVBuilder
 
         builder = CSVBuilder()
         bar_idx, bar_ts, ohlcv, views_data = _make_csv_accumulate_data(
@@ -953,7 +953,7 @@ class TestCSVBuilder(unittest.TestCase):
 
     def test_write_csv_file_exists(self):
         """验证 CSV 文件被创建"""
-        from services.event_recorder import CSVBuilder
+        from backtest.recorder import CSVBuilder
 
         builder = CSVBuilder()
         for bi in range(5):
@@ -974,7 +974,7 @@ class TestCSVBuilder(unittest.TestCase):
 
     def test_csv_row_count_matches_bars(self):
         """验证 CSV 行数 = 累积的 bar 数"""
-        from services.event_recorder import CSVBuilder
+        from backtest.recorder import CSVBuilder
 
         builder = CSVBuilder()
         n_bars = 7
@@ -997,7 +997,7 @@ class TestCSVBuilder(unittest.TestCase):
 
     def test_csv_bar_timestamps_are_monotonic(self):
         """验证 bar_timestamp 列单调递增"""
-        from services.event_recorder import CSVBuilder
+        from backtest.recorder import CSVBuilder
 
         builder = CSVBuilder()
         n_bars = 10
@@ -1023,7 +1023,7 @@ class TestCSVBuilder(unittest.TestCase):
 
     def test_csv_ohlcv_not_null(self):
         """验证 OHLCV 列有值（非 NaN）"""
-        from services.event_recorder import CSVBuilder
+        from backtest.recorder import CSVBuilder
 
         builder = CSVBuilder()
         for bi in range(5):
@@ -1055,7 +1055,7 @@ class TestCSVBuilder(unittest.TestCase):
         （无 schmitt/filtered/pairs），bar 2 全量数据。写入 CSV 后，
         bar 1 的缺失列应从 bar 0 前向填充获取值。
         """
-        from services.event_recorder import CSVBuilder
+        from backtest.recorder import CSVBuilder
 
         builder = CSVBuilder()
 
@@ -1090,7 +1090,7 @@ class TestCSVBuilder(unittest.TestCase):
 
     def test_csv_bs_labels_are_valid(self):
         """验证 BS 列为 B/S/- 三值之一"""
-        from services.event_recorder import CSVBuilder
+        from backtest.recorder import CSVBuilder
 
         builder = CSVBuilder()
         n_bars = 20
@@ -1122,7 +1122,7 @@ class TestCSVBuilder(unittest.TestCase):
 
     def test_write_empty_does_not_raise(self):
         """验证空 CSVBuilder 调用 write 不抛异常"""
-        from services.event_recorder import CSVBuilder
+        from backtest.recorder import CSVBuilder
 
         builder = CSVBuilder()
         csv_path = Path(self.tmpdir) / "empty.csv"
@@ -1142,7 +1142,7 @@ class TestCSVBuilder(unittest.TestCase):
         bar 4 首次出现 "B"。写入后 bar 1-3 的前导 "-" 变成 NaN → ffill 无
         前驱值 → fillna("-") 还原为 "-"，而 bar 4-5 被 "B" 前向填充。
         """
-        from services.event_recorder import CSVBuilder
+        from backtest.recorder import CSVBuilder
 
         builder = CSVBuilder()
         # 使用 bar 1–5，首段（bar 1-3）都没有 entry marker
@@ -1188,7 +1188,7 @@ class TestIntegrationSmoke(unittest.TestCase):
     def test_full_recording_pipeline(self):
         """Smoke test: create EventRecorder, record 5 steps with 2 views,
         verify JSONL files and CSV are written and readable."""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         config = {
             "configs": [
@@ -1297,7 +1297,7 @@ class TestIntegrationSmoke(unittest.TestCase):
     def test_pipeline_output_read_back(self):
         """Verify filter_tail JSONL records can be read back and contain
         expected keys for each step/view."""
-        from services.event_recorder import EventRecorder
+        from backtest.recorder import EventRecorder
 
         config = {"configs": [{"tf": "日线", "n_pts": 120}],
                   "min_tf": "日线", "ticker": "MSFT"}

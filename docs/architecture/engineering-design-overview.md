@@ -1,8 +1,8 @@
 # 工程设计总览（据实）— filter_research
 
 > 本文据当前代码实测撰写（非旧蓝图），关键处标注函数名与 `文件:行`。
-> 仓库根：`/Users/xfpan/claude/filter_research`，主包 `filter_app/`。
-> 撰写基准：`filter_app/` 9 个核心 Python 文件（合计约 6237 行）+ `tests/`（`pytest --collect-only` 实测 **815** 个用例）。
+> 仓库根：`/Users/xfpan/claude/filter_research`，主包 `filter/`。
+> 撰写基准：`filter/` 9 个核心 Python 文件（合计约 6237 行）+ `tests/`（`pytest --collect-only` 实测 **815** 个用例）。
 
 ---
 
@@ -19,7 +19,7 @@
 - **4 视图并列**（v0~v3），各视图独立选周期/滤波/参数，默认周期 `["日线","60分钟","15分钟","5分钟"]`（`sidebar.py:14 DEFAULT_TFS`），2×2 网格布局。
 - **两种运行模式**：浏览模式（取最新 N 条窗口，支持按天前后移）与回测模式（按 bar 逐步/自动播放，级联合成未完成 K 线，避免未来信息泄漏）。
 - **配置持久化**：JSON 导入/导出 + SQLite 预设库两条路径；参数以 `VIEW_PARAM_SPECS` 为单一真源。
-- 版本号 `pyproject.toml` 记为 `10.5.0`。技术栈：streamlit 1.57 / plotly 6.7 / numpy 2.2 / scipy 1.17 / pandas 2.3 / statsmodels 0.14 / yfinance 1.4（`filter_app/requirements.txt`）。
+- 版本号 `pyproject.toml` 记为 `10.5.0`。技术栈：streamlit 1.57 / plotly 6.7 / numpy 2.2 / scipy 1.17 / pandas 2.3 / statsmodels 0.14 / yfinance 1.4（`filter/requirements.txt`）。
 
 ---
 

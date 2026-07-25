@@ -20,9 +20,9 @@ import pandas as pd
 import pytest
 
 # ---------------------------------------------------------------------------
-# Ensure filter_app is importable
+# Ensure filter is importable
 # ---------------------------------------------------------------------------
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+_src = Path(__file__).resolve().parent.parent / "filter"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
@@ -37,7 +37,7 @@ class TestPipelineStageData:
 
     def test_default_construction(self):
         """All fields default to None/empty strings on construction."""
-        from services.pipeline_capture import PipelineStageData
+        from backtest.pipeline import PipelineStageData
 
         psd = PipelineStageData()
         assert psd.view_name == ""
@@ -64,7 +64,7 @@ class TestPipelineStageData:
 
     def test_partial_construction(self):
         """Can set a few fields, rest default to None."""
-        from services.pipeline_capture import PipelineStageData
+        from backtest.pipeline import PipelineStageData
 
         t = np.arange(50, dtype=float)
         psd = PipelineStageData(view_name="v0_日线", t=t, filtered=np.ones(50))
@@ -76,7 +76,7 @@ class TestPipelineStageData:
 
     def test_full_construction(self):
         """All kwargs set correctly."""
-        from services.pipeline_capture import PipelineStageData
+        from backtest.pipeline import PipelineStageData
 
         n = 20
         t = np.arange(n, dtype=float)
@@ -133,25 +133,25 @@ class TestPipelineCaptureDisabled:
 
     def test_is_enabled_returns_false(self):
         """is_enabled() returns False when env var not set."""
-        from services.pipeline_capture import PipelineCapture
+        from backtest.pipeline import PipelineCapture
         assert PipelineCapture.is_enabled() is False
 
     def test_is_enabled_false_with_zero(self, monkeypatch):
         """is_enabled() returns False when PIPELINE_CAPTURE=0."""
         monkeypatch.setenv("PIPELINE_CAPTURE", "0")
-        from services.pipeline_capture import PipelineCapture
+        from backtest.pipeline import PipelineCapture
         assert PipelineCapture.is_enabled() is False
 
     def test_start_session_returns_empty(self):
         """start_session() returns '' when disabled."""
-        from services.pipeline_capture import PipelineCapture
+        from backtest.pipeline import PipelineCapture
         capture = PipelineCapture(ticker="AAPL")
         sid = capture.start_session()
         assert sid == ""
 
     def test_capture_step_noop(self, tmp_path):
         """capture_step() is a no-op when disabled (no files created)."""
-        from services.pipeline_capture import PipelineCapture, PipelineStageData
+        from backtest.pipeline import PipelineCapture, PipelineStageData
 
         capture = PipelineCapture(output_dir=str(tmp_path), ticker="AAPL")
         capture.start_session()
@@ -166,7 +166,7 @@ class TestPipelineCaptureDisabled:
 
     def test_end_session_returns_empty(self):
         """end_session() returns {} when disabled."""
-        from services.pipeline_capture import PipelineCapture
+        from backtest.pipeline import PipelineCapture
         capture = PipelineCapture(ticker="AAPL")
         capture.start_session()
         summary = capture.end_session()
@@ -188,12 +188,12 @@ class TestPipelineCaptureEnabled:
 
     def test_is_enabled_returns_true(self):
         """is_enabled() returns True when env var is 1."""
-        from services.pipeline_capture import PipelineCapture
+        from backtest.pipeline import PipelineCapture
         assert PipelineCapture.is_enabled() is True
 
     def test_start_session_creates_dir_and_metadata(self, tmp_path):
         """start_session creates a timestamped dir with metadata.json."""
-        from services.pipeline_capture import PipelineCapture
+        from backtest.pipeline import PipelineCapture
 
         capture = PipelineCapture(output_dir=str(tmp_path), ticker="AAPL",
                                   config={"min_tf": "日线"})
@@ -218,7 +218,7 @@ class TestPipelineCaptureEnabled:
 
     def test_capture_step_creates_stage_files(self, tmp_path):
         """capture_step writes parquet/json files for a view's pipeline stages."""
-        from services.pipeline_capture import PipelineCapture, PipelineStageData
+        from backtest.pipeline import PipelineCapture, PipelineStageData
 
         capture = PipelineCapture(output_dir=str(tmp_path), ticker="AAPL")
         capture.start_session()
@@ -278,7 +278,7 @@ class TestPipelineCaptureEnabled:
 
     def test_capture_step_skips_null_fields(self, tmp_path):
         """Fields that are None should be skipped (no parquet written)."""
-        from services.pipeline_capture import PipelineCapture, PipelineStageData
+        from backtest.pipeline import PipelineCapture, PipelineStageData
 
         capture = PipelineCapture(output_dir=str(tmp_path), ticker="AAPL")
         capture.start_session()
@@ -302,7 +302,7 @@ class TestPipelineCaptureEnabled:
 
     def test_capture_step_skips_none_cutoff(self, tmp_path):
         """capture_step with cutoff_date=None should skip entirely."""
-        from services.pipeline_capture import PipelineCapture, PipelineStageData
+        from backtest.pipeline import PipelineCapture, PipelineStageData
 
         capture = PipelineCapture(output_dir=str(tmp_path), ticker="AAPL")
         capture.start_session()
@@ -319,7 +319,7 @@ class TestPipelineCaptureEnabled:
 
     def test_capture_step_empty_views(self, tmp_path):
         """capture_step with empty views_data skips."""
-        from services.pipeline_capture import PipelineCapture
+        from backtest.pipeline import PipelineCapture
 
         capture = PipelineCapture(output_dir=str(tmp_path), ticker="AAPL")
         capture.start_session()
@@ -333,7 +333,7 @@ class TestPipelineCaptureEnabled:
 
     def test_end_session_returns_summary(self, tmp_path):
         """end_session returns summary with step_count and sizes."""
-        from services.pipeline_capture import PipelineCapture, PipelineStageData
+        from backtest.pipeline import PipelineCapture, PipelineStageData
 
         capture = PipelineCapture(output_dir=str(tmp_path), ticker="MSFT")
         capture.start_session()
@@ -359,7 +359,7 @@ class TestPipelineCaptureEnabled:
 
     def test_multiple_views_same_step(self, tmp_path):
         """Multiple views in a single capture_step create separate dirs."""
-        from services.pipeline_capture import PipelineCapture, PipelineStageData
+        from backtest.pipeline import PipelineCapture, PipelineStageData
 
         capture = PipelineCapture(output_dir=str(tmp_path), ticker="AAPL")
         capture.start_session()
@@ -384,7 +384,7 @@ class TestPipelineCaptureEnabled:
 
     def test_start_session_no_ticker(self, tmp_path):
         """start_session without ticker still works."""
-        from services.pipeline_capture import PipelineCapture
+        from backtest.pipeline import PipelineCapture
 
         capture = PipelineCapture(output_dir=str(tmp_path))
         sid = capture.start_session()
@@ -395,7 +395,7 @@ class TestPipelineCaptureEnabled:
 
     def test_index_json_only_written_once_per_step(self, tmp_path):
         """index.json is written only once even with multiple views."""
-        from services.pipeline_capture import PipelineCapture, PipelineStageData
+        from backtest.pipeline import PipelineCapture, PipelineStageData
 
         capture = PipelineCapture(output_dir=str(tmp_path), ticker="AAPL")
         capture.start_session()
@@ -428,7 +428,7 @@ class TestWriteView:
 
     def test_write_view_all_none_skips_all(self, tmp_path):
         """When all stage fields are None, no files are written."""
-        from services.pipeline_capture import _write_view, PipelineStageData
+        from backtest.pipeline import _write_view, PipelineStageData
 
         psd = PipelineStageData()
         view_dir = tmp_path / "v0"
@@ -440,7 +440,7 @@ class TestWriteView:
 
     def test_write_view_filter_only(self, tmp_path):
         """Only filtered is set → only stage_03_filter written."""
-        from services.pipeline_capture import _write_view, PipelineStageData
+        from backtest.pipeline import _write_view, PipelineStageData
 
         n = 10
         psd = PipelineStageData(t=np.arange(n, dtype=float),
@@ -455,7 +455,7 @@ class TestWriteView:
 
     def test_write_view_with_filtered2(self, tmp_path):
         """filtered2 is included when not None."""
-        from services.pipeline_capture import _write_view, PipelineStageData
+        from backtest.pipeline import _write_view, PipelineStageData
 
         n = 10
         psd = PipelineStageData(t=np.arange(n, dtype=float),
@@ -471,7 +471,7 @@ class TestWriteView:
 
     def test_write_view_schmitt_all_fields(self, tmp_path):
         """Stage 04 schmitt includes all fields: sig, v, a, eps, mu_v, sigma_v."""
-        from services.pipeline_capture import _write_view, PipelineStageData
+        from backtest.pipeline import _write_view, PipelineStageData
 
         n = 10
         psd = PipelineStageData(
@@ -497,7 +497,7 @@ class TestWriteView:
 
     def test_write_view_schmitt_skipped_when_sig_none(self, tmp_path):
         """schmitt is skipped when sig is None, even if v/a are set."""
-        from services.pipeline_capture import _write_view, PipelineStageData
+        from backtest.pipeline import _write_view, PipelineStageData
 
         psd = PipelineStageData(t=np.arange(10, dtype=float),
                                 v=np.ones(10), a=np.zeros(10),
@@ -509,7 +509,7 @@ class TestWriteView:
 
     def test_bs_markers_non_dict(self, tmp_path):
         """bs_markers that is not a dict uses empty defaults."""
-        from services.pipeline_capture import _write_view, PipelineStageData
+        from backtest.pipeline import _write_view, PipelineStageData
 
         psd = PipelineStageData(bs_markers=[("entry", 0)])  # non-dict
         view_dir = tmp_path / "v0"
@@ -531,7 +531,7 @@ class TestWriteHelpers:
 
     def test_write_parquet_roundtrip(self, tmp_path):
         """Data written with _write_parquet can be read back correctly."""
-        from services.pipeline_capture import _write_parquet
+        from backtest.pipeline import _write_parquet
 
         cols = {"t": np.arange(5, dtype=float), "filtered": np.array([1.0, 2.0, 3.0, 4.0, 5.0])}
         path = tmp_path / "test.parquet"
@@ -543,7 +543,7 @@ class TestWriteHelpers:
 
     def test_write_json_roundtrip(self, tmp_path):
         """Data written with _write_json can be read back correctly."""
-        from services.pipeline_capture import _write_json
+        from backtest.pipeline import _write_json
 
         data = {"key": "value", "nested": {"a": 1, "b": [2, 3]}}
         path = tmp_path / "test.json"
@@ -567,7 +567,7 @@ class TestPipelineCaptureCleanup:
 
     def test_second_session_creates_separate_dir(self, tmp_path):
         """Each start_session call creates a separate session directory."""
-        from services.pipeline_capture import PipelineCapture
+        from backtest.pipeline import PipelineCapture
         import time
 
         capture = PipelineCapture(output_dir=str(tmp_path), ticker="AAPL")
@@ -589,7 +589,7 @@ class TestPipelineCaptureCleanup:
     def test_end_session_without_start_returns_empty(self, monkeypatch):
         """end_session without start_session returns empty dict."""
         monkeypatch.setenv("PIPELINE_CAPTURE", "1")
-        from services.pipeline_capture import PipelineCapture
+        from backtest.pipeline import PipelineCapture
 
         capture = PipelineCapture(ticker="AAPL")
         summary = capture.end_session()

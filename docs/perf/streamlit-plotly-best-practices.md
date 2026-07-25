@@ -426,10 +426,10 @@ fig.add_trace(go.Scattergl(name="滤波"), hf_x=t, hf_y=filtered, row=1, col=1)
 
 ## 六、关键文件路径
 
-- `/Users/xfpan/claude/filter_research/filter_app/components/charts.py` — 自建 Plotly HTML 渲染、PnL 渲染函数
-- `/Users/xfpan/claude/filter_research/filter_app/streamlit_app.py` — 主应用: fragment 装饰、filter 计算、trace 构建、缓存装饰
-- `/Users/xfpan/claude/filter_research/filter_app/components/sidebar.py` — 参数面板 widget,决定 rerun 触发源
-- `/Users/xfpan/claude/filter_research/filter_app/state.py` — session_state 管理
+- `/Users/xfpan/claude/filter_research/filter/components/charts.py` — 自建 Plotly HTML 渲染、PnL 渲染函数
+- `/Users/xfpan/claude/filter_research/filter/streamlit_app.py` — 主应用: fragment 装饰、filter 计算、trace 构建、缓存装饰
+- `/Users/xfpan/claude/filter_research/filter/components/sidebar.py` — 参数面板 widget,决定 rerun 触发源
+- `/Users/xfpan/claude/filter_research/filter/state.py` — session_state 管理
 
 ## 七、数据参考
 

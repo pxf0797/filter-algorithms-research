@@ -1,6 +1,6 @@
 # 图表渲染中 Signal/PnL 的数据来源与动态更新机制分析
 
-> 分析范围：`filter_app/streamlit_app.py`, `filter_app/components/charts.py`, `filter_app/services/filter_engine.py`, `filter_app/services/data_loader.py`, `filter_app/state.py`
+> 分析范围：`filter/streamlit_app.py`, `filter/components/charts.py`, `filter/services/filter_engine.py`, `filter/services/data_loader.py`, `filter/state.py`
 
 ---
 

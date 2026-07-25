@@ -17,7 +17,7 @@
 
 | 组件 | 文件 | 角色 |
 |------|------|------|
-| **PipelineCapture** | `filter_app/services/pipeline_capture.py` | 运行时数据采集器。通过环境变量 `PIPELINE_CAPTURE=1` 控制开关，在回测每一步将管道各阶段输出写入结构化文件（Parquet + JSON） |
+| **PipelineCapture** | `filter/services/pipeline_capture.py` | 运行时数据采集器。通过环境变量 `PIPELINE_CAPTURE=1` 控制开关，在回测每一步将管道各阶段输出写入结构化文件（Parquet + JSON） |
 | **分析 CLI 工具** | `tools/analyze_captured_backtest.py` | 离线分析器。读取捕获会话目录，执行步间差分、BS 持久性、Schmitt 变化、级联放大四种分析，输出 TEXT 或 JSON 报告 |
 
 ### 1.3 适用场景
@@ -37,7 +37,7 @@
 通过环境变量 `PIPELINE_CAPTURE=1` 启动 Streamlit 应用：
 
 ```bash
-PIPELINE_CAPTURE=1 streamlit run filter_app/streamlit_app.py
+PIPELINE_CAPTURE=1 streamlit run filter/streamlit_app.py
 ```
 
 未设置该环境变量时，捕获系统完全不参与运行时流程，零开销。
@@ -448,7 +448,7 @@ python tools/analyze_captured_backtest.py --session-dir <path> --format JSON 2>/
 **第 1 步：启动捕获模式**
 
 ```bash
-PIPELINE_CAPTURE=1 streamlit run filter_app/streamlit_app.py
+PIPELINE_CAPTURE=1 streamlit run filter/streamlit_app.py
 ```
 
 **第 2 步：加载目标 preset**
@@ -579,11 +579,11 @@ print(f"BS entry count: {len(bs_base['entry_markers'])} → {len(bs_var['entry_m
 
 ```bash
 # 股票 A
-PIPELINE_CAPTURE=1 streamlit run filter_app/streamlit_app.py
+PIPELINE_CAPTURE=1 streamlit run filter/streamlit_app.py
 # ... 加载 AAPL, 运行回测 ...
 
 # 股票 B
-PIPELINE_CAPTURE=1 streamlit run filter_app/streamlit_app.py
+PIPELINE_CAPTURE=1 streamlit run filter/streamlit_app.py
 # ... 加载 03690.HK, 运行回测 ...
 ```
 
@@ -615,7 +615,7 @@ print(f"Ticker B: {b['bs_stability']['unstable_count']}/{len(b['bs_stability']['
 ### 6.1 运行捕获
 
 ```bash
-PIPELINE_CAPTURE=1 streamlit run filter_app/streamlit_app.py
+PIPELINE_CAPTURE=1 streamlit run filter/streamlit_app.py
 ```
 
 在界面中加载 3690_HK_2 preset，切换到回测模式，从 start 到 end 完成导航（约 45 步），退出回测。
@@ -880,13 +880,13 @@ git lfs track "data/pipeline_captures/**/*.parquet"
 echo $PIPELINE_CAPTURE  # 应输出 "1"
 
 # 如果未设置，重新启动
-PIPELINE_CAPTURE=1 streamlit run filter_app/streamlit_app.py
+PIPELINE_CAPTURE=1 streamlit run filter/streamlit_app.py
 ```
 
 也可以通过 Python 代码确认：
 
 ```python
-from filter_app.services.pipeline_capture import PipelineCapture
+from filter.services.pipeline_capture import PipelineCapture
 print("Capture enabled:", PipelineCapture.is_enabled())
 ```
 

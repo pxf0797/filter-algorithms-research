@@ -2,17 +2,17 @@
 
 ## 概述
 
-本文档分析 `filter_app` 中从 yfinance API 获取股票 K 线数据，经数据层处理，最终写入 SQLite 的完整流水线。链路涉及三个核心模块：
+本文档分析 `filter` 中从 yfinance API 获取股票 K 线数据，经数据层处理，最终写入 SQLite 的完整流水线。链路涉及三个核心模块：
 
-- `filter_app/services/data_loader.py` — 数据获取与展示层
-- `filter_app/db.py` — SQLite 数据持久化层
-- `filter_app/streamlit_app.py` — UI 调用层（`_cached_fetch_stock` / `_handle_initial_fetch` / `_load_chart_data`）
+- `filter/services/data_loader.py` — 数据获取与展示层
+- `filter/db.py` — SQLite 数据持久化层
+- `filter/streamlit_app.py` — UI 调用层（`_cached_fetch_stock` / `_handle_initial_fetch` / `_load_chart_data`）
 
 ---
 
 ## 1. `_fetch_all_timeframes()` — 8 周期并行拉取
 
-**文件:** `/Users/xfpan/claude/filter_research/filter_app/services/data_loader.py` 第 17-42 行
+**文件:** `/Users/xfpan/claude/filter_research/filter/services/data_loader.py` 第 17-42 行
 
 ### 输入参数
 
@@ -60,7 +60,7 @@ tf_config = {
 
 ## 2. `_fetch_stock()` — yfinance 核心获取
 
-**文件:** `/Users/xfpan/claude/filter_research/filter_app/services/data_loader.py` 第 45-136 行
+**文件:** `/Users/xfpan/claude/filter_research/filter/services/data_loader.py` 第 45-136 行
 
 ### 输入参数
 
@@ -188,7 +188,7 @@ tf_map = {
 
 ## 3. `_sync_to_display()` — 数据同步到 Parquet 缓存
 
-**文件:** `/Users/xfpan/claude/filter_research/filter_app/services/data_loader.py` 第 139-173 行
+**文件:** `/Users/xfpan/claude/filter_research/filter/services/data_loader.py` 第 139-173 行
 
 ### 输入参数
 
@@ -220,7 +220,7 @@ tf_map = {
 
 ## 4. `upsert_kline()` — 分段 Upsert 策略
 
-**文件:** `/Users/xfpan/claude/filter_research/filter_app/db.py` 第 50-83 行
+**文件:** `/Users/xfpan/claude/filter_research/filter/db.py` 第 50-83 行
 
 ### 输入参数
 
@@ -256,7 +256,7 @@ tf_map = {
 
 ## 5. `query_kline()` — 三种查询模式
 
-**文件:** `/Users/xfpan/claude/filter_research/filter_app/db.py` 第 86-133 行
+**文件:** `/Users/xfpan/claude/filter_research/filter/db.py` 第 86-133 行
 
 ### 输入参数
 
@@ -316,7 +316,7 @@ ORDER BY ts ASC LIMIT ? OFFSET ?
 
 ### 连接配置
 
-- **文件路径：** `filter_app/data/market.db`
+- **文件路径：** `filter/data/market.db`
 - **PRAGMA 设置：**
   - `journal_mode=WAL` — 写前日志，提高并发读写性能
   - `synchronous=NORMAL` — 平衡性能与数据安全

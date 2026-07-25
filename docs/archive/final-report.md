@@ -57,13 +57,13 @@
 
 | 文件 | 行数 | 用途 |
 |------|------|------|
-| `filter_app/streamlit_app.py` | 1487 | 主入口：页面布局、回测 UI、数据加载、滤波计算 |
-| `filter_app/db.py` | 464 | SQLite 数据层：kline CRUD、`query_kline` (含 offset 参数)、健康检查 |
-| `filter_app/services/data_loader.py` | 191 | yfinance 数据获取、`_sync_to_display` (浏览/回测统一) |
-| `filter_app/state.py` | 308 | 集中式 session_state：AppState 类 + 回测状态键 |
-| `filter_app/backtest_logger.py` | 75 | JSONL 格式回测事件日志 |
-| `filter_app/components/sidebar.py` | -- | 侧边栏组件：时间导航 (回测下隐藏)、参数面板 |
-| `filter_app/components/charts.py` | -- | Plotly 图表渲染 |
+| `filter/streamlit_app.py` | 1487 | 主入口：页面布局、回测 UI、数据加载、滤波计算 |
+| `filter/db.py` | 464 | SQLite 数据层：kline CRUD、`query_kline` (含 offset 参数)、健康检查 |
+| `filter/services/data_loader.py` | 191 | yfinance 数据获取、`_sync_to_display` (浏览/回测统一) |
+| `filter/state.py` | 308 | 集中式 session_state：AppState 类 + 回测状态键 |
+| `filter/backtest_logger.py` | 75 | JSONL 格式回测事件日志 |
+| `filter/components/sidebar.py` | -- | 侧边栏组件：时间导航 (回测下隐藏)、参数面板 |
+| `filter/components/charts.py` | -- | Plotly 图表渲染 |
 | `tests/test_backtest.py` | 405 | 28 个回测专项测试 |
 | `docs/backtest-comparison-report.md` | 805 | 浏览/回测模式完整差异报告 (15 项修复) |
 | `docs/backtest-redesign-v2.md` | 104 | 架构设计文档 |
@@ -125,7 +125,7 @@
 ### 数据加载
 
 ```python
-# filter_app/services/data_loader.py
+# filter/services/data_loader.py
 def _sync_to_display(ticker_code, tf, day_offset=0, n_pts=120, cutoff_date=None) -> Tuple[bool, int]:
     """
     cutoff_date=None:  浏览模式，取最新 n_pts 条 (支持 day_offset 日期偏移)
@@ -134,7 +134,7 @@ def _sync_to_display(ticker_code, tf, day_offset=0, n_pts=120, cutoff_date=None)
 ```
 
 ```python
-# filter_app/db.py
+# filter/db.py
 def query_kline(ticker, tf, n_pts=120, day_offset=0, offset=None) -> pd.DataFrame:
     """
     offset=None: 取最新 n_pts 条 (浏览模式, 支持 day_offset)
@@ -145,7 +145,7 @@ def query_kline(ticker, tf, n_pts=120, day_offset=0, offset=None) -> pd.DataFram
 ### 回测 UI
 
 ```python
-# filter_app/streamlit_app.py
+# filter/streamlit_app.py
 def _render_backtest_mode(configs, ticker_code):
     """回测模式 UI: 模式切换 radio + bar slider + 时间范围显示"""
 ```
@@ -163,7 +163,7 @@ def _get_min_tf_and_count(configs, ticker_code) -> Tuple[str, int]:
 ### 日志
 
 ```python
-# filter_app/backtest_logger.py
+# filter/backtest_logger.py
 def log_mode_switch(ticker, direction, min_tf, bar_count)   # 模式切换
 def log_bar_navigation(ticker, min_tf, bar_index, total, cutoff_date)  # bar 跳转
 def log_data_load(ticker, tf, bar_count, cutoff_date)        # 数据加载

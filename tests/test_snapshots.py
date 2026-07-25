@@ -15,12 +15,12 @@ import numpy as np
 import plotly.graph_objects as go
 import pytest
 
-# Ensure filter_app is importable
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+# Ensure filter is importable
+_src = Path(__file__).resolve().parent.parent / "filter"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
-from services.filter_engine import (
+from engine.filters import (
     apply_savgol,
     apply_ema,
     apply_sma,

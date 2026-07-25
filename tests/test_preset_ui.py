@@ -13,16 +13,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ============================================================
-# conftest 已将 filter_app/ 添加到 sys.path，但 streamlit 被 mock
+# conftest 已将 filter/ 添加到 sys.path，但 streamlit 被 mock
 # 后不再是 package，所以需要直接 import config_db
 # 这里手工补路径以确保模块级导入成功
 # ============================================================
 
-_src = Path(__file__).resolve().parent.parent / "filter_app"
+_src = Path(__file__).resolve().parent.parent / "filter"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
-import config_db as cfg
+import data.config_db as cfg
 
 
 @pytest.fixture(autouse=True)
