@@ -331,8 +331,18 @@ def embed_and_open(parquet_paths: list[str], metadata_path: str | None, html_tem
         columns = multi_data["data"][first_ticker]["columns"]
         stats = multi_data["data"][first_ticker]["stats"]
     else:
-        print(f"[1/4] 读取 Parquet: {parquet_paths[0]}")
-        columns, stats = load_parquet(parquet_paths[0])
+        # 单个路径：可能是目录也可能是 .parquet 文件
+        p = Path(parquet_paths[0])
+        if p.is_dir():
+            candidates = list(p.glob("backtest_result.parquet")) or list(p.glob("*.parquet"))
+            if not candidates:
+                print(f"错误：在 {p} 中找不到 parquet 文件", file=sys.stderr)
+                sys.exit(1)
+            actual_path = str(candidates[0])
+        else:
+            actual_path = parquet_paths[0]
+        print(f"[1/4] 读取 Parquet: {actual_path}")
+        columns, stats = load_parquet(actual_path)
         print(f"       {stats['n_rows']} 行 x {stats['n_cols']} 列")
 
     metadata = None

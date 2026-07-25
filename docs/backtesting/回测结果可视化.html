@@ -403,7 +403,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D1</span> 日线 完整视图</div>
     <div class="plot-wrap" style="height:520px"><div id="chart-dash-v0"></div></div>
-    <button onclick="Plotly.relayout('chart-dash-v0', {'xaxis.autorange': true, 'xaxis2.autorange': true, 'xaxis3.autorange': true, 'xaxis4.autorange': true})" class="btn-reset-zoom">↺ 重置缩放</button>
+    <button onclick="var dashIds=['chart-dash-v0','chart-dash-v1','chart-dash-v2','chart-dash-v3'];dashIds.forEach(function(id){Plotly.relayout(id,{'xaxis4.autorange':true,'xaxis3.autorange':true,'xaxis2.autorange':true,'xaxis.autorange':true})})" class="btn-reset-zoom">↺ 重置缩放 (全部)</button>
     <div id="date-tip-v0" class="date-tip"></div>
   </div>
 
@@ -464,6 +464,16 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   function toNum(v) { return (v === null || v === undefined || isNaN(v)) ? NaN : Number(v); }
   function toStr(v) { return (v === null || v === undefined) ? '' : String(v); }
   function toBool(v) { return v === true || v === 1; }
+  // Safe date parsing: returns null on invalid input instead of throwing
+  function safeDate(v) {
+    if (v === null || v === undefined || v === '') return null;
+    try { var d = new Date(v); return isNaN(d.getTime()) ? null : d; }
+    catch (e) { return null; }
+  }
+  function safeDateISO(v, len) {
+    var d = safeDate(v);
+    return d ? d.toISOString().substring(0, len || 16) : '?';
+  }
 
   function col(data, name) { return data.columns[name] || []; }
   function viewLabel(viewKey) {
@@ -480,9 +490,9 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 	  /** Pick tickformat based on the time span of bar_timestamp data. */
 	  function getTimeTickFormat(barTs) {
 	    if (!barTs || barTs.length < 2) return '%m/%d %H:%M';
-	    const t0 = new Date(barTs[0]).getTime();
-	    const t1 = new Date(barTs[barTs.length - 1]).getTime();
-	    const spanDays = (t1 - t0) / (1000 * 60 * 60 * 24);
+	    var d0 = safeDate(barTs[0]), d1 = safeDate(barTs[barTs.length - 1]);
+	    if (!d0 || !d1) return '%m/%d %H:%M';
+	    var spanDays = (d1.getTime() - d0.getTime()) / (1000 * 60 * 60 * 24);
 	    if (spanDays < 7) return '%m/%d %H:%M';
 	    if (spanDays < 365) return '%m/%d';
 	    return '%Y-%m-%d';
@@ -546,8 +556,8 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     ).join('');
 
     const barTs = col(data, 'bar_timestamp');
-    const dateMin = barTs[0] ? new Date(barTs[0]).toISOString().substring(0, 16) : '?';
-    const dateMax = barTs[N - 1] ? new Date(barTs[N - 1]).toISOString().substring(0, 16) : '?';
+    const dateMin = safeDateISO(barTs[0], 16);
+    const dateMax = safeDateISO(barTs[N - 1], 16);
     document.getElementById('summary-row').innerHTML =
       '<span>日期范围: <strong>' + dateMin + '</strong> &rarr; <strong>' + dateMax + '</strong></span>' +
       '<span>数据规模: <strong>' + N + ' 行 x ' + data.parquetCols.length + ' 列</strong></span>' +
@@ -1141,25 +1151,42 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
     const tickFormat = getTimeTickFormat(barTs);
 
+    // Filter out null timestamps: replace with empty string so Plotly skips the cell
+    // instead of showing a gap. Using barIdx as fallback for x-axis ensures continuity.
+    var cleanSampledTs = sampledTs.map(function(ts) { return ts || ''; });
+    // Use bar_index values (equidistant integers) as primary x to avoid
+    // timestamp gaps (weekends/overnight) creating blank heatmap columns.
+    var sampledBarIdx = sampledIndices.map(function(i) { return barIdx[i]; });
+
     const trace = {
       z: rows, type: 'heatmap',
       colorscale: colorMap,
+      zmin: 0, zmax: 2,
       showscale: false,
-      x: sampledTs,
+      x: sampledBarIdx,
       y: rowLabels,
       text: textRows,
+      customdata: sampledTs,
       xgap: 1, ygap: 2,
       hoverongaps: false,
       hoverlabel: { bgcolor: '#21262d', bordercolor: '#30363d', font: { color: '#f0f6fc', size: 11 } },
-      hovertemplate: '<b>%{y}</b><br>时间=%{x}<br>%{text}<extra></extra>',
+      hovertemplate: '<b>%{y}</b><br>时间=%{customdata}<br>%{text}<extra></extra>',
     };
+
+    // Add tick labels using barTs for readability
+    var hmTickStep = Math.max(1, Math.floor(sampledBarIdx.length / 8));
+    var hmTickVals = [], hmTickTexts = [];
+    for (var hi = 0; hi < sampledBarIdx.length; hi += hmTickStep) {
+      hmTickVals.push(sampledBarIdx[hi]);
+      hmTickTexts.push(sampledTs[hi] ? sampledTs[hi].substring(0, 16) : '');
+    }
 
     const layout = {
       template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
       font: { color: '#c9d1d9', size: 11 },
       displayModeBar: false,
       margin: { l: 160, r: 40, t: 20, b: 40 },
-      xaxis: { title: { text: '时间', font: { size: 10, color: '#8b949e' } }, type: 'date', tickformat: tickFormat, showgrid: true, gridcolor: gridColor, side: 'top' },
+      xaxis: { title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, tickvals: hmTickVals, ticktext: hmTickTexts, showgrid: true, gridcolor: gridColor, side: 'top', zeroline: false },
       yaxis: { automargin: true },
     };
 
@@ -1172,6 +1199,9 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     const { columns, N } = data;
     const barIdx = col(data, 'bar_index');
     const barTs = col(data, 'bar_timestamp');
+
+    // Guard: empty data
+    if (!barIdx || barIdx.length === 0) return;
     const traces = [];
     const shapes = [];
     const annotations = [];
@@ -1405,6 +1435,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       z: hRows,
       type: 'heatmap',
       colorscale: heatmapColorMap,
+      zmin: 0, zmax: 2,
       showscale: false,
       x: sampledBarIdx,
       y: posLabels,
@@ -1456,7 +1487,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       yaxis3: { domain: [0.52, 0.64], title: { text: '信号', font: { size: 10, color: '#8b949e' } }, tickvals: [-1, 0, 1], ticktext: ['空头(-1)', '中性(0)', '多头(+1)'], range: [-1.2, 1.2], showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
 
       // Row 4 (bottom): PnL — shows tick labels, NOT matching (anchor)
-      xaxis4: { domain: [0.0, 1.0], title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, tickvals: tickVals, ticktext: tickTexts, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
+      xaxis4: { range: [barIdx[0], barIdx[barIdx.length - 1]], domain: [0.0, 1.0], title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, tickvals: tickVals, ticktext: tickTexts, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
       yaxis4: { domain: [0.0, 0.4], title: { text: 'PnL (累计)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
     };
 
@@ -1785,10 +1816,18 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     };
 
     const N = stats.n_rows;
+
+    // Guard: empty data
+    if (!N || N === 0) {
+      document.getElementById('guide-page').querySelector('.guide-desc').innerHTML =
+        '<span style="color:var(--red)">错误：回测数据为空（0 行），无法渲染可视化。</span>';
+      return;
+    }
+
     const parquetCols = stats.column_names;
     const barTs = col(data, 'bar_timestamp');
-    const dateMin = barTs[0] ? new Date(barTs[0]).toISOString().substring(0, 16) : '?';
-    const dateMax = barTs[N - 1] ? new Date(barTs[N - 1]).toISOString().substring(0, 16) : '?';
+    const dateMin = safeDateISO(barTs[0], 16);
+    const dateMax = safeDateISO(barTs[N - 1], 16);
 
     // Show dashboard
     document.getElementById('guide-page').classList.add('hidden');
@@ -1837,6 +1876,34 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     VIEWS.forEach(function(v) {
       buildPeriodDashboard(data, v, viewLabels[v]);
     });
+
+    // ── Cross-dashboard x-axis sync: when user zooms/pans one period dashboard,
+    // sync xaxis4 range to the other three dashboards ──
+    (function() {
+      var _syncGuard = false; // prevent infinite relayout loop
+      VIEWS.forEach(function(v) {
+        var divEl = document.getElementById('chart-dash-' + v);
+        // Remove old listener to avoid duplicates on re-upload
+        if (divEl._relayoutHandler) divEl.removeListener('plotly_relayout', divEl._relayoutHandler);
+        divEl._relayoutHandler = function(eventData) {
+          if (_syncGuard) return;
+          var range0 = eventData['xaxis4.range[0]'];
+          var range1 = eventData['xaxis4.range[1]'];
+          if (range0 === undefined && range1 === undefined) return;
+          _syncGuard = true;
+          VIEWS.forEach(function(otherV) {
+            if (otherV === v) return;
+            var update = {};
+            if (range0 !== undefined) update['xaxis4.range[0]'] = range0;
+            if (range1 !== undefined) update['xaxis4.range[1]'] = range1;
+            Plotly.relayout('chart-dash-' + otherV, update);
+          });
+          _syncGuard = false;
+        };
+        divEl.on('plotly_relayout', divEl._relayoutHandler);
+      });
+    })();
+
     buildTrades(data);
     buildTable(data);
   }
