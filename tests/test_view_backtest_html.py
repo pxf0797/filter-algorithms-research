@@ -470,21 +470,56 @@ class TestHeatmapSamplingFix:
             "buildPeriodDashboard should NOT use limit 100 — use 200 instead"
         )
 
-    def test_build_heatmap_still_uses_100_limit(self):
-        """buildHeatmap (非 period dashboard) 仍使用 100 上限 — 只改了 buildPeriodDashboard。"""
+    def test_build_heatmap_no_truncation(self):
+        """buildHeatmap (Section 5) 也不存在硬截断。"""
         content = _read_html()
-        # Find buildHeatmap function (NOT buildPeriodDashboard)
         heatmap_func_start = content.find("function buildHeatmap(data)")
         assert heatmap_func_start > 0, "buildHeatmap function not found"
-        # Find next function after buildHeatmap
         next_func = content.find("function build", heatmap_func_start + 10)
         if next_func > 0:
             heatmap_section = content[heatmap_func_start:next_func]
         else:
             heatmap_section = content[heatmap_func_start:]
-        # buildHeatmap should still have its original 100 limit (not changed)
-        assert "Math.min(100, N)" in heatmap_section or "sampledIndices.length = sampleN" in heatmap_section, (
-            "buildHeatmap should retain its original sampling — only buildPeriodDashboard was changed"
+        # The truncation pattern should NOT exist in buildHeatmap
+        assert "sampledIndices.length = sampleN" not in heatmap_section, (
+            "buildHeatmap must NOT use sampledIndices.length = sampleN truncation — "
+            "use uniform sampling instead"
+        )
+
+    def test_build_heatmap_has_uniform_sampling(self):
+        """buildHeatmap 存在均匀采样。"""
+        content = _read_html()
+        heatmap_func_start = content.find("function buildHeatmap(data)")
+        assert heatmap_func_start > 0, "buildHeatmap function not found"
+        next_func = content.find("function build", heatmap_func_start + 10)
+        if next_func > 0:
+            heatmap_section = content[heatmap_func_start:next_func]
+        else:
+            heatmap_section = content[heatmap_func_start:]
+        # Uniform sampling should use Math.round and a step calculation
+        assert "Math.round" in heatmap_section, (
+            "buildHeatmap should use Math.round for uniform index selection"
+        )
+        assert "(sampledIndices.length - 1) / (sampleN - 1)" in heatmap_section, (
+            "buildHeatmap should use uniform sampling step calculation: "
+            "(sampledIndices.length - 1) / (sampleN - 1)"
+        )
+
+    def test_build_heatmap_sample_limit_is_200(self):
+        """buildHeatmap 中采样上限为 200 而非 100。"""
+        content = _read_html()
+        heatmap_func_start = content.find("function buildHeatmap(data)")
+        assert heatmap_func_start > 0, "buildHeatmap function not found"
+        next_func = content.find("function build", heatmap_func_start + 10)
+        if next_func > 0:
+            heatmap_section = content[heatmap_func_start:next_func]
+        else:
+            heatmap_section = content[heatmap_func_start:]
+        assert "Math.min(200, N)" in heatmap_section, (
+            "buildHeatmap sample limit should be 200 (was 100)"
+        )
+        assert "Math.min(100, N)" not in heatmap_section, (
+            "buildHeatmap should NOT use limit 100 — use 200 instead"
         )
 
 

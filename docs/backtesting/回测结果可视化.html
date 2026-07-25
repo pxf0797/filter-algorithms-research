@@ -1119,7 +1119,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
     // Guard: empty data
     if (!barIdx || barIdx.length === 0) return;
-    const sampleN = Math.min(100, N);
+    const sampleN = Math.min(200, N);
     const step = Math.max(1, Math.floor(N / sampleN));
     const sampledIndices = [];
     const sampledTs = [];
@@ -1127,7 +1127,15 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       sampledIndices.push(i);
       sampledTs.push(barTs[i]);
     }
-    if (sampledIndices.length > sampleN) sampledIndices.length = sampleN;
+    if (sampledIndices.length > sampleN) {
+      var _step = (sampledIndices.length - 1) / (sampleN - 1);
+      var _result = [];
+      for (var _j = 0; _j < sampleN; _j++) {
+        _result.push(sampledIndices[Math.round(_j * _step)]);
+      }
+      sampledIndices.length = 0;
+      for (var _k = 0; _k < _result.length; _k++) sampledIndices.push(_result[_k]);
+    }
 
     const rows = [];
     const rowLabels = [];
