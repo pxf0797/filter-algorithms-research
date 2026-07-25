@@ -1907,20 +1907,27 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       VIEWS.forEach(function(v) {
         var divEl = document.getElementById('chart-dash-' + v);
         if (!divEl) return;
-        if (divEl._relayoutHandler) divEl.removeAllListeners('plotly_relayout');
-        divEl._relayoutHandler = function(eventData) {
+        if (divEl._relayoutHandler) divEl.removeListener('plotly_relayout', divEl._relayoutHandler);
+        divEl._relayoutHandler = async function(eventData) {
           if (_syncGuard) return;
           var range0 = eventData['xaxis4.range[0]'];
           var range1 = eventData['xaxis4.range[1]'];
           if (range0 === undefined && range1 === undefined) return;
+          // Throttle: skip if same range already synced
+          var lastRange0 = divEl._lastSyncedRange0;
+          var lastRange1 = divEl._lastSyncedRange1;
+          if (lastRange0 === range0 && lastRange1 === range1) return;
+          divEl._lastSyncedRange0 = range0;
+          divEl._lastSyncedRange1 = range1;
           _syncGuard = true;
-          VIEWS.forEach(function(otherV) {
-            if (otherV === v) return;
+          for (var i = 0; i < VIEWS.length; i++) {
+            var otherV = VIEWS[i];
+            if (otherV === v) continue;
             var update = {};
             if (range0 !== undefined) update['xaxis4.range[0]'] = range0;
             if (range1 !== undefined) update['xaxis4.range[1]'] = range1;
-            Plotly.relayout('chart-dash-' + otherV, update);
-          });
+            await Plotly.relayout('chart-dash-' + otherV, update);
+          }
           _syncGuard = false;
         };
         divEl.on('plotly_relayout', divEl._relayoutHandler);

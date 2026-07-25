@@ -263,3 +263,147 @@ class TestCdnFallback:
         """应有 init() 入口函数。"""
         content = _read_html()
         assert "function init()" in content
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 帮助函数：提取 sync 区域
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _get_sync_section():
+    """提取跨 dashboard sync 代码段（从 var _syncGuard 到 setTimeout 结束）。"""
+    content = _read_html()
+    start = content.find("var _syncGuard = false;")
+    if start == -1:
+        return ""
+    end = content.find("}, _phase3Ms + 120);", start)
+    if end == -1:
+        return content[start:]
+    return content[start:end + len("}, _phase3Ms + 120);")]
+
+
+def _get_handler_body():
+    """提取 sync handler 函数体（从 _relayoutHandler = async function 到 _syncGuard = false）。"""
+    content = _read_html()
+    start = content.find("_relayoutHandler = async function(eventData)")
+    if start == -1:
+        return ""
+    end = content.find("_syncGuard = false;", start)
+    if end == -1:
+        return content[start:]
+    return content[start:end + len("_syncGuard = false;")]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SyncGuard 竞态条件回归测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSyncGuardRaceCondition:
+    """验证 _syncGuard 竞态条件已被修复（handler async + await + guard 顺序）。"""
+
+    def test_handler_is_async_function(self):
+        """sync handler 是 async 函数。"""
+        content = _read_html()
+        assert "_relayoutHandler = async function(eventData)" in content, (
+            "Sync handler should be an async function to properly handle Promise-based relayout"
+        )
+
+    def test_handler_uses_await_relayout(self):
+        """handler 内使用 await Plotly.relayout 而非裸调用。"""
+        content = _read_html()
+        assert "await Plotly.relayout" in content, (
+            "Handler should use await Plotly.relayout to prevent race condition"
+        )
+
+    def test_sync_guard_set_before_await(self):
+        """_syncGuard = true 出现在 await 之前，防止 async 操作完成前 guard 失效。"""
+        handler = _get_handler_body()
+        assert handler, "Handler body not found in template"
+        guard_pos = handler.find("_syncGuard = true;")
+        await_pos = handler.find("await Plotly.relayout")
+        assert guard_pos > 0, "_syncGuard = true not found in handler body"
+        assert await_pos > guard_pos, (
+            "_syncGuard = true must appear BEFORE await Plotly.relayout "
+            "to prevent re-entry during async operation"
+        )
+
+    def test_sync_guard_reset_after_await(self):
+        """_syncGuard = false 出现在所有 await 之后，确保所有 relayout 完成才重置。"""
+        handler = _get_handler_body()
+        assert handler, "Handler body not found in template"
+        await_pos = handler.rfind("await Plotly.relayout")
+        reset_pos = handler.find("_syncGuard = false;")
+        assert await_pos > 0, "await Plotly.relayout not found in handler body"
+        assert reset_pos > await_pos, (
+            "_syncGuard = false must appear AFTER all await Plotly.relayout calls "
+            "to ensure guard is only reset when sync is complete"
+        )
+
+    def test_no_for_each_with_async_relayout(self):
+        """handler 内没有使用 forEach 包裹 await Plotly.relayout（forEach 无法正确处理 async）。"""
+        handler = _get_handler_body()
+        assert handler, "Handler body not found in template"
+        # 应使用普通 for 循环而非 forEach
+        assert "for (var i = 0; i < VIEWS.length; i++)" in handler, (
+            "Handler should use a regular for loop (not forEach) with await Plotly.relayout"
+        )
+        # handler 函数体内不应出现 forEach
+        assert "forEach" not in handler, (
+            "Handler body should not contain forEach — use regular for loop with await"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# removeAllListeners 替换回归测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestRemoveAllListenersFix:
+    """验证 removeAllListeners 已被替换为 removeListener（避免破坏 Plotly 内部监听器）。"""
+
+    def test_remove_all_listeners_not_used_in_sync(self):
+        """sync 代码段中不存在 removeAllListeners('plotly_relayout')。"""
+        sync = _get_sync_section()
+        assert sync, "Sync section not found in template"
+        assert "removeAllListeners('plotly_relayout')" not in sync, (
+            "Sync section should NOT use removeAllListeners for plotly_relayout "
+            "— it removes Plotly's internal listeners too"
+        )
+
+    def test_remove_listener_used_instead(self):
+        """使用了 removeListener('plotly_relayout', divEl._relayoutHandler)。"""
+        content = _read_html()
+        assert "removeListener('plotly_relayout'" in content, (
+            "Should use removeListener (not removeAllListeners) to remove only our handler"
+        )
+
+    def test_remove_listener_uses_specific_handler(self):
+        """removeListener 传入了具体的 handler 引用，而非空或模糊参数。"""
+        content = _read_html()
+        assert "removeListener('plotly_relayout', divEl._relayoutHandler)" in content, (
+            "removeListener must pass the specific handler reference (divEl._relayoutHandler) "
+            "to avoid removing other listeners"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 节流保护回归测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestThrottleProtection:
+    """验证节流保护：相同 x 轴 range 不重复同步。"""
+
+    def test_last_synced_range_present(self):
+        """模板包含 _lastSyncedRange0 和 _lastSyncedRange1 变量。"""
+        content = _read_html()
+        assert "_lastSyncedRange0" in content, (
+            "Template should define _lastSyncedRange0 for throttle protection"
+        )
+        assert "_lastSyncedRange1" in content, (
+            "Template should define _lastSyncedRange1 for throttle protection"
+        )
+
+    def test_skip_same_range(self):
+        """handler 在 range 相同时跳过同步（避免重复 plotly_relayout 事件触发冗余 sync）。"""
+        content = _read_html()
+        assert "lastRange0 === range0 && lastRange1 === range1" in content, (
+            "Handler should skip re-syncing when the x-axis range has not changed"
+        )
