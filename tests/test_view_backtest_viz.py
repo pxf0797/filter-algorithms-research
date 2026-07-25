@@ -157,3 +157,91 @@ class TestParquetRoundtrip:
             assert len(columns["v0_sig"]) == 10
         finally:
             os.unlink(path)
+
+
+class TestPanel5PositionHeatmap:
+    """Panel 5 (持仓状态热力图) 依赖 bar_index 和 position 列"""
+
+    def test_bar_index_in_serialized_columns(self):
+        """bar_index 必须在序列化数据中存在（buildHeatmap 依赖 barIdx）"""
+        df = pd.DataFrame({
+            "bar_index": range(5),
+            "bar_timestamp": pd.date_range("2026-01-01", periods=5, freq="D"),
+            "v0_long_pos": [False, True, True, False, False],
+            "v0_short_pos": [False, False, False, True, True],
+        })
+        columns, stats = df_to_columns(df)
+        assert "bar_index" in columns
+        assert len(columns["bar_index"]) == 5
+        assert all(isinstance(v, (int, float)) for v in columns["bar_index"])
+
+    def test_position_columns_non_null_for_heatmap(self):
+        """Position 列应存在且无全空，确保热力图有数据可渲染"""
+        df = pd.DataFrame({
+            "bar_index": range(3),
+            "v0_long_pos": [True, False, True],
+            "v0_short_pos": [False, False, False],
+            "v1_long_pos": [False, True, False],
+            "v1_short_pos": [True, False, False],
+        })
+        columns, stats = df_to_columns(df)
+        for v in range(2):
+            for pos in ["long_pos", "short_pos"]:
+                col = f"v{v}_{pos}"
+                assert col in columns, f"Missing {col}"
+                assert len(columns[col]) == 3
+                # At least one non-null value for heatmap rendering
+                non_null = [x for x in columns[col] if x is not None]
+                assert len(non_null) > 0, f"{col} has all None values"
+
+
+class TestPanel6PeriodDashboard:
+    """Panel 6 (周期视图 D1-D4) 依赖 bar_index + 各视图信号/过滤列"""
+
+    def test_period_dashboard_columns_present(self):
+        """buildPeriodDashboard 所需的列应为所有 4 个视图提供"""
+        df = pd.DataFrame({"bar_index": range(5)})
+        for v in range(4):
+            df[f"v{v}_filtered"] = [100.0 + i + v * 0.1 for i in range(5)]
+            df[f"v{v}_sig"] = [0, 1, -1, 0, 1]
+            df[f"v{v}_eps"] = [0.5] * 5
+        df["close"] = [100.0 + i for i in range(5)]
+        columns, stats = df_to_columns(df)
+        for v in range(4):
+            assert f"v{v}_filtered" in columns
+            assert f"v{v}_sig" in columns
+            assert f"v{v}_eps" in columns
+            assert len(columns[f"v{v}_filtered"]) == 5
+
+    def test_bar_index_present_for_x_axis(self):
+        """buildPeriodDashboard 使用 barIdx 作为 x 轴，不能缺失"""
+        df = pd.DataFrame({
+            "bar_index": range(10),
+            "close": [100.0] * 10,
+            "v0_filtered": [100.0] * 10,
+            "v0_sig": [0] * 10,
+            "v0_eps": [0.5] * 10,
+        })
+        columns, stats = df_to_columns(df)
+        assert "bar_index" in columns
+        assert len(columns["bar_index"]) == 10
+
+
+class TestPanel8DataTable:
+    """Panel 8 (完整数据表) 依赖列数据存在"""
+
+    def test_columns_have_data_for_table_rendering(self):
+        """buildTable 需要列数据 — 所有 Parquet 列都应存在"""
+        df = pd.DataFrame({
+            "bar_index": range(3),
+            "bar_timestamp": pd.date_range("2026-01-01", periods=3, freq="D"),
+            "close": [100.0, 101.0, 102.0],
+            "v0_sig": [0, 1, -1],
+        })
+        columns, stats = df_to_columns(df)
+        # buildTable uses parquetCols (stats.column_names) and columns dict
+        assert stats["n_rows"] == 3
+        assert len(stats["column_names"]) == 4
+        for col_name in stats["column_names"]:
+            assert col_name in columns
+            assert len(columns[col_name]) == 3

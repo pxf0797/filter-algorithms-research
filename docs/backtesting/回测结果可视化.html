@@ -1114,7 +1114,11 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   // --- Section 5: Position Heatmap ---
   function buildHeatmap(data) {
     const { columns, N } = data;
+    const barIdx = col(data, 'bar_index');
     const barTs = col(data, 'bar_timestamp');
+
+    // Guard: empty data
+    if (!barIdx || barIdx.length === 0) return;
     const sampleN = Math.min(100, N);
     const step = Math.max(1, Math.floor(N / sampleN));
     const sampledIndices = [];
