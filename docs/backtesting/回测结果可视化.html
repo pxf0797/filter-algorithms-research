@@ -422,7 +422,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   </div>
 
   <div class="section period-dashboard">
-    <div class="section-title"><span class="num">D4</span> 5分钟 完整视图</div>
+    <div class="section-title"><span class="num">D4</span> <span id="dash-d4-title">完整视图</span></div>
     <div class="plot-wrap" style="height:520px"><div id="chart-dash-v3"></div></div>
     <button onclick="Plotly.relayout('chart-dash-v3', {'xaxis.autorange': true, 'xaxis2.autorange': true, 'xaxis3.autorange': true, 'xaxis4.autorange': true})" class="btn-reset-zoom">↺ 重置缩放</button>
     <div id="date-tip-v3" class="date-tip"></div>
@@ -1401,13 +1401,21 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     });
 
     // ===== Row 3: Position Heatmap (yaxis2/xaxis2) =====
-    const sampleN = Math.min(100, N);
+    const sampleN = Math.min(200, N);
     const sampleStep = Math.max(1, Math.floor(N / sampleN));
     const sampledIndices = [];
     for (let i = 0; i < N; i += sampleStep) {
       sampledIndices.push(i);
     }
-    if (sampledIndices.length > sampleN) sampledIndices.length = sampleN;
+    if (sampledIndices.length > sampleN) {
+      var _step = (sampledIndices.length - 1) / (sampleN - 1);
+      var _result = [];
+      for (var _j = 0; _j < sampleN; _j++) {
+        _result.push(sampledIndices[Math.round(_j * _step)]);
+      }
+      sampledIndices.length = 0;
+      for (var _k = 0; _k < _result.length; _k++) sampledIndices.push(_result[_k]);
+    }
 
     const sampledBarIdx = sampledIndices.map(function(i) { return barIdx[i]; });
 
@@ -1898,6 +1906,8 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     setTimeout(function() {
       try { buildTrades(data); } catch(e) { console.error('buildTrades failed', e); }
       try { buildTable(data); } catch(e) { console.error('buildTable failed', e); }
+      var d4Title = document.getElementById('dash-d4-title');
+      if (d4Title && viewLabels && viewLabels.v3) d4Title.textContent = viewLabels.v3 + ' ';
     }, _phase3Ms);
 
     // ── Cross-dashboard x-axis sync (after all dashboards rendered) ──

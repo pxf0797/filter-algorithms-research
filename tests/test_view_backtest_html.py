@@ -407,3 +407,117 @@ class TestThrottleProtection:
         assert "lastRange0 === range0 && lastRange1 === range1" in content, (
             "Handler should skip re-syncing when the x-axis range has not changed"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 热力图采样修复回归测试 (buildPeriodDashboard)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestHeatmapSamplingFix:
+    """验证 buildPeriodDashboard 中的热力图采样已从截断改为均匀采样。"""
+
+    def test_no_truncation_pattern_in_period_dashboard(self):
+        """buildPeriodDashboard 中不存在 sampledIndices.length = sampleN 的截断模式。"""
+        content = _read_html()
+        # Find buildPeriodDashboard function body
+        dash_start = content.find("function buildPeriodDashboard(data, v, label)")
+        assert dash_start > 0, "buildPeriodDashboard function not found"
+        # Find the second occurrence of "function build" after it (the next function)
+        next_func = content.find("function build", dash_start + 10)
+        if next_func > 0:
+            dash_section = content[dash_start:next_func]
+        else:
+            dash_section = content[dash_start:]
+        # The truncation pattern should NOT exist in buildPeriodDashboard
+        assert "sampledIndices.length = sampleN" not in dash_section, (
+            "buildPeriodDashboard must NOT use sampledIndices.length = sampleN truncation — "
+            "use uniform sampling instead"
+        )
+
+    def test_uniform_sampling_present_in_period_dashboard(self):
+        """buildPeriodDashboard 中存在均匀采样逻辑（Math.round + step）。"""
+        content = _read_html()
+        dash_start = content.find("function buildPeriodDashboard(data, v, label)")
+        assert dash_start > 0, "buildPeriodDashboard function not found"
+        next_func = content.find("function build", dash_start + 10)
+        if next_func > 0:
+            dash_section = content[dash_start:next_func]
+        else:
+            dash_section = content[dash_start:]
+        # Uniform sampling should use Math.round and a step calculation
+        assert "Math.round" in dash_section, (
+            "buildPeriodDashboard should use Math.round for uniform index selection"
+        )
+        assert "(sampledIndices.length - 1) / (sampleN - 1)" in dash_section, (
+            "buildPeriodDashboard should use uniform sampling step calculation: "
+            "(sampledIndices.length - 1) / (sampleN - 1)"
+        )
+
+    def test_sample_limit_is_200_in_period_dashboard(self):
+        """buildPeriodDashboard 中采样上限为 200 而非 100。"""
+        content = _read_html()
+        dash_start = content.find("function buildPeriodDashboard(data, v, label)")
+        assert dash_start > 0, "buildPeriodDashboard function not found"
+        next_func = content.find("function build", dash_start + 10)
+        if next_func > 0:
+            dash_section = content[dash_start:next_func]
+        else:
+            dash_section = content[dash_start:]
+        assert "Math.min(200, N)" in dash_section, (
+            "buildPeriodDashboard sample limit should be 200 (was 100)"
+        )
+        assert "Math.min(100, N)" not in dash_section, (
+            "buildPeriodDashboard should NOT use limit 100 — use 200 instead"
+        )
+
+    def test_build_heatmap_still_uses_100_limit(self):
+        """buildHeatmap (非 period dashboard) 仍使用 100 上限 — 只改了 buildPeriodDashboard。"""
+        content = _read_html()
+        # Find buildHeatmap function (NOT buildPeriodDashboard)
+        heatmap_func_start = content.find("function buildHeatmap(data)")
+        assert heatmap_func_start > 0, "buildHeatmap function not found"
+        # Find next function after buildHeatmap
+        next_func = content.find("function build", heatmap_func_start + 10)
+        if next_func > 0:
+            heatmap_section = content[heatmap_func_start:next_func]
+        else:
+            heatmap_section = content[heatmap_func_start:]
+        # buildHeatmap should still have its original 100 limit (not changed)
+        assert "Math.min(100, N)" in heatmap_section or "sampledIndices.length = sampleN" in heatmap_section, (
+            "buildHeatmap should retain its original sampling — only buildPeriodDashboard was changed"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# D4 标题动态化回归测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestD4TitleDynamic:
+    """验证 D4 标题从硬编码改为动态设置。"""
+
+    def test_d4_title_span_exists(self):
+        """D4 标题使用 span id 而非硬编码文本。"""
+        content = _read_html()
+        assert 'id="dash-d4-title"' in content, (
+            "D4 title should use a span with id='dash-d4-title' for dynamic content"
+        )
+        # 确保不再硬编码 "5分钟"
+        dash_d4_section_start = content.find('id="dash-d4-title"')
+        # 检查 D4 section-title 行
+        d4_title_line_start = content.rfind('<div class="section-title">', 0, content.find('id="dash-d4-title"') + 50)
+        d4_title_line_end = content.find('</div>', d4_title_line_start)
+        d4_title_line = content[d4_title_line_start:d4_title_line_end]
+        assert "5分钟" not in d4_title_line, (
+            "D4 title must not hardcode '5分钟' — use dynamic span instead"
+        )
+
+    def test_d4_title_dynamic_set(self):
+        """renderAll 中动态设置 D4 标题。"""
+        content = _read_html()
+        assert "dash-d4-title" in content
+        assert "viewLabels && viewLabels.v3" in content, (
+            "renderAll should dynamically set D4 title using viewLabels.v3"
+        )
+        assert "d4Title.textContent = viewLabels.v3" in content, (
+            "D4 title should be set to viewLabels.v3 + ' '"
+        )
