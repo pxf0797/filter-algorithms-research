@@ -141,58 +141,68 @@ def _extract_trade_records(df: pd.DataFrame, view_prefix: str) -> list[dict]:
 
 def _render_kpi_cards(metrics: dict) -> None:
     """渲染 KPI 指标卡片行。"""
+    import math
+
+    # Sanitize NaN/Inf values that would crash f-string formatting.
+    _safe = {}
+    for k, v in metrics.items():
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            _safe[k] = 0
+        else:
+            _safe[k] = v
+
     st.subheader("核心指标")
 
     cols = st.columns(6)
     cols[0].metric(
         "累计收益",
-        f"{metrics.get('total_return_pct', 0):.2f}%",
+        f"{_safe.get('total_return_pct', 0):.2f}%",
     )
     cols[1].metric(
         "Sharpe",
-        f"{metrics.get('sharpe_ratio', 0):.3f}",
+        f"{_safe.get('sharpe_ratio', 0):.3f}",
     )
     cols[2].metric(
         "最大回撤",
-        f"{metrics.get('max_drawdown_pct', 0):.2f}%",
+        f"{_safe.get('max_drawdown_pct', 0):.2f}%",
     )
     cols[3].metric(
         "胜率",
-        f"{metrics.get('win_rate_pct', 0):.1f}%",
+        f"{_safe.get('win_rate_pct', 0):.1f}%",
     )
     cols[4].metric(
         "交易次数",
-        str(metrics.get('total_trades', 0)),
+        str(_safe.get('total_trades', 0)),
     )
     cols[5].metric(
         "Calmar",
-        f"{metrics.get('calmar_ratio', 0):.3f}",
+        f"{_safe.get('calmar_ratio', 0):.3f}",
     )
 
     cols2 = st.columns(6)
     cols2[0].metric(
         "盈利因子",
-        f"{metrics.get('profit_factor', 0):.2f}",
+        f"{_safe.get('profit_factor', 0):.2f}",
     )
     cols2[1].metric(
         "Sortino",
-        f"{metrics.get('sortino_ratio', 0):.3f}",
+        f"{_safe.get('sortino_ratio', 0):.3f}",
     )
     cols2[2].metric(
         "年化收益",
-        f"{metrics.get('annualized_return_pct', 0):.2f}%",
+        f"{_safe.get('annualized_return_pct', 0):.2f}%",
     )
     cols2[3].metric(
         "年化波动",
-        f"{metrics.get('annualized_volatility_pct', 0):.2f}%",
+        f"{_safe.get('annualized_volatility_pct', 0):.2f}%",
     )
     cols2[4].metric(
         "最大水下天数",
-        str(metrics.get('max_drawdown_duration', 0)),
+        str(_safe.get('max_drawdown_duration', 0)),
     )
     cols2[5].metric(
         "平均交易收益",
-        f"{metrics.get('avg_trade_return_pct', 0):.2f}%",
+        f"{_safe.get('avg_trade_return_pct', 0):.2f}%",
     )
 
 

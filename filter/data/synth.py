@@ -476,7 +476,7 @@ def _build_output_df(db_rows: list, synthesized_bar: _Optional[dict], n_pts: int
     return pd.DataFrame(data, columns=["Date", "Open", "High", "Low", "Close", "Volume"])
 
 
-def _write_parquet(tf: str, df: pd.DataFrame, ticker_code: str = "") -> bool:
+def _write_parquet(tf: str, df: pd.DataFrame, ticker_code: str = "", *, output_dir: str | None = None) -> bool:
     """将 DataFrame 写入时间分区 parquet 文件。
 
     写入 ``data/display/{ticker_code}/{YYYY}/{MM}/{ticker_code}_{tf}.parquet``。
@@ -489,6 +489,9 @@ def _write_parquet(tf: str, df: pd.DataFrame, ticker_code: str = "") -> bool:
         要写入的 DataFrame 数据。
     ticker_code : str
         股票代码，用于隔离不同 ticker 的显示缓存文件。
+    output_dir : str | None
+        测试用可选参数。指定输出根目录，替代 ``__file__`` 推导的路径。
+        生产代码不应传递此参数。
 
     Returns
     -------
@@ -496,13 +499,26 @@ def _write_parquet(tf: str, df: pd.DataFrame, ticker_code: str = "") -> bool:
         写入成功返回 True，失败返回 False。
     """
     try:
-        display_root = Path(__file__).parent.parent.parent / "data" / "display"
+        if output_dir is not None:
+            display_root = Path(output_dir) / "data" / "display"
+        else:
+            display_root = Path(__file__).parent.parent.parent / "data" / "display"
         now = datetime.now()
         parquet_path = (
             display_root / ticker_code / f"{now.year:04d}" / f"{now.month:02d}"
             / f"{ticker_code}_{tf}.parquet"
         )
         parquet_path.parent.mkdir(parents=True, exist_ok=True)
+        # Normalise Date column to tz-naive strings so pd.to_datetime can parse
+        # consistently on read (mixed tz-aware / naive rows break format inference).
+        if "Date" in df.columns and len(df) > 0:
+            try:
+                df = df.copy()
+                df["Date"] = df["Date"].astype(str).str.replace(
+                    r"[+-]\d{2}:\d{2}$", "", regex=True
+                ).str.rstrip("Z")
+            except Exception:
+                pass
         df.to_parquet(parquet_path, index=False)
         # Inline version save (avoid circular import from data.loader)
         try:
