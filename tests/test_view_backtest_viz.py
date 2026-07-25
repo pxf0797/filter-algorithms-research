@@ -429,3 +429,92 @@ class TestPanel8DataTable:
         for col_name in stats["column_names"]:
             assert col_name in columns
             assert len(columns[col_name]) == 3
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Edge Cases: load_parquet / serialize_value / df_to_columns
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestLoadParquetEdgeCases:
+    """load_parquet 边缘情况：文件不存在、损坏的parquet."""
+
+    def test_nonexistent_file_raises(self):
+        """不存在的文件应抛出 FileNotFoundError."""
+        with pytest.raises(FileNotFoundError):
+            load_parquet("/nonexistent/path/foo.parquet")
+
+    def test_corrupt_file_raises(self, tmp_path):
+        """损坏的 parquet 文件应抛出异常（非静默失败）."""
+        bad_path = tmp_path / "bad.parquet"
+        bad_path.write_text("this is not a valid parquet file")
+        with pytest.raises(Exception):
+            load_parquet(str(bad_path))
+
+
+class TestSerializeValueDatetime:
+    """serialize_value 处理 Python datetime.datetime（非 pd.Timestamp）."""
+
+    def test_python_datetime_returns_iso_string(self):
+        """Python datetime.datetime 应被 str() 转换，不抛异常."""
+        from datetime import datetime
+        dt = datetime(2026, 7, 25, 14, 30, 0)
+        result = serialize_value(dt)
+        # Python datetime 不匹配 isinstance(v, (pd.Timestamp,))，走 str(v) fallback
+        assert isinstance(result, str)
+
+    def test_python_date_returns_string(self):
+        """Python datetime.date 应被 str() 转换."""
+        from datetime import date
+        d = date(2026, 12, 31)
+        result = serialize_value(d)
+        assert isinstance(result, str)
+
+
+class TestDfToColumnsAllNaN:
+    """df_to_columns 处理全 NaN / 全 None 列."""
+
+    def test_all_nan_column_serializes_to_none(self):
+        """全 NaN 列的所有值应转为 None."""
+        import numpy as np
+        df = pd.DataFrame({"x": [np.nan, np.nan, np.nan]})
+        columns, stats = df_to_columns(df)
+        assert stats["n_rows"] == 3
+        assert all(v is None for v in columns["x"])
+
+    def test_all_none_column_serializes_to_none(self):
+        """全 None 列保持 None."""
+        df = pd.DataFrame({"x": [None, None, None]})
+        columns, stats = df_to_columns(df)
+        assert all(v is None for v in columns["x"])
+
+    def test_mixed_nan_and_normal_columns(self):
+        """NaN 列不影响同一 DataFrame 中的正常列."""
+        import numpy as np
+        df = pd.DataFrame({
+            "normal": [1, 2, 3],
+            "all_nan": [np.nan, np.nan, np.nan],
+        })
+        columns, stats = df_to_columns(df)
+        assert columns["normal"] == [1, 2, 3]
+        assert all(v is None for v in columns["all_nan"])
+
+
+class TestExtractTickerNameEdgeCases:
+    """extract_ticker_name 异常路径格式."""
+
+    def test_deeply_nested_path(self):
+        """深层嵌套路径仍正确提取 ticker."""
+        name = extract_ticker_name(
+            "/data/output/GOOGL_20260725/backtest_result.parquet"
+        )
+        assert name == "GOOGL"
+
+    def test_no_underscore_in_name(self):
+        """路径中无下划线时返回完整组件名（大写）."""
+        name = extract_ticker_name("TSLA/backtest_result.parquet")
+        assert name == "TSLA"
+
+    def test_multiple_underscores(self):
+        """多个下划线时仅取第一个 _ 前部分."""
+        name = extract_ticker_name("AAPL_US_20260101/result.parquet")
+        assert name == "AAPL"

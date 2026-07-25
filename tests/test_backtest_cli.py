@@ -272,3 +272,287 @@ class TestCLISmoke:
             parquet_files = list(output_dir.rglob("*.parquet"))
             csv_files = list(output_dir.rglob("*.csv"))
             # 生产输出文件是可选的（取决于数据是否存在），不做强制断言
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 配置加载函数单元测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestLoadConfigsFromFile:
+    """_load_configs_from_file — 文件不存在、无效JSON、有效文件等场景."""
+
+    def test_nonexistent_file_exits(self):
+        """不存在的文件引发 SystemExit(1)."""
+        from filter.backtest.cli import _load_configs_from_file
+        with pytest.raises(SystemExit) as exc:
+            _load_configs_from_file("/nonexistent/path/config.json")
+        assert exc.value.code == 1
+
+    def test_invalid_json_exits(self, tmp_path):
+        """无效 JSON 文件引发 SystemExit(1)."""
+        from filter.backtest.cli import _load_configs_from_file
+        bad_json = tmp_path / "bad.json"
+        bad_json.write_text("not valid json {{{")
+        with pytest.raises(SystemExit) as exc:
+            _load_configs_from_file(str(bad_json))
+        assert exc.value.code == 1
+
+    def test_valid_configs_dict(self, tmp_path):
+        """有效 JSON (含 configs 列表) 正确返回."""
+        from filter.backtest.cli import _load_configs_from_file
+        import json
+        cfg = tmp_path / "cfg.json"
+        cfg.write_text(json.dumps({
+            "configs": [
+                {"tf": "日线", "n_pts": 120, "_fid": "sma"},
+            ],
+        }))
+        result = _load_configs_from_file(str(cfg))
+        assert isinstance(result, list)
+        assert len(result) == 1
+        assert result[0]["tf"] == "日线"
+
+    def test_valid_view_configs_dict(self, tmp_path):
+        """有效 JSON (含 view_configs 列表) 正确返回."""
+        from filter.backtest.cli import _load_configs_from_file
+        import json
+        cfg = tmp_path / "cfg.json"
+        cfg.write_text(json.dumps({
+            "view_configs": [
+                {"tf": "60分钟", "n_pts": 200, "_fid": "savgol"},
+            ],
+        }))
+        result = _load_configs_from_file(str(cfg))
+        assert len(result) == 1
+        assert result[0]["tf"] == "60分钟"
+
+    def test_non_list_configs_exits(self, tmp_path):
+        """configs 值不是 list 时引发 SystemExit(1)."""
+        from filter.backtest.cli import _load_configs_from_file
+        import json
+        cfg = tmp_path / "cfg.json"
+        cfg.write_text(json.dumps({"configs": "not_a_list"}))
+        with pytest.raises(SystemExit) as exc:
+            _load_configs_from_file(str(cfg))
+        assert exc.value.code == 1
+
+    def test_preset_params_format(self, tmp_path):
+        """平铺预设参数字典格式（无 configs 键）自动转换."""
+        from filter.backtest.cli import _load_configs_from_file
+        import json
+        cfg = tmp_path / "cfg.json"
+        cfg.write_text(json.dumps({
+            "global_f": "sma",
+            "global_dual": False,
+            "v0_tf": "日线", "v0_n": 120,
+            "v1_tf": "60分钟", "v1_n": 200,
+            "v2_tf": "15分钟", "v2_n": 300,
+            "v3_tf": "5分钟", "v3_n": 400,
+        }))
+        result = _load_configs_from_file(str(cfg))
+        assert isinstance(result, list)
+        assert len(result) == 4
+        # v0 should be the coarsest (日线)
+        assert result[0]["tf"] == "日线"
+
+
+class TestGetMinWindowSize:
+    """_get_min_window_size — 空 configs 回退到 120."""
+
+    def test_empty_configs(self):
+        from filter.backtest.cli import _get_min_window_size
+        assert _get_min_window_size([]) == 120
+
+    def test_normal_configs(self):
+        from filter.backtest.cli import _get_min_window_size
+        configs = [
+            {"tf": "日线", "n_pts": 120},
+            {"tf": "60分钟", "n_pts": 50},
+            {"tf": "15分钟", "n_pts": 200},
+        ]
+        assert _get_min_window_size(configs) == 50
+
+    def test_missing_n_pts(self):
+        """某 config 缺少 n_pts 时使用默认 120."""
+        from filter.backtest.cli import _get_min_window_size
+        configs = [
+            {"tf": "日线"},
+            {"tf": "60分钟", "n_pts": 50},
+        ]
+        assert _get_min_window_size(configs) == 50
+
+
+class TestGetMinTf:
+    """_get_min_tf — 从 configs 中找到最精细周期."""
+
+    def test_empty_configs(self):
+        from filter.backtest.cli import _get_min_tf
+        assert _get_min_tf([]) == ""
+
+    def test_normal_configs(self):
+        from filter.backtest.cli import _get_min_tf
+        configs = [
+            {"tf": "日线", "n_pts": 120},
+            {"tf": "15分钟", "n_pts": 200},
+            {"tf": "60分钟", "n_pts": 100},
+        ]
+        assert _get_min_tf(configs) == "15分钟"
+
+    def test_unknown_tf_ignored(self):
+        """未知周期名称被忽略，不影响其他周期."""
+        from filter.backtest.cli import _get_min_tf
+        configs = [
+            {"tf": "日线"},
+            {"tf": "non-existent"},
+            {"tf": "60分钟"},
+        ]
+        assert _get_min_tf(configs) == "60分钟"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# main() 边界条件测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestMainBoundary:
+    """main() — 无效参数导致 SystemExit 的场景."""
+
+    def test_invalid_preset_name_exits(self):
+        """--preset 指定不存在的预设名时退出."""
+        with patch("filter.backtest.cli.has_data", return_value=True), \
+             patch("filter.backtest.cli.list_presets", return_value=[
+                 {"name": "valid_preset_1", "preset_id": 1},
+             ]), \
+             patch.object(sys, "argv",
+                          ["backtest_cli.py", "--ticker", "AAPL",
+                           "--preset", "nonexistent_preset", "--quiet"]):
+            from filter.backtest.cli import main
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 1
+
+    def test_nonexistent_config_file_exits(self):
+        """--config-file 指向不存在的文件时退出."""
+        with patch("filter.backtest.cli.has_data", return_value=True), \
+             patch.object(sys, "argv",
+                          ["backtest_cli.py", "--ticker", "AAPL",
+                           "--config-file", "/nonexistent/cfg.json", "--quiet"]):
+            from filter.backtest.cli import main
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 1
+
+    def test_negative_start_bar_exits(self):
+        """--start-bar 负数导致退出."""
+        with patch("filter.backtest.cli.has_data", return_value=True), \
+             patch("filter.backtest.cli._get_total_bars", return_value=500), \
+             patch("filter.backtest.cli.BacktestRunner"), \
+             patch("filter.backtest.cli.EventRecorder"), \
+             patch("filter.backtest.cli.ParquetStore"), \
+             patch.object(sys, "argv",
+                          ["backtest_cli.py", "--ticker", "AAPL",
+                           "--start-bar", "-5", "--end-bar", "100", "--quiet"]):
+            from filter.backtest.cli import main
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 1
+
+    def test_start_equals_end_exits(self):
+        """start_bar == end_bar 导致退出."""
+        with patch("filter.backtest.cli.has_data", return_value=True), \
+             patch("filter.backtest.cli._get_total_bars", return_value=500), \
+             patch("filter.backtest.cli.BacktestRunner"), \
+             patch("filter.backtest.cli.EventRecorder"), \
+             patch("filter.backtest.cli.ParquetStore"), \
+             patch.object(sys, "argv",
+                          ["backtest_cli.py", "--ticker", "AAPL",
+                           "--start-bar", "100", "--end-bar", "100", "--quiet"]):
+            from filter.backtest.cli import main
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 1
+
+    def test_start_greater_than_end_exits(self):
+        """start_bar > end_bar 导致退出."""
+        with patch("filter.backtest.cli.has_data", return_value=True), \
+             patch("filter.backtest.cli._get_total_bars", return_value=500), \
+             patch("filter.backtest.cli.BacktestRunner"), \
+             patch("filter.backtest.cli.EventRecorder"), \
+             patch("filter.backtest.cli.ParquetStore"), \
+             patch.object(sys, "argv",
+                          ["backtest_cli.py", "--ticker", "AAPL",
+                           "--start-bar", "200", "--end-bar", "100", "--quiet"]):
+            from filter.backtest.cli import main
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 1
+
+    def test_end_bar_exceeds_total_exits(self):
+        """end_bar 超出总数导致退出."""
+        with patch("filter.backtest.cli.has_data", return_value=True), \
+             patch("filter.backtest.cli._get_total_bars", return_value=100), \
+             patch("filter.backtest.cli.BacktestRunner"), \
+             patch("filter.backtest.cli.EventRecorder"), \
+             patch("filter.backtest.cli.ParquetStore"), \
+             patch.object(sys, "argv",
+                          ["backtest_cli.py", "--ticker", "AAPL",
+                           "--start-bar", "50", "--end-bar", "200", "--quiet"]):
+            from filter.backtest.cli import main
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 1
+
+    def test_checkpoint_interval_negative_behaves_like_zero(self):
+        """负数 checkpoint-interval 等同于 0（禁用自动保存）."""
+        mock_runner = MagicMock()
+        mock_runner.run.return_value = []
+        with patch("filter.backtest.cli.has_data", return_value=True), \
+             patch("filter.backtest.cli._get_total_bars", return_value=500), \
+             patch("filter.backtest.cli.Path.mkdir"), \
+             patch("filter.backtest.cli.BacktestRunner",
+                   return_value=mock_runner), \
+             patch("filter.backtest.cli.EventRecorder"), \
+             patch("filter.backtest.cli.ParquetStore"), \
+             patch.object(sys, "argv",
+                          ["backtest_cli.py", "--ticker", "AAPL",
+                           "--checkpoint-interval", "-1", "--quiet"]):
+            from filter.backtest.cli import main
+            main()
+        # checkpoint_path should be None because -1 > 0 is False
+        call_kwargs = mock_runner.run.call_args[1]
+        assert call_kwargs["checkpoint_path"] is None
+
+    def test_no_data_ticker_exits(self):
+        """ticker 无数据时退出."""
+        with patch("filter.backtest.cli.has_data", return_value=False), \
+             patch.object(sys, "argv",
+                          ["backtest_cli.py", "--ticker", "FAKETICKER", "--quiet"]):
+            from filter.backtest.cli import main
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 1
+
+    def test_zero_total_bars_exits(self):
+        """数据存在但 count 为 0 时退出."""
+        with patch("filter.backtest.cli.has_data", return_value=True), \
+             patch("filter.backtest.cli._get_total_bars", return_value=0), \
+             patch.object(sys, "argv",
+                          ["backtest_cli.py", "--ticker", "AAPL", "--quiet"]):
+            from filter.backtest.cli import main
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 1
+
+    def test_invalid_view_filter_exits(self):
+        """--view-filter 指定不存在的视图时退出."""
+        with patch("filter.backtest.cli.has_data", return_value=True), \
+             patch("filter.backtest.cli._get_total_bars", return_value=500), \
+             patch("filter.backtest.cli.BacktestRunner"), \
+             patch("filter.backtest.cli.EventRecorder"), \
+             patch("filter.backtest.cli.ParquetStore"), \
+             patch.object(sys, "argv",
+                          ["backtest_cli.py", "--ticker", "AAPL",
+                           "--view-filter", "v9_nonexistent", "--quiet"]):
+            from filter.backtest.cli import main
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 1

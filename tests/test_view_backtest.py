@@ -486,3 +486,71 @@ class TestImport:
         view_path = Path(__file__).resolve().parent.parent / "tools" / "view_backtest.py"
         spec = importlib.util.spec_from_file_location("view_backtest", str(view_path))
         assert spec is not None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Parquet 加载边缘情况
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestLoadParquetEdgeCases:
+    """load_parquet 边缘情况."""
+
+    def test_empty_parquet_with_columns(self, tmp_path):
+        """空行但有列定义的 Parquet 正常加载。"""
+        parquet_path = tmp_path / "empty.parquet"
+        df = pd.DataFrame({"a": pd.Series([], dtype=float)})
+        df.to_parquet(parquet_path)
+
+        columns, stats = view_backtest.load_parquet(str(parquet_path))
+        assert stats["n_rows"] == 0
+        assert stats["n_cols"] == 1
+        assert stats["column_names"] == ["a"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 多 Ticker 边缘情况
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestLoadMultiParquetEdgeCases:
+    """load_multi_parquet 边缘情况."""
+
+    def test_empty_file_list(self):
+        """空文件列表应返回空 tickers 列表。"""
+        result = view_backtest.load_multi_parquet([])
+        assert result["is_multiticker"] is False
+        assert result["tickers"] == []
+        assert result["data"] == {}
+
+    def test_invalid_path_gracefully_skipped(self, tmp_path):
+        """列表中包含无效路径时被静默跳过，不影响有效路径的加载。"""
+        valid = tmp_path / "valid.parquet"
+        pd.DataFrame({"v0_pnl_long": [100.0]}).to_parquet(valid)
+        invalid = tmp_path / "nonexistent.parquet"
+
+        # load_multi_parquet 内部 try/except 跳过无效路径
+        # is_multiticker 在函数入口就设为 len(paths) > 1，不受 skip 影响
+        result = view_backtest.load_multi_parquet([str(valid), str(invalid)])
+        assert len(result["tickers"]) == 1
+        assert result["data"] != {}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HTML 模板存在性
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestHtmlTemplate:
+    """HTML_TEMPLATE 路径验证."""
+
+    def test_template_file_exists(self):
+        """HTML 模板文件存在且可读。"""
+        template = view_backtest.HTML_TEMPLATE
+        assert template.exists(), f"HTML 模板不存在: {template}"
+        content = template.read_text(encoding="utf-8")
+        assert len(content) > 0
+
+    def test_template_contains_key_placeholders(self):
+        """HTML 模板包含关键占位符。"""
+        template = view_backtest.HTML_TEMPLATE
+        content = template.read_text(encoding="utf-8")
+        # 模板应包含 Parquet 数据嵌入占位符
+        assert "__PARQUET_DATA__" in content or "parquet" in content.lower()

@@ -151,9 +151,9 @@ class TestFetchStock:
     def test_ticker_construction(self, market, code, expected_full):
         """验证不同市场下 ticker 拼接逻辑."""
         mock_df = _mock_ohlc_df(days=10)
-        with patch("data.fetcher.yf.download", return_value=mock_df), \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+        with patch("filter.data.fetcher.yf.download", return_value=mock_df), \
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(mock_df)):
             from data.loader import _fetch_stock
             t, close, ohlc, full, err, dates = _fetch_stock(market, code, "日线", 10)
@@ -162,7 +162,7 @@ class TestFetchStock:
 
     def test_yfinance_empty_data(self):
         """yfinance 返回空 DataFrame 时返回 无数据."""
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=pd.DataFrame()):
             from data.loader import _fetch_stock
             _, _, _, full, err, _ = _fetch_stock("美股 US", "AAPL", "日线", 10)
@@ -171,10 +171,10 @@ class TestFetchStock:
     def test_multiindex_columns_flattened(self):
         """MultiIndex columns 被正确 flatten."""
         mock_df = _mock_multiindex_ohlc(days=10)
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=mock_df), \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(mock_df)):
             from data.loader import _fetch_stock
             _, _, ohlc, _, err, _ = _fetch_stock("美股 US", "AAPL", "日线", 10)
@@ -188,10 +188,10 @@ class TestFetchStock:
         df.iloc[-1, df.columns.get_loc("Close")] = np.nan
         weekly_df = _mock_weekly_close_df(value=105.0)
 
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    side_effect=[df, weekly_df]), \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(df.dropna(subset=["Close"]))):
             from data.loader import _fetch_stock
             _, close, _, _, err, _ = _fetch_stock("美股 US", "AAPL", "日线", 10)
@@ -203,10 +203,10 @@ class TestFetchStock:
         df.iloc[-1, df.columns.get_loc("Close")] = np.nan
         weekly_df = _mock_multiindex_ohlc(days=3)
 
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    side_effect=[df, weekly_df]), \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(df.dropna(subset=["Close"]))):
             from data.loader import _fetch_stock
             _, close, _, _, err, _ = _fetch_stock("美股 US", "AAPL", "日线", 10)
@@ -218,10 +218,10 @@ class TestFetchStock:
         df.iloc[-1, df.columns.get_loc("Close")] = np.nan
         empty_weekly = pd.DataFrame()
 
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    side_effect=[df, empty_weekly]), \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(df.dropna(subset=["Close"]))):
             from data.loader import _fetch_stock
             _, close, _, _, err, _ = _fetch_stock("美股 US", "AAPL", "日线", 10)
@@ -237,10 +237,10 @@ class TestFetchStock:
                 raise ValueError("API error")
             return df
 
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    side_effect=yf_side_effect), \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(df.dropna(subset=["Close"]))):
             from data.loader import _fetch_stock
             _, close, _, _, err, _ = _fetch_stock("美股 US", "AAPL", "日线", 10)
@@ -254,10 +254,10 @@ class TestFetchStock:
     def test_all_timeframes(self, tf, expected_interval):
         """验证所有周期对应的 interval 参数传递正确."""
         mock_df = _mock_ohlc_df(days=10)
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=mock_df) as mock_dl, \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(mock_df)):
             from data.loader import _fetch_stock
             _, _, _, _, err, _ = _fetch_stock("美股 US", "AAPL", tf, 10)
@@ -291,10 +291,10 @@ class TestFetchStock:
     def test_period_calculation(self, tf, n_pts, expected_period):
         """验证周期的 period 自动计算逻辑覆盖所有分支."""
         mock_df = _mock_ohlc_df(days=max(n_pts, 10))
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=mock_df) as mock_dl, \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(mock_df)):
             from data.loader import _fetch_stock
             _, _, _, _, err, _ = _fetch_stock("美股 US", "AAPL", tf, n_pts)
@@ -306,11 +306,11 @@ class TestFetchStock:
     def test_db_upsert_failure(self):
         """upsert_kline 抛出异常不阻碍流程，继续查询."""
         mock_df = _mock_ohlc_df(days=10)
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=mock_df), \
-             patch("data.fetcher.upsert_kline",
+             patch("filter.data.fetcher.upsert_kline",
                    side_effect=RuntimeError("DB locked")), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(mock_df)):
             from data.loader import _fetch_stock
             _, _, _, _, err, _ = _fetch_stock("美股 US", "AAPL", "日线", 10)
@@ -320,10 +320,10 @@ class TestFetchStock:
     def test_query_returns_empty_after_upsert(self):
         """upsert 成功但 query_kline 返回空 = 写入成功但查询失败."""
         mock_df = _mock_ohlc_df(days=10)
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=mock_df), \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=pd.DataFrame()):
             from data.loader import _fetch_stock
             _, _, _, _, err, _ = _fetch_stock("美股 US", "AAPL", "日线", 10)
@@ -332,10 +332,10 @@ class TestFetchStock:
     def test_force_period_argument(self):
         """force_period 参数覆盖自动 period 计算."""
         mock_df = _mock_ohlc_df(days=10)
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=mock_df) as mock_dl, \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(mock_df)):
             from data.loader import _fetch_stock
             _, _, _, _, err, _ = _fetch_stock("美股 US", "AAPL", "日线", 10,
@@ -346,7 +346,7 @@ class TestFetchStock:
 
     def test_yfinance_exception(self):
         """yfinance 本身抛出异常时冒泡."""
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    side_effect=ConnectionError("network error")):
             from data.loader import _fetch_stock
             with pytest.raises(ConnectionError):
@@ -355,10 +355,10 @@ class TestFetchStock:
     def test_hk_ticker(self):
         """港股 ticker 拼接."""
         mock_df = _mock_ohlc_df(days=5)
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=mock_df), \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(mock_df)):
             from data.loader import _fetch_stock
             _, _, _, full, err, _ = _fetch_stock("港股 HK", "700", "60分钟", 100)
@@ -368,10 +368,10 @@ class TestFetchStock:
     def test_non_daily_interval_no_weekly_fallback(self):
         """非日线周期不走周线回填逻辑."""
         mock_df = _mock_ohlc_df(days=100)
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=mock_df) as mock_dl, \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(mock_df)):
             from data.loader import _fetch_stock
             _, _, _, _, err, _ = _fetch_stock("美股 US", "AAPL", "周线", 10)
@@ -433,7 +433,7 @@ class TestFetchAllTimeframes:
     def test_all_timeframes_success(self):
         """所有8个周期全部成功."""
         mock_df = _mock_ohlc_df(days=50)
-        with patch("data.fetcher._fetch_stock",
+        with patch("filter.data.fetcher._fetch_stock",
                    return_value=(
                        np.arange(50, dtype=float),
                        mock_df["Close"].values,
@@ -459,7 +459,7 @@ class TestFetchAllTimeframes:
             return (np.arange(50, dtype=float), mock_df["Close"].values,
                     mock_df, "AAPL", None, pd.to_datetime(mock_df.index))
 
-        with patch("data.fetcher._fetch_stock",
+        with patch("filter.data.fetcher._fetch_stock",
                    side_effect=mock_fetch):
             from data.loader import _fetch_all_timeframes
             results = _fetch_all_timeframes("美股 US", "AAPL")
@@ -471,7 +471,7 @@ class TestFetchAllTimeframes:
         def mock_fetch(market, code, tf, n_pts, force_period=None):
             raise ValueError("unexpected error")
 
-        with patch("data.fetcher._fetch_stock",
+        with patch("filter.data.fetcher._fetch_stock",
                    side_effect=mock_fetch):
             from data.loader import _fetch_all_timeframes
             results = _fetch_all_timeframes("美股 US", "AAPL")
@@ -809,7 +809,7 @@ class TestIncrementalFetch:
     def test_fetch_incremental_delegates_to_fetch_stock(self):
         """fetch_incremental 正确委托到 _fetch_stock(incremental=True)。"""
         mock_df = _mock_ohlc_df(days=30)
-        with patch("data.fetcher._fetch_stock") as mock_fetch:
+        with patch("filter.data.fetcher._fetch_stock") as mock_fetch:
             mock_fetch.return_value = (
                 np.arange(30, dtype=float),
                 mock_df["Close"].values,
@@ -829,12 +829,12 @@ class TestIncrementalFetch:
     def test_fetch_stock_incremental_no_db_data_falls_back_to_period(self):
         """DB无数据时 incremental 回退到 period 全量拉取。"""
         mock_df = _mock_ohlc_df(days=20)
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=mock_df) as mock_dl, \
-             patch("data.fetcher.get_latest_date",
+             patch("filter.data.fetcher.get_latest_date",
                    return_value=None), \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(mock_df)):
             from data.loader import _fetch_stock
             _, _, _, _, err, _ = _fetch_stock(
@@ -848,12 +848,12 @@ class TestIncrementalFetch:
     def test_fetch_stock_incremental_with_db_data_uses_start(self):
         """DB有数据时 incremental 模式使用 start= 参数。"""
         mock_df = _mock_ohlc_df(days=10)
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=mock_df) as mock_dl, \
-             patch("data.fetcher.get_latest_date",
+             patch("filter.data.fetcher.get_latest_date",
                    return_value="2024-01-15"), \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(mock_df)):
             from data.loader import _fetch_stock
             _, _, _, _, err, _ = _fetch_stock(
@@ -868,10 +868,10 @@ class TestIncrementalFetch:
     def test_fetch_stock_non_incremental_uses_period(self):
         """incremental=False（默认）时正常使用 period 参数。"""
         mock_df = _mock_ohlc_df(days=20)
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=mock_df) as mock_dl, \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(mock_df)):
             from data.loader import _fetch_stock
             _, _, _, _, err, _ = _fetch_stock(
@@ -885,12 +885,12 @@ class TestIncrementalFetch:
     def test_incremental_with_timezone_timestamp(self):
         """DB中时间戳带时区时 last_date[:10] 仍正确提取日期部分。"""
         mock_df = _mock_ohlc_df(days=5)
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=mock_df) as mock_dl, \
-             patch("data.fetcher.get_latest_date",
+             patch("filter.data.fetcher.get_latest_date",
                    return_value="2024-06-15T14:30:00+08:00"), \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(mock_df)):
             from data.loader import _fetch_stock
             _, _, _, _, err, _ = _fetch_stock(
@@ -903,12 +903,12 @@ class TestIncrementalFetch:
     def test_incremental_hk_ticker(self):
         """港股 ticker 增量拉取正确工作。"""
         mock_df = _mock_ohlc_df(days=15)
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=mock_df) as mock_dl, \
-             patch("data.fetcher.get_latest_date",
+             patch("filter.data.fetcher.get_latest_date",
                    return_value="2024-03-10"), \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(mock_df)):
             from data.loader import _fetch_stock
             _, _, _, _, err, _ = _fetch_stock(
@@ -921,12 +921,12 @@ class TestIncrementalFetch:
     def test_incremental_force_period_overrides(self):
         """incremental 模式下 force_period 仍遵循，不影响 start 逻辑。"""
         mock_df = _mock_ohlc_df(days=10)
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=mock_df) as mock_dl, \
-             patch("data.fetcher.get_latest_date",
+             patch("filter.data.fetcher.get_latest_date",
                    return_value="2024-01-01"), \
-             patch("data.fetcher.upsert_kline"), \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(mock_df)):
             from data.loader import _fetch_stock
             _, _, _, _, err, _ = _fetch_stock(
@@ -941,12 +941,12 @@ class TestIncrementalFetch:
     def test_upsert_called_after_incremental_fetch(self):
         """增量拉取后仍调用 upsert_kline 写入 DB。"""
         mock_df = _mock_ohlc_df(days=10)
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=mock_df), \
-             patch("data.fetcher.get_latest_date",
+             patch("filter.data.fetcher.get_latest_date",
                    return_value="2024-01-01"), \
-             patch("data.fetcher.upsert_kline") as mock_upsert, \
-             patch("data.fetcher.query_kline",
+             patch("filter.data.fetcher.upsert_kline") as mock_upsert, \
+             patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(mock_df)):
             from data.loader import _fetch_stock
             _, _, _, _, err, _ = _fetch_stock(
@@ -957,15 +957,191 @@ class TestIncrementalFetch:
 
     def test_incremental_empty_download_returns_no_data(self):
         """增量拉取时 yfinance 返回空数据（如周末/节假日）返回无数据错误。"""
-        with patch("data.fetcher.yf.download",
+        with patch("filter.data.fetcher.yf.download",
                    return_value=pd.DataFrame()), \
-             patch("data.fetcher.get_latest_date",
+             patch("filter.data.fetcher.get_latest_date",
                    return_value="2024-01-15"):
             from data.loader import _fetch_stock
             _, _, _, full, err, _ = _fetch_stock(
                 "美股 US", "AAPL", "日线", 10, incremental=True,
             )
             assert err and "无数据" in err
+
+
+# ---------------------------------------------------------------------------
+# _fetch_stock edge cases
+# ---------------------------------------------------------------------------
+
+class TestFetchStockEdgeCases:
+    """_fetch_stock — 未知周期、未知市场、DB异常等边界条件."""
+
+    def test_unknown_timeframe_raises_key_error(self):
+        """未知周期名称引发 KeyError."""
+        from data.loader import _fetch_stock
+        mock_df = _mock_ohlc_df(days=10)
+        # An unknown timeframe won't be in tf_map, causing KeyError
+        with patch("filter.data.fetcher.yf.download", return_value=mock_df), \
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
+                   return_value=_query_result(mock_df)):
+            with pytest.raises(KeyError):
+                _fetch_stock("美股 US", "AAPL", "未知周期", 10)
+
+    def test_unknown_market_no_suffix(self):
+        """未知市场不添加后缀，直接使用原始code大写."""
+        mock_df = _mock_ohlc_df(days=5)
+        with patch("filter.data.fetcher.yf.download",
+                   return_value=mock_df) as mock_dl, \
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
+                   return_value=_query_result(mock_df)):
+            from data.loader import _fetch_stock
+            _, _, _, full, err, _ = _fetch_stock("未知市场", "SomeCode", "日线", 5)
+            assert err is None
+            assert full == "SOMECODE"
+
+    def test_yfinance_download_network_error(self):
+        """yfinance 网络错误冒泡为异常."""
+        with patch("filter.data.fetcher.yf.download",
+                   side_effect=ConnectionError("network timeout")):
+            from data.loader import _fetch_stock
+            with pytest.raises(ConnectionError, match="network timeout"):
+                _fetch_stock("美股 US", "AAPL", "日线", 10)
+
+    def test_hk_code_zero_zfilled(self):
+        """港股 3 位代码自动补零到 4 位."""
+        mock_df = _mock_ohlc_df(days=5)
+        with patch("filter.data.fetcher.yf.download",
+                   return_value=mock_df), \
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
+                   return_value=_query_result(mock_df)):
+            from data.loader import _fetch_stock
+            _, _, _, full, err, _ = _fetch_stock("港股 HK", "5", "日线", 5)
+            assert err is None
+            assert full == "0005.HK"
+
+    def test_a_share_shanghai_prefix(self):
+        """A股 600开头 → .SS."""
+        mock_df = _mock_ohlc_df(days=5)
+        with patch("filter.data.fetcher.yf.download",
+                   return_value=mock_df), \
+             patch("filter.data.fetcher.upsert_kline"), \
+             patch("filter.data.fetcher.query_kline",
+                   return_value=_query_result(mock_df)):
+            from data.loader import _fetch_stock
+            _, _, _, full, err, _ = _fetch_stock("A股(沪深)", "688001", "日线", 5)
+            assert err is None
+            assert full == "688001.SS"
+
+
+# ---------------------------------------------------------------------------
+# _fetch_all_timeframes edge cases
+# ---------------------------------------------------------------------------
+
+class TestFetchAllTimeframesEdgeCases:
+    """_fetch_all_timeframes — 全部失败等边界条件."""
+
+    def test_all_timeframes_fail(self):
+        """全部 8 个周期均失败."""
+        with patch("filter.data.fetcher._fetch_stock",
+                   return_value=(None, None, None, "AAPL", "全部失败", None)):
+            from data.loader import _fetch_all_timeframes
+            results = _fetch_all_timeframes("美股 US", "AAPL")
+            assert len(results) == 8
+            for tf, (ok, detail) in results.items():
+                assert ok is False
+                assert "全部失败" in str(detail)
+
+
+# ---------------------------------------------------------------------------
+# fetch_incremental edge cases
+# ---------------------------------------------------------------------------
+
+class TestFetchIncrementalEdgeCases:
+    """fetch_incremental — DB 连接异常等边界条件."""
+
+    def test_get_latest_date_raises(self):
+        """get_latest_date 抛出异常时冒泡."""
+        with patch("filter.data.fetcher.get_latest_date",
+                   side_effect=RuntimeError("DB connection lost")):
+            from data.loader import _fetch_stock
+            with pytest.raises(RuntimeError, match="DB connection lost"):
+                _fetch_stock("美股 US", "AAPL", "日线", 10, incremental=True)
+
+    def test_fetch_incremental_passes_through(self):
+        """fetch_incremental 是 _fetch_stock(incremental=True) 的薄包装."""
+        mock_df = _mock_ohlc_df(days=30)
+        with patch("filter.data.fetcher._fetch_stock") as mock_fetch:
+            mock_fetch.return_value = (
+                np.arange(30, dtype=float),
+                mock_df["Close"].values,
+                mock_df, "AAPL", None,
+                pd.to_datetime(mock_df.index),
+            )
+            from data.loader import fetch_incremental
+            result = fetch_incremental("港股 HK", "0700", "60分钟", n_pts=50,
+                                        force_period="1y")
+            assert result[4] is None
+            mock_fetch.assert_called_once_with(
+                "港股 HK", "0700", "60分钟", 50,
+                force_period="1y", incremental=True,
+            )
+
+
+# ---------------------------------------------------------------------------
+# _sync_to_display edge cases
+# ---------------------------------------------------------------------------
+
+class TestSyncToDisplayEdgeCases:
+    """_sync_to_display — cutoff_date 回测模式等边界条件."""
+
+    def test_backtest_mode_with_data(self, tmp_path):
+        """cutoff_date 不为 None 时进入回测模式查询."""
+        df = _mock_ohlc_df(days=20)
+        # Build rows matching the DB query result format
+        rows = [
+            (str(d.date()), o, h, l, c, v)
+            for d, o, h, l, c, v in zip(
+                df.index, df["Open"], df["High"], df["Low"],
+                df["Close"], df["Volume"],
+            )
+        ]
+        from data.loader import _sync_to_display
+        import data.loader as dl
+
+        with patch.object(dl, "get_conn") as mock_get_conn:
+            mock_conn = MagicMock()
+            mock_conn.__enter__.return_value = mock_conn
+            mock_conn.execute.return_value.fetchall.return_value = rows
+            mock_get_conn.return_value = mock_conn
+
+            # Redirect __file__ to tmp_path
+            orig_file = dl.__file__
+            dl.__file__ = str(tmp_path / "filter" / "data" / "loader.py")
+            try:
+                ok, count = _sync_to_display("AAPL", "日线", n_pts=20,
+                                              cutoff_date="2024-01-25")
+                assert ok is True
+                assert count == 20
+            finally:
+                dl.__file__ = orig_file
+
+    def test_backtest_mode_no_rows(self):
+        """回测模式查询无结果时返回 (False, 0)."""
+        from data.loader import _sync_to_display
+        import data.loader as dl
+
+        with patch.object(dl, "get_conn") as mock_get_conn:
+            mock_conn = MagicMock()
+            mock_conn.__enter__.return_value = mock_conn
+            mock_conn.execute.return_value.fetchall.return_value = []
+            mock_get_conn.return_value = mock_conn
+
+            ok, count = _sync_to_display("AAPL", "日线", n_pts=20,
+                                          cutoff_date="2024-01-01")
+            assert ok is False
+            assert count == 0
 
 
 # Smoke tests: module-level import does not crash
@@ -1189,10 +1365,9 @@ class TestParquetPartitioning:
 
         df = _mock_ohlc_df(days=20)
         display_root = tmp_path / "data" / "display"
-        import data.synth as syn
+        import filter.data.synth as syn
 
         # Redirect __file__ so display_root resolves to tmp_path
-        # NOTE: _write_parquet lives in data.synth, not data.loader
         orig_file = syn.__file__
         syn.__file__ = str(tmp_path / "filter" / "data" / "synth.py")
 

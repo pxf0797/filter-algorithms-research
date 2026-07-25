@@ -485,3 +485,185 @@ class TestRenderViewComparison:
         with patch.object(dash_mod, "st") as mock_st:
             _render_view_comparison(df, ["v0", "v1"])
             assert mock_st.plotly_chart.called
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 指标计算边缘情况
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestComputeMetricsEdgeCases:
+    """_compute_metrics_from_pnl 边缘情况."""
+
+    def test_single_bar_data(self):
+        """单行数据：n_bars=1, combined_pnl 长度 < 2 → 返回空指标."""
+        from filter.backtest.dashboard import _compute_metrics_from_pnl
+
+        long_pnl = np.array([100.0])
+        short_pnl = np.array([100.0])
+        df = pd.DataFrame({"v0_sig": [0]})
+
+        result = _compute_metrics_from_pnl(long_pnl, short_pnl, df, "v0", 1)
+        # 单 bar 无法计算收益率差分会触发 _empty_metrics
+        assert result["total_trades"] == 0
+        assert result["total_return_pct"] == 0.0
+        assert result["sharpe_ratio"] == 0.0
+
+    def test_two_bar_data(self):
+        """两行数据：可计算一阶差分但无法计算年化波动率."""
+        from filter.backtest.dashboard import _compute_metrics_from_pnl
+
+        long_pnl = np.array([100.0, 101.0])
+        short_pnl = np.array([100.0, 100.0])
+        df = pd.DataFrame({"v0_sig": [0, 0]})
+
+        result = _compute_metrics_from_pnl(long_pnl, short_pnl, df, "v0", 2)
+        # 可计算收益率，但 returns len=1 且 returns[1:] empty → std 为 0
+        assert "total_return_pct" in result
+        assert "sharpe_ratio" in result
+
+    def test_very_large_pnl_values(self):
+        """非常大的 PnL 值（> 1e9）不导致溢出."""
+        from filter.backtest.dashboard import _compute_metrics_from_pnl
+
+        long_pnl = np.array([1e12, 1.1e12, 1.2e12, 1.3e12, 1.4e12])
+        short_pnl = np.array([1e12, 1e12, 1e12, 1e12, 1e12])
+        df = pd.DataFrame({"v0_sig": [0] * 5})
+
+        result = _compute_metrics_from_pnl(long_pnl, short_pnl, df, "v0", 5)
+        # 不能有 NaN 或 Inf 指标值
+        assert not np.isnan(result["total_return_pct"])
+        assert not np.isinf(result["total_return_pct"])
+        assert result["total_return_pct"] > 0
+
+    def test_very_small_sharpe_scenario(self):
+        """收益率波动极小导致极低 Sharpe 时不出错."""
+        from filter.backtest.dashboard import _compute_metrics_from_pnl
+
+        # PnL 几乎不变 → returns ≈ 0 → std ≈ 0 → sharpe 可能非常大（正或负）
+        long_pnl = np.array([100.0, 100.0001, 100.0002, 100.0003, 100.0004])
+        short_pnl = np.array([100.0, 100.0, 100.0, 100.0, 100.0])
+        df = pd.DataFrame({"v0_sig": [0] * 5})
+
+        result = _compute_metrics_from_pnl(long_pnl, short_pnl, df, "v0", 5)
+        # Sharpe 应为有限数（公式: (annual_return - 0.03) / annual_vol）
+        # 当 annual_vol 极小时，Sharpe 可能极大正负值，但必须是有限值
+        assert not np.isnan(result["sharpe_ratio"])
+        assert not np.isinf(result["sharpe_ratio"])
+
+    def test_empty_arrays(self):
+        """空数组应由 _empty_metrics 安全返回."""
+        from filter.backtest.dashboard import _compute_metrics_from_pnl
+
+        long_pnl = np.array([])
+        short_pnl = np.array([])
+        df = pd.DataFrame()
+
+        result = _compute_metrics_from_pnl(long_pnl, short_pnl, df, "v0", 0)
+        assert result["total_trades"] == 0
+        assert result["total_return_pct"] == 0.0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# KPI 卡片 NaN 值处理
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestKpiCardsWithNaNValues:
+    """_render_kpi_cards 处理含 NaN 的 metrics dict."""
+
+    def test_nan_values_get_defaulted(self):
+        """NaN/Inf 指标值被预处理为 0，防止 f-string 格式化崩溃。
+
+        ``_render_kpi_cards`` 在格式化前将所有 float NaN/Inf 替换为 0，
+        因此即使 metrics 包含 NaN，传给 ``st.metric()`` 的始终是合法数值。
+        """
+        from filter.backtest.dashboard import _render_kpi_cards
+        import filter.backtest.dashboard as dash_mod
+
+        metrics = {
+            "total_return_pct": float("nan"),
+            "sharpe_ratio": float("inf"),
+            "max_drawdown_pct": float("-inf"),
+            "win_rate_pct": float("nan"),
+            "total_trades": float("nan"),
+            "calmar_ratio": float("nan"),
+            "profit_factor": float("nan"),
+            "sortino_ratio": float("nan"),
+            "annualized_return_pct": float("nan"),
+            "annualized_volatility_pct": float("nan"),
+            "max_drawdown_duration": float("nan"),
+            "avg_trade_return_pct": float("nan"),
+        }
+
+        with patch.object(dash_mod, "st") as mock_st:
+            mock_col = MagicMock()
+            mock_st.columns.return_value = [mock_col] * 6
+            _render_kpi_cards(metrics)
+            # 12 个 metric 调用全部完成，未因 NaN/Inf 触发 ValueError
+            assert mock_col.metric.call_count == 12
+            # 验证传入 metric 的值已被 sanitized（不含 NaN/Inf）
+            for call_args in mock_col.metric.call_args_list:
+                value_arg = call_args[0][1]  # 第二个位置参数是值
+                assert "nan" not in str(value_arg).lower()
+                assert "inf" not in str(value_arg).lower()
+
+    def test_mixed_nan_and_valid(self):
+        """部分 NaN 部分有效值混合 — 有效值保留，NaN 被替换为 0."""
+        from filter.backtest.dashboard import _render_kpi_cards
+        import filter.backtest.dashboard as dash_mod
+
+        metrics = {
+            "total_return_pct": 15.5,
+            "sharpe_ratio": float("nan"),
+            "max_drawdown_pct": -8.5,
+            "win_rate_pct": 55.0,
+            "total_trades": None,
+            "calmar_ratio": 1.82,
+        }
+
+        with patch.object(dash_mod, "st") as mock_st:
+            mock_col = MagicMock()
+            mock_st.columns.return_value = [mock_col] * 6
+            _render_kpi_cards(metrics)
+            assert mock_col.metric.call_count == 12
+            # 有效数值保留原值格式
+            first_val = mock_col.metric.call_args_list[0][0][1]
+            assert "15.5" in first_val  # valid number preserved
+            # NaN sharpe → 被替换为 0.000
+            sharpe_val = mock_col.metric.call_args_list[1][0][1]
+            assert "0.000" in sharpe_val  # NaN replaced with 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PnL 视图检测边缘情况
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestDetectPnlViewsEdgeCases:
+    """_detect_pnl_views 边缘情况."""
+
+    def test_columns_with_invalid_patterns(self):
+        """非标准列名不影响 PnL 列检测."""
+        from filter.backtest.dashboard import _detect_pnl_views
+
+        df = pd.DataFrame({
+            "v0_pnl_long":  [100.0] * 3,
+            "v0_pnl_short": [100.0] * 3,
+            "random_column": [1, 2, 3],
+            "another_pnl_long": [200.0] * 3,
+        })
+        views = _detect_pnl_views(df)
+        # "another_pnl_long" 不匹配 vN_pnl_* 模式，应被忽略
+        assert views == ["v0"]
+
+    def test_large_view_index(self):
+        """v9, v10 等高索引视图也能被检测."""
+        from filter.backtest.dashboard import _detect_pnl_views
+
+        df = pd.DataFrame({
+            "v9_pnl_long":  [100.0] * 3,
+            "v9_pnl_short": [100.0] * 3,
+            "v10_pnl_long": [100.0] * 3,
+            "v10_pnl_short": [100.0] * 3,
+        })
+        views = _detect_pnl_views(df)
+        assert "v9" in views
+        assert "v10" in views
