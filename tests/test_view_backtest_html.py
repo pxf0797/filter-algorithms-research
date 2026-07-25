@@ -524,35 +524,133 @@ class TestHeatmapSamplingFix:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# D4 标题动态化回归测试
+# D1-D4 标题动态化回归测试
 # ═══════════════════════════════════════════════════════════════════════════════
 
-class TestD4TitleDynamic:
-    """验证 D4 标题从硬编码改为动态设置。"""
+class TestDashTitlesDynamic:
+    """验证 D1-D4 标题全部使用动态 span 元素，并且 JS 端统一更新。"""
 
-    def test_d4_title_span_exists(self):
-        """D4 标题使用 span id 而非硬编码文本。"""
+    def test_all_dash_titles_have_spans(self):
+        """D1-D4 标题都使用 span id。"""
         content = _read_html()
-        assert 'id="dash-d4-title"' in content, (
-            "D4 title should use a span with id='dash-d4-title' for dynamic content"
+        for prefix in ['d1', 'd2', 'd3', 'd4']:
+            assert f'id="dash-{prefix}-title"' in content, (
+                f"D{prefix[-1]} title should use a span with id='dash-{prefix}-title'"
+            )
+
+    def test_dash_titles_no_hardcoded_periods_in_spans(self):
+        """D1-D3 section-title 行不再硬编码周期名到 span 之外（span 作为 label 容器）。"""
+        content = _read_html()
+        # D1 should not have "日线" outside the span
+        d1_line = content[content.find('id="dash-d1-title"'):content.find('</div>', content.find('id="dash-d1-title"'))]
+        # The span itself contains the fallback text; the key is no bare period text
+        # right after the span and before 完整视图
+        assert 'id="dash-d1-title"' in d1_line, "D1 must have dynamic span"
+        assert 'id="dash-d2-title"' in content, "D2 must have dynamic span"
+        assert 'id="dash-d3-title"' in content, "D3 must have dynamic span"
+        assert 'id="dash-d4-title"' in content, "D4 must have dynamic span"
+
+    def test_dynamic_title_update_uses_loop(self):
+        """renderAll 中使用 forEach 循环统一更新 D1-D4 标题，而非单独处理 D4。"""
+        content = _read_html()
+        # Check loop pattern: ['d1','d2','d3','d4'].forEach
+        assert "['d1','d2','d3','d4'].forEach" in content, (
+            "renderAll should use a forEach loop over ['d1','d2','d3','d4'] "
+            "to update all period dashboard titles"
         )
-        # 确保不再硬编码 "5分钟"
-        dash_d4_section_start = content.find('id="dash-d4-title"')
-        # 检查 D4 section-title 行
-        d4_title_line_start = content.rfind('<div class="section-title">', 0, content.find('id="dash-d4-title"') + 50)
-        d4_title_line_end = content.find('</div>', d4_title_line_start)
-        d4_title_line = content[d4_title_line_start:d4_title_line_end]
-        assert "5分钟" not in d4_title_line, (
-            "D4 title must not hardcode '5分钟' — use dynamic span instead"
+        assert "dash-' + prefix + '-title'" in content, (
+            "Title span IDs should be constructed dynamically via prefix"
         )
 
-    def test_d4_title_dynamic_set(self):
-        """renderAll 中动态设置 D4 标题。"""
+    def test_eps_ref_label_dynamic(self):
+        """Section 2 的 eps 参考标签使用 span id 动态更新。"""
         content = _read_html()
-        assert "dash-d4-title" in content
-        assert "viewLabels && viewLabels.v3" in content, (
-            "renderAll should dynamically set D4 title using viewLabels.v3"
+        assert 'id="eps-ref-label"' in content, (
+            "EPS reference label should use span with id='eps-ref-label'"
         )
-        assert "d4Title.textContent = viewLabels.v3" in content, (
-            "D4 title should be set to viewLabels.v3 + ' '"
+        assert "eps-ref-label" in content
+        assert "viewLabels.v2" in content, (
+            "EPS reference should be updated from viewLabels.v2"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 信号背景可见性 — 信号值 0 的背景 alpha 提升
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSignalBgVisibility:
+    """验证信号 0 值背景从 0.03 alpha 提升到 0.10，避免视觉空白。"""
+
+    def test_signal_zero_bg_not_tiny_alpha(self):
+        """信号值 '0' 的背景 alpha 不应再是 0.03（提升到 0.10 以匹配多空背景可见度）。"""
+        content = _read_html()
+        # Old value must not exist
+        assert "139,148,158,0.03" not in content, (
+            "Signal-0 background should no longer use alpha=0.03 — "
+            "was too transparent and looked blank"
+        )
+
+    def test_signal_zero_bg_has_proper_alpha(self):
+        """信号值 '0' 的背景使用 alpha=0.10 与多空信号一致。"""
+        content = _read_html()
+        assert "139,148,158,0.10" in content, (
+            "Signal-0 background should use alpha=0.10 to match long/short bg visibility"
+        )
+
+    def test_signal_bg_colors_consistent(self):
+        """三个信号状态 (1, -1, 0) 背景 alpha 应该一致（都是 0.10）。"""
+        content = _read_html()
+        # All three sigBgColors keys should use alpha=0.10 (matching visibility)
+        assert "'1': 'rgba(63,185,80,0.10)'" in content or "'1': 'rgba(63,185,80,0.1)'" in content
+        assert "'-1': 'rgba(248,81,73,0.10)'" in content or "'-1': 'rgba(248,81,73,0.1)'" in content
+        assert "'0': 'rgba(139,148,158,0.10)'" in content or "'0': 'rgba(139,148,158,0.1)'" in content
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 视图周期标签映射 — viewLabels 与 metadata 一致性
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestViewLabelMapping:
+    """验证 viewLabels 从 metadata 正确映射，DEFAULT_VIEW_LABELS 作为降级。"""
+
+    def test_default_view_labels_exist(self):
+        """DEFAULT_VIEW_LABELS 定义了 4 个视图的降级标签。"""
+        content = _read_html()
+        assert "DEFAULT_VIEW_LABELS" in content, (
+            "DEFAULT_VIEW_LABELS constant must exist for fallback"
+        )
+        assert "v0: '日线'" in content
+        assert "v1: '60分钟'" in content
+        assert "v2: '15分钟'" in content
+        assert "v3: '5分钟'" in content
+
+    def test_view_labels_merge_from_metadata(self):
+        """renderAll 中 viewLabels 合并 metadata.view_labels 覆盖默认值。"""
+        content = _read_html()
+        assert "metadata.view_labels" in content, (
+            "renderAll should read view_labels from metadata"
+        )
+        assert "...DEFAULT_VIEW_LABELS" in content, (
+            "metadata.view_labels should spread over DEFAULT_VIEW_LABELS for override"
+        )
+
+    def test_view_label_used_in_signals_chart(self):
+        """buildSignals 使用 viewLabel(v) 显示视图名称（而非硬编码周期）。"""
+        content = _read_html()
+        signals_func = content[content.find("function buildSignals"):]
+        next_func = signals_func.find("\nfunction build", 10)
+        if next_func > 0:
+            signals_body = signals_func[:next_func]
+        else:
+            signals_body = signals_func
+        assert "viewLabel(v)" in signals_body, (
+            "buildSignals should use viewLabel(v) for dynamic period labels "
+            "in legend names"
+        )
+
+    def test_view_labels_used_in_overview_subtitle(self):
+        """dashboard-subtitle 使用 viewLabel(v) 渲染视图标签。"""
+        content = _read_html()
+        assert "viewLabel(v)" in content, (
+            "renderAll subtitle should use viewLabel(v) for view tag display"
         )

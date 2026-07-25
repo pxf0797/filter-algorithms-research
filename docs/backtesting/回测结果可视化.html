@@ -362,7 +362,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 	  <div class="section">
 	    <div class="section-title"><span class="num">2</span> Filtered 价格总览 + eps 阈值带（4 线叠加 + v2 eps 带）</div>
 	    <div class="plot-wrap-overview" id="chart-filtered-overview"></div>
-	    <p class="annotation">4 条滤波价格线叠加（颜色+线宽分层），半透明带=v2(日线) ±eps 阈值参考。</p>
+	    <p class="annotation">4 条滤波价格线叠加（颜色+线宽分层），半透明带=<span id="eps-ref-label">v2</span> ±eps 阈值参考。</p>
 	  </div>
 
   <!-- Section 3: Signal Comparison -->
@@ -401,21 +401,21 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
   <!-- Period Dashboards -->
   <div class="section period-dashboard">
-    <div class="section-title"><span class="num">D1</span> 日线 完整视图</div>
+    <div class="section-title"><span class="num">D1</span> <span id="dash-d1-title">日线</span> 完整视图</div>
     <div class="plot-wrap" style="height:520px"><div id="chart-dash-v0"></div></div>
     <button onclick="var dashIds=['chart-dash-v0','chart-dash-v1','chart-dash-v2','chart-dash-v3'];dashIds.forEach(function(id){Plotly.relayout(id,{'xaxis4.autorange':true,'xaxis3.autorange':true,'xaxis2.autorange':true,'xaxis.autorange':true})})" class="btn-reset-zoom">↺ 重置缩放 (全部)</button>
     <div id="date-tip-v0" class="date-tip"></div>
   </div>
 
   <div class="section period-dashboard">
-    <div class="section-title"><span class="num">D2</span> 60分钟 完整视图</div>
+    <div class="section-title"><span class="num">D2</span> <span id="dash-d2-title">60分钟</span> 完整视图</div>
     <div class="plot-wrap" style="height:520px"><div id="chart-dash-v1"></div></div>
     <button onclick="Plotly.relayout('chart-dash-v1', {'xaxis.autorange': true, 'xaxis2.autorange': true, 'xaxis3.autorange': true, 'xaxis4.autorange': true})" class="btn-reset-zoom">↺ 重置缩放</button>
     <div id="date-tip-v1" class="date-tip"></div>
   </div>
 
   <div class="section period-dashboard">
-    <div class="section-title"><span class="num">D3</span> 15分钟 完整视图</div>
+    <div class="section-title"><span class="num">D3</span> <span id="dash-d3-title">15分钟</span> 完整视图</div>
     <div class="plot-wrap" style="height:520px"><div id="chart-dash-v2"></div></div>
     <button onclick="Plotly.relayout('chart-dash-v2', {'xaxis.autorange': true, 'xaxis2.autorange': true, 'xaxis3.autorange': true, 'xaxis4.autorange': true})" class="btn-reset-zoom">↺ 重置缩放</button>
     <div id="date-tip-v2" class="date-tip"></div>
@@ -751,7 +751,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     var sigBgColors = {
       '1': 'rgba(63,185,80,0.10)',
       '-1': 'rgba(248,81,73,0.10)',
-      '0': 'rgba(139,148,158,0.03)',
+      '0': 'rgba(139,148,158,0.10)',
     };
 
     // Helper: build background rectangles for consecutive same-signal segments
@@ -1283,7 +1283,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     const sigBgColors = {
       '1': 'rgba(63,185,80,0.10)',
       '-1': 'rgba(248,81,73,0.10)',
-      '0': 'rgba(139,148,158,0.03)',
+      '0': 'rgba(139,148,158,0.10)',
     };
 
     // Signal background shapes
@@ -1914,8 +1914,19 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     setTimeout(function() {
       try { buildTrades(data); } catch(e) { console.error('buildTrades failed', e); }
       try { buildTable(data); } catch(e) { console.error('buildTable failed', e); }
-      var d4Title = document.getElementById('dash-d4-title');
-      if (d4Title && viewLabels && viewLabels.v3) d4Title.textContent = viewLabels.v3 + ' ';
+      // Update all period dashboard titles and EPS reference from view_labels
+      ['d1','d2','d3','d4'].forEach(function(prefix, idx) {
+        var v = 'v' + idx;
+        var el = document.getElementById('dash-' + prefix + '-title');
+        if (el && viewLabels && viewLabels[v]) {
+          el.textContent = viewLabels[v] + (prefix === 'd4' ? ' ' : '');
+        }
+      });
+      // Update EPS reference label in Section 2 annotation
+      var epsRefEl = document.getElementById('eps-ref-label');
+      if (epsRefEl && viewLabels && viewLabels.v2) {
+        epsRefEl.textContent = 'v2(' + viewLabels.v2 + ')';
+      }
     }, _phase3Ms);
 
     // ── Cross-dashboard x-axis sync (after all dashboards rendered) ──
