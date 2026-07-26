@@ -9,7 +9,7 @@ PnL 曲线渲染公共模块 — 回测仪表盘与图表构建器共享的 PnL 
 
 import numpy as np
 
-from filter.constants.colors import COLORS, COLORS_CB, get_colors
+from filter.constants.colors import COLORS, get_colors
 
 # ── 常量 ──────────────────────────────────────────────────────────
 PNL_BASELINE = 100.0  # PnL 以 100 为起点（百分比）
@@ -34,23 +34,15 @@ def make_pnl_long_trace(
     width: float = 1.5,
     name: str = "做多PnL",
     opacity: float = 1.0,
-    colorblind: bool = False,
 ) -> dict:
-    """生成做多 PnL 曲线 trace dict。
-
-    色盲模式下: 实线 + circle marker 实现双编码区分。
-    """
-    colors = get_colors(colorblind)
+    """生成做多 PnL 曲线 trace dict。"""
+    colors = get_colors()
     ax = {"xaxis": f"x{row}", "yaxis": f"y{row}"} if row else {}
-    trace = dict(
+    return dict(
         type="scattergl", x=x, y=pnl, mode="lines", name=name,
         line=dict(color=colors["pnl_long"], width=width, dash=dash),
         opacity=opacity, **ax,
     )
-    if colorblind:
-        trace["mode"] = "lines+markers"
-        trace["marker"] = dict(symbol="circle", size=4, color=colors["pnl_long"])
-    return trace
 
 
 def make_pnl_short_trace(
@@ -59,67 +51,43 @@ def make_pnl_short_trace(
     width: float = 1.5,
     name: str = "做空PnL",
     opacity: float = 1.0,
-    colorblind: bool = False,
 ) -> dict:
-    """生成做空 PnL 曲线 trace dict。
-
-    色盲模式下: 虚线 + triangle-down marker 实现双编码区分。
-    """
-    colors = get_colors(colorblind)
+    """生成做空 PnL 曲线 trace dict。"""
+    colors = get_colors()
     ax = {"xaxis": f"x{row}", "yaxis": f"y{row}"} if row else {}
-    trace = dict(
+    return dict(
         type="scattergl", x=x, y=pnl, mode="lines", name=name,
         line=dict(color=colors["pnl_short"], width=width, dash=dash),
         opacity=opacity, **ax,
     )
-    if colorblind:
-        trace["mode"] = "lines+markers"
-        trace["marker"] = dict(symbol="triangle-down", size=4, color=colors["pnl_short"])
-    return trace
 
 
 def make_pnl_combined_trace(
     x, combined, row=None,
     name: str = "max(做多, 做空) PnL",
-    colorblind: bool = False,
 ) -> dict:
-    """生成 max(做多,做空) 组合 PnL 曲线 trace dict（含填色）。
-
-    色盲模式下: 深蓝实线 + square marker。
-    """
-    colors = get_colors(colorblind)
+    """生成 max(做多,做空) 组合 PnL 曲线 trace dict（含填色）。"""
+    colors = get_colors()
     ax = {"xaxis": f"x{row}", "yaxis": f"y{row}"} if row else {}
-    trace = dict(
+    return dict(
         type="scattergl", x=x, y=combined - PNL_BASELINE, mode="lines", name=name,
         line=dict(color=colors["pnl_combined"], width=2),
         fill="tozeroy", fillcolor=colors["pnl_combined_fill"],
         **ax,
     )
-    if colorblind:
-        trace["mode"] = "lines+markers"
-        trace["marker"] = dict(symbol="square", size=3, color=colors["pnl_combined"])
-    return trace
 
 
-def make_drawdown_trace(x, pnl_array, row=None, colorblind: bool = False) -> dict:
-    """生成回撤曲线 trace dict。
-
-    色盲模式下: dashdot 线型 + cross marker。
-    """
-    colors = get_colors(colorblind)
+def make_drawdown_trace(x, pnl_array, row=None) -> dict:
+    """生成回撤曲线 trace dict。"""
+    colors = get_colors()
     dd = compute_drawdown(pnl_array)
     ax = {"xaxis": f"x{row}", "yaxis": f"y{row}"} if row else {}
-    line_dash = "dashdot" if colorblind else "solid"
-    trace = dict(
+    return dict(
         type="scattergl", x=x, y=dd, mode="lines", name="回撤 %",
-        line=dict(color=colors["pnl_short"], width=1.5, dash=line_dash),
+        line=dict(color=colors["pnl_short"], width=1.5, dash="solid"),
         fill="tozeroy", fillcolor=colors["drawdown_fill"],
         **ax,
     )
-    if colorblind:
-        trace["mode"] = "lines+markers"
-        trace["marker"] = dict(symbol="cross", size=3, color=colors["pnl_short"])
-    return trace
 
 
 def make_pnl_baseline_shape(row: int, y: float = PNL_BASELINE) -> dict:

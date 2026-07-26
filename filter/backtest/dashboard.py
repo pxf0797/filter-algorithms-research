@@ -22,7 +22,7 @@ from filter.common.pnl_renderer import (
     make_pnl_combined_trace,
     make_drawdown_trace,
 )
-from filter.constants.colors import COLORS, view_color, get_colors
+from filter.constants.colors import COLORS, view_color
 
 
 def render_backtest_dashboard(
@@ -76,12 +76,11 @@ def render_backtest_dashboard(
     _render_kpi_cards(metrics)
 
     # ── PnL 曲线 + 回撤 ──
-    colorblind = st.session_state.get("_colorblind_mode", False)
-    _render_pnl_chart(long_pnl, short_pnl, result_df, colorblind=colorblind)
+    _render_pnl_chart(long_pnl, short_pnl, result_df)
 
     # ── 视图对比（多视图时）──
     if len(pnl_views) > 1:
-        _render_view_comparison(result_df, pnl_views, colorblind=colorblind)
+        _render_view_comparison(result_df, pnl_views)
 
     # ── 交易明细表 ──
     _render_trade_table(result_df, primary_view)
@@ -278,7 +277,6 @@ def _render_pnl_chart(
     long_pnl: np.ndarray,
     short_pnl: np.ndarray,
     df: pd.DataFrame,
-    colorblind: bool = False,
 ) -> None:
     """渲染 PnL 累积曲线和回撤图。
 
@@ -309,7 +307,6 @@ def _render_pnl_chart(
         go.Scattergl(**make_pnl_long_trace(
             x_vals, long_pnl - PNL_BASELINE,
             dash="dot", width=1, opacity=0.5, name="做多 PnL",
-            colorblind=colorblind,
         )),
         row=1, col=1,
     )
@@ -317,23 +314,21 @@ def _render_pnl_chart(
         go.Scattergl(**make_pnl_short_trace(
             x_vals, short_pnl - PNL_BASELINE,
             dash="dot", width=1, opacity=0.5, name="做空 PnL",
-            colorblind=colorblind,
         )),
         row=1, col=1,
     )
 
     # max 组合曲线 (实线)
     fig.add_trace(
-        go.Scattergl(**make_pnl_combined_trace(x_vals, combined, colorblind=colorblind)),
+        go.Scattergl(**make_pnl_combined_trace(x_vals, combined)),
         row=1, col=1,
     )
     # 零线
-    colors = get_colors(colorblind)
-    fig.add_hline(y=0, line_dash="dash", line_color=colors["zero_line"], row=1, col=1)
+    fig.add_hline(y=0, line_dash="dash", line_color=COLORS["zero_line"], row=1, col=1)
 
     # 回撤
     fig.add_trace(
-        go.Scattergl(**make_drawdown_trace(x_vals, combined, colorblind=colorblind)),
+        go.Scattergl(**make_drawdown_trace(x_vals, combined)),
         row=2, col=1,
     )
 
@@ -350,12 +345,11 @@ def _render_pnl_chart(
     st.plotly_chart(fig, use_container_width=True, config={"modeBarButtonsToAdd": ["downloadImage"]})
 
 
-def _render_view_comparison(df: pd.DataFrame, views: list[str], colorblind: bool = False) -> None:
+def _render_view_comparison(df: pd.DataFrame, views: list[str]) -> None:
     """多视图 PnL 对比图。"""
     st.subheader("视图 PnL 对比")
 
     fig = go.Figure()
-    colors = get_colors(colorblind)
 
     for i, v in enumerate(views):
         long_col = f"{v}_pnl_long"
@@ -369,10 +363,10 @@ def _render_view_comparison(df: pd.DataFrame, views: list[str], colorblind: bool
             y=cum,
             mode="lines",
             name=v,
-            line=dict(color=view_color(i, colorblind=colorblind), width=2),
+            line=dict(color=view_color(i), width=2),
         ))
 
-    fig.add_hline(y=0, line_dash="dash", line_color=colors["zero_line"])
+    fig.add_hline(y=0, line_dash="dash", line_color=COLORS["zero_line"])
 
     fig.update_layout(
         template="plotly_dark",

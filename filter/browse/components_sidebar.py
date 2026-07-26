@@ -314,18 +314,3 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
 
     return cfg
 
-
-def _render_colorblind_toggle() -> None:
-    """在 sidebar 渲染色盲友好模式复选框。
-
-    默认关闭。开启后所有图表使用 CUD 色盲安全调色板 (COLORS_CB)
-    并启用双编码（线型 + 标记）区分不同数据系列。
-    """
-    cb = st.sidebar.checkbox(
-        "色盲友好模式",
-        value=st.session_state.get("_colorblind_mode", False),
-        key="_cb_mode_toggle",
-        help="使用 Color Universal Design (CUD) 调色板，去除红绿依赖，"
-             "并通过线型和标记进行双重编码。符合 WCAG 2.1 AA 合规要求。",
-    )
-    st.session_state["_colorblind_mode"] = cb

@@ -19,7 +19,7 @@ from filter.common.pnl_renderer import (
     make_pnl_baseline_shape,
     make_pnl_yaxis_config,
 )
-from filter.constants.colors import COLORS, COLORS_CB, get_colors
+from filter.constants.colors import COLORS, get_colors
 
 
 def _date_markers(dates, tf) -> tuple:
@@ -231,12 +231,9 @@ def _add_schmitt_traces(t, schmitt, acc, all_pairs, sar, ssr):
     return traces, shapes
 
 
-def _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row, colorblind: bool = False):
-    """Return (traces, shapes, annotations, yaxes) for PnL subplot.
-
-    色盲模式下: 颜色改用 CUD 调色板 + 线型/标记双编码区分做多(实线+circle)与做空(虚线+triangle-down)。
-    """
-    colors = get_colors(colorblind)
+def _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row):
+    """Return (traces, shapes, annotations, yaxes) for PnL subplot."""
+    colors = get_colors()
     _pnl_x = f"x{pnl_row}"; _pnl_y = f"y{pnl_row}"
     _pnl_annotations = []  # collected annotations (replaces fig.add_annotation)
     # Trace merge: 逐笔交易段合并为 2 条 (多/空), NaN 分隔
@@ -280,8 +277,8 @@ def _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row, colorblind: 
                 xref=f"x{pnl_row}", yref=f"y{pnl_row}"))
     # Collect all PnL traces, shapes, annotations into return values
     _pnl_traces = [
-        make_pnl_long_trace(t, long_pnl, row=pnl_row, colorblind=colorblind),
-        make_pnl_short_trace(t, short_pnl, row=pnl_row, colorblind=colorblind),
+        make_pnl_long_trace(t, long_pnl, row=pnl_row),
+        make_pnl_short_trace(t, short_pnl, row=pnl_row),
     ]
     if _l_seg:
         xs, ys = zip(*_l_seg)
