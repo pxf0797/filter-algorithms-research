@@ -154,7 +154,7 @@ class TestCacheTTL:
 
     def test_all_cache_data_have_ttl(self):
         """所有 @st.cache_data 装饰器必须有 ttl 参数。"""
-        app_path = Path(__file__).resolve().parent.parent / "streamlit_app.py"
+        app_path = Path(__file__).resolve().parent.parent / "filter" / "browse" / "app.py"
         source = app_path.read_text()
         tree = ast.parse(source)
 
@@ -189,7 +189,7 @@ class TestCacheTTL:
 
     def test_cached_fetch_stock_ttl_is_3600(self):
         """数据加载缓存 _cached_fetch_stock ttl 应为 3600 (1小时)。"""
-        app_path = Path(__file__).resolve().parent.parent / "streamlit_app.py"
+        app_path = Path(__file__).resolve().parent.parent / "filter" / "browse" / "app.py"
         source = app_path.read_text()
         tree = ast.parse(source)
 
@@ -213,7 +213,7 @@ class TestCacheTTL:
             "_compute_prediction_pairs",
             "_cached_strategy_pnl",
         ]
-        app_path = Path(__file__).resolve().parent.parent / "streamlit_app.py"
+        app_path = Path(__file__).resolve().parent.parent / "filter" / "browse" / "app.py"
         source = app_path.read_text()
         tree = ast.parse(source)
 

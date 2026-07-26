@@ -49,8 +49,7 @@ def make_pnl_long_trace(
     )
     if colorblind:
         trace["mode"] = "lines+markers"
-        trace["marker"] = dict(symbol="circle", size=4, color=colors["pnl_long"],
-                               maxdisplayed=len(x) // 20 + 1)
+        trace["marker"] = dict(symbol="circle", size=4, color=colors["pnl_long"])
     return trace
 
 
@@ -75,8 +74,7 @@ def make_pnl_short_trace(
     )
     if colorblind:
         trace["mode"] = "lines+markers"
-        trace["marker"] = dict(symbol="triangle-down", size=4, color=colors["pnl_short"],
-                               maxdisplayed=len(x) // 20 + 1)
+        trace["marker"] = dict(symbol="triangle-down", size=4, color=colors["pnl_short"])
     return trace
 
 
@@ -99,8 +97,7 @@ def make_pnl_combined_trace(
     )
     if colorblind:
         trace["mode"] = "lines+markers"
-        trace["marker"] = dict(symbol="square", size=3, color=colors["pnl_combined"],
-                               maxdisplayed=len(x) // 20 + 1)
+        trace["marker"] = dict(symbol="square", size=3, color=colors["pnl_combined"])
     return trace
 
 
@@ -121,8 +118,7 @@ def make_drawdown_trace(x, pnl_array, row=None, colorblind: bool = False) -> dic
     )
     if colorblind:
         trace["mode"] = "lines+markers"
-        trace["marker"] = dict(symbol="cross", size=3, color=colors["pnl_short"],
-                               maxdisplayed=len(x) // 20 + 1)
+        trace["marker"] = dict(symbol="cross", size=3, color=colors["pnl_short"])
     return trace
 
 
