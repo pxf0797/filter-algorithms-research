@@ -41,7 +41,6 @@ from filter.browse.charts import (
     _render_plotly, _add_prediction_traces,
     _add_cross_pnl_subplot, _add_alignment_subplot,
     _draw_holding_bands, _add_bs_markers,
-    _PLOTLY_CDN, _PLOTLY_CDN_FALLBACK,
 )
 from filter.browse.chart_builder import (
     _date_markers, _determine_subplot_layout, _insert_feedback_row,
@@ -701,7 +700,7 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
 
     # ── Build and render figure ──
     fig, fh = _build_chart_figure(data, cfg, compact=compact)
-    _render_plotly(fig, height=fh + 30, dates=data["dates"], include_plotlyjs=False)
+    _render_plotly(fig, height=fh + 30, dates=data["dates"])
 
 
 # =====================================================================
@@ -846,17 +845,6 @@ def main() -> None:
 
     # ── DB backup/restore ──
     _render_db_backup()
-
-    # ── M6: inject Plotly.js CDN into parent window once per page load ──
-    if not st.session_state.get("_plotly_cdn_injected"):
-        st.session_state["_plotly_cdn_injected"] = True
-        _cdn_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-<style>body{{margin:0;overflow:hidden}}</style></head><body>
-<script src="{_PLOTLY_CDN}"
-    onerror="this.onerror=null;this.src='{_PLOTLY_CDN_FALLBACK}';"></script>
-<script>window.parent.Plotly=window.parent.Plotly||Plotly;window.parent.__plotlyReady=true;</script>
-</body></html>"""
-        st.components.v1.html(_cdn_html, height=1)
 
     # ── Pass 2: 2x2 chart views ──
     cb_mode = AppState.get("_cb_mode", False)
