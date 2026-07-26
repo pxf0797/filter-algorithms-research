@@ -726,6 +726,28 @@ class ParquetStore:
         for i, row in enumerate(self._buffer):
             for name in self._column_names:
                 val = row.get(name)
+                if val is None:
+                    if name in np_cols:
+                        dtype = np_cols[name].dtype
+                        if np.issubdtype(dtype, np.integer):
+                            val = 0
+                        elif np.issubdtype(dtype, np.floating):
+                            val = np.nan
+                        elif np.issubdtype(dtype, np.bool_):
+                            val = False
+                        elif np.issubdtype(dtype, np.datetime64):
+                            val = np.datetime64("NaT")
+                        else:
+                            val = 0
+                        logger.debug(
+                            "_buffer_to_table: column={!r} row={} "
+                            "is None, using default={!r}",
+                            name, i, val,
+                        )
+                    else:
+                        # str_cols: None is fine (pyarrow handles null)
+                        str_cols[name][i] = val
+                        continue
                 if name in np_cols:
                     np_cols[name][i] = val
                 else:
