@@ -41,7 +41,7 @@ class BacktestRunner:
     >>> results = runner.run(0, 500, step_interval=1)
     """
 
-    def __init__(self, ticker: str, configs: list) -> None:
+    def __init__(self, ticker: str, configs: list, **kwargs) -> None:
         """
         Parameters
         ----------
@@ -53,6 +53,9 @@ class BacktestRunner:
             ``_fid2``, ``pv2``, ``ew``, ``ke``, ``sm``, ``show_sch``,
             ``show_strategy``, ``show_pred``, ``stop_loss_pct``, ``n_ext``,
             ``fc``, ``fc2``, ``fit_mode``。
+        **kwargs
+            save_debug_data : bool, default False
+                是否保存调试数据（JSONL/CSV）。
 
         Raises
         ------
@@ -65,6 +68,7 @@ class BacktestRunner:
             raise ValueError("configs 不能为空")
 
         self.ticker = ticker.strip()
+        self.save_debug_data = kwargs.get("save_debug_data", False)
         # 确保 configs 按 coarsest→finest 排序 (v0=coarsest, v3=finest)
         configs = sorted(configs, key=lambda c: ALL_TFS.index(c["tf"]), reverse=True)
         self.configs = configs

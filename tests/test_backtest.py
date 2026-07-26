@@ -373,6 +373,124 @@ class TestBacktestLogger:
             assert logs.is_dir()
 
 
+# ── TestEventRecorderDebugMode ────────────────────────────────────────────────
+
+
+class TestEventRecorderDebugMode:
+    """EventRecorder 的 save_debug_data 模式测试.
+
+    save_debug_data=False 时不写入 JSONL/CSV 调试文件,
+    save_debug_data=True 时写入完整的调试数据。
+    metadata.json 在两种模式下都始终写入。
+    """
+
+    @staticmethod
+    def _make_minimal_config():
+        return {
+            "ticker": "AAPL",
+            "configs": [{"tf": "日线", "n_pts": 120}],
+        }
+
+    @staticmethod
+    def _make_minimal_output(step_index=0, bar_index=0):
+        """构造最小 pipeline_output（仅含一个视图的 dummy 数据）。"""
+        n = 50
+        return {
+            "step_index": step_index,
+            "bar_index": bar_index,
+            "bar_timestamp": "2026-01-15",
+            "cutoff_date": "2026-01-15",
+            "ohlcv": {"open": 100.0, "high": 101.0, "low": 99.0,
+                      "close": 100.0, "volume": 1000},
+            "views": {
+                "v0_日线": {
+                    "t": None,
+                    "filtered": None,
+                    "schmitt": None,
+                    "long_pnl": None,
+                    "short_pnl": None,
+                    "long_mask": None,
+                    "short_mask": None,
+                    "trade_records": [],
+                    "bs_markers": {"entry_markers": [], "exit_markers": []},
+                },
+            },
+        }
+
+    def test_default_save_debug_data_is_true(self):
+        """EventRecorder 默认 save_debug_data=True."""
+        from backtest.recorder import EventRecorder
+        rec = EventRecorder("/tmp/test", "TEST")
+        assert rec.save_debug_data is True
+
+    def test_debug_mode_false_no_jsonl_writes(self, tmp_path):
+        """save_debug_data=False: record_step + end_session 不产生 JSONL/CSV 文件."""
+        from backtest.recorder import EventRecorder
+
+        rec = EventRecorder(str(tmp_path), "AAPL", save_debug_data=False)
+        rec.start_session(self._make_minimal_config())
+        rec.record_step(0, "2026-01-15", self._make_minimal_output())
+        rec.end_session()
+
+        # metadata.json 始终存在
+        session_dir = list(tmp_path.iterdir())[0]
+        assert (session_dir / "metadata.json").exists()
+
+        # JSONL 文件不应存在
+        assert not (session_dir / "events.jsonl").exists()
+        assert not (session_dir / "bs_snapshot.jsonl").exists()
+        assert not (session_dir / "filter_tail.jsonl").exists()
+        assert not (session_dir / "schmitt_snapshot.jsonl").exists()
+        assert not (session_dir / "trade_summary.jsonl").exists()
+        # CSV 文件不应存在
+        assert not (session_dir / "backtest_data.csv").exists()
+
+    def test_debug_mode_true_writes_jsonl(self, tmp_path):
+        """save_debug_data=True: record_step + end_session 产生 JSONL 和 CSV 文件."""
+        from backtest.recorder import EventRecorder
+
+        rec = EventRecorder(str(tmp_path), "AAPL", save_debug_data=True)
+        rec.start_session(self._make_minimal_config())
+        rec.record_step(0, "2026-01-15", self._make_minimal_output())
+        rec.end_session()
+
+        session_dir = list(tmp_path.iterdir())[0]
+        assert (session_dir / "events.jsonl").exists()
+        assert (session_dir / "bs_snapshot.jsonl").exists()
+        assert (session_dir / "filter_tail.jsonl").exists()
+        assert (session_dir / "schmitt_snapshot.jsonl").exists()
+        assert (session_dir / "trade_summary.jsonl").exists()
+
+    def test_metadata_always_written_regardless_of_mode(self, tmp_path):
+        """metadata.json 在 debug 和非 debug 模式下都写入."""
+        from backtest.recorder import EventRecorder
+
+        for mode in [True, False]:
+            rec = EventRecorder(str(tmp_path), "AAPL", save_debug_data=mode)
+            rec.start_session(self._make_minimal_config())
+            rec.record_step(0, "2026-01-15", self._make_minimal_output())
+            rec.end_session()
+
+            session_dir = list(tmp_path.iterdir())[-1]
+            assert (session_dir / "metadata.json").exists(), (
+                f"metadata.json should exist in save_debug_data={mode}"
+            )
+
+    def test_session_started_event_written_even_in_non_debug_mode(self, tmp_path):
+        """即使 save_debug_data=False, session_started/session_ended 事件
+        仍写入 events.jsonl（因为 _append_jsonl 对 events_fp=None 写 metadata）。"""
+        from backtest.recorder import EventRecorder
+
+        rec = EventRecorder(str(tmp_path), "AAPL", save_debug_data=False)
+        rec.start_session(self._make_minimal_config())
+        rec.record_step(0, "2026-01-15", self._make_minimal_output())
+        rec.end_session()
+
+        # 验证 session 正常完成（不抛异常）
+        session_dir = list(tmp_path.iterdir())[0]
+        assert session_dir.is_dir()
+
+
 # ── TestAppStateKeys ─────────────────────────────────────────────────────────
 
 class TestAppStateKeys:
@@ -1454,6 +1572,42 @@ class TestCheckpoint:
 
 # 注册 BacktestRunner（模块顶层引用，便于测试使用）
 from filter.backtest.engine import BacktestRunner  # noqa: E402
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BacktestRunner save_debug_data 模式测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestBacktestRunnerDebugMode:
+    """BacktestRunner 的 save_debug_data 参数测试."""
+
+    def test_default_save_debug_data_is_false(self):
+        """BacktestRunner 默认 save_debug_data=False."""
+        mock_conn = _make_mock_db_conn()
+        configs = _make_minimal_configs()
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs)
+        assert runner.save_debug_data is False
+
+    def test_save_debug_data_true_passed_via_kwargs(self):
+        """save_debug_data=True 通过 kwargs 传入 BacktestRunner."""
+        mock_conn = _make_mock_db_conn()
+        configs = _make_minimal_configs()
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs, save_debug_data=True)
+        assert runner.save_debug_data is True
+
+    def test_save_debug_data_false_explicit(self):
+        """save_debug_data=False 显式传入 BacktestRunner."""
+        mock_conn = _make_mock_db_conn()
+        configs = _make_minimal_configs()
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs, save_debug_data=False)
+        assert runner.save_debug_data is False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

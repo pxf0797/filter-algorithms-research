@@ -321,9 +321,11 @@ class EventRecorder:
         Ticker symbol (e.g. ``"03690.HK"``).
     """
 
-    def __init__(self, output_dir: Union[str, Path], ticker: str):
+    def __init__(self, output_dir: Union[str, Path], ticker: str,
+                 save_debug_data: bool = True):
         self.output_dir = Path(output_dir)
         self.ticker = ticker
+        self.save_debug_data = save_debug_data
         self._session_dir: Optional[Path] = None
         self._session_id: str = ""
         self._prev_bs_by_view: Dict[str, Optional[dict]] = {}
@@ -372,12 +374,13 @@ class EventRecorder:
         }
         _write_json(self._session_dir / "metadata.json", metadata)
 
-        # Open JSONL files for append
-        self._events_fp = _open_jsonl(self._session_dir / "events.jsonl")
-        self._filter_tail_fp = _open_jsonl(self._session_dir / "filter_tail.jsonl")
-        self._schmitt_snapshot_fp = _open_jsonl(self._session_dir / "schmitt_snapshot.jsonl")
-        self._trade_summary_fp = _open_jsonl(self._session_dir / "trade_summary.jsonl")
-        self._bs_snapshot_fp = _open_jsonl(self._session_dir / "bs_snapshot.jsonl")
+        # Open JSONL files for append (debug data only)
+        if self.save_debug_data:
+            self._events_fp = _open_jsonl(self._session_dir / "events.jsonl")
+            self._filter_tail_fp = _open_jsonl(self._session_dir / "filter_tail.jsonl")
+            self._schmitt_snapshot_fp = _open_jsonl(self._session_dir / "schmitt_snapshot.jsonl")
+            self._trade_summary_fp = _open_jsonl(self._session_dir / "trade_summary.jsonl")
+            self._bs_snapshot_fp = _open_jsonl(self._session_dir / "bs_snapshot.jsonl")
 
         # Write session_started event
         self._append_jsonl(self._events_fp, {
@@ -450,23 +453,24 @@ class EventRecorder:
         self._step_count = step_index + 1
 
         # --- CSV 累积（在 JSONL 写入之后，非阻断） ---
-        try:
-            bar_index: int = pipeline_output.get("bar_index", step_index)
-            bar_timestamp: str = pipeline_output.get("bar_timestamp", cutoff_date)
-            ohlcv_data = pipeline_output.get("ohlcv", {})
-            ohlcv: dict[str, float] = {
-                "close": float(ohlcv_data.get("close", float("nan"))),
-                "open": float(ohlcv_data.get("open", float("nan"))),
-                "high": float(ohlcv_data.get("high", float("nan"))),
-                "low": float(ohlcv_data.get("low", float("nan"))),
-                "volume": float(ohlcv_data.get("volume", float("nan"))),
-            }
-            self._csv_builder.accumulate(bar_index, bar_timestamp, ohlcv, views)
-        except Exception as e:
-            logger.warning(
-                "EventRecorder: failed to accumulate CSV data for step %d: %s",
-                step_index, e, exc_info=True,
-            )
+        if self.save_debug_data:
+            try:
+                bar_index: int = pipeline_output.get("bar_index", step_index)
+                bar_timestamp: str = pipeline_output.get("bar_timestamp", cutoff_date)
+                ohlcv_data = pipeline_output.get("ohlcv", {})
+                ohlcv: dict[str, float] = {
+                    "close": float(ohlcv_data.get("close", float("nan"))),
+                    "open": float(ohlcv_data.get("open", float("nan"))),
+                    "high": float(ohlcv_data.get("high", float("nan"))),
+                    "low": float(ohlcv_data.get("low", float("nan"))),
+                    "volume": float(ohlcv_data.get("volume", float("nan"))),
+                }
+                self._csv_builder.accumulate(bar_index, bar_timestamp, ohlcv, views)
+            except Exception as e:
+                logger.warning(
+                    "EventRecorder: failed to accumulate CSV data for step %d: %s",
+                    step_index, e, exc_info=True,
+                )
 
     def end_session(self) -> None:
         """Close session, write end_time and step_count to metadata.json."""
@@ -513,11 +517,12 @@ class EventRecorder:
         _write_json(meta_path, meta)
 
         # --- CSV 写入 ---
-        try:
-            csv_path: Path = self._session_dir / "backtest_data.csv"
-            self._csv_builder.write(csv_path)
-        except Exception as e:
-            logger.warning(f"EventRecorder: failed to write CSV: {e}", exc_info=True)
+        if self.save_debug_data:
+            try:
+                csv_path: Path = self._session_dir / "backtest_data.csv"
+                self._csv_builder.write(csv_path)
+            except Exception as e:
+                logger.warning(f"EventRecorder: failed to write CSV: {e}", exc_info=True)
 
     # ------------------------------------------------------------------
     # BS Marker Comparison

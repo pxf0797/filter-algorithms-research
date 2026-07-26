@@ -100,6 +100,10 @@ def parse_args() -> argparse.Namespace:
         help="不保存 Parquet/CSV，仅生成 JSONL 事件流",
     )
     parser.add_argument(
+        "--debug", action="store_true",
+        help="保存调试数据（JSONL/CSV）",
+    )
+    parser.add_argument(
         "--step-interval", type=int, default=1,
         help="步进间隔（默认: 1）",
     )
@@ -491,7 +495,7 @@ def main() -> None:
 
     # ── 4. 创建 Runner + Recorder ──
     try:
-        runner = BacktestRunner(args.ticker, configs)
+        runner = BacktestRunner(args.ticker, configs, save_debug_data=args.debug)
     except ValueError as e:
         logger.error("初始化 BacktestRunner 失败: {}", e)
         sys.exit(1)
@@ -517,7 +521,7 @@ def main() -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
         checkpoint_path = str(output_dir / f"{args.ticker}_checkpoint.json")
 
-    recorder = EventRecorder(args.output_dir, args.ticker)
+    recorder = EventRecorder(args.output_dir, args.ticker, save_debug_data=args.debug)
     session_id = recorder.start_session({
         "ticker": args.ticker,
         "preset": args.preset,
@@ -532,7 +536,7 @@ def main() -> None:
     # ParquetStore for full data persistence (default on; use --no-save-data to skip)
     parquet_store = None
     if not args.no_save_data:
-        parquet_store = ParquetStore(args.output_dir, args.ticker, configs)
+        parquet_store = ParquetStore(args.output_dir, args.ticker, configs, save_debug_data=args.debug)
         parquet_store.start_session()
         if not args.quiet:
             logger.info("数据存储已启用: {}", parquet_store.output_dir)
@@ -577,11 +581,16 @@ def main() -> None:
     output_path = Path(args.output_dir) / f"{args.ticker}_{session_id}"
     logger.info("完成! {} 步已保存到 {}/", step_count, output_path)
     if not args.quiet:
-        logger.info("  - events.jsonl")
-        logger.info("  - bs_snapshot.jsonl")
-        logger.info("  - filter_tail.jsonl")
-        logger.info("  - schmitt_snapshot.jsonl")
-        logger.info("  - trade_summary.jsonl")
+        if args.debug:
+            logger.info("  - events.jsonl")
+            logger.info("  - bs_snapshot.jsonl")
+            logger.info("  - filter_tail.jsonl")
+            logger.info("  - schmitt_snapshot.jsonl")
+            logger.info("  - trade_summary.jsonl")
+            logger.info("  - backtest_data.csv")
+            logger.info("  - backtest_result.csv")
+        if not args.no_save_data:
+            logger.info("  - backtest_result.parquet")
         logger.info("  - metadata.json")
 
 

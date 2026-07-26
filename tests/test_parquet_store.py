@@ -3085,3 +3085,111 @@ class TestTradeDateBasedMatching:
         assert cols["v0_trade"] is None
         assert np.isnan(cols["v0_trade_return"])
         assert cols["v0_trade_reason"] is None
+
+
+# ============================================================================
+# TestParquetStoreDebugMode — save_debug_data 模式测试
+# ============================================================================
+
+
+class TestParquetStoreDebugMode:
+    """ParquetStore 的 _save_debug_data 模式测试.
+
+    - _save_debug_data=False: 只写 Parquet，不导出 CSV
+    - _save_debug_data=True: 写 Parquet + CSV
+    - Parquet 始终写入，无论 debug 模式如何
+    """
+
+    @staticmethod
+    def _append_and_close(store, n_rows=2):
+        """向 store 追加若干行数据并结束 session。"""
+        for i in range(n_rows):
+            output = {
+                "bar_index": i,
+                "bar_timestamp": f"2026-01-{i+1:02d}T10:00:00",
+                "cutoff_date": f"2026-01-{i+1:02d}",
+                "views": {
+                    "v0_日线": {
+                        "t": None, "schmitt": None, "filtered": None,
+                        "long_pnl": None, "short_pnl": None,
+                        "long_mask": None, "short_mask": None,
+                        "trade_records": [],
+                        "bs_markers": {"entry_markers": [], "exit_markers": []},
+                    },
+                },
+            }
+            store.append_row(
+                bar_index=output["bar_index"],
+                bar_timestamp=output["bar_timestamp"],
+                cutoff_date=output["cutoff_date"],
+                stage_outputs=output,
+            )
+        store.end_session()
+
+    def test_default_save_debug_data_is_true(self):
+        """ParquetStore 默认 _save_debug_data=True."""
+        store = ParquetStore("/tmp/test", "TEST", [{"tf": "日线"}])
+        assert store._save_debug_data is True
+
+    def test_debug_mode_false_no_csv(self, tmp_path):
+        """_save_debug_data=False: Parquet 存在但 CSV 不导出."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}],
+                              save_debug_data=False)
+        store.start_session()
+        self._append_and_close(store)
+
+        session_dir = store._session_dir
+        parquet_files = list(session_dir.glob("*.parquet"))
+        csv_files = list(session_dir.glob("*.csv"))
+
+        assert len(parquet_files) >= 1, "Parquet should always be written"
+        assert len(csv_files) == 0, f"CSV should not be written, got {csv_files}"
+
+    def test_debug_mode_true_writes_csv(self, tmp_path):
+        """_save_debug_data=True: Parquet 和 CSV 都存在."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}],
+                              save_debug_data=True)
+        store.start_session()
+        self._append_and_close(store)
+
+        session_dir = store._session_dir
+        parquet_files = list(session_dir.glob("*.parquet"))
+        csv_files = list(session_dir.glob("*.csv"))
+
+        assert len(parquet_files) >= 1, "Parquet should always be written"
+        assert len(csv_files) >= 1, f"CSV should be written, got {csv_files}"
+
+    def test_parquet_always_written_debug_false(self, tmp_path):
+        """_save_debug_data=False 时 parquet 仍始终写入."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}],
+                              save_debug_data=False)
+        store.start_session()
+        self._append_and_close(store)
+
+        session_dir = store._session_dir
+        parquet_files = list(session_dir.glob("*.parquet"))
+        assert len(parquet_files) >= 1, "Parquet should always be written even without debug"
+
+    def test_parquet_always_written_debug_true(self, tmp_path):
+        """_save_debug_data=True 时 parquet 也正常写入."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}],
+                              save_debug_data=True)
+        store.start_session()
+        self._append_and_close(store)
+
+        session_dir = store._session_dir
+        parquet_files = list(session_dir.glob("*.parquet"))
+        assert len(parquet_files) >= 1, "Parquet should be written in debug mode"
+
+    def test_metadata_always_written(self, tmp_path):
+        """metadata.json 在两种模式下都写入."""
+        for mode in [True, False]:
+            store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}],
+                                  save_debug_data=mode)
+            store.start_session()
+            self._append_and_close(store)
+
+            meta_path = store._session_dir / "metadata.json"
+            assert meta_path.exists(), (
+                f"metadata.json should exist in save_debug_data={mode}"
+            )
