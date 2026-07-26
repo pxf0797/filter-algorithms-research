@@ -148,3 +148,147 @@ class TestViewConfigDictAccess:
         assert cfg.get("tf") == "60分钟"
         assert cfg.get("nonexistent") is None
         assert cfg.get("nonexistent", "fallback") == "fallback"
+
+
+# ===================================================================
+# pyproject.toml 包安装验证
+# ===================================================================
+
+
+class TestPackageImports:
+    """验证 pip install 后 filter 子包可正常导入."""
+
+    def test_filter_constants_importable(self):
+        """filter.constants 模块可导入."""
+        import filter.constants as _fc
+        assert _fc is not None
+
+    def test_filter_common_importable(self):
+        """filter.common 模块可导入."""
+        import filter.common as _fcm
+        assert _fcm is not None
+
+    def test_filter_common_pnl_renderer_importable(self):
+        """filter.common.pnl_renderer 子模块可导入."""
+        from filter.common.pnl_renderer import (
+            compute_combined_pnl, compute_drawdown,
+        )
+        assert callable(compute_combined_pnl)
+        assert callable(compute_drawdown)
+
+    def test_filter_constants_colors_importable(self):
+        """filter.constants.colors 子模块可导入."""
+        from filter.constants.colors import COLORS
+        assert isinstance(COLORS, dict)
+        assert len(COLORS) > 0
+
+
+class TestVersionConsistency:
+    """验证 filter.__version__ 与 pyproject.toml 一致."""
+
+    def test_version_matches_pyproject(self):
+        """filter.__version__ 与 pyproject.toml 中的版本一致."""
+        import tomllib
+        from pathlib import Path
+        from filter import __version__ as pkg_version
+
+        project_root = Path(__file__).resolve().parent.parent
+        pyproject_path = project_root / "pyproject.toml"
+        with open(pyproject_path, "rb") as fp:
+            pyproject_data = tomllib.load(fp)
+
+        toml_version = pyproject_data["project"]["version"]
+        assert pkg_version == toml_version, (
+            f"filter.__version__ ({pkg_version}) 与 pyproject.toml 版本 "
+            f"({toml_version}) 不一致"
+        )
+
+    def test_version_is_semver(self):
+        """版本号符合 semver 格式."""
+        import re
+        from filter import __version__
+        assert re.match(r"^\d+\.\d+\.\d+$", __version__), (
+            f"版本号 '{__version__}' 不符合 MAJOR.MINOR.PATCH 格式"
+        )
+
+
+# ===================================================================
+# pyproject.toml [build-system] 配置验证
+# ===================================================================
+
+
+class TestBuildSystemConfig:
+    """验证 pyproject.toml 的 [build-system] 配置."""
+
+    def test_build_system_config(self):
+        """pyproject.toml 的 [build-system] 包含正确的 requires 和 build-backend."""
+        import tomllib
+        from pathlib import Path
+
+        project_root = Path(__file__).resolve().parent.parent
+        pyproject_path = project_root / "pyproject.toml"
+        with open(pyproject_path, "rb") as fp:
+            cfg = tomllib.load(fp)
+
+        bs = cfg["build-system"]
+        assert any("setuptools>=61.0" in req for req in bs["requires"]), (
+            f"build-system.requires 应包含 'setuptools>=61.0'，实际为: {bs['requires']}"
+        )
+        assert bs["build-backend"] == "setuptools.build_meta", (
+            f"build-backend 应为 'setuptools.build_meta'，实际为: {bs['build-backend']}"
+        )
+
+
+# ===================================================================
+# docker-compose.yml 验证
+# ===================================================================
+
+
+class TestDockerCompose:
+    """验证 docker-compose.yml 格式与服务定义."""
+
+    @pytest.fixture(scope="class")
+    def compose_data(self):
+        import yaml
+        from pathlib import Path
+        compose_path = Path(__file__).resolve().parent.parent / "docker-compose.yml"
+        with open(compose_path) as fp:
+            return yaml.safe_load(fp)
+
+    def test_yaml_parses(self, compose_data):
+        """docker-compose.yml 可被 YAML 解析器正确解析."""
+        assert compose_data is not None
+
+    def test_services_key_exists(self, compose_data):
+        """顶层 services 键存在."""
+        assert "services" in compose_data
+
+    def test_streamlit_service_defined(self, compose_data):
+        """streamlit 服务已定义."""
+        assert "streamlit" in compose_data["services"]
+
+    def test_streamlit_has_restart_policy(self, compose_data):
+        """streamlit 服务的 restart 策略为 unless-stopped."""
+        svc = compose_data["services"]["streamlit"]
+        assert svc.get("restart") == "unless-stopped"
+
+    def test_streamlit_has_healthcheck(self, compose_data):
+        """streamlit 服务定义了 healthcheck."""
+        svc = compose_data["services"]["streamlit"]
+        assert "healthcheck" in svc
+
+    def test_streamlit_healthcheck_has_test(self, compose_data):
+        """streamlit 健康检查包含 test 命令."""
+        hc = compose_data["services"]["streamlit"]["healthcheck"]
+        assert "test" in hc
+        assert len(hc["test"]) > 0
+
+    def test_streamlit_healthcheck_has_retries(self, compose_data):
+        """streamlit 健康检查配置了重试次数."""
+        hc = compose_data["services"]["streamlit"]["healthcheck"]
+        assert "retries" in hc
+        assert hc["retries"] >= 1
+
+    def test_no_version_field(self, compose_data):
+        """Docker Compose V2 不应包含已废弃的 version 字段."""
+        assert "version" not in compose_data
