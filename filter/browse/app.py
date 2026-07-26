@@ -49,9 +49,7 @@ from filter.browse.sidebar import (
     _render_config_history, _render_db_import_export, _run_auto_refresh,
 )
 from filter.engine.signals import compute_bs_markers, get_lower_tfs
-from filter.browse.components_sidebar import (
-    ALL_TFS, DEFAULT_TFS, TF_HIERARCHY,
-)
+from filter.shared.constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY
 from filter.shared.state import AppState
 from filter.backtest.capture import PipelineCapture, PipelineStageData
 from filter.backtest.logger import log_data_load

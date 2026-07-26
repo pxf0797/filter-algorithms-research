@@ -3,7 +3,7 @@ line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "W"]
+select = ["E", "F", "W", "I"]
 ignore = ["E501"]
 
 [build-system]
@@ -61,6 +61,8 @@ markers = [
     "strategy: PnL and strategy tests",
     "alignment: time alignment tests",
     "benchmark: performance regression benchmarks (pytest-benchmark)",
+    "engine: engine/backtest runner tests",
+    "numba: numba JIT compilation tests",
 ]
 
 [tool.coverage.run]

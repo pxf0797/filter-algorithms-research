@@ -28,8 +28,8 @@ from filter.data.db import (
 )
 from filter.data.loader import _fetch_all_timeframes
 from filter.engine.filters import FILTERS
-from filter.browse.components_sidebar import _render_params, ALL_TFS, DEFAULT_TFS
-from filter.shared.constants import TF_INTERVAL
+from filter.browse.components_sidebar import _render_params
+from filter.shared.constants import ALL_TFS, DEFAULT_TFS, TF_INTERVAL
 from filter.shared.state import AppState
 
 

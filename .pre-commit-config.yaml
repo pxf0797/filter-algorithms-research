@@ -46,3 +46,14 @@ repos:
       - id: bandit
         pass_filenames: true
         args: [--skip, "B101,B104,B301", --recursive, filter/]
+
+  # P0: fast smoke tests
+  - repo: local
+    hooks:
+      - id: fast-smoke-tests
+        name: fast smoke tests
+        entry: python -m pytest tests/test_constants.py tests/test_config.py tests/test_filters.py tests/test_db.py tests/test_state.py -q --tb=line
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]

@@ -10,6 +10,9 @@ install:
 test:
 	python -m pytest tests/ --tb=short -q
 
+test-failed:
+	python -m pytest --lf --tb=short -q
+
 test-snapshots:
 	python -m pytest tests/test_snapshots.py --tb=short -q
 
