@@ -22,6 +22,22 @@ jobs:
       - run: pip install ruff
       - run: ruff check . --ignore=E501,F841
 
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-typecheck-${{ hashFiles('filter/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-typecheck-
+      - run: pip install -r filter/requirements.txt
+      - run: pip install mypy types-requests types-pyyaml
+      - run: mypy filter/ --ignore-missing-imports --follow-imports=skip
+
   fast-tests:
     runs-on: ubuntu-latest
     strategy:

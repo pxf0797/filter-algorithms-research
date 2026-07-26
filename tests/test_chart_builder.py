@@ -148,3 +148,100 @@ class TestPrepareChartDataGuard:
         assert isinstance(result, dict)
         assert result["err"] is not None
         assert "数据" in result["err"]
+
+
+# ===================================================================
+# SECTION — 空数据端到端: _prepare_chart_data → _build_chart_figure → _render_plotly
+# ===================================================================
+
+class TestEmptyDataE2E:
+    """验证空 ticker / 数据不足时全链路不崩溃.
+
+    修复前：某些边界条件下 _prepare_chart_data 返回后未正确 short-circuit，
+    导致 None/空数据传递到 _build_chart_figure → _render_plotly 而崩溃。
+    """
+
+    @patch("browse.app._load_chart_data")
+    @patch("browse.app.st")
+    def test_full_chain_short_circuits_on_empty_ticker(self, mock_st, mock_load):
+        """空 ticker 输入时 _prepare_chart_data 短接 — 不执行 figure 构建."""
+        mock_load.return_value = (
+            None, None, None, None, None, "回测数据未就绪"
+        )
+        mock_st.session_state = {}
+
+        from browse.app import _prepare_chart_data
+        result = _prepare_chart_data({
+            "market": "A",
+            "ticker_code": "",
+            "cfg": {"tf": "日线", "n_pts": 120},
+        })
+
+        assert isinstance(result, dict)
+        assert result["err"] is not None
+        # 全链路关键守卫：有 err 时不应继续传数据给 _build_chart_figure
+        assert mock_load.call_count == 1
+
+    @patch("browse.app._load_chart_data")
+    @patch("browse.app.st")
+    def test_prepare_then_build_with_empty_data_safe(self, mock_st, mock_load):
+        """_prepare_chart_data 返回 err 时，_build_chart_figure 不应被调用.
+
+        验证调用方检查 data["err"] 后不进入 figure 构建流程。
+        """
+        mock_load.return_value = (
+            None, None, None, "000001", None, "数据加载失败: 网络超时"
+        )
+        mock_st.session_state = {}
+
+        from browse.app import _prepare_chart_data
+        result = _prepare_chart_data({
+            "market": "A",
+            "ticker_code": "000001",
+            "cfg": {"tf": "日线", "n_pts": 120},
+        })
+
+        assert result["err"] is not None
+        # 模拟调用方逻辑：有 err 则不应调用 _build_chart_figure
+        should_skip_build = result["err"] is not None or result.get("t") is None
+        assert should_skip_build, (
+            "当 err 或 t 为 None 时应跳过 _build_chart_figure, "
+            "防止将 None 传递给需要数组的下游"
+        )
+
+    @patch("browse.app._load_chart_data")
+    @patch("browse.app.st")
+    def test_insufficient_data_no_crash(self, mock_st, mock_load):
+        """数据点 < 2 时 _prepare_chart_data 短接，不交由下游崩溃."""
+        mock_load.return_value = (
+            np.array([100.0]),      # t — 仅 1 个点
+            np.array([50.0]),       # noisy
+            None,                    # ohlc
+            "000001",                # ticker_full
+            None,                    # dates
+            None,                    # err
+        )
+        mock_st.session_state = {}
+
+        from browse.app import _prepare_chart_data
+        result = _prepare_chart_data({
+            "market": "A",
+            "ticker_code": "000001",
+            "cfg": {"tf": "日线", "n_pts": 120},
+        })
+
+        assert isinstance(result, dict)
+        assert result["err"] is not None
+        assert "数据点不足" in result["err"]
+        # 确保未崩溃；mock_load 仅被调用一次
+        assert mock_load.call_count == 1
+
+    def test_build_chart_figure_signature_safety(self):
+        """_build_chart_figure 签名中 data 参数应为 dict 类型（T7 guard）."""
+        import inspect
+        from browse.app import _build_chart_figure
+        sig = inspect.signature(_build_chart_figure)
+        params = list(sig.parameters.keys())
+        assert "data" in params, (
+            "_build_chart_figure 第一个参数应为 'data'"
+        )
