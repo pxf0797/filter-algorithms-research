@@ -19,7 +19,7 @@ jobs:
           key: ${{ runner.os }}-pip-lint-${{ hashFiles('filter/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-lint-
-      - run: pip install ruff
+      - run: pip install "ruff>=0.11"
       - run: ruff check .
 
   type-check:
@@ -35,7 +35,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-typecheck-
       - run: pip install -r filter/requirements.txt
-      - run: pip install mypy types-requests types-pyyaml
+      - run: pip install "mypy>=2.0" types-requests types-pyyaml
       - run: mypy filter/ --ignore-missing-imports --follow-imports=skip
 
   fast-tests:

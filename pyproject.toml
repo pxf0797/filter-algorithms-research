@@ -16,7 +16,7 @@ version = "3.5.0"
 description = "多周期股票滤波分析工具"
 requires-python = ">=3.11"
 dependencies = [
-    "streamlit>=1.57",
+    "streamlit==1.57.0",
     "loguru>=0.7",
     "numpy>=2.2",
     "scipy>=1.17",
