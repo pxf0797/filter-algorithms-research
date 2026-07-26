@@ -422,7 +422,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   </div>
 
   <div class="section period-dashboard">
-    <div class="section-title"><span class="num">D4</span> <span id="dash-d4-title">完整视图</span></div>
+    <div class="section-title"><span class="num">D4</span> <span id="dash-d4-title">5分钟</span> 完整视图</div>
     <div class="plot-wrap" style="height:520px"><div id="chart-dash-v3"></div></div>
     <button onclick="Plotly.relayout('chart-dash-v3', {'xaxis.autorange': true, 'xaxis2.autorange': true, 'xaxis3.autorange': true, 'xaxis4.autorange': true})" class="btn-reset-zoom">↺ 重置缩放</button>
     <div id="date-tip-v3" class="date-tip"></div>
@@ -455,6 +455,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   // ========== Constants ==========
   const VIEWS = ['v0', 'v1', 'v2', 'v3'];
   const VIEW_COLORS = { v0: '#58a6ff', v1: '#3fb950', v2: '#d2991d', v3: '#f78166' };
+  const ALL_TFS = ['1分钟','5分钟','15分钟','60分钟','日线','周线','月线','季线']; // idx↑ = coarser
   // ========== State ==========
   const DEFAULT_VIEW_LABELS = { v0: '日线', v1: '60分钟', v2: '15分钟', v3: '5分钟' };
   let viewLabels = { ...DEFAULT_VIEW_LABELS };
@@ -681,17 +682,18 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       });
     });
 
-    // Add v2 (daily) EPS band
-    var v2Filtered = col(data, 'v2_filtered');
-    var v2Eps = col(data, 'v2_eps');
-    var epsUpper = v2Filtered.map(function(f, i) { return toNum(f) + toNum(v2Eps[i]); });
-    var epsLower = v2Filtered.map(function(f, i) { return toNum(f) - toNum(v2Eps[i]); });
+    // Add coarsest view EPS band
+    var coarsestView = VIEWS[0];
+    var coarsestFiltered = col(data, coarsestView + '_filtered');
+    var coarsestEps = col(data, coarsestView + '_eps');
+    var epsUpper = coarsestFiltered.map(function(f, i) { return toNum(f) + toNum(coarsestEps[i]); });
+    var epsLower = coarsestFiltered.map(function(f, i) { return toNum(f) - toNum(coarsestEps[i]); });
 
     // Upper band trace (invisible, for fill anchoring)
     traces.push({
       x: barIdx, y: epsUpper,
       type: 'scatter', mode: 'lines',
-      name: 'v2 +eps',
+      name: coarsestView + ' +eps',
       line: { width: 0 },
       showlegend: false,
     });
@@ -700,7 +702,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     traces.push({
       x: barIdx, y: epsLower,
       type: 'scatter', mode: 'lines',
-      name: 'v2 ±eps',
+      name: coarsestView + ' ±eps',
       line: { width: 0 },
       fill: 'tonexty',
       fillcolor: 'rgba(217,119,6,0.10)',
@@ -998,8 +1000,8 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       var barIdx = td.columns.bar_index || [];
       var barTs = td.columns.bar_timestamp || [];
 
-      // Use v2 (daily) PnL long by default, fallback to first view found
-      var pnlKey = 'v2_pnl_long';
+      // Use coarsest view PnL long by default, fallback to any view found
+      var pnlKey = VIEWS[0] + '_pnl_long';
       if (!td.columns[pnlKey]) {
         // Find any pnl_long column
         var cols = td.stats.column_names || [];
@@ -1833,6 +1835,16 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   function renderAll(columns, stats, metadata) {
     // Set view labels from metadata (null-safe: if metadata is null or has no view_labels, use empty dict)
     viewLabels = (metadata && metadata.view_labels) ? { ...DEFAULT_VIEW_LABELS, ...metadata.view_labels } : { ...DEFAULT_VIEW_LABELS };
+
+    // Sort VIEWS by ALL_TFS index descending to ensure coarsest→finest order
+    // (coarsest at top of heatmaps, consistent with config generation order)
+    VIEWS.sort((a, b) => {
+      const idxA = ALL_TFS.indexOf(viewLabels[a]);
+      const idxB = ALL_TFS.indexOf(viewLabels[b]);
+      // Guard: if timeframe not found in ALL_TFS, keep original relative order
+      if (idxA === -1 || idxB === -1) return 0;
+      return idxB - idxA; // descending ALL_TFS index = coarsest→finest
+    });
 
     const data = {
       columns: columns,

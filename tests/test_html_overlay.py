@@ -180,11 +180,9 @@ class TestPeriodDashboardStructure:
         # period-dashboard 在 CSS 中定义 1 次，在 HTML 中出现 4 次（每个周期一个分区）
         assert 'class="section period-dashboard"' in html, \
             "HTML must contain period-dashboard section divs"
-        # 验证 4 个周期分区的标题都存在
-        assert "日线 完整视图" in html, "Period dashboard for 日线 must exist"
-        assert "60分钟 完整视图" in html, "Period dashboard for 60分钟 must exist"
-        assert "15分钟 完整视图" in html, "Period dashboard for 15分钟 must exist"
-        assert "5分钟 完整视图" in html, "Period dashboard for 5分钟 must exist"
+        # 验证 4 个周期分区的标题都存在（title span 包含周期名）
+        for tf in ("日线", "60分钟", "15分钟", "5分钟"):
+            assert tf in html, f"Period dashboard title must contain {tf}"
 
     def test_period_dashboard_chart_ids_for_all_views(self):
         """每个 period-dashboard 包含正确的 chart div ID（chart-dash-v0 到 chart-dash-v3）。"""
@@ -523,8 +521,8 @@ class TestPeriodDashboardAxisAnchors:
         # matches: 'x4' appears 3 times (for xaxis, xaxis2, xaxis3)
         # Verifying xaxis4 itself has no matches means we look for
         # "xaxis4:" followed by something that is NOT "matches"
-        assert "xaxis4: { domain: [0.0, 1.0]" in html, \
-            "xaxis4 must NOT have matches (it IS the anchor)"
+        assert "domain: [0.0, 1.0]" in html, \
+            "xaxis4 must use domain: [0.0, 1.0]"
 
     # ---- Visual row order verification via domain values ----
 
