@@ -21,6 +21,23 @@ jobs:
             ${{ runner.os }}-pip-lint-
       - run: pip install "ruff>=0.11"
       - run: ruff check .
+      - name: Check test imports
+        run: python scripts/check_test_imports.py
+      - name: Validate CI test file references
+        run: |
+          grep -oE "tests/test_[a-zA-Z0-9_]+\.py" .github/workflows/ci.yml | sort -u | while read f; do
+            [ -f "$f" ] || echo "::warning::CI references missing file: $f"
+          done
+
+  lock-consistency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install pip-tools
+      - run: |
+          pip-compile --dry-run filter/requirements.txt 2>&1 | tee /dev/stderr | grep -q "is up-to-date" || (echo "::error::requirements.lock is stale" && exit 1)
 
   type-check:
     runs-on: ubuntu-latest

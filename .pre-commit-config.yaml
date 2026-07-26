@@ -57,3 +57,26 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+
+      - id: check-conftest-fixtures
+        name: verify conftest autouse fixtures
+        entry: python -c "
+import ast, sys;
+tree = ast.parse(open('tests/conftest.py').read());
+funcs = [n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)];
+required = ['_reset_db_connection', '_reset_streamlit_components', '_restore_engine_get_conn'];
+missing = [r for r in required if r not in funcs];
+if missing: print(f'MISSING autouse fixtures: {missing}'); sys.exit(1);
+print('All autouse fixtures present');
+"
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: check-test-imports
+        name: verify test imports
+        entry: python scripts/check_test_imports.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
