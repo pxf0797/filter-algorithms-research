@@ -122,7 +122,7 @@ def _print_summary(result: dict) -> None:
     views = result.get("views", {})
 
     print(f"\n{'='*60}")
-    print(f"  Bar 重放摘要")
+    print("  Bar 重放摘要")
     print(f"{'='*60}")
     print(f"  bar_index:   {bar_index}")
     print(f"  timestamp:   {bar_ts}")
@@ -234,7 +234,7 @@ def main():
         print("错误：重算失败（数据不足或 bar_index 越界）", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[2/2] 重算完成", file=sys.stderr)
+    print("[2/2] 重算完成", file=sys.stderr)
 
     if args.json:
         _print_json(result)

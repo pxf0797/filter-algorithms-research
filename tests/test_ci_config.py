@@ -115,6 +115,104 @@ def test_makefile_snapshot_update_uses_update_flag():
     )
 
 
+def test_precommit_mypy_rev_valid():
+    """.pre-commit-config.yaml 中 mypy rev 应为有效版本号 (e.g. v2.1.0)。"""
+    precommit_path = ROOT / ".pre-commit-config.yaml"
+    assert precommit_path.exists(), f".pre-commit-config.yaml not found at {precommit_path}"
+
+    with open(precommit_path) as f:
+        data = yaml.safe_load(f)
+
+    mypy_rev = None
+    for repo in data.get("repos", []):
+        if "mirrors-mypy" in repo.get("repo", ""):
+            mypy_rev = repo.get("rev", "")
+            break
+
+    assert mypy_rev is not None, (
+        "mirrors-mypy repo not found in .pre-commit-config.yaml"
+    )
+    assert re.match(r"^v\d+\.\d+\.\d+$", mypy_rev), (
+        f"mypy rev '{mypy_rev}' should match v<major>.<minor>.<patch> format"
+    )
+
+
+def test_ci_has_type_check_job():
+    """CI workflow 应包含 type-check job 运行 mypy 检查。"""
+    ci_path = ROOT / ".github" / "workflows" / "ci.yml"
+    with open(ci_path) as f:
+        data = yaml.safe_load(f)
+
+    jobs = data.get("jobs", {})
+    assert "type-check" in jobs, (
+        "ci.yml missing 'type-check' job"
+    )
+
+    job = jobs["type-check"]
+    assert job.get("runs-on") == "ubuntu-latest", (
+        "type-check should run on ubuntu-latest"
+    )
+
+    steps = job.get("steps", [])
+    assert len(steps) > 0, "type-check should have steps"
+
+    # At least one step should run mypy
+    mypy_cmd_found = False
+    for step in steps:
+        run_cmd = step.get("run", "")
+        if "mypy" in run_cmd:
+            mypy_cmd_found = True
+            break
+
+    assert mypy_cmd_found, (
+        "type-check job should have a step running 'mypy'"
+    )
+
+
+def test_ci_ruff_does_not_ignore_f841():
+    """CI ruff step should NOT ignore F841 (unused variable).
+
+    F841 is enforced by pre-commit and pyproject.toml;
+    CI must be consistent — not silently ignore it.
+    """
+    ci_path = ROOT / ".github" / "workflows" / "ci.yml"
+    with open(ci_path) as f:
+        content = f.read()
+
+    # Find the lint job's ruff command
+    match = re.search(r"ruff check \.(.*)", content)
+    assert match is not None, "CI must have a 'ruff check .' command"
+
+    ruff_args = match.group(1)
+    assert "F841" not in ruff_args, (
+        f"CI ruff step must NOT ignore F841. Found: ruff check .{ruff_args}"
+    )
+
+
+def test_ci_coverage_threshold_matches_pyproject():
+    """CI coverage fail-under threshold should match pyproject.toml (75)."""
+    ci_path = ROOT / ".github" / "workflows" / "ci.yml"
+    with open(ci_path) as f:
+        ci_content = f.read()
+
+    # Extract --cov-fail-under value from CI
+    match = re.search(r"--cov-fail-under=(\d+)", ci_content)
+    assert match is not None, "CI coverage step must specify --cov-fail-under"
+    ci_threshold = int(match.group(1))
+
+    # Extract fail_under from pyproject.toml
+    pyproject_path = ROOT / "pyproject.toml"
+    pyproject_content = pyproject_path.read_text()
+    match = re.search(r"fail_under\s*=\s*(\d+)", pyproject_content)
+    assert match is not None, "pyproject.toml must have fail_under under [tool.coverage.report]"
+    pyproject_threshold = int(match.group(1))
+
+    assert ci_threshold == pyproject_threshold, (
+        f"Coverage threshold mismatch: "
+        f"CI={ci_threshold}, pyproject.toml={pyproject_threshold}"
+    )
+
+
 def test_no_stale_streamlit_app_paths():
     """Dockerfile/Makefile/README 中不应存在过时的 streamlit_app.py 路径。"""
     files_to_check = {

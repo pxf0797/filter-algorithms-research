@@ -13,20 +13,14 @@ from pathlib import Path
 
 import numpy as np
 import plotly.graph_objects as go
-import pytest
 
 # Ensure filter is importable
 _src = Path(__file__).resolve().parent.parent / "filter"
 if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
-from engine.filters import (
-    apply_savgol,
-    apply_ema,
-    apply_sma,
-    apply_median,
-    _schmitt_trigger,
-)
+from engine.filters import apply_savgol, apply_ema, apply_sma, apply_median
+from engine.schmitt import _schmitt_trigger
 
 
 # ═════════════════════════════════════════════════════════════════════════

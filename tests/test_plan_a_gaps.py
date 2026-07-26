@@ -22,7 +22,7 @@ from plotly.subplots import make_subplots
 
 from browse.charts import (
     _draw_holding_bands, _add_cross_pnl_subplot,
-    _add_alignment_subplot, _add_prediction_traces,
+    _add_alignment_subplot,
 )
 from browse.app import (
     _add_feedback_subplot, _add_schmitt_traces,

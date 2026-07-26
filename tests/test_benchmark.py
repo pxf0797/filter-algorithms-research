@@ -6,15 +6,14 @@ Run: python -m pytest tests/test_benchmark.py --benchmark-only
 """
 
 import numpy as np
-import pandas as pd
 import pytest
 from engine.filters import (
     apply_sma, apply_ema, apply_wma, apply_alma,
     apply_savgol, apply_kalman, apply_butterworth,
     apply_gaussian, apply_median, apply_lowess,
-    compute_metrics, _schmitt_trigger, _find_all_pairs,
-    _fit_parabolic, _fit_physics_parabola,
 )
+from engine.alignment import compute_metrics
+from engine.schmitt import _schmitt_trigger, _find_all_pairs, _fit_parabolic, _fit_physics_parabola
 
 # ---------------------------------------------------------------------------
 # Test data (shared across benchmarks)
@@ -50,6 +49,7 @@ class TestFilterPerformance:
     """Benchmark each filter on 2000-bar data."""
 
     @pytest.mark.benchmark
+    @pytest.mark.slow
     @pytest.mark.filter
     @pytest.mark.parametrize("name,func,kwargs", FILTER_BENCH_SPECS)
     def test_filter_2000_bars(self, name, func, kwargs, benchmark):
@@ -66,6 +66,7 @@ class TestSchmittTriggerPerformance:
     """Benchmark Schmitt trigger computation (critical path for strategy)."""
 
     @pytest.mark.benchmark
+    @pytest.mark.slow
     @pytest.mark.signal
     def test_schmitt_trigger_2000_bars(self, benchmark):
         """Benchmark Schmitt trigger on 2000 bars of v/a data."""
@@ -74,6 +75,7 @@ class TestSchmittTriggerPerformance:
         benchmark(_schmitt_trigger, v, a, ewma_span=60, k_eps=0.15, sigma_min=0.05)
 
     @pytest.mark.benchmark
+    @pytest.mark.slow
     @pytest.mark.signal
     def test_find_all_pairs_2000_bars(self, benchmark):
         """Benchmark pair finding on Schmitt trigger output."""
@@ -94,6 +96,7 @@ class TestMetricsPerformance:
     """Benchmark compute_metrics on typical data sizes."""
 
     @pytest.mark.benchmark
+    @pytest.mark.slow
     @pytest.mark.filter
     def test_compute_metrics_2000_bars(self, benchmark):
         """Benchmark metrics computation on 2000 data points."""
@@ -112,6 +115,7 @@ class TestFitPerformance:
     """Benchmark parabolic fitting (used in strategy prediction)."""
 
     @pytest.mark.benchmark
+    @pytest.mark.slow
     @pytest.mark.strategy
     def test_fit_parabolic_100_bars(self, benchmark):
         """Benchmark quadratic polynomial fit on 100-bar segment."""
@@ -121,6 +125,7 @@ class TestFitPerformance:
         benchmark(_fit_parabolic, x, y, 0, seg_len - 1)
 
     @pytest.mark.benchmark
+    @pytest.mark.slow
     @pytest.mark.strategy
     def test_fit_physics_parabola_100_bars(self, benchmark):
         """Benchmark physics parabola fit on 100-bar segment."""
@@ -138,6 +143,7 @@ class TestBatchProcessing:
     """Benchmark batch operations on multiple filter calls."""
 
     @pytest.mark.benchmark
+    @pytest.mark.slow
     @pytest.mark.filter
     def test_batch_filter_10x(self, benchmark):
         """Benchmark running 10 different filter configs in sequence."""
@@ -161,6 +167,7 @@ class TestBatchProcessing:
         benchmark(batch_run)
 
     @pytest.mark.benchmark
+    @pytest.mark.slow
     @pytest.mark.filter
     def test_compute_metrics_batch_50x(self, benchmark):
         """Benchmark 50 sequential metrics computations."""
@@ -176,6 +183,7 @@ class TestBatchProcessing:
         benchmark(batch_metrics)
 
     @pytest.mark.benchmark
+    @pytest.mark.slow
     @pytest.mark.signal
     def test_data_loading_simulated_2000_bars(self, benchmark):
         """Benchmark simulated data generation (proxy for data loading path)."""

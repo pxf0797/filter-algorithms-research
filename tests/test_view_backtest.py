@@ -12,14 +12,11 @@ view_backtest.py 测试 — HTML 桥接、数据序列化、服务器模式。
 
 import json
 import sys
-import tempfile
 import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import numpy as np
 import pandas as pd
-import pytest
 
 
 # ── 确保 tools/ 在 sys.path 中 ────────────────────────────────────────────────

@@ -8,7 +8,8 @@ Usage:
   PYTHONPATH=filter:$PYTHONPATH python3 diagnose_axis.py
 """
 
-import sys, os, json
+import sys
+import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "filter"))
 
 # ---- Mock streamlit before any project imports ----

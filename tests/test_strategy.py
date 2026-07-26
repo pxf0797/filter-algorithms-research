@@ -6,10 +6,9 @@ PnL computation (_compute_strategy_pnl, _add_prediction_traces).
 import numpy as np
 import pandas as pd
 import pytest
-from engine.filters import (
-    _fit_parabolic, _fit_physics_parabola,
-    _compute_strategy_pnl, _find_all_pairs,
-)
+from unittest.mock import patch, MagicMock
+from engine.schmitt import _fit_parabolic, _fit_physics_parabola, _find_all_pairs
+from engine.strategy import _compute_strategy_pnl
 from browse.charts import _add_prediction_traces
 
 
@@ -508,7 +507,7 @@ class TestSearchSortedConsistency:
 
     def test_align_pnl_searchsorted_consistency(self):
         """P0-1: _align_pnl_to_current_tf 的 searchsorted 与旧 np.where 等价。"""
-        from filter.engine.filters import _align_pnl_to_current_tf
+        from filter.engine.alignment import _align_pnl_to_current_tf
 
         np.random.seed(42)
         n_higher = 50
@@ -557,7 +556,7 @@ class TestSearchSortedConsistency:
 
     def test_cross_period_markers_with_eod(self):
         """P0-2: eod 退场 marker 正确设置为窗口最后一个 bar。"""
-        from filter.engine.filters import _align_pnl_to_current_tf
+        from filter.engine.alignment import _align_pnl_to_current_tf
 
         n_higher = 10
         n_current = 30
@@ -596,3 +595,53 @@ class TestSearchSortedConsistency:
             assert eod_exit[0][0] == n_current - 1, (
                 f"eod exit bar should be {n_current - 1}, got {eod_exit[0][0]}"
             )
+
+
+class TestComputeStrategyDisplay:
+    """_compute_strategy_display 边界测试."""
+
+    def test_no_strategy_returns_none_pnl(self):
+        """show_strategy=False 返回 (None, None, [])."""
+        import filter.browse.app as app_module
+        with patch.object(app_module, "st") as mock_st:
+            mock_st.columns.return_value = [MagicMock() for _ in range(3)]
+            t = np.arange(100, dtype=float)
+            filtered = np.sin(t / 10.0) + 100.0
+            cfg = {"show_strategy": False, "stop_loss_pct": 2.0, "n_ext": 10}
+            long_pnl, short_pnl, trade_records = app_module._compute_strategy_display(
+                t, filtered, None, [], [], cfg, "日线", pd.DatetimeIndex([]),
+            )
+            assert long_pnl is None
+            assert short_pnl is None
+            assert trade_records == []
+
+    def test_no_schmitt_returns_none_pnl(self):
+        """schmitt=None 时 show_strategy=True 仍然返回 (None, None, [])."""
+        import filter.browse.app as app_module
+        with patch.object(app_module, "st") as mock_st:
+            mock_st.columns.return_value = [MagicMock() for _ in range(3)]
+            t = np.arange(100, dtype=float)
+            filtered = np.sin(t / 10.0) + 100.0
+            cfg = {"show_strategy": True, "stop_loss_pct": 2.0, "n_ext": 10}
+            long_pnl, short_pnl, trade_records = app_module._compute_strategy_display(
+                t, filtered, None, [], [], cfg, "日线", pd.DatetimeIndex([]),
+            )
+            assert long_pnl is None
+            assert short_pnl is None
+            assert trade_records == []
+
+    def test_empty_pred_pairs_returns_none_pnl(self):
+        """pred_pairs 为空时返回 (None, None, [])."""
+        import filter.browse.app as app_module
+        with patch.object(app_module, "st") as mock_st:
+            mock_st.columns.return_value = [MagicMock() for _ in range(3)]
+            t = np.arange(100, dtype=float)
+            filtered = np.sin(t / 10.0) + 100.0
+            schmitt = {"sig": np.ones(100, dtype=int)}
+            cfg = {"show_strategy": True, "stop_loss_pct": 2.0, "n_ext": 10}
+            long_pnl, short_pnl, trade_records = app_module._compute_strategy_display(
+                t, filtered, schmitt, [], [], cfg, "日线", pd.DatetimeIndex([]),
+            )
+            assert long_pnl is None
+            assert short_pnl is None
+            assert trade_records == []

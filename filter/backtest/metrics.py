@@ -8,6 +8,90 @@
 import numpy as np
 from itertools import groupby
 
+try:
+    from numba import njit
+    HAS_NUMBA = True
+except ImportError:
+    def njit(*args, **kwargs):
+        """Identity decorator: numba not installed, return function unchanged."""
+        return lambda f: f
+    HAS_NUMBA = False
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Numba-accelerated core: max drawdown & underwater duration
+# ═══════════════════════════════════════════════════════════════════════════
+
+@njit(cache=True)
+def _compute_drawdown_metrics(pnl: np.ndarray):
+    """Compute max drawdown and max drawdown duration in a single O(n) pass.
+
+    Replaces the three-pass approach (``np.maximum.accumulate`` +
+    vectorised drawdown + ``itertools.groupby``) with one numba loop.
+
+    Parameters
+    ----------
+    pnl : np.ndarray
+        PnL curve values (e.g. combined long/short).
+
+    Returns
+    -------
+    (max_dd, max_dd_dur) : (float, int)
+        ``max_dd`` is the most negative drawdown ratio (e.g. -0.15 for 15%),
+        ``max_dd_dur`` is the longest consecutive underwater bar count.
+    """
+    n = len(pnl)
+    if n == 0:
+        return 0.0, 0
+
+    peak = pnl[0]
+    max_dd = 0.0
+    max_dd_dur = 0
+    current_dur = 0
+
+    for i in range(n):
+        val = pnl[i]
+        if val > peak:
+            peak = val
+
+        if peak != 0.0:
+            dd = (val - peak) / peak
+        else:
+            dd = 0.0
+
+        if dd < max_dd:
+            max_dd = dd
+
+        if dd < 0.0:
+            current_dur += 1
+            if current_dur > max_dd_dur:
+                max_dd_dur = current_dur
+        else:
+            current_dur = 0
+
+    return max_dd, max_dd_dur
+
+
+def _compute_drawdown_metrics_py(pnl: np.ndarray):
+    """Pure Python fallback for :func:`_compute_drawdown_metrics`.
+
+    Uses ``np.maximum.accumulate`` + ``itertools.groupby``, matching the
+    original implementation exactly.
+    """
+    if len(pnl) == 0:
+        return 0.0, 0
+
+    peak = np.maximum.accumulate(pnl)
+    drawdown = np.where(peak != 0, (pnl - peak) / peak, 0.0)
+    max_dd = float(np.min(drawdown))
+
+    underwater = drawdown < 0
+    max_dd_dur = max(
+        (len(list(g)) for k, g in groupby(underwater) if k),
+        default=0,
+    )
+    return max_dd, max_dd_dur
+
 
 def compute_backtest_metrics(
     long_pnl: np.ndarray,
@@ -67,16 +151,10 @@ def compute_backtest_metrics(
                if downside_vol > 0 else 0.0)
 
     # ── Max Drawdown & Duration ──
-    peak = np.maximum.accumulate(combined_pnl)
-    drawdown = np.where(peak != 0, (combined_pnl - peak) / peak, 0.0)
-    max_dd = np.min(drawdown)
-
-    # 连续水下天数
-    underwater = drawdown < 0
-    max_dd_dur = max(
-        (len(list(g)) for k, g in groupby(underwater) if k),
-        default=0,
-    )
+    if HAS_NUMBA:
+        max_dd, max_dd_dur = _compute_drawdown_metrics(combined_pnl)
+    else:
+        max_dd, max_dd_dur = _compute_drawdown_metrics_py(combined_pnl)
 
     # ── Calmar ──
     calmar = annual_return / abs(max_dd) if max_dd != 0 else 0.0

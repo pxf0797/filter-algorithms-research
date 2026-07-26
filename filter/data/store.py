@@ -116,7 +116,7 @@ class ParquetStore:
         so downstream consumers can reproduce the backtest setup.
     """
 
-    _MAX_BUFFER_MB: int = 500  # hard memory limit for in-memory buffer (P0-7)
+    _MAX_BUFFER_MB: int = 200  # hard memory limit for in-memory buffer
 
     def __init__(
         self,
@@ -146,6 +146,7 @@ class ParquetStore:
         self._part_index: int = 0
         self._last_flush_time: float = 0.0
         self._total_row_count: int = 0
+        self._buffer_memory_bytes: int = 0
 
     # ── Public API ──────────────────────────────────────────────────
 
@@ -186,6 +187,7 @@ class ParquetStore:
         self._part_index = 0
         self._last_flush_time = time.time()
         self._total_row_count = 0
+        self._buffer_memory_bytes = 0
         self._last_pnl: dict[str, float] = {}
 
         # ── Pending events for post-hoc trade/BS matching ──
@@ -257,16 +259,29 @@ class ParquetStore:
         try:
             row = self._extract_row(bar_index, bar_timestamp, stage_outputs)
             self._buffer.append(row)
+            self._buffer_memory_bytes += sys.getsizeof(row)
             self._accumulate_events(stage_outputs)
 
-            # P0-7: defensively flush when estimated memory exceeds limit
-            est_mb = len(self._buffer) * sys.getsizeof(self._buffer[0]) / (1024 * 1024) if self._buffer else 0
-            if est_mb > self._max_buffer_mb:
+            # Memory pressure tracking with tiered logging
+            max_bytes = self._max_buffer_mb * 1024 * 1024
+            mem_mb = self._buffer_memory_bytes / (1024 * 1024)
+            row_count = len(self._buffer)
+            if self._buffer_memory_bytes > max_bytes * 0.9:
                 logger.warning(
-                    "ParquetStore buffer 超过 {}MB，强制 flush ({} 行)",
-                    self._max_buffer_mb, len(self._buffer),
+                    "ParquetStore buffer 内存 {:.1f}MB / {}MB ({} 行)，强制 flush",
+                    mem_mb, self._max_buffer_mb, row_count,
                 )
                 self.flush()
+            elif self._buffer_memory_bytes > max_bytes * 0.75:
+                logger.warning(
+                    "ParquetStore buffer 内存 {:.1f}MB / {}MB ({} 行)",
+                    mem_mb, self._max_buffer_mb, row_count,
+                )
+            elif self._buffer_memory_bytes > max_bytes * 0.5:
+                logger.info(
+                    "ParquetStore buffer 内存 {:.1f}MB / {}MB ({} 行)",
+                    mem_mb, self._max_buffer_mb, row_count,
+                )
 
             self._maybe_flush()
         except Exception:
@@ -320,6 +335,7 @@ class ParquetStore:
 
         self._total_row_count += len(self._buffer)
         self._buffer.clear()
+        self._buffer_memory_bytes = 0
         self._last_flush_time = time.time()
 
     def end_session(self) -> None:
@@ -682,27 +698,78 @@ class ParquetStore:
     def _buffer_to_table(self) -> pa.Table:
         """Convert the current in-memory buffer to a pyarrow Table.
 
-        Each dict in the buffer must have keys matching ``_column_names``.
-        Returns a table typed according to ``_full_schema``.
+        Pre-allocates numpy arrays matching the schema types for zero-copy
+        conversion, avoiding the memory overhead of dict-of-lists pivot.
         """
-        # Pivot: dict[col_name] → list of values
-        columns: dict[str, list] = {name: [] for name in self._column_names}
-        for row in self._buffer:
-            for name in self._column_names:
-                columns[name].append(row.get(name))
+        n = len(self._buffer)
 
-        # Build typed arrays matching the schema
+        # Separate columns by storage strategy:
+        #   - numpy arrays for fixed-width types (zero-copy → pyarrow)
+        #   - Python lists for variable-width strings (unavoidable)
+        np_cols: dict[str, np.ndarray] = {}
+        str_cols: dict[str, list] = {}
+
+        for field in self._full_schema:
+            name = field.name
+            if pa.types.is_string(field.type):
+                str_cols[name] = [None] * n
+            elif pa.types.is_timestamp(field.type):
+                np_cols[name] = np.empty(n, dtype="datetime64[ns]")
+            elif pa.types.is_boolean(field.type):
+                np_cols[name] = np.empty(n, dtype=np.bool_)
+            elif pa.types.is_floating(field.type):
+                np_cols[name] = np.empty(n, dtype=np.float32)
+            else:
+                np_cols[name] = np.empty(n, dtype=np.int32)
+
+        # Fill arrays by row index
+        for i, row in enumerate(self._buffer):
+            for name in self._column_names:
+                val = row.get(name)
+                if val is None:
+                    if name in np_cols:
+                        dtype = np_cols[name].dtype
+                        if np.issubdtype(dtype, np.integer):
+                            val = 0
+                        elif np.issubdtype(dtype, np.floating):
+                            val = np.nan
+                        elif np.issubdtype(dtype, np.bool_):
+                            val = False
+                        elif np.issubdtype(dtype, np.datetime64):
+                            val = np.datetime64("NaT")
+                        else:
+                            val = 0
+                        logger.debug(
+                            "_buffer_to_table: column={!r} row={} "
+                            "is None, using default={!r}",
+                            name, i, val,
+                        )
+                    else:
+                        # str_cols: None is fine (pyarrow handles null)
+                        str_cols[name][i] = val
+                        continue
+                if name in np_cols:
+                    np_cols[name][i] = val
+                else:
+                    str_cols[name][i] = val
+
+        # Build pyarrow arrays (zero-copy from numpy where possible)
         arrays: list[pa.Array] = []
         for field in self._full_schema:
-            col_name = field.name
+            name = field.name
             col_type = field.type
-            values = columns[col_name]
-            try:
-                arr = pa.array(values, type=col_type)
-            except (pa.ArrowInvalid, pa.ArrowTypeError, TypeError):
-                # Coerce by building untyped then casting
-                arr = pa.array(values)
-                arr = arr.cast(col_type, safe=False)
+            if name in np_cols:
+                try:
+                    arr = pa.array(np_cols[name], type=col_type)
+                except (pa.ArrowInvalid, pa.ArrowTypeError, TypeError):
+                    arr = pa.array(np_cols[name])
+                    arr = arr.cast(col_type, safe=False)
+            else:
+                try:
+                    arr = pa.array(str_cols[name], type=col_type)
+                except (pa.ArrowInvalid, pa.ArrowTypeError, TypeError):
+                    arr = pa.array(str_cols[name])
+                    arr = arr.cast(col_type, safe=False)
             arrays.append(arr)
 
         return pa.Table.from_arrays(arrays, schema=self._full_schema)
@@ -763,14 +830,6 @@ class ParquetStore:
         if self._save_debug_data:
             csv_path = self._session_dir / "backtest_result.csv"
             df = merged.to_pandas()
-            # Convert float32 → float64 so CSV text serialization preserves exact
-            # values: float32.repr truncates to ~7 sig digits, but when read_csv
-            # re-interprets the text as float64 the reconstructed value differs
-            # from the original float32 bits (e.g. 86.652405 → 86.652405000000002
-            # while the true float32 value is 86.652404785156250).
-            float32_cols = [c for c in df.columns if df[c].dtype == "float32"]
-            if float32_cols:
-                df[float32_cols] = df[float32_cols].astype("float64")
             df.to_csv(str(csv_path), index=False)
 
         # Remove part files now that the merged file exists

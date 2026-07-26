@@ -15,6 +15,7 @@ from pathlib import Path
 import os as _os
 
 import pandas as pd
+import pyarrow.parquet as pq
 from loguru import logger
 from typing import Any, Dict, Optional, Tuple
 from filter.data.db import get_conn, query_kline
@@ -174,8 +175,9 @@ def _compute_version(parquet_path: Path) -> Dict[str, Any]:
         ``{"mtime": float, "rows": int}``。
     """
     mtime = parquet_path.stat().st_mtime
-    df = pd.read_parquet(parquet_path)
-    return {"mtime": mtime, "rows": len(df)}
+    pf = pq.ParquetFile(parquet_path)
+    nrows = pf.metadata.num_rows
+    return {"mtime": mtime, "rows": nrows}
 
 
 def _save_version(parquet_path: Path) -> None:
@@ -338,14 +340,14 @@ def _sync_to_display(ticker_code: str, tf: str, n_pts: int = 120,
 # 向后兼容 — 委托给拆分的子模块
 # ═══════════════════════════════════════════════════════════════
 
-from filter.data.fetcher import (
+from filter.data.fetcher import (  # noqa: F401
     _fetch_stock,
     _fetch_all_timeframes,
     fetch_incremental,
     _stock_name_lookup,
 )
 
-from filter.data.synth import (
+from filter.data.synth import (  # noqa: F401
     _sync_all_cascading,
     _write_parquet,
     # Re-export cascade helper functions for backward compatibility
@@ -362,4 +364,6 @@ from filter.data.synth import (
     _synthesize_incomplete_bar,
     _query_tf_from_db,
     _query_tf_for_period,
+    clear_query_cache,
 )
+

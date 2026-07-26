@@ -507,3 +507,246 @@ class TestBacktestSliderKeys:
         # 修改一个不影响另一个
         AppState.set("_bt_slider_pos", 99)
         assert AppState.get("_bar_index") == 100
+
+
+# ====================================================================
+# DictStateStore — 纯 dict 存储
+# ====================================================================
+
+class TestDictStateStore:
+    """Tests for DictStateStore — pure dict-backed state storage."""
+
+    def test_get_existing_key(self):
+        store = state.DictStateStore({"a": 1, "b": 2})
+        assert store.get("a") == 1
+        assert store.get("b") == 2
+
+    def test_get_missing_key_returns_none(self):
+        store = state.DictStateStore()
+        assert store.get("nonexistent") is None
+
+    def test_get_missing_key_returns_default(self):
+        store = state.DictStateStore()
+        assert store.get("nonexistent", 42) == 42
+
+    def test_set_and_get(self):
+        store = state.DictStateStore()
+        store.set("key1", "value1")
+        assert store.get("key1") == "value1"
+
+    def test_contains(self):
+        store = state.DictStateStore({"a": 1})
+        assert "a" in store
+        assert "b" not in store
+
+    def test_pop_existing_key(self):
+        store = state.DictStateStore({"a": 1, "b": 2})
+        assert store.pop("a") == 1
+        assert "a" not in store
+        assert store.get("b") == 2
+
+    def test_pop_missing_key_returns_none(self):
+        store = state.DictStateStore()
+        assert store.pop("no_key") is None
+
+    def test_pop_missing_key_returns_default(self):
+        store = state.DictStateStore()
+        assert store.pop("no_key", "default") == "default"
+
+    def test_keys_iteration(self):
+        store = state.DictStateStore({"a": 1, "b": 2, "c": 3})
+        keys = list(store.keys())
+        assert sorted(keys) == ["a", "b", "c"]
+
+    def test_empty_store_keys(self):
+        store = state.DictStateStore()
+        assert list(store.keys()) == []
+
+    def test_initial_none_creates_empty(self):
+        store = state.DictStateStore(None)
+        assert list(store.keys()) == []
+
+    def test_overwrite_value(self):
+        store = state.DictStateStore({"a": 1})
+        store.set("a", 99)
+        assert store.get("a") == 99
+
+
+# ====================================================================
+# StreamlitStateStore — mock streamlit 环境
+# ====================================================================
+
+class TestStreamlitStateStore:
+    """Tests for StreamlitStateStore with mocked streamlit module."""
+
+    def test_get_from_session_state(self, real_session_state):
+        store = state.StreamlitStateStore()
+        real_session_state["_test_key"] = "hello"
+        assert store.get("_test_key") == "hello"
+
+    def test_get_missing_returns_none(self, real_session_state):
+        store = state.StreamlitStateStore()
+        assert store.get("_missing") is None
+
+    def test_get_missing_returns_default(self, real_session_state):
+        store = state.StreamlitStateStore()
+        assert store.get("_missing", "fallback") == "fallback"
+
+    def test_set_writes_to_session_state(self, real_session_state):
+        store = state.StreamlitStateStore()
+        store.set("_write_test", 42)
+        assert real_session_state["_write_test"] == 42
+
+    def test_contains(self, real_session_state):
+        store = state.StreamlitStateStore()
+        real_session_state["_exists"] = 1
+        assert "_exists" in store
+        assert "_not_exists" not in store
+
+    def test_pop_existing(self, real_session_state):
+        store = state.StreamlitStateStore()
+        real_session_state["_pop_test"] = "bye"
+        assert store.pop("_pop_test") == "bye"
+        assert "_pop_test" not in real_session_state
+
+    def test_pop_missing(self, real_session_state):
+        store = state.StreamlitStateStore()
+        assert store.pop("_no_such") is None
+
+    def test_pop_missing_with_default(self, real_session_state):
+        store = state.StreamlitStateStore()
+        assert store.pop("_no_such", 99) == 99
+
+    def test_keys_iterates_session_state(self, real_session_state):
+        store = state.StreamlitStateStore()
+        real_session_state["_k1"] = 1
+        real_session_state["_k2"] = 2
+        keys = list(store.keys())
+        assert "_k1" in keys
+        assert "_k2" in keys
+
+
+# ====================================================================
+# AppState with custom DictStateStore
+# ====================================================================
+
+class TestAppStateWithDictStore:
+    """Tests for AppState methods accepting a custom DictStateStore."""
+
+    @staticmethod
+    def _make_store(**kwargs):
+        return state.DictStateStore(kwargs)
+
+    def test_get_with_custom_store(self):
+        store = self._make_store(_my_key="hello")
+        assert AppState.get("_my_key", store=store) == "hello"
+
+    def test_get_imp_fallback_with_custom_store(self):
+        store = self._make_store(_imp__fb="from_imp")
+        assert AppState.get("_fb", store=store) == "from_imp"
+
+    def test_get_missing_with_custom_store(self):
+        store = self._make_store()
+        assert AppState.get("_ghost", store=store) is None
+        assert AppState.get("_ghost", 42, store=store) == 42
+
+    def test_set_with_custom_store(self):
+        store = state.DictStateStore()
+        AppState.set("_set_key", "val", store=store)
+        assert store.get("_set_key") == "val"
+        assert store.get("_imp__set_key") == "val"
+
+    def test_set_imp_disabled_with_custom_store(self):
+        old = AppState._imp_enabled
+        AppState._imp_enabled = False
+        try:
+            store = state.DictStateStore()
+            AppState.set("_no_imp", "val", store=store)
+            assert store.get("_no_imp") == "val"
+            assert "_imp__no_imp" not in store
+        finally:
+            AppState._imp_enabled = old
+
+    def test_has_with_custom_store(self):
+        store = self._make_store(_exists=1)
+        assert AppState.has("_exists", store=store) is True
+        assert AppState.has("_missing", store=store) is False
+
+    def test_has_imp_fallback_with_custom_store(self):
+        store = self._make_store(_imp__backup="yes")
+        assert AppState.has("_backup", store=store) is True
+
+    def test_pop_with_custom_store(self):
+        store = self._make_store(_pop_me="gone")
+        val = AppState.pop("_pop_me", store=store)
+        assert val == "gone"
+        assert "_pop_me" not in store
+        assert "_imp__pop_me" not in store
+
+    def test_set_many_with_custom_store(self):
+        store = state.DictStateStore()
+        AppState.set_many({"_a": 1, "_b": 2}, store=store)
+        assert store.get("_a") == 1
+        assert store.get("_b") == 2
+
+    def test_init_defaults_with_custom_store(self):
+        store = state.DictStateStore()
+        AppState.init_defaults(store=store)
+        for k, v in SYSTEM_KEYS.items():
+            if v is not None:
+                assert k in store, f"Key {k!r} should be initialized"
+                assert store.get(k) == v
+
+    def test_get_global_with_custom_store(self):
+        store = state.DictStateStore()
+        val = AppState.get_global("market", store=store)
+        assert val == "美股 US"
+
+    def test_primary_takes_precedence_over_imp_with_custom_store(self):
+        store = self._make_store(_pre="primary", _imp__pre="backup")
+        assert AppState.get("_pre", store=store) == "primary"
+
+
+# ====================================================================
+# ViewState with custom DictStateStore
+# ====================================================================
+
+class TestViewStateWithDictStore:
+    """Tests for ViewState accepting a custom DictStateStore."""
+
+    def test_viewstate_get_with_custom_store(self):
+        store = state.DictStateStore({"v0_ke": 0.42})
+        vs = state.ViewState(0, store=store)
+        assert vs.get("ke") == 0.42
+
+    def test_viewstate_set_with_custom_store(self):
+        store = state.DictStateStore()
+        vs = state.ViewState(0, store=store)
+        vs.set("ke", 0.99)
+        assert store.get("v0_ke") == 0.99
+
+    def test_viewstate_load_with_custom_store(self):
+        store = state.DictStateStore({"v1_tf": "周线"})
+        vs = state.ViewState.load(1, store=store)
+        assert vs.get("tf") == "周线"
+
+    def test_viewstate_different_stores_independent(self):
+        store_a = state.DictStateStore()
+        store_b = state.DictStateStore()
+        vs_a = state.ViewState(0, store=store_a)
+        vs_b = state.ViewState(0, store=store_b)
+        vs_a.set("ke", 0.10)
+        vs_b.set("ke", 0.50)
+        assert store_a.get("v0_ke") == 0.10
+        assert store_b.get("v0_ke") == 0.50
+
+    def test_apply_preset_params_with_custom_store(self):
+        store = state.DictStateStore()
+        state.ViewState.apply_preset_params({"v0_ke": 0.25, "market": "港股 HK"}, store=store)
+        assert store.get("v0_ke") == 0.25
+        assert store.get("market") == "港股 HK"
+
+    def test_shortcut_view_with_custom_store(self):
+        store = state.DictStateStore({"v2_n": 200})
+        vs = state.view(2, store=store)
+        assert vs.get("n") == 200

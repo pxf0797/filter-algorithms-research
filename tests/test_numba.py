@@ -9,8 +9,8 @@ Verifies:
 
 import numpy as np
 import pytest
-from unittest import mock
 import sys
+from unittest.mock import patch
 
 pytestmark = pytest.mark.numba
 
@@ -66,7 +66,7 @@ class TestSchmittNumba:
 
     def test_equivalence_randomsignal(self):
         """TC-NUMBA-01: numba _schmitt_core matches pure Python reference."""
-        from engine.filters import _schmitt_core
+        from engine.schmitt import _schmitt_core
 
         np.random.seed(123)
         n = 1000
@@ -82,7 +82,7 @@ class TestSchmittNumba:
 
     def test_all_above_upper(self):
         """TC-NUMBA-02: price always above upper → output all 1."""
-        from engine.filters import _schmitt_core
+        from engine.schmitt import _schmitt_core
 
         n = 100
         price = np.full(n, 5.0)
@@ -94,7 +94,7 @@ class TestSchmittNumba:
 
     def test_all_below_lower(self):
         """TC-NUMBA-03: price always below lower → output all 0."""
-        from engine.filters import _schmitt_core
+        from engine.schmitt import _schmitt_core
 
         n = 100
         price = np.full(n, 1.0)
@@ -106,7 +106,7 @@ class TestSchmittNumba:
 
     def test_hysteresis_preserved(self):
         """TC-NUMBA-04: within deadband → state unchanged (hysteresis)."""
-        from engine.filters import _schmitt_core
+        from engine.schmitt import _schmitt_core
 
         price = np.array([3.0, 2.5, 2.5, 2.5, 1.0])
         upper = np.array([4.0, 4.0, 4.0, 4.0, 4.0])
@@ -233,7 +233,7 @@ class TestNumbaFallback:
         # checking that the function executes correctly (it uses pure loops).
         # The decorator fallback logic (identity) is tested implicitly via
         # the HAS_NUMBA guard in apply_kalman.
-        from engine.filters import _schmitt_core
+        from engine.schmitt import _schmitt_core
         price = np.arange(10, dtype=float)
         upper = np.full(10, 5.0)
         lower = np.full(10, 3.0)
@@ -264,7 +264,6 @@ class TestNumbaFallback:
         """Verify that the pure Python fallback path inside apply_kalman
         produces correct numerical results by simulating numba-unavailable."""
         from engine.filters import _kalman_core
-        import engine.filters as eng
 
         Q, R = 0.01, 1.0
         dt = float(time_index_500[1] - time_index_500[0])
@@ -290,7 +289,7 @@ class TestNumbaSanity:
 
     def test_schmitt_large_array(self):
         """10k-element Schmitt trigger should not crash."""
-        from engine.filters import _schmitt_core
+        from engine.schmitt import _schmitt_core
 
         n = 10000
         np.random.seed(99)
@@ -316,3 +315,374 @@ class TestNumbaSanity:
         result = _kalman_core(np.array([5.0]), 1.0, 0.01, 1.0)
         assert len(result) == 1
         assert result[0] == pytest.approx(5.0, rel=1e-10)
+
+
+# ===================================================================
+# SECTION 5 — Backtest metrics numba: drawdown & underwater duration
+# ===================================================================
+
+
+class TestDrawdownMetricsNumba:
+    """_compute_drawdown_metrics tests: numba vs pure Python equivalence."""
+
+    @staticmethod
+    def _compute_dd_py(pnl):
+        """Reference: np.maximum.accumulate + groupby (original logic)."""
+        import numpy as np
+        from itertools import groupby
+
+        if len(pnl) == 0:
+            return 0.0, 0
+        peak = np.maximum.accumulate(pnl)
+        drawdown = np.where(peak != 0, (pnl - peak) / peak, 0.0)
+        max_dd = float(np.min(drawdown))
+        underwater = drawdown < 0
+        max_dd_dur = max(
+            (len(list(g)) for k, g in groupby(underwater) if k),
+            default=0,
+        )
+        return max_dd, max_dd_dur
+
+    def test_equivalence_up_down_pattern(self):
+        """TC-NUMBA-11: numba drawdown matches pure Python on known pattern."""
+        from backtest.metrics import _compute_drawdown_metrics
+
+        pnl = np.array([100.0, 110.0, 120.0, 100.0, 80.0, 90.0, 95.0, 70.0])
+        dd_numba, dur_numba = _compute_drawdown_metrics(pnl)
+        dd_py, dur_py = self._compute_dd_py(pnl)
+
+        assert dd_numba == pytest.approx(dd_py, rel=1e-12)
+        assert dur_numba == dur_py
+
+    def test_equivalence_monotonic_up(self):
+        """TC-NUMBA-12: monotonically increasing PnL → zero drawdown."""
+        from backtest.metrics import _compute_drawdown_metrics
+
+        pnl = np.array([100.0, 101.0, 102.0, 103.0, 104.0])
+        dd_numba, dur_numba = _compute_drawdown_metrics(pnl)
+        dd_py, dur_py = self._compute_dd_py(pnl)
+
+        assert dd_numba == pytest.approx(0.0, abs=1e-12)
+        assert dur_numba == 0
+        assert dd_py == pytest.approx(0.0, abs=1e-12)
+        assert dur_py == 0
+
+    def test_equivalence_monotonic_down(self):
+        """TC-NUMBA-13: monotonically decreasing PnL → continuous drawdown."""
+        from backtest.metrics import _compute_drawdown_metrics
+
+        pnl = np.array([100.0, 99.0, 98.0, 97.0, 96.0])
+        dd_numba, dur_numba = _compute_drawdown_metrics(pnl)
+        dd_py, dur_py = self._compute_dd_py(pnl)
+
+        assert dd_numba == pytest.approx(dd_py, rel=1e-12)
+        assert dur_numba == dur_py
+        assert dur_numba == 4  # 4 bars underwater
+
+    def test_equivalence_large_random(self):
+        """TC-NUMBA-14: 100k random PnL — numba matches pure Python exactly."""
+        from backtest.metrics import _compute_drawdown_metrics
+
+        np.random.seed(123)
+        pnl = 100.0 * np.cumprod(1 + np.random.randn(10000) * 0.01)
+        dd_numba, dur_numba = _compute_drawdown_metrics(pnl)
+        dd_py, dur_py = self._compute_dd_py(pnl)
+
+        assert dd_numba == pytest.approx(dd_py, rel=1e-12)
+        assert dur_numba == dur_py
+
+    def test_empty_array(self):
+        """TC-NUMBA-15: empty PnL array → (0.0, 0)."""
+        from backtest.metrics import _compute_drawdown_metrics
+
+        dd, dur = _compute_drawdown_metrics(np.array([]))
+        assert dd == 0.0
+        assert dur == 0
+
+    def test_single_point(self):
+        """TC-NUMBA-16: single-point PnL → (0.0, 0)."""
+        from backtest.metrics import _compute_drawdown_metrics
+
+        dd, dur = _compute_drawdown_metrics(np.array([100.0]))
+        assert dd == 0.0
+        assert dur == 0
+
+    def test_flat_line(self):
+        """TC-NUMBA-17: flat PnL → no drawdown."""
+        from backtest.metrics import _compute_drawdown_metrics
+
+        pnl = np.full(100, 50.0)
+        dd, dur = _compute_drawdown_metrics(pnl)
+        assert dd == pytest.approx(0.0, abs=1e-12)
+        assert dur == 0
+
+    def test_fallback_matches_numba(self):
+        """TC-NUMBA-18: _compute_drawdown_metrics_py matches _compute_drawdown_metrics."""
+        from backtest.metrics import _compute_drawdown_metrics, _compute_drawdown_metrics_py, HAS_NUMBA
+
+        assert HAS_NUMBA is True, "numba should be installed in test env"
+
+        np.random.seed(99)
+        pnl = 100.0 * np.cumprod(1 + np.random.randn(5000) * 0.02)
+        dd_numba, dur_numba = _compute_drawdown_metrics(pnl)
+        dd_py, dur_py = _compute_drawdown_metrics_py(pnl)
+
+        assert dd_numba == pytest.approx(dd_py, rel=1e-12)
+        assert dur_numba == dur_py
+
+
+# ===================================================================
+# SECTION 6 — Recorder trade position numba
+# ===================================================================
+
+
+class TestTradePositionsNumba:
+    """_compute_trade_positions_numba tests: numba vs pure Python equivalence."""
+
+    @staticmethod
+    def _compute_pos_py(trade_records, view_last_idx):
+        """Reference: original Python loop from _extract_view_columns."""
+        long_pos = 0
+        short_pos = 0
+        for tr in trade_records:
+            entry_idx = tr.get("entry_idx")
+            exit_idx = tr.get("exit_idx")
+            tt = tr.get("type", "")
+            reason = str(tr.get("exit_reason", ""))
+            if entry_idx is not None and int(entry_idx) <= view_last_idx:
+                if (
+                    exit_idx is None
+                    or int(exit_idx) > view_last_idx
+                    or reason == "eod"
+                ):
+                    if tt == "long":
+                        long_pos = 1
+                    elif tt == "short":
+                        short_pos = 1
+        return long_pos, short_pos
+
+    def _make_arrays(self, records):
+        """Convert trade records list to numba-compatible arrays."""
+        n = len(records)
+        entry_idx = np.empty(n, dtype=np.int64)
+        exit_idx = np.empty(n, dtype=np.float64)
+        is_long = np.empty(n, dtype=np.bool_)
+        is_eod = np.empty(n, dtype=np.bool_)
+        for j, tr in enumerate(records):
+            entry_idx[j] = tr.get("entry_idx", -1)
+            exit_idx[j] = tr.get("exit_idx", np.nan)
+            is_long[j] = (tr.get("type", "") == "long")
+            is_eod[j] = (str(tr.get("exit_reason", "")) == "eod")
+        return entry_idx, exit_idx, is_long, is_eod
+
+    def test_equivalence_active_long(self):
+        """TC-NUMBA-21: active long position — numba matches pure Python."""
+        from backtest.recorder import _compute_trade_positions_numba
+
+        records = [
+            {"entry_idx": 0, "type": "long", "exit_reason": ""},
+            {"entry_idx": 5, "exit_idx": 8, "type": "short", "exit_reason": ""},
+        ]
+        entry_idx, exit_idx, is_long, is_eod = self._make_arrays(records)
+
+        lp_n, sp_n = _compute_trade_positions_numba(
+            entry_idx, exit_idx, is_long, is_eod, 6)
+        lp_p, sp_p = self._compute_pos_py(records, 6)
+
+        assert lp_n == lp_p == 1
+        assert sp_n == sp_p == 1
+
+    def test_equivalence_after_exit(self):
+        """TC-NUMBA-22: after exit — both positions closed."""
+        from backtest.recorder import _compute_trade_positions_numba
+
+        records = [
+            {"entry_idx": 0, "exit_idx": 7, "type": "long", "exit_reason": "take_profit"},
+            {"entry_idx": 5, "exit_idx": 8, "type": "short", "exit_reason": ""},
+        ]
+        entry_idx, exit_idx, is_long, is_eod = self._make_arrays(records)
+
+        lp_n, sp_n = _compute_trade_positions_numba(
+            entry_idx, exit_idx, is_long, is_eod, 10)
+        lp_p, sp_p = self._compute_pos_py(records, 10)
+
+        assert lp_n == lp_p
+        assert sp_n == sp_p
+
+    def test_equivalence_eod_active(self):
+        """TC-NUMBA-23: eod forced close — still considered active."""
+        from backtest.recorder import _compute_trade_positions_numba
+
+        records = [
+            {"entry_idx": 0, "exit_idx": 8, "type": "long", "exit_reason": "eod"},
+        ]
+        entry_idx, exit_idx, is_long, is_eod = self._make_arrays(records)
+
+        lp_n, sp_n = _compute_trade_positions_numba(
+            entry_idx, exit_idx, is_long, is_eod, 10)
+        lp_p, sp_p = self._compute_pos_py(records, 10)
+
+        assert lp_n == lp_p == 1
+        assert sp_n == sp_p == 0
+
+    def test_equivalence_before_entry(self):
+        """TC-NUMBA-24: before entry bar — position not yet active."""
+        from backtest.recorder import _compute_trade_positions_numba
+
+        records = [
+            {"entry_idx": 5, "type": "long", "exit_reason": ""},
+        ]
+        entry_idx, exit_idx, is_long, is_eod = self._make_arrays(records)
+
+        lp_n, sp_n = _compute_trade_positions_numba(
+            entry_idx, exit_idx, is_long, is_eod, 2)
+        lp_p, sp_p = self._compute_pos_py(records, 2)
+
+        assert lp_n == lp_p == 0
+        assert sp_n == sp_p == 0
+
+    def test_equivalence_empty_records(self):
+        """TC-NUMBA-25: empty trade records — both positions 0."""
+        from backtest.recorder import _compute_trade_positions_numba
+
+        entry_idx = np.array([], dtype=np.int64)
+        exit_idx = np.array([], dtype=np.float64)
+        is_long = np.array([], dtype=np.bool_)
+        is_eod = np.array([], dtype=np.bool_)
+
+        lp_n, sp_n = _compute_trade_positions_numba(
+            entry_idx, exit_idx, is_long, is_eod, 5)
+        lp_p, sp_p = self._compute_pos_py([], 5)
+
+        assert lp_n == lp_p == 0
+        assert sp_n == sp_p == 0
+
+    def test_equivalence_both_active(self):
+        """TC-NUMBA-26: both long and short active simultaneously."""
+        from backtest.recorder import _compute_trade_positions_numba
+
+        records = [
+            {"entry_idx": 0, "type": "long", "exit_reason": ""},
+            {"entry_idx": 1, "type": "short", "exit_reason": ""},
+        ]
+        entry_idx, exit_idx, is_long, is_eod = self._make_arrays(records)
+
+        lp_n, sp_n = _compute_trade_positions_numba(
+            entry_idx, exit_idx, is_long, is_eod, 3)
+        lp_p, sp_p = self._compute_pos_py(records, 3)
+
+        assert lp_n == lp_p == 1
+        assert sp_n == sp_p == 1
+
+
+class TestKalmanFilterNoNumba:
+    """卡尔曼滤波无 numba 时的纯 Python fallback 路径."""
+
+    def test_kalman_fallback_without_numba(self):
+        """模拟 numba 不可用时的 fallback 路径."""
+        import engine.filters as filt_mod
+        signal = np.sin(np.linspace(0, 2 * np.pi, 30)) + np.random.RandomState(42).randn(30) * 0.05
+        t = np.arange(30, dtype=float)
+
+        # 临时禁用 numba
+        with patch.object(filt_mod, "HAS_NUMBA", False):
+            result = filt_mod.apply_kalman(signal, t, Q=0.01, R=1.0)
+        assert len(result) == len(signal)
+        assert not np.any(np.isnan(result))
+
+
+class TestDrawdownMetricsNumbaFallback:
+    """_compute_drawdown_metrics 的纯 Python fallback 测试."""
+
+    def test_python_fallback_empty(self):
+        """空数组."""
+        from filter.backtest.metrics import _compute_drawdown_metrics_py
+        max_dd, max_dd_dur = _compute_drawdown_metrics_py(np.array([]))
+        assert max_dd == 0.0
+        assert max_dd_dur == 0
+
+    def test_python_fallback_monotonic_increase(self):
+        """单调增长."""
+        from filter.backtest.metrics import _compute_drawdown_metrics_py
+        pnl = np.linspace(100, 200, 100)
+        max_dd, max_dd_dur = _compute_drawdown_metrics_py(pnl)
+        assert max_dd == 0.0
+        assert max_dd_dur == 0
+
+    def test_python_fallback_monotonic_decrease(self):
+        """单调下降."""
+        from filter.backtest.metrics import _compute_drawdown_metrics_py
+        pnl = np.linspace(100, 50, 100)
+        max_dd, max_dd_dur = _compute_drawdown_metrics_py(pnl)
+        assert max_dd < 0
+        assert max_dd_dur == 99
+
+    def test_python_fallback_v_shape(self):
+        """V形恢复."""
+        from filter.backtest.metrics import _compute_drawdown_metrics_py
+        pnl = np.array([100, 110, 90, 80, 90, 100, 110])
+        max_dd, max_dd_dur = _compute_drawdown_metrics_py(pnl)
+        assert max_dd < 0
+        assert max_dd_dur >= 1
+
+    def test_numba_disabled_path(self):
+        """模拟 HAS_NUMBA=False 时使用纯 Python fallback."""
+        import filter.backtest.metrics as metrics_mod
+        pnl = np.linspace(100, 50, 100)
+        with patch.object(metrics_mod, "HAS_NUMBA", False):
+            max_dd, max_dd_dur = metrics_mod._compute_drawdown_metrics(pnl)
+        assert max_dd < 0
+        assert max_dd_dur == 99
+
+    def test_combined_pnl_long_dominant(self):
+        """long_pnl > short_pnl 时 combined = max(long, short) = long."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        long_pnl = np.linspace(100, 150, 100)
+        short_pnl = np.full(100, 100.0)
+        # 验证不崩溃
+        result = compute_backtest_metrics(long_pnl, short_pnl, [], 100)
+        assert "total_return_pct" in result
+
+    def test_combined_pnl_short_dominant(self):
+        """short_pnl > long_pnl 时 combined = max(long, short) = short."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        long_pnl = np.full(100, 100.0)
+        short_pnl = np.linspace(100, 150, 100)
+        result = compute_backtest_metrics(long_pnl, short_pnl, [], 100)
+        assert "total_return_pct" in result
+
+    def test_finite_returns_filtering(self):
+        """returns 中的 inf/nan 被过滤 (np.isfinite)."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        # PnL: the code handles division by near-zero via np.where fallback
+        pnl = np.array([1e-6, 100.0, 200.0, 300.0])
+        result = compute_backtest_metrics(pnl, pnl, [], 252)
+        assert "sharpe_ratio" in result
+
+    def test_zero_vol_returns_zero_sharpe(self):
+        """零波动率: sharpe=0."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        pnl = np.full(100, 100.0)  # flat
+        result = compute_backtest_metrics(pnl, pnl, [], 100)
+        assert result["sharpe_ratio"] == 0.0
+
+    def test_sortino_with_no_downside(self):
+        """无下行波动: Sortino=0."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        pnl = np.linspace(100, 200, 100)  # monotonic up
+        result = compute_backtest_metrics(pnl, pnl, [], 100)
+        assert result["sortino_ratio"] == 0.0  # no downside returns
+
+    def test_yearly_annualization(self):
+        """年化计算: 252 bars = 1 year."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        pnl = np.array([100.0, 110.0])
+        result = compute_backtest_metrics(pnl, pnl, [], 252)
+        assert result["annualized_return_pct"] == pytest.approx(10.0, rel=0.1)
+
+    def test_large_number_of_bars(self):
+        """大量 bar: 年化正常."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        pnl = np.linspace(100, 110, 504)  # 2 years
+        result = compute_backtest_metrics(pnl, pnl, [], 504)
+        assert result["total_trades"] == 0

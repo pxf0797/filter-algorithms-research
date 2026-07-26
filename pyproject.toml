@@ -3,14 +3,51 @@ line-length = 120
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "W"]
+select = ["E", "F", "W", "I"]
 ignore = ["E501"]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "filter-research"
 version = "3.5.0"
 description = "多周期股票滤波分析工具"
 requires-python = ">=3.11"
+dependencies = [
+    "streamlit==1.57.0",
+    "loguru>=0.7",
+    "numpy>=2.2",
+    "scipy>=1.17",
+    "plotly>=6.7",
+    "pandas>=2.3",
+    "statsmodels>=0.14",
+    "yfinance>=1.4",
+    "pyarrow>=14.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0",
+    "pytest-cov>=7.0",
+    "pytest-benchmark>=5.0",
+    "pytest-mock>=3.0",
+    "ruff>=0.11",
+    "mypy>=2.0",
+    "coverage>=7.0",
+    "pre-commit>=3.0",
+    "pip-tools>=7.0",
+    "pip-audit>=2.7",
+    "build>=1.0",
+    "types-requests>=2.31",
+    "types-pyyaml>=6.0",
+    "pytest-randomly>=3.15",
+    "pytest-timeout>=2.3",
+]
+
+[tool.setuptools.packages.find]
+include = ["filter*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -18,7 +55,7 @@ norecursedirs = ["_archive", "__pycache__", ".hypothesis"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = ["-v", "--tb=short", "--strict-markers"]
+addopts = ["-v", "--tb=short", "--strict-markers", "--timeout=60"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "filter: filter algorithm tests",
@@ -26,6 +63,8 @@ markers = [
     "strategy: PnL and strategy tests",
     "alignment: time alignment tests",
     "benchmark: performance regression benchmarks (pytest-benchmark)",
+    "engine: engine/backtest runner tests",
+    "numba: numba JIT compilation tests",
 ]
 
 [tool.coverage.run]
@@ -33,5 +72,5 @@ source = ["filter"]
 omit = ["tests/*"]
 
 [tool.coverage.report]
-fail_under = 55
+fail_under = 75
 exclude_lines = ["pragma: no cover", "if __name__ == .__main__.:"]

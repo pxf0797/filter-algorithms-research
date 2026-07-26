@@ -19,7 +19,7 @@ repos:
 
   # P1-17: type checking (fast pre-commit pass; full check in CI)
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.11.0
+    rev: v2.1.0
     hooks:
       - id: mypy
         pass_filenames: true
@@ -32,7 +32,8 @@ repos:
     hooks:
       - id: changelog-updated
         name: Check CHANGELOG.md updated
-        entry: bash -c 'git diff --cached --name-only | grep -qv "^CHANGELOG.md$" && git diff --cached --name-only | grep -qE "\.(py|toml|yaml|yml)$" && ! git diff --cached --name-only | grep -q "^CHANGELOG.md$" && echo "ERROR: Source files changed but CHANGELOG.md not updated. Stage CHANGELOG.md or run make changelog." && exit 1 || exit 0'
+        entry: |-
+          bash -c 'git diff --cached --name-only | grep -qv "^CHANGELOG.md$" && git diff --cached --name-only | grep -qE "\.(py|toml|yaml|yml)$" && ! git diff --cached --name-only | grep -q "^CHANGELOG.md$" && echo "ERROR: Source files changed but CHANGELOG.md not updated. Stage CHANGELOG.md or run make changelog." && exit 1 || exit 0'
         language: system
         pass_filenames: false
         always_run: true
@@ -45,3 +46,38 @@ repos:
       - id: bandit
         pass_filenames: true
         args: [--skip, "B101,B104,B301", --recursive, filter/]
+
+  # P0: fast smoke tests
+  - repo: local
+    hooks:
+      - id: fast-smoke-tests
+        name: fast smoke tests
+        entry: python -m pytest tests/test_constants.py tests/test_config.py tests/test_filters.py tests/test_db.py tests/test_state.py -q --tb=line
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: check-conftest-fixtures
+        name: verify conftest autouse fixtures
+        entry: |-
+          python -c "
+          import ast, sys;
+          tree = ast.parse(open('tests/conftest.py').read());
+          funcs = [n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)];
+          required = ['_reset_db_connection', '_reset_streamlit_components', '_restore_engine_get_conn'];
+          missing = [r for r in required if r not in funcs];
+          if missing: print(f'MISSING autouse fixtures: {missing}'); sys.exit(1);
+          print('All autouse fixtures present');
+          "
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: check-test-imports
+        name: verify test imports
+        entry: python scripts/check_test_imports.py
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]

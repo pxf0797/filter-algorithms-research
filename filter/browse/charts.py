@@ -10,15 +10,27 @@ import uuid
 from pathlib import Path
 import numpy as np
 import streamlit as st
-import plotly.graph_objects as go
 
-from filter.engine.filters import _compute_holding_masks
+from filter.engine.strategy import _compute_holding_masks
 
 # ---------------------------------------------------------------------------
 # Module-level constants
 # ---------------------------------------------------------------------------
 _PLOTLY_CDN = "https://cdn.plot.ly/plotly-2.35.2.min.js"
-_PLOTLY_CDN_FALLBACK = "https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js"
+_PLOTLY_CDN_FALLBACK = "https://cdn.jsdelivr.net/npm/plotly.js@2.35.2/dist/plotly.min.js"
+
+# Shared layout template: common properties stripped from per-chart JSON.
+# charts.js applies these defaults before Plotly.newPlot, so omitting them
+# from the per-chart payload saves ~3-5 KB per chart.
+_SHARED_LAYOUT_TEMPLATE = {
+    "template": "plotly_dark",
+    "margin": {"l": 10, "r": 10, "t": 25, "b": 10},
+    "hovermode": "x unified",
+    "legend": {
+        "orientation": "h", "yanchor": "bottom", "y": 1.02,
+        "xanchor": "right", "x": 1, "font": {"size": 9},
+    },
+}
 
 
 @functools.lru_cache(maxsize=1)
@@ -28,30 +40,78 @@ def _get_chart_js() -> str:
     return _js_path.read_text(encoding="utf-8")
 
 
+def _compact_floats(obj, precision=6):
+    """Round all float values in nested structures to *precision* decimal places.
+
+    Reduces JSON payload size ~30 % without visible chart changes — 6 decimal
+    places is well below one pixel on a typical 800 px chart.
+    """
+    if isinstance(obj, dict):
+        return {k: _compact_floats(v, precision) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_compact_floats(v, precision) for v in obj]
+    if isinstance(obj, np.ndarray):
+        return _compact_floats(obj.tolist(), precision)
+    if isinstance(obj, (float, np.floating)):
+        return round(float(obj), precision)
+    return obj
+
+
 # ---------------------------------------------------------------------------
 # Plotly cross-subplot crosshair helper
 # ---------------------------------------------------------------------------
-def _render_plotly(fig, height=750, dates=None) -> None:
-    """Render Plotly chart with cross-subplot crosshair (no value tooltip)."""
+def _render_plotly(fig, height=750, dates=None, include_plotlyjs=True) -> None:
+    """Render Plotly chart with cross-subplot crosshair (no value tooltip).
+
+    Parameters
+    ----------
+    include_plotlyjs : bool
+        If True, include Plotly.js CDN <script> tag and expose Plotly to
+        ``window.parent`` so sibling iframes can reuse it.
+        If False, omit CDN tag; chart JS will resolve Plotly from
+        ``window.parent.Plotly`` (polled briefly if not yet ready).
+    """
     from plotly.utils import PlotlyJSONEncoder
 
     # Serialize manually instead of fig.to_json():
     #  1. _dates is injected into layout (not supported by fig.to_json output)
     #  2. fig.to_json() bdata-encodes x-arrays as base64 which changes the
     #     JS-side array type and breaks the _nearestIdx binary search
-    fig_dict = {"data": [], "layout": fig.layout.to_plotly_json()}
+    layout_dict = fig.layout.to_plotly_json()
+
+    # ── Strip layout properties that match the shared template ──
+    for key, default_val in _SHARED_LAYOUT_TEMPLATE.items():
+        if key in layout_dict and layout_dict[key] == default_val:
+            del layout_dict[key]
+
+    fig_dict = {"data": [], "layout": layout_dict}
 
     if dates is not None:
         date_strs = [d.strftime("%Y-%m-%d %H:%M") if hasattr(d, 'strftime') else str(d)
                      for d in dates]
         fig_dict["layout"]["_dates"] = date_strs
 
+    # ── Build trace list with x-array deduplication ──
+    # Traces whose x matches data[0].x have x stripped; charts.js restores it.
+    first_x = None
     for trace in fig.data:
         tr = trace.to_plotly_json()
+        x_val = tr.get("x")
         # Convert numpy x to plain list so JS crosshair gets a regular Array
-        if isinstance(tr.get("x"), np.ndarray):
-            tr["x"] = tr["x"].tolist()
+        if isinstance(x_val, np.ndarray):
+            x_val = x_val.tolist()
+            tr["x"] = x_val
+
+        if first_x is None:
+            first_x = x_val
+        elif isinstance(x_val, list) and isinstance(first_x, list):
+            if x_val == first_x:
+                del tr["x"]  # Same as first trace — JS restores from data[0].x
+
         fig_dict["data"].append(tr)
+
+    # ── Compact floats: round to 6 decimal places (below 1-pixel precision) ──
+    fig_dict = _compact_floats(fig_dict, precision=6)
 
     figure_json = json.dumps(fig_dict, cls=PlotlyJSONEncoder)
     div_id = f"plot-{uuid.uuid4().hex[:8]}"
@@ -61,12 +121,20 @@ def _render_plotly(fig, height=750, dates=None) -> None:
     _js_code = _js_code.replace("__DIV_ID__", div_id)
     _js_code = _js_code.replace("__FIGURE_JSON__", figure_json)
 
+    # ── CDN block ──
+    if include_plotlyjs:
+        cdn_block = f"""<script src="{_PLOTLY_CDN}"
+    onerror="this.onerror=null;this.src='{_PLOTLY_CDN_FALLBACK}';window._plotlyCdnFailed=true"></script>
+<script>/* expose Plotly to parent so sibling iframes can reuse it */
+if(window.parent&&typeof Plotly!=='undefined'){{window.parent.Plotly=window.parent.Plotly||Plotly;window.parent.__plotlyReady=true;}}</script>"""
+    else:
+        cdn_block = ""
+
     html = f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<script src="{_PLOTLY_CDN}"
-    onerror="this.onerror=null;this.src='{_PLOTLY_CDN_FALLBACK}';window._plotlyCdnFailed=true"></script>
+{cdn_block}
 <style>
 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
 html, body {{ width: 100%; height: 100%; overflow: hidden; }}

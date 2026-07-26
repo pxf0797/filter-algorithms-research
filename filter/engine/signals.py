@@ -11,15 +11,9 @@ BS 仓位操作标识计算模块
 
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 
-# 周期层级反向映射（高 → 低），用于 BS 标记级联
-TF_LOWER = {
-    "季线": "月线", "月线": "周线", "周线": "日线",
-    "日线": "60分钟", "60分钟": "15分钟", "15分钟": "5分钟",
-    "5分钟": "1分钟", "1分钟": None,
-}
+from filter.shared.constants import TF_LOWER
 
 
 def _find_date_index(dates, target_date) -> Optional[int]:

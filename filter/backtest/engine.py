@@ -12,15 +12,12 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Optional, Tuple
 from loguru import logger
 
-from filter.engine.filters import (
-    _find_all_pairs,
-    _compute_strategy_pnl,
-    _align_pnl_to_current_tf,
-    _compute_holding_masks,
-)
+from filter.engine.schmitt import _find_all_pairs
+from filter.engine.strategy import _compute_strategy_pnl, _compute_holding_masks
+from filter.engine.alignment import _align_pnl_to_current_tf
 from filter.engine.pipeline import compute_filters, compute_schmitt_trigger, compute_prediction_pairs
 from filter.data.loader import _sync_all_cascading, load_display_cache
 from filter.engine.signals import compute_bs_markers
@@ -100,6 +97,12 @@ class BacktestRunner:
         # bar 总数
         self._bar_count: int = self._query_bar_count()
 
+        # B15: 文件存在性缓存 — 避免逐 bar os.path.exists()
+        self._file_exists: dict[str, bool] = {}
+
+        # B16: 窗口数据排序缓存 — 避免逐 bar set_index().sort_index()
+        self._sorted_window_cache: dict[str, tuple] = {}
+
         # P0-3: 一次性预加载全部 bar 信息到内存，避免逐 bar LIMIT 1 OFFSET N
         self._MAX_BAR_CACHE = 200_000
         self._bar_info_cache: list[dict] = self._load_all_bar_info()
@@ -172,6 +175,13 @@ class BacktestRunner:
 
         results: list[dict] = []
 
+        # B17: 预计算排好序的视图索引 — 避免逐 bar ALL_TFS.index()
+        self._sorted_views: list[tuple[int, dict]] = sorted(
+            enumerate(self.configs),
+            key=lambda x: ALL_TFS.index(x[1]["tf"]),
+            reverse=True,  # 粗→细
+        )
+
         for bar_index in range(start_bar, end_bar, step_interval):
             bar_info = self._get_bar_info(bar_index)
             cutoff_date = bar_info["cutoff_date"]
@@ -188,19 +198,13 @@ class BacktestRunner:
             # 存储每 TF 的 PnL 结果，供低周期视图做跨周期对齐
             tf_pnl_cache: dict[str, dict] = {}
 
-            sorted_views = sorted(
-                enumerate(self.configs),
-                key=lambda x: ALL_TFS.index(x[1]["tf"]),
-                reverse=True,  # 粗→细
-            )
-
             # P3-2: 多视图并行计算 — 预加载窗口数据，然后并行运行管道
             _use_parallel = os.environ.get("BACKTEST_PARALLEL_VIEWS", "1") == "1"
-            if _use_parallel and len(sorted_views) > 1:
+            if _use_parallel and len(self._sorted_views) > 1:
                 # 阶段 1: 预加载所有窗口数据
                 preloaded: dict[str, tuple] = {}
                 ewma_inits: dict[str, Optional[dict]] = {}
-                for view_index, view_cfg in sorted_views:
+                for view_index, view_cfg in self._sorted_views:
                     tf = view_cfg["tf"]
                     n_pts = view_cfg.get("n_pts", 120)
                     view_key = f"v{view_index}_{tf}"
@@ -216,7 +220,7 @@ class BacktestRunner:
                 if n_views > 0:
                     pipeline_futures: dict = {}
                     with ThreadPoolExecutor(max_workers=min(n_views, 4)) as executor:
-                        for view_index, view_cfg in sorted_views:
+                        for view_index, view_cfg in self._sorted_views:
                             view_key = f"v{view_index}_{view_cfg['tf']}"
                             if view_key not in preloaded:
                                 continue
@@ -243,7 +247,7 @@ class BacktestRunner:
                             view_outputs[view_key] = stage_output
             else:
                 # 顺序模式（原有逻辑，保持兼容）
-                for view_index, view_cfg in sorted_views:
+                for view_index, view_cfg in self._sorted_views:
                     tf = view_cfg["tf"]
                     n_pts = view_cfg.get("n_pts", 120)
                     view_key = f"v{view_index}_{tf}"
@@ -328,10 +332,10 @@ class BacktestRunner:
     # 断点续跑
     # ------------------------------------------------------------------
 
-    def save_checkpoint(self, path: str) -> dict:
+    def save_checkpoint(self, path: str, bar_index: int = 0) -> dict:
         """将当前 runner 状态序列化到断点文件，返回状态字典。"""
         state = {
-            "bar_index": 0,  # caller tracks this；retained for from_checkpoint use
+            "bar_index": bar_index,
             "ewma_state": self._ewma_state,
             "bar_count": self._bar_count,
             "config_hash": self._config_hash(),
@@ -542,16 +546,32 @@ class BacktestRunner:
         """
         df = load_display_cache(self.ticker, tf)
         if df is None:
-            if not (Path(__file__).parent.parent.parent / "data" / "display" / self.ticker / f"{tf}.parquet").exists():
+            # B15: lazy 文件存在性检查 — 首次检查后缓存结果
+            if tf not in self._file_exists:
+                _display_dir = Path(__file__).parent.parent.parent / "data" / "display"
+                _parquet_path = _display_dir / self.ticker / f"{tf}.parquet"
+                self._file_exists[tf] = _parquet_path.exists()
+            if not self._file_exists[tf]:
                 logger.warning("parquet 不存在: {}", Path(__file__).parent.parent.parent / "data" / "display" / self.ticker / f"{tf}.parquet")
             return None
+        # B15: 文件存在时更新缓存标记
+        self._file_exists[tf] = True
 
         if "Date" not in df.columns or "Close" not in df.columns:
             logger.warning("parquet {}/{} 缺少 Date/Close 列", self.ticker, tf)
             return None
 
         df["Date"] = pd.to_datetime(df["Date"])
-        df = df.set_index("Date").sort_index()
+
+        # B16: 缓存 set_index().sort_index() 结果 — 数据内容不变时跳过重排
+        _sig = (len(df), str(df["Date"].iloc[0]), str(df["Date"].iloc[-1]),
+                str(df["Close"].iloc[0]))
+        _cached = self._sorted_window_cache.get(tf)
+        if _cached is not None and _cached[0] == _sig:
+            df = _cached[1].copy()
+        else:
+            df = df.set_index("Date").sort_index()
+            self._sorted_window_cache[tf] = (_sig, df.copy())
 
         # Per-bar windowing: filter to cutoff_date, keep last n_pts bars
         if cutoff_date is not None:
@@ -1060,9 +1080,10 @@ def replay_bar(
 # ═══════════════════════════════════════════════════════════════
 
 def _compute_and_log_metrics(results: list[dict], ticker: str) -> None:
-    """从回测结果中提取最后一步的 PnL 数据，计算核心指标并记录日志。
+    """从回测结果所有步骤和视图中聚合完整 PnL 时序，计算核心指标并记录日志。
 
-    从最后一步的第一个视图获取 PnL 和交易记录（跨视图指标计算暂未实现）。
+    遍历所有步骤和所有视图，将 long_pnl / short_pnl 数组纵向拼接为完整时序，
+    合并所有 trade_records，基于完整 PnL 序列计算 Sharpe/最大回撤/胜率等指标。
     结果通过 loguru 记录，便于后续查询和分析。
 
     Parameters
@@ -1081,24 +1102,34 @@ def _compute_and_log_metrics(results: list[dict], ticker: str) -> None:
         logger.debug("backtest.metrics module not available, skipping metrics")
         return
 
-    last_step = results[-1]
-    views = last_step.get("views", {})
-    if not views:
+    # ── 遍历所有 step × view 聚合 PnL 和交易记录 ──
+    long_pnl_segments: list[np.ndarray] = []
+    short_pnl_segments: list[np.ndarray] = []
+    all_trade_records: list[dict] = []
+    total_bars = 0
+
+    for step in results:
+        views = step.get("views", {})
+        for view_data in views.values():
+            lp = view_data.get("long_pnl")
+            sp = view_data.get("short_pnl")
+            if lp is not None and sp is not None:
+                long_pnl_segments.append(lp)
+                short_pnl_segments.append(sp)
+                total_bars += len(view_data.get("t", []))
+            tr = view_data.get("trade_records", [])
+            if tr:
+                all_trade_records.extend(tr)
+
+    if not long_pnl_segments:
         return
 
-    # 取第一个视图的 PnL 数据（未来可扩展为跨视图聚合）
-    first_view = next(iter(views.values()))
-    long_pnl = first_view.get("long_pnl")
-    short_pnl = first_view.get("short_pnl")
-    trade_records = first_view.get("trade_records", [])
-    n_bars = len(first_view.get("t", []))
-
-    if long_pnl is None or short_pnl is None:
-        return
+    aggregated_long = np.concatenate(long_pnl_segments)
+    aggregated_short = np.concatenate(short_pnl_segments)
 
     try:
         metrics = compute_backtest_metrics(
-            long_pnl, short_pnl, trade_records, n_bars,
+            aggregated_long, aggregated_short, all_trade_records, total_bars,
         )
         logger.info(
             "回测指标: ticker={}, total_return={}%, sharpe={}, max_dd={}%, trades={}, win_rate={}%",

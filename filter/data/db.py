@@ -6,6 +6,7 @@ filter/db.py — SQLite 数据层
 import os
 import sqlite3
 import shutil
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
@@ -15,20 +16,43 @@ from loguru import logger
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "market.db"
 SNAPSHOT_DIR = DB_PATH.parent / "snapshots"
 
+# Thread-local connection storage (fix: B38 singleton was not thread-safe —
+# ThreadPoolExecutor workers in _fetch_all_timeframes couldn't use the
+# main-thread connection due to check_same_thread=True, causing upsert_kline
+# to fail silently and data to never persist to SQLite).
+_local = threading.local()
+
 
 def get_conn() -> sqlite3.Connection:
-    """获取数据库连接。
+    """获取数据库连接（线程本地复用）。
 
-    以 WAL 模式打开 SQLite 连接，设置合理的同步与超时参数，
-    并使用 ``sqlite3.Row`` 作为行工厂以支持列名访问。
+    每个线程首次调用时创建并配置 WAL 模式、同步参数和性能 PRAGMA。
+    同一线程内后续调用返回同一连接实例，避免重复创建连接的开销。
+    当 DB_PATH 变更时自动重建当前线程的连接（测试场景支持）。
 
     Returns
     -------
     sqlite3.Connection
-        配置好的数据库连接对象。
+        配置好的数据库连接对象（线程本地单例）。
     """
-    logger.debug("Connecting to DB: {}", DB_PATH)
-    conn = sqlite3.connect(str(DB_PATH))
+    current_path = str(DB_PATH)
+
+    conn = getattr(_local, "conn", None)
+    conn_path = getattr(_local, "conn_path", None)
+
+    # 同线程、同路径：直接复用
+    if conn is not None and conn_path == current_path:
+        return conn
+
+    # 路径变更或首次调用：关闭旧连接（若存在）并创建新连接
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    logger.debug("Connecting to DB: {}", current_path)
+    conn = sqlite3.connect(current_path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.execute("PRAGMA busy_timeout=5000")
@@ -36,7 +60,25 @@ def get_conn() -> sqlite3.Connection:
     conn.execute("PRAGMA temp_store=MEMORY")          # temp tables in memory (P0-4)
     conn.execute("PRAGMA cache_size=-32768")          # 32MB page cache (P0-4)
     conn.row_factory = sqlite3.Row
+
+    _local.conn = conn
+    _local.conn_path = current_path
     return conn
+
+
+def close_conn():
+    """关闭当前线程的数据库连接。
+
+    用于测试清理和 DB_PATH 变更时重建连接。
+    """
+    conn = getattr(_local, "conn", None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        _local.conn = None
+        _local.conn_path = None
 
 
 def init_db():

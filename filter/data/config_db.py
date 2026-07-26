@@ -391,104 +391,8 @@ def apply_preset(preset_id: int) -> Optional[Dict[str, Any]]:
 
 
 # ═══════════════════════════════════════════════════════════
-# Ticker config
-# ═══════════════════════════════════════════════════════════
-
-def load_ticker_config(ticker: str, variant: str = "single") -> Optional[Dict[str, Any]]:
-    """Load a ticker's config from ``config_ticker``.
-
-    Parameters
-    ----------
-    ticker : str
-        Ticker symbol (e.g. ``"AAPL"``, ``"2382.HK"``).
-    variant : str, optional
-        Variant identifier (default ``"single"``).
-
-    Returns
-    -------
-    dict or None
-        The row as a dict, or ``None`` if no config exists for this ticker
-        and variant.
-    """
-    logger.debug("Loading ticker config: ticker={}, variant={}", ticker, variant)
-    with _get_conn() as conn:
-        row = conn.execute(
-            "SELECT ticker, variant, market, preset_id, params_json, updated_at "
-            "FROM config_ticker WHERE ticker=? AND variant=?",
-            (ticker, variant)).fetchone()
-    if not row:
-        return None
-    return dict(row)
-
-
-def save_ticker_config(ticker: str, market: str, variant: str,
-                       params_json: str, preset_id: Optional[int] = None):
-    """Insert or replace a ticker's config row.
-
-    Validates that ``preset_id`` references an existing preset; if it does
-    not, the reference is silently set to ``NULL``.
-
-    Parameters
-    ----------
-    ticker : str
-        Ticker symbol.
-    market : str
-        Market label (e.g. ``"US"``, ``"HK"``).
-    variant : str
-        Variant identifier (e.g. ``"single"``, ``"dual"``).
-    params_json : str
-        JSON-encoded parameter dictionary.
-    preset_id : int or None, optional
-        Foreign key to ``config_presets`` (default ``None``).
-    """
-    logger.debug("Saving ticker config: ticker={}, variant={}, market={}, preset_id={}",
-                 ticker, variant, market, preset_id)
-    # P1-4: 校验 preset_id 存在性，避免 FK 引用不存在的预设
-    if preset_id is not None:
-        if get_preset(preset_id) is None:
-            logger.warning("save_ticker_config: preset_id={} 不存在，设为 NULL", preset_id)
-            preset_id = None
-
-    with _get_conn() as conn:
-        conn.execute(
-            """INSERT OR REPLACE INTO config_ticker
-               (ticker, variant, market, preset_id, params_json, updated_at)
-               VALUES(?,?,?,?,?,datetime('now','localtime'))""",
-            (ticker, variant, market, preset_id, params_json))
-
-
-# ═══════════════════════════════════════════════════════════
 # History
 # ═══════════════════════════════════════════════════════════
-
-def record_history(ticker: str, variant: str,
-                   old_json: str, new_json: str,
-                   preset_id: Optional[int] = None,
-                   source: str = "ui"):
-    """Insert a history entry recording a config change.
-
-    Parameters
-    ----------
-    ticker : str
-        Ticker symbol.
-    variant : str
-        Variant identifier.
-    old_json : str
-        Previous value of ``params_json`` (may be empty).
-    new_json : str
-        New value of ``params_json`` (may be empty).
-    preset_id : int or None, optional
-        Associated preset ID (default ``None``).
-    source : str, optional
-        Origin of the change, e.g. ``"ui"`` or ``"import"`` (default ``"ui"``).
-    """
-    logger.debug("Recording history: ticker={}, variant={}, source={}", ticker, variant, source)
-    with _get_conn() as conn:
-        conn.execute(
-            """INSERT INTO config_history(ticker,variant,preset_id,old_json,new_json,source)
-               VALUES(?,?,?,?,?,?)""",
-            (ticker, variant, preset_id, old_json, new_json, source))
-
 
 def get_history(ticker: str, variant: str = "single",
                 limit: int = 20) -> List[Dict[str, Any]]:
@@ -667,7 +571,7 @@ def collect_current_params() -> Dict[str, Any]:
 # ═══════════════════════════════════════════════════════════
 
 if __name__ == "__main__":  # pragma: no cover
-    from data.db import init_db
+    from filter.data.db import init_db
     init_db()
     init_config_tables()
 

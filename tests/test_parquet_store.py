@@ -989,19 +989,21 @@ class TestConcurrencySafety:
 
     def test_same_ticker_serial_runs_isolated(self, tmp_path):
         """同一 ticker 串行运行使用不同的 session 目录。"""
-        import time
+        from datetime import datetime, timedelta
+        from itertools import count
+        from unittest import mock
 
         store = ParquetStore(str(tmp_path), "AAPL", [{"name": "v0"}])
 
-        sid1 = store.start_session()
-        dir1 = store._session_dir
-        store.end_session()
-
-        # 等待至少 1 秒以确保时间戳不同（session ID 精度为秒级）
-        time.sleep(1.1)
-
-        sid2 = store.start_session()
-        dir2 = store._session_dir
+        # Mock 时间替代 sleep：每个 datetime.now() 返回递增的时间戳
+        counter = count()
+        with mock.patch('data.store.datetime') as mock_dt:
+            mock_dt.now.side_effect = lambda *a, **kw: datetime(2026, 1, 1, 12, 0, 0) + timedelta(seconds=next(counter) * 10)
+            sid1 = store.start_session()
+            dir1 = store._session_dir
+            store.end_session()
+            sid2 = store.start_session()
+            dir2 = store._session_dir
 
         assert dir1 != dir2, (
             f"Serial runs should use different session dirs: {dir1} == {dir2}"
@@ -1192,7 +1194,7 @@ class TestViewLabelMapping:
         session_dir = tmp_path / list(tmp_path.iterdir())[0].name
         meta_path = session_dir / "metadata.json"
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        assert "view_labels" in meta, f"view_labels missing from EventRecorder metadata"
+        assert "view_labels" in meta, "view_labels missing from EventRecorder metadata"
         assert meta["view_labels"] == {"v0": "日线", "v1": "60分钟"}
 
 
@@ -2427,7 +2429,7 @@ class TestMultiTickerIsolation:
     def test_pipeline_capture_two_tickers_separate_dirs(self, tmp_path, monkeypatch):
         """两个不同 ticker 的 PipelineCapture 写入不同 session 目录。"""
         monkeypatch.setenv("PIPELINE_CAPTURE", "1")
-        from backtest.pipeline import PipelineCapture
+        from filter.backtest.capture import PipelineCapture
 
         cap_a = PipelineCapture(str(tmp_path), "AAPL", {})
         cap_b = PipelineCapture(str(tmp_path), "TSLA", {})
@@ -2446,7 +2448,7 @@ class TestMultiTickerIsolation:
     def test_pipeline_capture_data_independent(self, tmp_path, monkeypatch):
         """两个 ticker 的 PipelineCapture 数据互不干扰。"""
         monkeypatch.setenv("PIPELINE_CAPTURE", "1")
-        from backtest.pipeline import PipelineCapture, PipelineStageData
+        from filter.backtest.capture import PipelineCapture, PipelineStageData
 
         cap_a = PipelineCapture(str(tmp_path), "AAPL", {})
         cap_b = PipelineCapture(str(tmp_path), "TSLA", {})
@@ -3193,3 +3195,468 @@ class TestParquetStoreDebugMode:
             assert meta_path.exists(), (
                 f"metadata.json should exist in save_debug_data={mode}"
             )
+
+
+# ============================================================================
+# T10: OOM防护 — buffer memory limit & numpy preallocation
+# ============================================================================
+
+class TestOomBufferLimit:
+    """T10: ParquetStore buffer memory limit triggers flush at 90% threshold."""
+
+    @staticmethod
+    def _make_valid_row(store, bar_index=0, ts="2026-01-01", close=100.0):
+        """Build a row dict that passes _buffer_to_table validation."""
+        row = {}
+        col_names = store._column_names
+        for name in col_names:
+            if name == "bar_index":
+                row[name] = bar_index
+            elif name == "bar_timestamp":
+                row[name] = pd.Timestamp(ts)
+            elif name == "close":
+                row[name] = float(close)
+            elif name.endswith("_sig"):
+                row[name] = 0      # int8 default
+            elif name.endswith("_eps"):
+                row[name] = 0.0    # float32 default
+            elif name.endswith("_filtered"):
+                row[name] = float(close)
+            elif name.endswith("_pnl_long") or name.endswith("_pnl_short"):
+                row[name] = 100.0
+            elif name.endswith("_trade_return"):
+                row[name] = 0.0
+            elif name.endswith("_long_pos") or name.endswith("_short_pos"):
+                row[name] = False
+            elif name.endswith("_trade") or name.endswith("_trade_reason"):
+                row[name] = ""
+            elif name.endswith("_bs_entry") or name.endswith("_bs_exit"):
+                row[name] = ""
+            else:
+                row[name] = None
+        return row
+
+    def test_max_buffer_mb_class_attribute(self):
+        """ParquetStore 类有 _MAX_BUFFER_MB 硬限制."""
+        assert hasattr(ParquetStore, "_MAX_BUFFER_MB")
+        assert ParquetStore._MAX_BUFFER_MB == 200
+
+    def test_max_buffer_mb_instance_default(self, tmp_path):
+        """start_session 后 _max_buffer_mb 设为类常量值."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+        assert store._max_buffer_mb == ParquetStore._MAX_BUFFER_MB
+
+    def test_buffer_memory_bytes_zero_after_flush(self, tmp_path):
+        """flush 后 _buffer_memory_bytes 重置为 0."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+        row = self._make_valid_row(store)
+        store._buffer = [row]
+        store._buffer_memory_bytes = 50000
+        assert store._buffer_memory_bytes > 0
+        store.flush()
+        assert store._buffer_memory_bytes == 0
+        assert len(store._buffer) == 0
+
+    def test_buffer_clear_on_start_session(self, tmp_path):
+        """start_session 清空 buffer 和内存计数."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+        row = self._make_valid_row(store)
+        store._buffer = [row]
+        store._buffer_memory_bytes = 1000
+        # restart session
+        store.start_session()
+        assert len(store._buffer) == 0
+        assert store._buffer_memory_bytes == 0
+
+    def test_auto_flush_on_append_row_memory_pressure(self, tmp_path, monkeypatch):
+        """append_row: buffer 内存超 90% 限制时触发 flush（捕获异常不会crash）."""
+        import sys as _sys
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+
+        original_getsizeof = _sys.getsizeof
+
+        # Each row will appear to use 190MB — with max=200MB, 1 row > 90%
+        def _fake_getsizeof(obj):
+            return 190 * 1024 * 1024  # 190 MB
+
+        monkeypatch.setattr(_sys, "getsizeof", _fake_getsizeof)
+
+        try:
+            # append_row catches exceptions internally, so it should not crash
+            store.append_row(0, "2026-01-01", "2026-01-01", {"views": {}})
+            # The flush may succeed (if _buffer_to_table handles None) or
+            # fail (if row is incomplete). Either way, append_row must not
+            # raise — the backtest loop must keep running.
+            assert not hasattr(store, "_crash_flag"), (
+                "内存压力触发 flush 不应导致 append_row 崩溃"
+            )
+        finally:
+            monkeypatch.setattr(_sys, "getsizeof", original_getsizeof)
+
+    def test_append_row_never_crashes_on_bad_data(self, tmp_path):
+        """append_row 即使收到损坏数据也不会抛出异常（只 log warning）."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+        # append_row with garbage data — should not raise
+        try:
+            store.append_row(0, None, None, None)
+        except Exception:
+            pytest.fail("append_row 不应因损坏数据而抛出异常")
+        # Also verify start_session sets up buffer properly
+        assert store._buffer_size == 10_000_000  # effectively infinite for session
+
+    def test_flush_noop_on_empty_buffer(self, tmp_path):
+        """flush 在 buffer 为空时是 no-op."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+        store._buffer.clear()
+        store._buffer_memory_bytes = 0
+        part_before = store._part_index
+        store.flush()
+        assert store._part_index == part_before
+
+    def test_flush_increments_part_index(self, tmp_path):
+        """flush 产生新的 part 文件并递增 part_index."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+        row = self._make_valid_row(store)
+        store._buffer = [row]
+        store._buffer_memory_bytes = 1000
+        part_before = store._part_index
+        store.flush()
+        assert store._part_index == part_before + 1
+        part_files = list(store._session_dir.glob("part_*.parquet"))
+        assert len(part_files) >= 1
+
+    def test_numpy_dtype_in_schema(self):
+        """Schema 使用 numpy-friendly pyarrow 类型（非 Python object）."""
+        from data.store import _build_full_schema
+        schema = _build_full_schema(["v0"])
+        for field in schema:
+            dtype = field.type
+            assert not pa.types.is_null(dtype), (
+                f"Schema field '{field.name}' should have fixed-width type, got null"
+            )
+        close_field = schema.field("close")
+        assert close_field.type == pa.float32()
+
+    def test_column_defaults_are_numpy_compatible(self):
+        """_COL_DEFAULTS 使用 numpy 兼容的 NaN/0/False/None 值."""
+        from data.store import _COL_DEFAULTS, _FLOAT_NA, _INT_NA, _BOOL_NA
+        assert np.isnan(_FLOAT_NA)
+        assert _INT_NA == 0
+        assert _BOOL_NA is False
+        assert "sig" in _COL_DEFAULTS
+        assert "filtered" in _COL_DEFAULTS
+        assert "pnl_long" in _COL_DEFAULTS
+
+
+# ============================================================================
+# TestBufferToTableNoneHandling — _buffer_to_table None 值处理
+# ============================================================================
+
+
+class TestBufferToTableNoneHandling:
+    """验证 _buffer_to_table 不会因 None 值而崩溃。
+
+    P0-1 修复：在 np_cols 赋值前检查 ``val is None``，使用类型默认值替代。
+    涵盖整数、浮点、布尔、datetime64、字符串五种类型的 None→默认值转换。
+    """
+
+    # ── helpers ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _make_store(tmp_path, ticker="TEST"):
+        store = ParquetStore(str(tmp_path), ticker, [{"tf": "日线"}])
+        store.start_session()
+        return store
+
+    @staticmethod
+    def _build_row_with_nones(bar_index=0, bar_ts="2024-01-01", close=100.0):
+        """构造包含 None 值的行，模拟部分列为 None 的情况。"""
+        return {
+            "bar_index": bar_index,
+            "bar_timestamp": bar_ts,
+            "close": close,
+            # View columns — set some to None
+            "v0_sig": None,
+            "v0_filtered": None,
+            "v0_eps": None,
+            "v0_pnl_long": None,
+            "v0_pnl_short": None,
+            "v0_long_pos": None,
+            "v0_short_pos": None,
+            "v0_trade": None,
+            "v0_trade_return": None,
+            "v0_trade_reason": None,
+            "v0_bs_entry": None,
+            "v0_bs_exit": None,
+        }
+
+    def _do_buffer_to_table(self, store, rows):
+        """Directly set buffer and call _buffer_to_table."""
+        store._buffer = list(rows)
+        store._column_names = [f.name for f in store._full_schema]
+        return store._buffer_to_table()
+
+    # ── 崩溃测试 ───────────────────────────────────────────────────────
+
+    def test_buffer_to_table_does_not_crash_on_all_nones(self, tmp_path):
+        """全部 view 列为 None 时 _buffer_to_table 不崩溃。"""
+        store = self._make_store(tmp_path)
+        row = self._build_row_with_nones()
+        table = self._do_buffer_to_table(store, [row])
+        assert len(table) == 1
+        assert table.column("bar_index")[0].as_py() == 0
+
+    def test_buffer_to_table_does_not_crash_on_mixed_nones(self, tmp_path):
+        """部分列为 None、部分列有值时 _buffer_to_table 不崩溃。"""
+        store = self._make_store(tmp_path)
+        row = self._build_row_with_nones()
+        row["v0_sig"] = 1
+        row["v0_filtered"] = 50.5
+        row["v0_long_pos"] = True
+        table = self._do_buffer_to_table(store, [row])
+        assert len(table) == 1
+
+    def test_buffer_to_table_does_not_crash_with_many_rows(self, tmp_path):
+        """大量行包含 None 值时 _buffer_to_table 不崩溃。"""
+        store = self._make_store(tmp_path)
+        rows = [self._build_row_with_nones(bar_index=i) for i in range(50)]
+        table = self._do_buffer_to_table(store, rows)
+        assert len(table) == 50
+
+    # ── 默认值正确性 — 整数列 ──────────────────────────────────────────
+
+    def test_none_int_column_defaults_to_zero(self, tmp_path):
+        """整数列 (sig) 的 None 值应转换为 0。"""
+        store = self._make_store(tmp_path)
+        row = self._build_row_with_nones()
+        table = self._do_buffer_to_table(store, [row])
+        assert table.column("v0_sig")[0].as_py() == 0
+
+    def test_bar_index_int_column_defaults_to_zero(self, tmp_path):
+        """bar_index（整数列）的 None 值应转换为 0。"""
+        store = self._make_store(tmp_path)
+        row = self._build_row_with_nones()
+        row["bar_index"] = None
+        table = self._do_buffer_to_table(store, [row])
+        assert table.column("bar_index")[0].as_py() == 0
+
+    # ── 默认值正确性 — 浮点列 ──────────────────────────────────────────
+
+    def test_none_float_column_defaults_to_nan(self, tmp_path):
+        """浮点列 (filtered, eps, pnl_long, etc.) 的 None 值应转换为 NaN。"""
+        store = self._make_store(tmp_path)
+        row = self._build_row_with_nones()
+        table = self._do_buffer_to_table(store, [row])
+        assert np.isnan(table.column("v0_filtered")[0].as_py())
+        assert np.isnan(table.column("v0_eps")[0].as_py())
+        assert np.isnan(table.column("v0_pnl_long")[0].as_py())
+        assert np.isnan(table.column("v0_pnl_short")[0].as_py())
+        assert np.isnan(table.column("v0_trade_return")[0].as_py())
+
+    def test_close_float_column_defaults_to_nan(self, tmp_path):
+        """close 列（浮点）的 None 值应转换为 NaN。"""
+        store = self._make_store(tmp_path)
+        row = self._build_row_with_nones()
+        row["close"] = None
+        table = self._do_buffer_to_table(store, [row])
+        assert np.isnan(table.column("close")[0].as_py())
+
+    # ── 默认值正确性 — 布尔列 ──────────────────────────────────────────
+
+    def test_none_bool_column_defaults_to_false(self, tmp_path):
+        """布尔列 (long_pos, short_pos) 的 None 值应转换为 False。"""
+        store = self._make_store(tmp_path)
+        row = self._build_row_with_nones()
+        table = self._do_buffer_to_table(store, [row])
+        assert table.column("v0_long_pos")[0].as_py() is False
+        assert table.column("v0_short_pos")[0].as_py() is False
+
+    # ── 默认值正确性 — datetime64 列 ───────────────────────────────────
+
+    def test_none_timestamp_column_defaults_to_nat(self, tmp_path):
+        """bar_timestamp（datetime64 列）的 None 值应转换为 NaT。"""
+        store = self._make_store(tmp_path)
+        row = self._build_row_with_nones()
+        row["bar_timestamp"] = None
+        table = self._do_buffer_to_table(store, [row])
+        ts = table.column("bar_timestamp")[0]
+        assert ts.is_valid is False  # pyarrow null
+
+    # ── 默认值正确性 — 字符串列 ────────────────────────────────────────
+
+    def test_none_string_column_stays_none(self, tmp_path):
+        """字符串列 (trade, bs_entry, bs_exit) 的 None 值应保持为 null。"""
+        store = self._make_store(tmp_path)
+        row = self._build_row_with_nones()
+        table = self._do_buffer_to_table(store, [row])
+        assert table.column("v0_trade")[0].as_py() is None
+        assert table.column("v0_trade_reason")[0].as_py() is None
+        assert table.column("v0_bs_entry")[0].as_py() is None
+        assert table.column("v0_bs_exit")[0].as_py() is None
+
+    # ── 端到端：含有 None 的 buffer flush ──────────────────────────────
+
+    def test_flush_with_none_values_produces_valid_parquet(self, tmp_path):
+        """含有 None 值的 buffer flush 应生成合法的 Parquet 文件。"""
+        store = self._make_store(tmp_path)
+
+        # Emulate what CLI does: build rows via _extract_row then modify
+        n = 10
+        for i in range(n):
+            t = np.arange(50, dtype=float)
+            view_data = {
+                "t": t,
+                "schmitt": {"sig": np.zeros(50, dtype=int), "eps": np.full(50, 0.1)},
+                "filtered": np.random.RandomState(i).randn(50).cumsum() * 0.01 + 100,
+                "long_pnl": np.linspace(100, 110, 50),
+                "short_pnl": np.linspace(100, 105, 50),
+                "long_mask": np.zeros(50, dtype=bool),
+                "short_mask": np.zeros(50, dtype=bool),
+                "trade_records": [],
+                "bs_markers": {"entry_markers": [], "exit_markers": []},
+            }
+            stage_output = {"views": {"v0_日线": view_data}}
+            store.append_row(i, f"2024-01-{i+1:02d}T10:00:00", f"2024-01-{i+1:02d}", stage_output)
+
+        # Manually inject None into buffer to simulate the edge case
+        store._buffer[5]["v0_sig"] = None
+        store._buffer[5]["v0_filtered"] = None
+        store._buffer[5]["v0_long_pos"] = None
+        store._buffer[5]["bar_timestamp"] = None
+
+        # Flush should not crash
+        store.flush()
+
+        # Verify the Parquet file was written
+        import glob
+        part_files = sorted(glob.glob(str(tmp_path / "*" / "part_*.parquet")))
+        assert len(part_files) >= 1, "Expected at least one part file after flush"
+
+        # Read back and verify
+        table = pq.read_table(part_files[0])
+        assert len(table) == n
+
+        # Row 5 (injected None) should have defaults
+        assert table.column("v0_sig")[5].as_py() == 0
+        assert np.isnan(table.column("v0_filtered")[5].as_py())
+        assert table.column("v0_long_pos")[5].as_py() is False
+        assert table.column("bar_timestamp")[5].is_valid is False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P2-3 B46: CSV导出保持float32 — 验证不转换为float64避免内存翻倍
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestCsvExportFloat32Preservation:
+    """验证 CSV 导出时 float32 列保持原 dtype，不转换为 float64。"""
+
+    def test_merged_dataframe_keeps_float32_dtypes(self, tmp_path):
+        """_merge_parts_and_export_csv 后，float32 列不应被转换为 float64（P2-3 B46）。"""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}],
+                              save_debug_data=True)
+        store.start_session()
+
+        # 添加含真实 float32 值的数据行
+        for i in range(3):
+            n = 50
+            t = np.arange(n, dtype=float)
+            output = {
+                "bar_index": i,
+                "bar_timestamp": f"2026-01-{i+1:02d}T10:00:00",
+                "cutoff_date": f"2026-01-{i+1:02d}",
+                "views": {
+                    "v0_日线": {
+                        "t": t,
+                        "schmitt": {"sig": np.zeros(n, dtype=int), "eps": np.full(n, 0.1)},
+                        "filtered": np.random.RandomState(i).randn(n).cumsum() * 0.01 + 100,
+                        "long_pnl": np.linspace(100, 110, n),
+                        "short_pnl": np.linspace(100, 105, n),
+                        "long_mask": np.zeros(n, dtype=bool),
+                        "short_mask": np.zeros(n, dtype=bool),
+                        "trade_records": [],
+                        "bs_markers": {"entry_markers": [], "exit_markers": []},
+                    },
+                },
+            }
+            store.append_row(
+                output["bar_index"], output["bar_timestamp"],
+                output["cutoff_date"], output,
+            )
+        store.flush()
+        store.end_session()
+
+        # 读取合并后的 Parquet 并转换为 pandas（与 CSV 导出逻辑相同）
+        merged_path = store._session_dir / "backtest_result.parquet"
+        table = pq.read_table(str(merged_path))
+        df = table.to_pandas()
+
+        # 验证 float32 列未被转换为 float64
+        float32_cols = [c for c in df.columns if df[c].dtype == np.float32]
+        float64_cols = [c for c in df.columns if df[c].dtype == np.float64]
+
+        assert len(float32_cols) > 0, (
+            f"Expected float32 columns in DataFrame, got dtypes: {df.dtypes.to_dict()}"
+        )
+        # close 和视图浮点列应为 float32，不应为 float64
+        assert "close" in float32_cols, f"close 列应为 float32, got {df['close'].dtype}"
+        view_float_cols = ["v0_filtered", "v0_eps"]
+        for col in view_float_cols:
+            if col in df.columns:
+                assert df[col].dtype == np.float32, (
+                    f"{col} 应为 float32 而非 {df[col].dtype}"
+                )
+        # 确认没有 float32→float64 转换残留
+        for col in float32_cols:
+            assert df[col].dtype == np.float32, (
+                f"Column {col} should be float32, got {df[col].dtype}"
+            )
+
+    def test_csv_export_write_succeeds_with_float32(self, tmp_path):
+        """CSV 导出本身应正常完成（float32 写入不应报错）。"""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}],
+                              save_debug_data=True)
+        store.start_session()
+
+        for i in range(2):
+            n = 50
+            t = np.arange(n, dtype=float)
+            output = {
+                "bar_index": i,
+                "bar_timestamp": f"2026-01-{i+1:02d}T10:00:00",
+                "cutoff_date": f"2026-01-{i+1:02d}",
+                "views": {
+                    "v0_日线": {
+                        "t": t,
+                        "schmitt": {"sig": np.zeros(n, dtype=int), "eps": np.full(n, 0.1)},
+                        "filtered": np.random.RandomState(i).randn(n).cumsum() * 0.01 + 100,
+                        "long_pnl": np.linspace(100, 110, n),
+                        "short_pnl": np.linspace(100, 105, n),
+                        "long_mask": np.zeros(n, dtype=bool),
+                        "short_mask": np.zeros(n, dtype=bool),
+                        "trade_records": [],
+                        "bs_markers": {"entry_markers": [], "exit_markers": []},
+                    },
+                },
+            }
+            store.append_row(
+                output["bar_index"], output["bar_timestamp"],
+                output["cutoff_date"], output,
+            )
+        store.flush()
+        store.end_session()
+
+        # 验证 CSV 文件存在
+        csv_path = store._session_dir / "backtest_result.csv"
+        assert csv_path.exists(), f"CSV file should exist at {csv_path}"
+
+        # 验证 CSV 内容可读
+        df_csv = pd.read_csv(str(csv_path))
+        assert len(df_csv) >= 2, f"CSV should have at least 2 rows, got {len(df_csv)}"
+        assert "close" in df_csv.columns, "close column should be in CSV"

@@ -3,7 +3,6 @@ BS 仓位操作标识模块 — 单元测试
 """
 import numpy as np
 import pandas as pd
-import pytest
 
 from filter.engine.signals import (
     compute_bs_markers, _compute_from_trades_filtered, _compute_own_from_trades,
@@ -78,7 +77,7 @@ class TestFindDateIndex:
         result = _find_date_index(dates_tz_aware, target_tz_naive)
         # Should find the correct bar, NOT return None (which was the bug)
         assert result is not None, (
-            f"tz-naive vs tz-aware comparison should work after fix, got None"
+            "tz-naive vs tz-aware comparison should work after fix, got None"
         )
         assert result >= 0, f"Expected valid index, got {result}"
 
@@ -88,7 +87,7 @@ class TestFindDateIndex:
         target_aware = pd.Timestamp('2026-06-15 14:30:00+08:00')
 
         result = _find_date_index(dates_naive, target_aware)
-        assert result is not None, f"Expected valid index, got None"
+        assert result is not None, "Expected valid index, got None"
 
 
 # ── _compute_own_from_trades ─────────────────────────────────────────

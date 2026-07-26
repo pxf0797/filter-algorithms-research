@@ -417,7 +417,6 @@ class TestDataVersionMarking:
     def test_schema_format_version_constant(self):
         """验证 schema 版本常量存在且为已知值。"""
         # schema_version 是字符串常量 "3.4"
-        from data.store import ParquetStore
         # 通过创建 ParquetStore 并查看 _write_metadata 中写入的值来验证
         # 这里只验证 schema 构建逻辑中包含所需的列
         schema = _build_full_schema(["v0", "v1", "v2", "v3"])

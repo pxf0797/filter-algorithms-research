@@ -10,27 +10,26 @@ import json
 import os
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 import yfinance as yf
 from loguru import logger
 
 from filter.data.config_db import (
-    apply_preset, delete_preset, get_history, import_json_files_as_presets,
-    list_presets, rename_preset, save_preset, VIEW_PARAM_SPECS,
+    apply_preset, delete_preset, get_history, list_presets, rename_preset, save_preset, VIEW_PARAM_SPECS,
 )
 from filter.data.db import (
     check_data_health, checkpoint_wal, clear_display_cache, compare_with_db,
-    force_update_kline, get_db_size_mb, has_data, init_db, list_snapshots,
+    force_update_kline, get_db_size_mb, has_data, list_snapshots,
     prune_snapshots, restore_snapshot, snapshot_db, validate_db, DB_PATH,
 )
 from filter.data.loader import _fetch_all_timeframes
 from filter.engine.filters import FILTERS
-from filter.browse.components_sidebar import _render_params, ALL_TFS, DEFAULT_TFS
-from filter.shared.constants import TF_INTERVAL
+from filter.browse.components_sidebar import _render_params
+from filter.shared.constants import ALL_TFS, DEFAULT_TFS, TF_INTERVAL
 from filter.shared.state import AppState
 
 
@@ -137,6 +136,11 @@ def _render_preset_selector(market, ticker_code) -> None:
     if selected_preset:
         p = selected_preset
         st.sidebar.caption(f"💡 {p['description']}")
+
+        def _cancel_preset_action() -> None:
+            AppState.pop("_preset_action")
+            AppState.pop("_preset_action_id")
+
         c1, c2, c3, c4 = st.sidebar.columns([1.2, 1, 1, 0.8])
         with c1:
             # P2-opt: on_click callback — Streamlit auto-reruns, no explicit st.rerun() needed
@@ -176,7 +180,7 @@ def _render_preset_selector(market, ticker_code) -> None:
             with cc1:
                 # P2-opt: Streamlit auto-reruns after button click — no st.rerun() needed
                 if st.button("确认覆盖", key="update_confirm_btn", use_container_width=True):
-                    from data.config_db import collect_current_params
+                    from filter.data.config_db import collect_current_params
                     import json as _json
                     params = collect_current_params()
                     save_preset(target["name"],
@@ -189,8 +193,7 @@ def _render_preset_selector(market, ticker_code) -> None:
             with cc2:
                 # P1-4: on_click callback — Streamlit auto-reruns after callback
                 st.button("取消", key="update_cancel_btn", use_container_width=True,
-                          on_click=lambda: (AppState.pop("_preset_action"),
-                                            AppState.pop("_preset_action_id")))
+                          on_click=_cancel_preset_action)
         elif _action == "rename":
             st.sidebar.caption(f"重命名 **{target['name']}**")
             new_name = st.sidebar.text_input("新名称", value=target["name"],
@@ -211,8 +214,7 @@ def _render_preset_selector(market, ticker_code) -> None:
             with cc2:
                 # P1-4: on_click callback — Streamlit auto-reruns after callback
                 st.button("取消", key="rename_cancel_btn", use_container_width=True,
-                          on_click=lambda: (AppState.pop("_preset_action"),
-                                            AppState.pop("_preset_action_id")))
+                          on_click=_cancel_preset_action)
         elif _action == "delete":
             st.sidebar.error(f"确认删除 **{target['name']}**？此操作不可恢复。")
             cc1, cc2 = st.sidebar.columns(2)
@@ -228,8 +230,7 @@ def _render_preset_selector(market, ticker_code) -> None:
             with cc2:
                 # P1-4: on_click callback — Streamlit auto-reruns after callback
                 st.button("取消", key="delete_cancel_btn", use_container_width=True,
-                          on_click=lambda: (AppState.pop("_preset_action"),
-                                            AppState.pop("_preset_action_id")))
+                          on_click=_cancel_preset_action)
 
     # Save as preset
     with st.sidebar.expander("💾 保存 / 另存为预设", expanded=False):
@@ -249,7 +250,7 @@ def _render_preset_selector(market, ticker_code) -> None:
         # P2-opt: Streamlit auto-reruns after button click — no st.rerun() needed
         if st.button("💾 保存", key="save_preset_btn", use_container_width=True):
             if new_name.strip():
-                from data.config_db import collect_current_params
+                from filter.data.config_db import collect_current_params
                 import json as _json
                 params = collect_current_params()
                 target_name = (selected_preset["name"] if overwrite and selected_preset else new_name.strip())
@@ -304,34 +305,51 @@ def _render_data_validation(market, ticker_code) -> None:
             rows = []
             has_conflict = False
             has_update = False
+            # Phase 1: parallel download of all timeframes (I/O-bound)
+            with st.spinner("校验全部周期中..."):
+                raw_data = {}
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    futures = {}
+                    for tf in ALL_TFS:
+                        interval, period = TF_INTERVAL[tf]
+                        future = executor.submit(yf.download, full_code, period=period, interval=interval, progress=False)
+                        futures[future] = tf
+                    for future in as_completed(futures):
+                        tf = futures[future]
+                        try:
+                            raw_data[tf] = future.result(timeout=30)
+                        except Exception as e:
+                            raw_data[tf] = e
+
+            # Phase 2: process results in ALL_TFS order (logic unchanged)
             for tf in ALL_TFS:
-                interval, period = TF_INTERVAL[tf]
-                with st.spinner(f"校验 {tf} ..."):
-                    try:
-                        data = yf.download(full_code, period=period, interval=interval, progress=False)
-                        if data.empty or len(data[data["Close"].notna()]) < 5:
-                            rows.append({"周期": tf, "DB": "-", "yf": "-", "重叠": "-",
-                                         "指纹": "⚠️ 数据不足", "仅DB": "-", "仅yf": "-", "操作": ""})
-                            continue
-                        data = data[data["Close"].notna()]
-                        report = compare_with_db(ticker_code, tf, data)
-                    except Exception as e:
+                try:
+                    data = raw_data[tf]
+                    if isinstance(data, Exception):
+                        raise data
+                    if data.empty or len(data[data["Close"].notna()]) < 5:
                         rows.append({"周期": tf, "DB": "-", "yf": "-", "重叠": "-",
-                                     "指纹": f"❌ {str(e)[:30]}", "仅DB": "-", "仅yf": "-", "操作": ""})
+                                     "指纹": "⚠️ 数据不足", "仅DB": "-", "仅yf": "-", "操作": ""})
                         continue
-                    db_c = report["db_count"]
-                    yf_c = report["yf_count"]
-                    fp = "✅" if report["fingerprint_match"] else "❌"
-                    status = report["status"]
-                    if status == "conflict":
-                        has_conflict = True
-                    elif status == "update_available":
-                        has_update = True
-                    rows.append({
-                        "周期": tf, "DB": db_c, "yf": yf_c,
-                        "重叠": report["overlap_count"], "指纹": fp,
-                        "仅DB": report["only_db"], "仅yf": report["only_yf"], "操作": status,
-                    })
+                    data = data[data["Close"].notna()]
+                    report = compare_with_db(ticker_code, tf, data)
+                except Exception as e:
+                    rows.append({"周期": tf, "DB": "-", "yf": "-", "重叠": "-",
+                                 "指纹": f"❌ {str(e)[:30]}", "仅DB": "-", "仅yf": "-", "操作": ""})
+                    continue
+                db_c = report["db_count"]
+                yf_c = report["yf_count"]
+                fp = "✅" if report["fingerprint_match"] else "❌"
+                status = report["status"]
+                if status == "conflict":
+                    has_conflict = True
+                elif status == "update_available":
+                    has_update = True
+                rows.append({
+                    "周期": tf, "DB": db_c, "yf": yf_c,
+                    "重叠": report["overlap_count"], "指纹": fp,
+                    "仅DB": report["only_db"], "仅yf": report["only_yf"], "操作": status,
+                })
 
             if rows:
                 import pandas as _pd
@@ -380,13 +398,13 @@ def _render_data_validation(market, ticker_code) -> None:
 
 def _render_filter_selectors() -> tuple:
     """Render filter selector widgets. Returns (filter_id, dual, filter_id2)."""
-    filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),
-        format_func=lambda x: FILTERS.get(x, {}).get("name", x), key="global_f")
+    filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),  # type: ignore[arg-type]
+        format_func=lambda x: FILTERS.get(x, {}).get("name", x), key="global_f")  # type: ignore[arg-type,return-value]
     dual = st.sidebar.checkbox("双滤波对比", value=False, key="global_dual")
     filter_id2 = None
     if dual:
-        filter_id2 = st.sidebar.selectbox("滤波器 2", list(FILTERS.keys()),
-            format_func=lambda x: FILTERS.get(x, {}).get("name", x), key="global_f2")
+        filter_id2 = st.sidebar.selectbox("滤波器 2", list(FILTERS.keys()),  # type: ignore[arg-type]
+            format_func=lambda x: FILTERS.get(x, {}).get("name", x), key="global_f2")  # type: ignore[arg-type,return-value]
     return filter_id, dual, filter_id2
 
 
@@ -446,11 +464,11 @@ def _render_db_backup() -> None:
                         st.error(f"恢复失败: {e}")
             with c_r2:
                 # P2-opt: on_click callback — Streamlit auto-reruns, no explicit st.rerun()
+                def _delete_snapshot_cb() -> None:
+                    os.remove(snapshots[selected_idx][0])
+                    logger.info(f"Snapshot deleted: {snap_labels[selected_idx]}")
                 st.button("删除此备份", key="del_snap_btn", use_container_width=True,
-                          on_click=lambda idx=selected_idx: (
-                              os.remove(snapshots[idx][0]),
-                              logger.info(f"Snapshot deleted: {snap_labels[idx]}"),
-                          ))
+                          on_click=_delete_snapshot_cb)
 
 
 def _view_export_params(cfg, i) -> dict:
@@ -471,11 +489,11 @@ def _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_c
     }
     for i, cfg in enumerate(configs):
         export_data.update(_view_export_params(cfg, i))
-        f1 = FILTERS.get(filter_id, {})
+        f1: dict = FILTERS.get(filter_id, {})  # type: ignore[assignment]
         for pname, pval in cfg.get("pv", {}).items():
             label = f1["params"].get(pname, (pname,))[0]
             export_data[f"{label}_v{i}_f1_{filter_id}"] = pval
-        f2 = FILTERS.get(filter_id2, {}) if filter_id2 else {}
+        f2: dict = FILTERS.get(filter_id2, {}) if filter_id2 else {}  # type: ignore[assignment]
         for pname, pval in cfg.get("pv2", {}).items():
             label = f2["params"].get(pname, (pname,))[0]
             export_data[f"{label}_v{i}_f2_{filter_id2}"] = pval

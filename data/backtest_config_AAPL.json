@@ -1,0 +1,7 @@
+{
+  "ticker": "AAPL",
+  "min_tf": "日线",
+  "bar_count": 12853,
+  "window_size": 120,
+  "cached_at": "2026-07-26T16:11:28.896784"
+}

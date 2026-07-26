@@ -232,25 +232,25 @@ class TestGetQueryStartForSynthesis:
 class TestOffsetToTz:
     def test_positive_offset(self):
         from data.loader import _offset_to_tz
-        from datetime import timezone, timedelta
+        from datetime import timedelta
         tz = _offset_to_tz("+08:00")
         assert tz.utcoffset(None) == timedelta(hours=8)
 
     def test_negative_offset(self):
         from data.loader import _offset_to_tz
-        from datetime import timezone, timedelta
+        from datetime import timedelta
         tz = _offset_to_tz("-04:00")
         assert tz.utcoffset(None) == timedelta(hours=-4)
 
     def test_utc_z(self):
         from data.loader import _offset_to_tz
-        from datetime import timezone, timedelta
+        from datetime import timedelta
         tz = _offset_to_tz("Z")
         assert tz.utcoffset(None) == timedelta(0)
 
     def test_empty_string(self):
         from data.loader import _offset_to_tz
-        from datetime import timezone, timedelta
+        from datetime import timedelta
         tz = _offset_to_tz("")
         assert tz.utcoffset(None) == timedelta(0)
 
@@ -923,14 +923,14 @@ class TestOffsetToTzEdgeCases:
 
     def test_zero_offset(self):
         from data.loader import _offset_to_tz
-        from datetime import timezone, timedelta
+        from datetime import timedelta
         tz = _offset_to_tz("+00:00")
         assert tz.utcoffset(None) == timedelta(0)
 
     def test_partial_hour_offset(self):
         """非整小时偏移如 +05:30."""
         from data.loader import _offset_to_tz
-        from datetime import timezone, timedelta
+        from datetime import timedelta
         tz = _offset_to_tz("+05:30")
         assert tz.utcoffset(None) == timedelta(hours=5, minutes=30)
 
@@ -955,3 +955,65 @@ class TestModule:
         assert hasattr(data_loader, "_build_output_df")
         assert hasattr(data_loader, "_synthesize_incomplete_bar")
         assert hasattr(data_loader, "_sync_all_cascading")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P2-3 B41: LRU 查询缓存 — 验证缓存命中减少重复 DB 查询
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestQueryCache:
+    """验证 _query_tf_from_db 和 _query_tf_for_period 的 LRU 缓存行为。"""
+
+    def test_query_cache_hit(self):
+        """相同参数第二次调用应命中缓存，cache_info 显示 hits > 0。"""
+        from data.loader import _query_tf_from_db, clear_query_cache
+
+        clear_query_cache()
+        # 第一次调用：cache miss
+        info_before = _query_tf_from_db.cache_info()
+        assert info_before.hits == 0
+
+        # 用相同参数调用第二次：应命中缓存
+        _ = _query_tf_from_db("NONEXIST_TICKER", "日线", "2099-01-01", 120)
+        _ = _query_tf_from_db("NONEXIST_TICKER", "日线", "2099-01-01", 120)
+
+        info_after = _query_tf_from_db.cache_info()
+        assert info_after.hits >= 1, f"Expected cache hits >= 1, got {info_after.hits}"
+        assert info_after.misses >= 1
+
+    def test_query_cache_different_params_miss(self):
+        """不同参数应各自触发 cache miss。"""
+        from data.loader import _query_tf_from_db, clear_query_cache
+
+        clear_query_cache()
+        _ = _query_tf_from_db("NONEXIST_A", "日线", "2099-01-01", 120)
+        _ = _query_tf_from_db("NONEXIST_B", "日线", "2099-01-01", 120)
+
+        info = _query_tf_from_db.cache_info()
+        assert info.misses >= 2, f"Expected at least 2 misses for different params, got {info.misses}"
+
+    def test_clear_query_cache_resets(self):
+        """clear_query_cache 后缓存应被清空（hits=0, misses=0）。"""
+        from data.loader import _query_tf_from_db, _query_tf_for_period, clear_query_cache
+
+        # 先产生一些缓存条目
+        _ = _query_tf_from_db("NONEXIST_TICKER", "日线", "2099-01-01", 120)
+        _ = _query_tf_for_period("NONEXIST_TICKER", "60分钟", "2099-01-01", "2099-01-02")
+
+        clear_query_cache()
+
+        info1 = _query_tf_from_db.cache_info()
+        info2 = _query_tf_for_period.cache_info()
+        assert info1.hits == 0 and info1.misses == 0, "cache should be cleared"
+        assert info2.hits == 0 and info2.misses == 0, "cache should be cleared"
+
+    def test_query_for_period_cache_hit(self):
+        """_query_tf_for_period 也应支持缓存命中。"""
+        from data.loader import _query_tf_for_period, clear_query_cache
+
+        clear_query_cache()
+        _ = _query_tf_for_period("NONEXIST_TICKER", "60分钟", "2099-01-01", "2099-01-02")
+        _ = _query_tf_for_period("NONEXIST_TICKER", "60分钟", "2099-01-01", "2099-01-02")
+
+        info = _query_tf_for_period.cache_info()
+        assert info.hits >= 1, f"Expected cache hits >= 1, got {info.hits}"

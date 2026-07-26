@@ -2,10 +2,8 @@
 AppState _imp_ 清理 + Streamlit 缓存 TTL — 单元测试
 """
 import ast
-import sys
-import re
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -56,7 +54,7 @@ class TestCleanupOrphanedImpKeys:
         # 模拟 st.session_state 为 dict
         mock_st = MagicMock()
         mock_st.session_state = ss
-        monkeypatch.setattr("state.st", mock_st)
+        monkeypatch.setattr("shared.state.st", mock_st)
 
         AppState.cleanup_orphaned_imp_keys()
 
@@ -72,7 +70,7 @@ class TestCleanupOrphanedImpKeys:
         ss = _make_ss_with_imp()
         mock_st = MagicMock()
         mock_st.session_state = ss
-        monkeypatch.setattr("state.st", mock_st)
+        monkeypatch.setattr("shared.state.st", mock_st)
 
         AppState.cleanup_orphaned_imp_keys()
 
@@ -88,7 +86,7 @@ class TestCleanupOrphanedImpKeys:
         ss = _make_ss_with_imp()
         mock_st = MagicMock()
         mock_st.session_state = ss
-        monkeypatch.setattr("state.st", mock_st)
+        monkeypatch.setattr("shared.state.st", mock_st)
 
         AppState.cleanup_orphaned_imp_keys()
 
@@ -103,7 +101,7 @@ class TestCleanupOrphanedImpKeys:
         ss = {}
         mock_st = MagicMock()
         mock_st.session_state = ss
-        monkeypatch.setattr("state.st", mock_st)
+        monkeypatch.setattr("shared.state.st", mock_st)
 
         AppState.cleanup_orphaned_imp_keys()
 
@@ -116,7 +114,7 @@ class TestCleanupOrphanedImpKeys:
         ss = _make_ss_with_imp()
         mock_st = MagicMock()
         mock_st.session_state = ss
-        monkeypatch.setattr("state.st", mock_st)
+        monkeypatch.setattr("shared.state.st", mock_st)
 
         AppState.init_defaults()
 
@@ -134,7 +132,7 @@ class TestCleanupOrphanedImpKeys:
         ss["_imp_v5_ke"] = 0.3
         mock_st = MagicMock()
         mock_st.session_state = ss
-        monkeypatch.setattr("state.st", mock_st)
+        monkeypatch.setattr("shared.state.st", mock_st)
 
         AppState.cleanup_orphaned_imp_keys()
 
@@ -154,7 +152,7 @@ class TestCacheTTL:
 
     def test_all_cache_data_have_ttl(self):
         """所有 @st.cache_data 装饰器必须有 ttl 参数。"""
-        app_path = Path(__file__).resolve().parent.parent / "streamlit_app.py"
+        app_path = Path(__file__).resolve().parent.parent / "filter" / "browse" / "app.py"
         source = app_path.read_text()
         tree = ast.parse(source)
 
@@ -189,7 +187,7 @@ class TestCacheTTL:
 
     def test_cached_fetch_stock_ttl_is_3600(self):
         """数据加载缓存 _cached_fetch_stock ttl 应为 3600 (1小时)。"""
-        app_path = Path(__file__).resolve().parent.parent / "streamlit_app.py"
+        app_path = Path(__file__).resolve().parent.parent / "filter" / "browse" / "app.py"
         source = app_path.read_text()
         tree = ast.parse(source)
 
@@ -213,7 +211,7 @@ class TestCacheTTL:
             "_compute_prediction_pairs",
             "_cached_strategy_pnl",
         ]
-        app_path = Path(__file__).resolve().parent.parent / "streamlit_app.py"
+        app_path = Path(__file__).resolve().parent.parent / "filter" / "browse" / "app.py"
         source = app_path.read_text()
         tree = ast.parse(source)
 
@@ -244,3 +242,43 @@ class TestCacheTTL:
         if isinstance(cur, ast.Name):
             parts.append(cur.id)
         return ".".join(reversed(parts))
+
+
+class TestHandlePendingApply:
+    """_handle_pending_apply 测试."""
+
+    def test_no_pending_params(self):
+        """无等待参数时不报错."""
+        from filter.browse.sidebar import _handle_pending_apply
+        with patch("filter.browse.sidebar.AppState.has", return_value=False):
+            _handle_pending_apply()
+
+    def test_pending_params_none(self):
+        """等待参数为 None 时直接返回."""
+        from filter.browse.sidebar import _handle_pending_apply
+        with patch("filter.browse.sidebar.AppState.has", return_value=True), \
+             patch("filter.browse.sidebar.AppState.pop", return_value=None):
+            _handle_pending_apply()
+
+    def test_pending_params_applied(self):
+        """等待参数正常应用."""
+        from filter.browse.sidebar import _handle_pending_apply
+        params = {"key1": "val1", "key2": 42}
+
+        call_args = []
+
+        def fake_has(key):
+            return key == "_pending_apply_params"
+
+        def fake_pop(key):
+            return params
+
+        def fake_set(key, value):
+            call_args.append((key, value))
+
+        with patch("filter.browse.sidebar.AppState.has", side_effect=fake_has), \
+             patch("filter.browse.sidebar.AppState.pop", side_effect=fake_pop), \
+             patch("filter.browse.sidebar.AppState.set", side_effect=fake_set):
+            _handle_pending_apply()
+
+        assert len(call_args) == 3  # key1, key2, _import_data

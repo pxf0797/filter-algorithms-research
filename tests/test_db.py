@@ -13,11 +13,9 @@ tests/test_db.py — 完整单元测试覆盖 filter/db.py 模块
 
 import os
 import json
-import shutil
 import sqlite3
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock
 
 import numpy as np
 import pandas as pd
@@ -83,6 +81,9 @@ def db_target(tmp_path):
     orig_db = db.DB_PATH
     orig_snap = db.SNAPSHOT_DIR
 
+    # 关闭旧连接（若存在），确保 DB_PATH 变更后重建连接 (P2-3 B38)
+    db.close_conn()
+
     db.DB_PATH = db_path
     db.SNAPSHOT_DIR = snap_dir
     db.init_db()
@@ -90,6 +91,7 @@ def db_target(tmp_path):
     yield db, db_path
 
     # 清理 — 避免影响其他模块/测试
+    db.close_conn()
     db.DB_PATH = orig_db
     db.SNAPSHOT_DIR = orig_snap
 
@@ -380,14 +382,13 @@ class TestCheckDataHealth:
     def test_health_null_values(self, db_target):
         """有空值返回 warn。"""
         db_module, db_path = db_target
-        # 使用 db_module.get_conn() 确保 WAL 可见性一致
+        # 使用 db_module.get_conn() 确保 WAL 可见性一致（P2-3 B38: 不复用后不关闭）
         conn = db_module.get_conn()
         conn.execute("INSERT INTO kline VALUES (?,?,?,?,?,?,?,?)",
                      ("NULLTEST", "日线", "2026-06-01", 100.0, 101.0, 99.0, None, 1000.0))
         conn.execute("INSERT INTO kline VALUES (?,?,?,?,?,?,?,?)",
                      ("NULLTEST", "日线", "2026-06-02", 101.0, 102.0, 100.0, 101.0, 2000.0))
         conn.commit()
-        conn.close()
         report = db_module.check_data_health("NULLTEST")
         assert report["status"] == "warn"
         assert any("空值" in i for i in report["issues"])
@@ -422,7 +423,6 @@ class TestCheckDataHealth:
                      ("BUGTEST", "60分钟", "2026-06-01 09:00", 100.0, 101.0, 99.0, None, 1000.0))
 
         conn.commit()
-        conn.close()
 
         report = db_module.check_data_health("BUGTEST")
         issues = report["issues"]
@@ -438,7 +438,6 @@ class TestCheckDataHealth:
             conn.execute("INSERT INTO kline VALUES (?,?,?,?,?,?,?,?)",
                          ("GAPTEST", "日线", d, 100.0, 101.0, 99.0, 100.0 + i, 1000))
         conn.commit()
-        conn.close()
         report = db_module.check_data_health("GAPTEST")
         assert report["status"] == "warn"
         assert any("缺口" in i for i in report["issues"])
@@ -455,7 +454,6 @@ class TestCheckDataHealth:
         # 实际上这个不能通过"行数为零但周期存在"覆盖 —
         # 通过插入0行记录到另一个tf得到空周期名
         conn.commit()
-        conn.close()
         report = db_module.check_data_health("ZEROTEST")
         assert report["status"] in ("ok", "warn")
 
@@ -639,11 +637,14 @@ class TestSnapshotBackup:
 
     def test_snapshot_list(self, populate_kline):
         """list_snapshots 返回正确列表。"""
-        import time
+        from datetime import datetime
         db_module, _ = populate_kline
-        db_module.snapshot_db()
-        time.sleep(1.1)  # 确保不同秒，避免文件名冲突
-        db_module.snapshot_db()
+        # Mock 时间替代 sleep：生成不同秒的快照文件名
+        times = [datetime(2026, 1, 1, 12, 0, 0), datetime(2026, 1, 1, 12, 0, 5)]
+        with patch('data.db.datetime') as mock_dt:
+            mock_dt.now.side_effect = times
+            db_module.snapshot_db()
+            db_module.snapshot_db()
         snaps = db_module.list_snapshots()
         assert len(snaps) == 2
         # 每条记录包含 path, mtime, size_mb, label
@@ -681,7 +682,6 @@ class TestSnapshotBackup:
 
     def test_prune_snapshots_oserror_ignored(self, db_target):
         """prune_snapshots 遇到不可删除的文件时静默跳过。"""
-        import time
         db_module, _ = db_target
         db_module.snapshot_db()
         # mock os.remove 抛 OSError
@@ -691,13 +691,15 @@ class TestSnapshotBackup:
 
     def test_prune_snapshots(self, populate_kline):
         """创建 3 个快照 → prune(max_keep=2) → 保留 2 个。"""
-        import time
+        from datetime import datetime
         db_module, _ = populate_kline
-        db_module.snapshot_db()
-        time.sleep(1.1)
-        db_module.snapshot_db()
-        time.sleep(1.1)
-        db_module.snapshot_db()
+        # Mock 时间替代 sleep：生成不同秒的快照文件名
+        times = [datetime(2026, 1, 1, 12, 0, 0), datetime(2026, 1, 1, 12, 0, 5), datetime(2026, 1, 1, 12, 0, 10)]
+        with patch('data.db.datetime') as mock_dt:
+            mock_dt.now.side_effect = times
+            db_module.snapshot_db()
+            db_module.snapshot_db()
+            db_module.snapshot_db()
         assert len(db_module.list_snapshots()) == 3
         db_module.prune_snapshots(max_keep=2)
         assert len(db_module.list_snapshots()) == 2
@@ -782,7 +784,6 @@ class TestClearDisplayCache:
     def test_clear_display_cache_error_handling(self, tmp_path):
         """unlink 抛 OSError 时静默跳过。"""
         import data.db as db
-        import time
         db.DB_PATH = tmp_path / "test_market.db"
         display_dir = tmp_path / "display"
         display_dir.mkdir(parents=True, exist_ok=True)
@@ -936,54 +937,68 @@ class TestConcurrentAccess:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestPragmaOptimization:
-    """验证 get_conn() 返回的连接正确设置了性能 PRAGMA。"""
+    """验证 get_conn() 返回的连接正确设置了性能 PRAGMA。（P2-3 B38: 连接复用后不再逐测试关闭）"""
 
     def test_mmap_size_set(self):
         """get_conn() 应设置 mmap_size。"""
         from filter.data.db import get_conn
 
         conn = get_conn()
-        try:
-            mmap = conn.execute("PRAGMA mmap_size").fetchone()[0]
-            # mmap_size 应 > 0（即已启用 memory-mapped I/O）
-            assert mmap > 0, f"mmap_size should be > 0, got {mmap}"
-        finally:
-            conn.close()
+        mmap = conn.execute("PRAGMA mmap_size").fetchone()[0]
+        # mmap_size 应 > 0（即已启用 memory-mapped I/O）
+        assert mmap > 0, f"mmap_size should be > 0, got {mmap}"
 
     def test_temp_store_memory(self):
         """get_conn() 应设置 temp_store=MEMORY。"""
         from filter.data.db import get_conn
 
         conn = get_conn()
-        try:
-            val = conn.execute("PRAGMA temp_store").fetchone()[0]
-            # 0=DEFAULT, 1=FILE, 2=MEMORY
-            assert val == 2, f"temp_store should be 2 (MEMORY), got {val}"
-        finally:
-            conn.close()
+        val = conn.execute("PRAGMA temp_store").fetchone()[0]
+        # 0=DEFAULT, 1=FILE, 2=MEMORY
+        assert val == 2, f"temp_store should be 2 (MEMORY), got {val}"
 
     def test_cache_size_set(self):
         """get_conn() 应设置 cache_size 为负值（KB）。"""
         from filter.data.db import get_conn
 
         conn = get_conn()
-        try:
-            cache = conn.execute("PRAGMA cache_size").fetchone()[0]
-            # 负值表示 KB，正数表示页数。我们设置的是 -32768
-            assert cache != 0, f"cache_size should be non-zero, got {cache}"
-        finally:
-            conn.close()
+        cache = conn.execute("PRAGMA cache_size").fetchone()[0]
+        # 负值表示 KB，正数表示页数。我们设置的是 -32768
+        assert cache != 0, f"cache_size should be non-zero, got {cache}"
 
     def test_busy_timeout_set(self):
         """get_conn() 应设置 busy_timeout。"""
         from filter.data.db import get_conn
 
         conn = get_conn()
-        try:
-            timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
-            assert timeout == 5000, f"busy_timeout should be 5000, got {timeout}"
-        finally:
-            conn.close()
+        timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        assert timeout == 5000, f"busy_timeout should be 5000, got {timeout}"
+
+    def test_connection_reuse(self):
+        """验证 get_conn() 多次调用返回同一连接实例（P2-3 B38）。"""
+        from filter.data.db import get_conn
+
+        conn1 = get_conn()
+        conn2 = get_conn()
+        conn3 = get_conn()
+        assert conn1 is conn2, "get_conn() should return the same connection instance"
+        assert conn2 is conn3, "get_conn() should return the same connection instance"
+
+    def test_connection_reuse_persists_across_operations(self, db_target):
+        """验证多次数据库操作使用同一连接（P2-3 B38 → 线程本地复用）。"""
+        import data.db as db
+
+        # 执行写操作（内部调用 get_conn）
+        df = _make_ohlc_df(days=5)
+        db.upsert_kline("AAPL", "日线", df)
+
+        # 执行读操作（内部调用 get_conn）
+        result = db.query_kline("AAPL", "日线", n_pts=5)
+        assert len(result) == 5
+
+        # 验证当前线程的连接仍然有效（线程本地复用）
+        conn = getattr(db._local, "conn", None)
+        assert conn is not None, "Connection should persist after operations"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1028,3 +1043,287 @@ class TestForceUpdateBatch:
         df_empty = pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
         # 空 DataFrame 不应引发异常
         force_update_kline("TEST_EMPTY", "日线", df_empty)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# B38 Thread-Safety Regression: 数据刷新持久化修复
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestThreadLocalConnection:
+    """验证线程本地连接修复：多线程写入后数据正确持久化。"""
+
+    def test_same_thread_returns_same_connection(self, db_target):
+        """同一线程多次调用 get_conn() 返回同一连接实例。"""
+        import data.db as db
+        conn1 = db.get_conn()
+        conn2 = db.get_conn()
+        assert conn1 is conn2, "同一线程应复用连接"
+
+    def test_different_threads_get_different_connections(self, db_target):
+        """不同线程调用 get_conn() 返回不同连接实例。"""
+        import data.db as db
+        import threading
+
+        results = {}
+        barrier = threading.Barrier(3, timeout=5)
+
+        def worker(tid):
+            conn = db.get_conn()
+            results[tid] = id(conn)
+            barrier.wait()
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        # 三个线程应有三个不同的连接实例
+        assert len(set(results.values())) == 3, (
+            f"Expected 3 unique connections, got {len(set(results.values()))}"
+        )
+
+    def test_write_in_worker_thread_persisted_to_main_thread(self, db_target):
+        """工作线程写入后，主线程可读取（模拟 _fetch_all_timeframes 场景）。
+
+        这是 B38 回归的精确重现：ThreadPoolExecutor worker 线程通过
+        upsert_kline 写入数据，然后在主线程通过 query_kline 读取。
+        修复前，worker 线程因 check_same_thread 限制无法使用主线程的
+        单例连接，导致数据静默丢失。
+        """
+        import threading
+        import pandas as pd
+        import numpy as np
+
+        db_module, db_path = db_target
+
+        dates = pd.date_range("2024-01-01", periods=30, freq="D")
+        np.random.seed(42)
+        df = pd.DataFrame({
+            "Open": np.random.randn(30) + 100,
+            "High": np.random.randn(30) + 101,
+            "Low": np.random.randn(30) + 99,
+            "Close": np.random.randn(30) + 100,
+            "Volume": np.random.randint(1000, 10000, 30),
+        }, index=dates)
+
+        errors = []
+        ready = threading.Event()
+        done = threading.Event()
+
+        def worker_write():
+            try:
+                ready.set()
+                db_module.upsert_kline("THREAD_TEST", "日线", df)
+            except Exception as e:
+                errors.append(f"{type(e).__name__}: {e}")
+            finally:
+                done.set()
+
+        t = threading.Thread(target=worker_write)
+        t.start()
+        ready.wait(timeout=5)
+        t.join(timeout=10)
+
+        assert not errors, f"Worker thread write failed: {errors}"
+        assert done.is_set(), "Worker thread should have completed"
+
+        # 主线程读取：应看到 worker 线程写入的 30 条数据
+        result = db_module.query_kline("THREAD_TEST", "日线", n_pts=50)
+        assert len(result) == 30, (
+            f"Expected 30 rows written by worker thread, got {len(result)}"
+        )
+
+    def test_close_conn_closes_current_thread_only(self, db_target):
+        """close_conn() 只关闭当前线程的连接，不影响其他线程。"""
+        import data.db as db
+        import threading
+
+        # 主线程创建连接
+        main_conn = db.get_conn()
+        worker_conn_id = [None]
+
+        def worker():
+            worker_conn_id[0] = id(db.get_conn())
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=10)
+
+        # 关闭主线程连接
+        db.close_conn()
+
+        # 主线程连接应被清除
+        assert getattr(db._local, "conn", None) is None, (
+            "close_conn should clear the current thread's connection"
+        )
+
+        # worker 线程的连接不受影响（通过 id 验证已创建）
+        assert worker_conn_id[0] is not None, "Worker thread should have a connection"
+
+    def test_multiple_parallel_writes_all_persisted(self, db_target):
+        """多个工作线程并行写入，全部数据正确持久化。
+
+        模拟 _fetch_all_timeframes 8 个周期并行写入的完整场景。
+        """
+        import threading
+        import pandas as pd
+        import numpy as np
+
+        db_module, db_path = db_target
+        n_threads = 8
+        rows_per_thread = 10
+
+        errors = []
+        start_event = threading.Event()
+        done_count = [0]
+        done_lock = threading.Lock()
+
+        def worker_write(tid):
+            try:
+                start_event.wait(timeout=10)
+                dates = pd.date_range(
+                    f"2024-{tid+1:02d}-01", periods=rows_per_thread, freq="D"
+                )
+                df = pd.DataFrame({
+                    "Open": np.full(rows_per_thread, 100.0 + tid),
+                    "High": np.full(rows_per_thread, 101.0 + tid),
+                    "Low": np.full(rows_per_thread, 99.0 + tid),
+                    "Close": np.full(rows_per_thread, 100.5 + tid),
+                    "Volume": np.full(rows_per_thread, 1000 * (tid + 1), dtype=float),
+                }, index=dates)
+                db_module.upsert_kline("PARALLEL_TEST", "日线", df)
+            except Exception as e:
+                errors.append(f"thread_{tid}: {type(e).__name__}: {e}")
+            finally:
+                with done_lock:
+                    done_count[0] += 1
+
+        threads = [threading.Thread(target=worker_write, args=(i,))
+                   for i in range(n_threads)]
+        for t in threads:
+            t.start()
+        # Signal all threads to start simultaneously
+        start_event.set()
+        for t in threads:
+            t.join(timeout=15)
+
+        assert not errors, f"Worker thread writes failed: {errors}"
+        assert done_count[0] == n_threads, (
+            f"Expected {n_threads} threads to complete, got {done_count[0]}"
+        )
+
+        # 主线程读取：应看到所有 n_threads * rows_per_thread 条数据
+        result = db_module.query_kline("PARALLEL_TEST", "日线", n_pts=500)
+        expected = n_threads * rows_per_thread
+        assert len(result) == expected, (
+            f"Expected {expected} rows from {n_threads} parallel writes, "
+            f"got {len(result)}"
+        )
+
+    def test_version_serialisation_roundtrip(self, db_target):
+        """_save_version 后 _is_cache_valid 返回 True 表示数据可被正确读取。"""
+        import pandas as pd
+        import numpy as np
+
+        # 创建 display parquet 并保存版本
+        tmp = db_target[1].parent
+        parquet_path = tmp / "test_version.parquet"
+        dates = pd.date_range("2024-01-01", periods=20, freq="D")
+        df = pd.DataFrame({
+            "Date": dates,
+            "Open": np.arange(20, dtype=float) + 100,
+            "High": np.arange(20, dtype=float) + 101,
+            "Low": np.arange(20, dtype=float) + 99,
+            "Close": np.arange(20, dtype=float) + 100,
+            "Volume": np.full(20, 5000, dtype=float),
+        })
+        df.to_parquet(parquet_path, index=False)
+
+        # 直接内联 _save_version 逻辑验证版本写入
+        import pyarrow.parquet as pq
+        mtime = parquet_path.stat().st_mtime
+        nrows = pq.ParquetFile(parquet_path).metadata.num_rows
+        vp = parquet_path.with_suffix(".version.json")
+        vp.write_text(json.dumps({"mtime": mtime, "rows": nrows}))
+
+        # 验证缓存有效
+        from data.loader import _is_cache_valid
+        assert _is_cache_valid(parquet_path), "Fresh version should validate"
+
+        # 模拟刷新：写入新数据 → mtime 变化 → version 更新
+        df2 = pd.DataFrame({
+            "Date": pd.date_range("2024-02-01", periods=25, freq="D"),
+            "Open": np.arange(25, dtype=float) + 200,
+            "High": np.arange(25, dtype=float) + 201,
+            "Low": np.arange(25, dtype=float) + 199,
+            "Close": np.arange(25, dtype=float) + 200,
+            "Volume": np.full(25, 8000, dtype=float),
+        })
+        df2.to_parquet(parquet_path, index=False)
+
+        # 旧 version 应失效
+        assert not _is_cache_valid(parquet_path), (
+            "Version should be invalid after data change (mtime mismatch)"
+        )
+
+        # 写入新 version
+        mtime2 = parquet_path.stat().st_mtime
+        nrows2 = pq.ParquetFile(parquet_path).metadata.num_rows
+        vp.write_text(json.dumps({"mtime": mtime2, "rows": nrows2}))
+
+        # 新 version 应有效，行数对应新数据
+        assert _is_cache_valid(parquet_path), "Updated version should validate"
+        assert nrows2 == 25, f"Expected 25 rows after refresh, got {nrows2}"
+
+
+class TestRenderDbBackup:
+    """_render_db_backup 按钮逻辑测试 (纯函数逻辑)."""
+
+    def test_db_size_format_in_caption(self):
+        """验证 get_db_size_mb 被调用以获取数据库大小."""
+        from filter.browse.sidebar import _render_db_backup
+
+        mock_col = MagicMock()
+
+        with patch("filter.browse.sidebar.st") as mock_st, \
+             patch("filter.browse.sidebar.get_db_size_mb",
+                   return_value=10.5) as mock_size, \
+             patch("filter.browse.sidebar.list_snapshots", return_value=[]), \
+             patch("filter.browse.sidebar.logger"):
+            mock_st.sidebar = MagicMock()
+            mock_st.sidebar.expander.return_value.__enter__ = MagicMock()
+            mock_st.sidebar.columns.return_value = [mock_col, mock_col]
+            mock_st.sidebar.button.return_value = False
+            mock_st.sidebar.selectbox.return_value = 0
+            mock_st.sidebar.caption = MagicMock()
+            mock_st.columns.return_value = [mock_col, mock_col]
+            mock_st.caption = MagicMock()
+            mock_st.button.return_value = False
+
+            _render_db_backup()
+
+            mock_size.assert_called_once()
+
+    def test_no_snapshots_shows_empty_message(self):
+        """无快照时: 至少不崩溃."""
+        from filter.browse.sidebar import _render_db_backup
+
+        mock_col = MagicMock()
+
+        with patch("filter.browse.sidebar.st") as mock_st, \
+             patch("filter.browse.sidebar.get_db_size_mb", return_value=5.0), \
+             patch("filter.browse.sidebar.list_snapshots", return_value=[]), \
+             patch("filter.browse.sidebar.logger"):
+            mock_st.sidebar = MagicMock()
+            mock_st.sidebar.expander.return_value.__enter__ = MagicMock()
+            mock_st.sidebar.columns.return_value = [mock_col, mock_col]
+            mock_st.sidebar.button.return_value = False
+            mock_st.sidebar.caption = MagicMock()
+            mock_st.sidebar.selectbox.return_value = 0
+            mock_st.columns.return_value = [mock_col, mock_col]
+            mock_st.caption = MagicMock()
+            mock_st.button.return_value = False
+
+            # 验证不抛出异常
+            _render_db_backup()

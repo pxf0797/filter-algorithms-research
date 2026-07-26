@@ -2,24 +2,96 @@
 集中式 session_state 管理 — 类型安全的结构化访问
 
 提供:
-1. AppState 类 — 统一的 session_state 读写，含 _imp_ 备份兼容
-2. 视图参数辅助函数 — 一键读写 4 视图的全部参数
-3. 向后兼容 — 旧 _imp_ key 自动 fallback，预设/导入/导出无缝衔接
+1. StateStore 协议 — 抽象存储接口，解耦 Streamlit 与 CLI/backtest
+2. StreamlitStateStore — 封装 st.session_state
+3. DictStateStore — 纯 dict 实现，供 CLI/backtest 使用
+4. AppState 类 — 统一的 session_state 读写，含 _imp_ 备份兼容
+5. 视图参数辅助函数 — 一键读写 4 视图的全部参数
+6. 向后兼容 — 旧 _imp_ key 自动 fallback，预设/导入/导出无缝衔接
 
 用法:
     from shared.state import AppState, ViewState
     AppState.init_defaults()          # main() 开头
     vs = ViewState.load(0)            # 加载视图 0 的参数
-    vs.slider("ke", 0.15)            # 类型安全的 slider 读写
+    vs.get("ke", 0.15)               # 类型安全的参数读写
     vs.set("ke", 0.20)               # 写优先 key + 写 _imp_ 备份
+
+    # CLI / backtest 使用 DictStateStore
+    from shared.state import AppState, DictStateStore
+    store = DictStateStore()
+    AppState.init_defaults(store=store)
 """
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Protocol
 import re
 
 try:
     import streamlit as st
 except ImportError:
     st = None  # type: ignore[assignment]
+
+
+# ---------------------------------------------------------------------------
+# StateStore 协议 + 实现
+# ---------------------------------------------------------------------------
+
+class StateStore(Protocol):
+    """抽象存储接口，解耦 Streamlit session_state 与 CLI/backtest 引擎。"""
+    def get(self, key: str, default: Any = None) -> Any: ...
+    def set(self, key: str, value: Any) -> None: ...
+    def __contains__(self, key: str) -> bool: ...
+    def pop(self, key: str, default: Any = None) -> Any: ...
+    def keys(self) -> Any: ...
+
+
+class StreamlitStateStore:
+    """封装 st.session_state 操作，Streamlit 环境下的默认存储。"""
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if st is None:
+            return default
+        return st.session_state.get(key, default)
+
+    def set(self, key: str, value: Any) -> None:
+        if st is None:
+            return
+        st.session_state[key] = value
+
+    def __contains__(self, key: str) -> bool:
+        if st is None:
+            return False
+        return key in st.session_state
+
+    def pop(self, key: str, default: Any = None) -> Any:
+        if st is None:
+            return default
+        return st.session_state.pop(key, default)
+
+    def keys(self):
+        if st is None:
+            return iter([])
+        return st.session_state.keys()
+
+
+class DictStateStore:
+    """纯 dict 实现的状态存储，供 CLI/backtest 引擎使用。"""
+
+    def __init__(self, initial: Optional[Dict[str, Any]] = None) -> None:
+        self._data: Dict[str, Any] = dict(initial) if initial else {}
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._data.get(key, default)
+
+    def set(self, key: str, value: Any) -> None:
+        self._data[key] = value
+
+    def __contains__(self, key: str) -> bool:
+        return key in self._data
+
+    def pop(self, key: str, default: Any = None) -> Any:
+        return self._data.pop(key, default)
+
+    def keys(self):
+        return self._data.keys()
 
 # ---------------------------------------------------------------------------
 # Defaults catalog — 对照 session_state key 清单
@@ -104,23 +176,34 @@ class AppState:
         AppState.has("key")          # 是否存在
 
     所有 _imp_ 备份的读写自动处理，上层代码无需关心。
+
+    支持自定义 store:
+        store = DictStateStore()
+        AppState.get("key", store=store)
+        AppState.set("key", value, store=store)
     """
 
     # _imp_ 备份写入开关 — 设为 False 则只写主 key（测试/调试用）
     _imp_enabled = True
 
     @staticmethod
-    def init_defaults() -> None:
-        """初始化所有系统 key 的默认值（main() 开头调用一次）。"""
-        if st is None:
-            return
-        for k, v in SYSTEM_KEYS.items():
-            if k not in st.session_state and v is not None:
-                st.session_state[k] = v
-        AppState.cleanup_orphaned_imp_keys()
+    def _resolve_store(store: Optional[StateStore] = None) -> StateStore:
+        """Return the provided store or default to StreamlitStateStore."""
+        if store is not None:
+            return store
+        return StreamlitStateStore()
 
     @staticmethod
-    def cleanup_orphaned_imp_keys() -> None:
+    def init_defaults(*, store: Optional[StateStore] = None) -> None:
+        """初始化所有系统 key 的默认值（main() 开头调用一次）。"""
+        s = AppState._resolve_store(store)
+        for k, v in SYSTEM_KEYS.items():
+            if k not in s and v is not None:
+                s.set(k, v)
+        AppState.cleanup_orphaned_imp_keys(store=store)
+
+    @staticmethod
+    def cleanup_orphaned_imp_keys(*, store: Optional[StateStore] = None) -> None:
         """Remove orphaned _imp_ keys that no longer correspond to any known parameter.
 
         清理策略：
@@ -128,8 +211,7 @@ class AppState:
         - N 不在 0-3 范围内，或 suffix 不在 VIEW_DEFAULTS 中 → 删除
         - 非 view-pattern 的 _imp_ key 保留（可能是 widget 创建的动态 key）
         """
-        if st is None:
-            return
+        s = AppState._resolve_store(store)
 
         # 有效的 view suffix 集合
         valid_suffixes: set = set(VIEW_DEFAULTS.keys()) | {"exp_all"}
@@ -139,7 +221,7 @@ class AppState:
         # pattern: v{N}_{suffix}，suffix 至少一个字符
         view_key_re = re.compile(r"^v(\d+)_(.+)$")
 
-        for key in list(st.session_state.keys()):
+        for key in list(s.keys()):
             if not key.startswith("_imp_"):
                 continue
             main_key = key[5:]  # 去掉 "_imp_" 前缀
@@ -150,58 +232,51 @@ class AppState:
             vi = int(m.group(1))
             suffix = m.group(2)
             if vi not in valid_view_indices or suffix not in valid_suffixes:
-                del st.session_state[key]
+                s.pop(key, None)
 
     @staticmethod
-    def get(key: str, default: Any = None) -> Any:
+    def get(key: str, default: Any = None, *, store: Optional[StateStore] = None) -> Any:
         """安全的 session_state 读取，自动 fallback _imp_ 备份。
 
         优先读主 key；不存在时读 _imp_{key}；再不存在返回 default。
         """
-        if st is None:
-            return default
-        if key in st.session_state:
-            return st.session_state[key]
+        s = AppState._resolve_store(store)
+        if key in s:
+            return s.get(key)
         imp_key = f"_imp_{key}"
-        if imp_key in st.session_state:
-            return st.session_state[imp_key]
+        if imp_key in s:
+            return s.get(imp_key)
         return default
 
     @staticmethod
-    def set(key: str, value: Any) -> None:
+    def set(key: str, value: Any, *, store: Optional[StateStore] = None) -> None:
         """写入 session_state 主 key + _imp_ 备份。
 
         _imp_ 备份确保在 Streamlit rerun 后参数不丢失。
         """
-        if st is None:
-            return
-        st.session_state[key] = value
+        s = AppState._resolve_store(store)
+        s.set(key, value)
         if AppState._imp_enabled:
-            st.session_state[f"_imp_{key}"] = value
+            s.set(f"_imp_{key}", value)
 
     @staticmethod
-    def set_many(items: Dict[str, Any]) -> None:
+    def set_many(items: Dict[str, Any], *, store: Optional[StateStore] = None) -> None:
         """批量设置多个 key。"""
         for k, v in items.items():
-            AppState.set(k, v)
+            AppState.set(k, v, store=store)
 
     @staticmethod
-    def has(key: str) -> bool:
+    def has(key: str, *, store: Optional[StateStore] = None) -> bool:
         """检查 key 是否存在（含 _imp_ fallback）。"""
-        if st is None:
-            return False
-        if key in st.session_state:
-            return True
-        return f"_imp_{key}" in st.session_state
+        s = AppState._resolve_store(store)
+        return key in s or f"_imp_{key}" in s
 
     @staticmethod
-    def pop(key: str, default: Any = None) -> Any:
+    def pop(key: str, default: Any = None, *, store: Optional[StateStore] = None) -> Any:
         """删除并返回 key 的值（含 _imp_ 备份）。"""
-        if st is None:
-            return default
-        val = st.session_state.pop(key, default)
-        imp_key = f"_imp_{key}"
-        st.session_state.pop(imp_key, None)
+        s = AppState._resolve_store(store)
+        val = s.pop(key, default)
+        s.pop(f"_imp_{key}", None)
         return val
 
     @staticmethod
@@ -210,9 +285,9 @@ class AppState:
         return f"v{vi}_{suffix}"
 
     @staticmethod
-    def get_global(key: str, default: Any = None) -> Any:
+    def get_global(key: str, default: Any = None, *, store: Optional[StateStore] = None) -> Any:
         """读取全局 widget 参数，默认值来自 GLOBAL_KEYS。"""
-        return AppState.get(key, GLOBAL_KEYS.get(key, default))
+        return AppState.get(key, GLOBAL_KEYS.get(key, default), store=store)
 
 
 # ---------------------------------------------------------------------------
@@ -228,14 +303,19 @@ class ViewState:
         vs.set("ke", 0.20)    # 写主 key + _imp_
         vs.get_expanded()     # ex: v0_exp_all
         vs.toggle_expanded()  # 切换展开/折叠
+
+    支持自定义 store:
+        store = DictStateStore()
+        vs = ViewState.load(0, store=store)
     """
 
     _PREFIX = "v"
     _EXP_SUFFIX = "exp_all"
 
-    def __init__(self, vi: int) -> None:
+    def __init__(self, vi: int, *, store: Optional[StateStore] = None) -> None:
         self.vi = vi
         self.prefix = f"{self._PREFIX}{vi}_"
+        self._store = store
 
     # ---- 读写 ----
 
@@ -248,12 +328,12 @@ class ViewState:
         key = self._key(suffix)
         if default is None and suffix in VIEW_DEFAULTS:
             default = VIEW_DEFAULTS[suffix]["default"]
-        return AppState.get(key, default)
+        return AppState.get(key, default, store=self._store)
 
     def set(self, suffix: str, value: Any) -> None:
         """写入视图参数。"""
         key = self._key(suffix)
-        AppState.set(key, value)
+        AppState.set(key, value, store=self._store)
 
     def set_many(self, items: Dict[str, Any]) -> None:
         """批量写入视图参数。"""
@@ -264,7 +344,7 @@ class ViewState:
 
     def get_expanded(self) -> bool:
         """当前展开/折叠状态。"""
-        return AppState.get(self._key(self._EXP_SUFFIX), False)
+        return AppState.get(self._key(self._EXP_SUFFIX), False, store=self._store)
 
     def toggle_expanded(self) -> bool:
         """切换展开/折叠并返回新状态。"""
@@ -311,12 +391,12 @@ class ViewState:
     # ---- ViewState 工厂 ----
 
     @classmethod
-    def load(cls, vi: int) -> "ViewState":
+    def load(cls, vi: int, *, store: Optional[StateStore] = None) -> "ViewState":
         """创建 ViewState 实例。无需初始化 — 直接读 session_state。"""
-        return cls(vi)
+        return cls(vi, store=store)
 
     @classmethod
-    def apply_preset_params(cls, params: Dict[str, Any]) -> None:
+    def apply_preset_params(cls, params: Dict[str, Any], *, store: Optional[StateStore] = None) -> None:
         """将预设参数批量写入 session_state（适配 _pending_apply_params 场景）。
 
         只处理形如 'v0_ke' / 'v1_tf' 的视图键；其他 key 直接写入。
@@ -324,9 +404,9 @@ class ViewState:
         for k, v in params.items():
             if k.startswith(cls._PREFIX) and "_" in k:
                 # 形如 'v0_ke' 的视图键，直接写入
-                AppState.set(k, v)
+                AppState.set(k, v, store=store)
             else:
-                AppState.set(k, v)
+                AppState.set(k, v, store=store)
 
     # ---- 内部 ----
 
@@ -338,11 +418,11 @@ class ViewState:
 # ---------------------------------------------------------------------------
 # Shortcut helpers — 保持 import 简洁
 # ---------------------------------------------------------------------------
-def view(vi: int) -> ViewState:
+def view(vi: int, *, store: Optional[StateStore] = None) -> ViewState:
     """alias: view(0) → ViewState.load(0)"""
-    return ViewState.load(vi)
+    return ViewState.load(vi, store=store)
 
 
-def get_view_cfg(vi: int, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def get_view_cfg(vi: int, extra: Optional[Dict[str, Any]] = None, *, store: Optional[StateStore] = None) -> Dict[str, Any]:
     """alias: 一次构建视图 cfg dict"""
-    return ViewState.load(vi).build_cfg(extra)
+    return ViewState.load(vi, store=store).build_cfg(extra)

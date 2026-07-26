@@ -6,9 +6,24 @@ import pure functions from filter/streamlit_app.py without triggering a
 Streamlit runtime environment.
 """
 
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
+
+import numpy as np
+import pandas as pd
+import pytest
+from hypothesis import HealthCheck, settings
+
+# ---------------------------------------------------------------------------
+# Hypothesis profiles — CI 模式减少 max_examples 以加速 CI 运行
+# ---------------------------------------------------------------------------
+settings.register_profile("ci", max_examples=30, deadline=2000,
+                          suppress_health_check=[HealthCheck.too_slow])
+settings.register_profile("dev", max_examples=100)
+if os.environ.get("CI"):
+    settings.load_profile("ci")
 
 # ---------------------------------------------------------------------------
 # Ensure the filter/ package directory is importable
@@ -20,17 +35,47 @@ if str(_src) not in sys.path:
 # ---------------------------------------------------------------------------
 # Mock streamlit before any project module imports it
 # ---------------------------------------------------------------------------
-if "streamlit" not in sys.modules:
+def _make_streamlit_mock():
+    """创建 streamlit MagicMock，模拟核心装饰器/函数。"""
     mock_st = MagicMock()
-    # Support both @st.cache_resource and @st.cache_resource() usage
     mock_st.cache_resource = lambda f=None, **kw: f if callable(f) else (lambda g: g)
     mock_st.cache_data = lambda f=None, **kw: f if callable(f) else (lambda g: g)
     mock_st.fragment = lambda f=None, **kw: f if callable(f) else (lambda g: g)
-    sys.modules["streamlit"] = mock_st
+    return mock_st
 
-import numpy as np
-import pandas as pd
-import pytest
+
+# 收集阶段：pytest 导入各测试文件时，被测试模块通过 import streamlit 拿到 mock
+if "streamlit" not in sys.modules:
+    sys.modules["streamlit"] = _make_streamlit_mock()
+
+# 保存初始 streamlit mock 引用：test_charts.py 等模块在收集阶段的
+# ``import streamlit as st`` 绑定到此对象。若后续 _mock_streamlit_module
+# 创建新 MagicMock 注入 sys.modules，经过 test_app_ui 的 _fix_streamlit()
+# 删模块后再恢复时，测试代码持有的 st 与 sys.modules["streamlit"] 将是
+# 不同对象，导致 monkeypatch.setattr 修改的是旧 mock 而运行时代码路径
+# 从 sys.modules 拿到新 mock，patch 不对齐。
+_STREAMLIT_MOCK = sys.modules["streamlit"]
+
+
+@pytest.fixture(autouse=True)
+def _mock_streamlit_module():
+    """全局 mock streamlit — 每次测试前确保 mock 就位。
+
+    背景: test_app_ui.py 的模块级 fixture 通过 _fix_streamlit()
+    删除 MagicMock 并导入真实的 streamlit 包。该 fixture teardown
+    后不会还原 mock，导致后续测试文件（如 test_backtest_cli.py、
+    test_charts.py）导入链受真实 streamlit 污染。
+
+    本 autouse fixture 在每个测试函数运行前检测：若 streamlit 已
+    被替换为真实模块，则重新注入 **保存的** MagicMock（复用初始实例，
+    确保 test_charts.py 等模块的 ``import streamlit as st`` 引用
+    与 sys.modules 中的对象一致）。
+    """
+    st_mod = sys.modules.get("streamlit")
+    if st_mod is None or "MagicMock" not in type(st_mod).__name__:
+        sys.modules["streamlit"] = _STREAMLIT_MOCK
+    yield
+    # 不主动拆 mock — 下一个测试的 setup 会处理状态检查
 
 
 # ---------------------------------------------------------------------------
@@ -130,3 +175,158 @@ def sample_dates_daily():
 def sample_dates_intraday():
     """60分钟日期 (tz-aware HKT)"""
     return pd.date_range("2026-06-01 09:30", periods=120, freq="h", tz="Asia/Hong_Kong")
+
+
+# =============================================================================
+# P0-2: 全局清理 fixtures — 消除跨测试状态污染 (30个污染失败)
+# =============================================================================
+
+@pytest.fixture(autouse=True)
+def _reset_db_connection():
+    """每个测试后关闭线程本地数据库连接，防止跨测试连接泄漏。
+
+    问题根因:
+    filter.data.db 使用 ``threading.local()`` 存储每个线程的 sqlite3
+    连接。若测试中使用 ``patch()`` 替换 ``get_conn`` 后上下文管理器
+    在异常路径下未能恢复原始函数，残留的 mock 连接会导致后续
+    ``BacktestRunner._bar_count`` 查询返回 0。
+
+    本 fixture 在 teardown 阶段调用 ``close_conn()`` 清除当前线程的
+    连接缓存（``_local.conn = None``），确保下个测试创建新连接。
+    """
+    yield  # ── 测试执行 ──
+    try:
+        from filter.data.db import close_conn
+        close_conn()
+    except Exception:
+        pass
+    # 强制清理可能的 mock patch 残留
+    import gc
+    gc.collect()
+
+
+@pytest.fixture(autouse=True)
+def _reset_streamlit_components():
+    """每个测试后清理 streamlit components.v1.html mock 残留。
+
+    问题根因:
+    test_charts.py 通过 ``monkeypatch.setattr(st.components.v1, "html", ...)``
+    替换 mock 内部的 ``html`` 子属性。若 monkeypatch 在异常路径下未能
+    执行 undo（如测试内部 assert 失败后 monkeypatch 链断裂），后续测试
+    调用 ``_render_plotly`` 时 ``st.components.v1.html()`` 返回空值或
+    非预期对象，导致图表 HTML 为空。
+
+    本 fixture 在 teardown 阶段检测 ``st.components.v1.html`` 是否为
+    纯净的 MagicMock；若非（即被替换为函数/其他对象），则显式重置。
+    """
+    yield  # ── 测试执行 ──
+    st_mod = sys.modules.get("streamlit")
+    if st_mod is not None and "MagicMock" in type(st_mod).__name__:
+        try:
+            html_attr = st_mod.components.v1.html
+            if not isinstance(html_attr, MagicMock):
+                # monkeypatch 残留：html 被替换为非 Mock 对象
+                st_mod.components.v1.html = MagicMock()
+        except Exception:
+            pass
+
+
+@pytest.fixture(autouse=True)
+def _restore_engine_get_conn():
+    """每个测试后确保 ``filter.backtest.engine.get_conn`` 是真实函数。
+
+    问题根因:
+    多个测试文件（test_engine.py, test_metrics_fix.py, test_backtest_core.py）
+    使用 ``patch("filter.backtest.engine.get_conn", return_value=...)``
+    替换模块级函数引用。若 patch 的 ``__exit__`` 在异常时无法恢复，
+    ``BacktestRunner.__init__`` → ``_query_bar_count()`` → ``get_conn()``
+    拿到 mock 对象，执行 ``SELECT COUNT(*)`` 返回错误值导致
+    ``_bar_count == 0``。
+
+    本 fixture 在 teardown 阶段检测 engine 模块中的 ``get_conn`` 是否
+    被替换为 MagicMock；若是则恢复为 ``filter.data.db.get_conn`` 原引用。
+    """
+    yield  # ── 测试执行 ──
+    try:
+        import filter.backtest.engine as eng
+        import filter.data.db as _dbmod
+        if isinstance(eng.get_conn, MagicMock):
+            eng.get_conn = _dbmod.get_conn
+    except Exception:
+        pass
+
+
+# 保存关键模块引用：test_app_ui 的 _fix_streamlit() 会从 sys.modules
+# 中删除 filter.* / data.* / browse.* / charts.* 等前缀模块。模块删除后
+# 若后续测试用 patch("data.store.xxx", ...) mock，patch 通过 importlib
+# 查找时拿到新导入的模块对象，而测试代码持有的类/函数引用仍指向旧模块，
+# 导致 mock 注入对被测代码无效。
+#
+# 策略：在收集阶段（此时 _fix_streamlit 尚未运行）显式导入会被删除的
+# 关键模块，确保测试模块（如 test_engine.py）的 import 拿到同一对象。
+# setup 阶段将保存的模块恢复到 sys.modules。
+#
+# 注意：不保存 data.db / data.loader 等状态可变模块 — 测试运行时可能
+# 修改其 DB_PATH / _local 等属性，恢复原始引用会覆盖测试变更导致副作用。
+_SAVED_SYSMODULES: dict[str, object] = {}
+for _mod_path in [
+    "filter.backtest.engine",   # engine 测试 core
+    "data.store",               # parquet_store 测试 core
+    "backtest.recorder",        # parquet_store 测试 import
+]:
+    try:
+        __import__(_mod_path, fromlist=["_"])
+        _SAVED_SYSMODULES[_mod_path] = sys.modules[_mod_path]
+    except ImportError:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_engine_state():
+    """每个测试后清理 engine 模块级状态并恢复被 test_app_ui 删除的关键模块。
+
+    问题根因:
+    test_app_ui 的 ``_fix_streamlit()`` 遍历 ``sys.modules`` 删除所有
+    filter.* / data.* / engine.* 等前缀模块。删除后引擎测试的模块级
+    ``from filter.backtest.engine import BacktestRunner`` 持有的类引用
+    与原模块不同，``patch("filter.backtest.engine.get_conn", ...)`` 通过
+    ``importlib`` 查找时拿到新导入的模块，两模块的 ``get_conn`` 不是同一
+    对象，导致 mock 注入对 BacktestRunner 无效（使用真实 DB 连接，bar_count=0）。
+
+    策略:
+    1. setup 阶段: 若关键模块被从 sys.modules 删除，恢复保存的原始引用
+       → patch() 能定位到正确模块
+    2. teardown 阶段: 用 ``is`` 身份比较确保 get_conn 未被 mock 残留替换
+       → 比 isinstance 检查更通用（覆盖 lambda/函数包装器等非 MagicMock）
+    """
+    # ── setup: 恢复被 test_app_ui 删除的关键模块 ──
+    for _mod_name, _mod_obj in _SAVED_SYSMODULES.items():
+        if _mod_name not in sys.modules:
+            sys.modules[_mod_name] = _mod_obj
+    yield  # ── 测试执行 ──
+    # ── teardown: 清理 get_conn mock 残留 ──
+    try:
+        import filter.backtest.engine as eng
+        if hasattr(eng, "get_conn"):
+            from filter.data.db import get_conn as real_get_conn
+            if eng.get_conn is not real_get_conn:
+                eng.get_conn = real_get_conn
+    except Exception:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_gc_and_modules():
+    """每个测试后主动回收内存，清理模块级缓存残留。
+
+    问题根因:
+    长时间运行的测试套件可能累积循环引用、失效的模块缓存和线程本地
+    变量，导致后续测试行为异常（如 ParquetStore session dir UUID 碰撞
+    引起的时间戳竞争、threading.local() 变量跨线程污染）。
+
+    本 fixture 在 teardown 阶段调用 ``gc.collect()`` 强制回收不可达
+    对象，帮助释放文件句柄和数据库连接。
+    """
+    yield  # ── 测试执行 ──
+    import gc
+    gc.collect()

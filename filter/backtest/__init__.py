@@ -1,1 +1,1 @@
-"""Backtest mode: engine, CLI, metrics, catalog, panel, recorder, optimizer, pipeline."""
+"""Backtest mode: engine, CLI, metrics, catalog, panel, recorder, optimizer, capture."""

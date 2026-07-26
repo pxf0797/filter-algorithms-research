@@ -7,7 +7,6 @@
 """
 
 import json
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -16,7 +15,7 @@ from loguru import logger
 
 from filter.shared.state import AppState
 from filter.backtest.logger import log_mode_switch
-from filter.browse.components_sidebar import ALL_TFS  # keep for backward-compat; primary source is filter.constants
+from filter.shared.constants import ALL_TFS
 
 
 # ============================================================================
@@ -41,7 +40,7 @@ def _get_bar_date_from_db(ticker_code, tf, bar_index):
         Date string from ``kline.ts`` for the bar at the requested
         offset, or an empty string if no row is found.
     """
-    from data.db import get_conn
+    from filter.data.db import get_conn
     with get_conn() as conn:
         row = conn.execute(
             "SELECT ts FROM kline WHERE ticker=? AND timeframe=? ORDER BY ts ASC LIMIT 1 OFFSET ?",
@@ -113,7 +112,7 @@ def _get_min_tf_and_count(configs, ticker_code) -> tuple:
 
     # 从 DB 查询全量 bar 数（parquet 只含当前窗口数据，不能用作 slider 上限）
     try:
-        from data.db import get_conn
+        from filter.data.db import get_conn
         with get_conn() as conn:
             row = conn.execute(
                 "SELECT COUNT(*) FROM kline WHERE ticker=? AND timeframe=?",
@@ -518,7 +517,6 @@ def _execute_full_backtest(
     """
     from filter.backtest.engine import BacktestRunner
     from filter.data.store import ParquetStore
-    import os as _os
 
     st.toast(f"开始完整回测: bar {start_bar} ~ {end_bar}")
     logger.info("开始完整回测: ticker={}, bars=[{}, {}]", ticker_code, start_bar, end_bar)
@@ -587,7 +585,6 @@ def _execute_full_backtest(
 def _render_past_sessions() -> None:
     """渲染历史回测 session 列表，支持加载。"""
     from filter.backtest.catalog import BacktestCatalog
-    from pathlib import Path as _Path
 
     try:
         catalog = BacktestCatalog("backtest_output")
@@ -732,7 +729,7 @@ def sync_backtest_cascading_data(ticker_code: str, configs: list, cutoff_date: s
     -------
     None
     """
-    from data.loader import _sync_all_cascading
+    from filter.data.loader import _sync_all_cascading
 
     tfs_in_use = sorted(set(cfg["tf"] for cfg in configs),
                         key=lambda x: all_tfs.index(x))

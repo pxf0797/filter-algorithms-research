@@ -1,0 +1,30 @@
+-r requirements.txt
+
+# ============================================================
+# 开发工具
+# ============================================================
+
+# 测试
+pytest>=9.0
+pytest-cov>=7.0
+pytest-benchmark>=5.0
+pytest-mock>=3.0
+
+# 代码质量
+ruff>=0.11
+mypy>=2.0
+coverage>=7.0
+
+# Git hooks
+pre-commit>=3.0
+
+# 依赖管理
+pip-tools>=7.0
+pip-audit>=2.7,<3
+
+# 构建
+build>=1.0
+
+# mypy 类型存根
+types-requests>=2.31
+types-pyyaml>=6.0

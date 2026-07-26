@@ -339,7 +339,6 @@ def test_load_metadata_empty_file(tmp_path):
 def test_embed_and_open_includes_metadata(tmp_path):
     """embed_and_open 在有 metadata 时将 BACKTEST_METADATA 嵌入 HTML。"""
     # 准备 parquet 文件
-    import numpy as np
 
     parquet_dir = tmp_path / "TEST_20240101_backtest"
     parquet_dir.mkdir()

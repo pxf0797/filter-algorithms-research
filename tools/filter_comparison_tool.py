@@ -850,7 +850,7 @@ def main() -> None:
             metrics["time_per_1000"] = 1000.0 * t_single / len(noisy)
             results[fname][sname] = metrics
             print(".", end="", flush=True)
-        print(f"  done")
+        print("  done")
 
     # --- 4. Generate all plots ---
     generate_plots(signals, results)

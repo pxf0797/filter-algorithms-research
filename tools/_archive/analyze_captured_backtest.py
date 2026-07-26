@@ -15,7 +15,9 @@ Options:
 Dependencies: numpy, pandas (standard library + project deps)
 """
 
-import argparse, json, sys
+import argparse
+import json
+import sys
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -339,7 +341,7 @@ def _text_report(session_dir: str, diffs: list, bs_stab: dict, sc: dict) -> str:
     meta = load_session_metadata(session_dir)
     sid = meta.get("session_id", Path(session_dir).name)
     L, S = [], "=" * 65
-    L += [S, f"  Backtest Pipeline Capture Analysis",
+    L += [S, "  Backtest Pipeline Capture Analysis",
           f"  Session: {sid}  Ticker: {meta.get('ticker','?')}  Steps: {meta.get('step_count',len(diffs)+1)}", S, ""]
 
     # ── Step-by-Step Diff ──

@@ -8,10 +8,8 @@ HTML 模板测试 — 验证 回测结果可视化.html 中的关键 JS 结构�
 - safeDate / null guard / zmin:zmax 等渲染修复点
 """
 
-import re
 from pathlib import Path
 
-import pytest
 
 
 # ── 模板路径 ────────────────────────────────────────────────────────────────────

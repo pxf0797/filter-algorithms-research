@@ -2,6 +2,8 @@
 import sys
 from pathlib import Path
 
+import numpy as np
+
 # Ensure filter is on path
 _src = Path(__file__).resolve().parent.parent / "filter"
 if str(_src) not in sys.path:
@@ -100,3 +102,76 @@ class TestPathFixVerification:
         import test_param_export_import as tpie
         # Verify the fixture function exists
         assert hasattr(tpie, "sample_config"), "sample_config fixture should be defined"
+
+
+class TestCachedFunctions:
+    """Streamlit 缓存函数边界测试."""
+
+    def test_compute_filters_cache_basic(self):
+        """_compute_filters 基本缓存行为."""
+        import filter.browse.app as app_module
+        noisy = np.sin(np.linspace(0, 4 * np.pi, 100))
+        t = np.arange(100, dtype=float)
+        st_mod = sys.modules.get("streamlit")
+        if hasattr(st_mod, "cache_data"):
+            import importlib
+            importlib.reload(app_module)
+        cfg = {"_fid": "sma", "pv": {"window": 11}}
+        filtered, filtered2 = app_module._compute_filters(noisy, t, cfg)
+        assert len(filtered) == 100
+        assert filtered2 is None
+
+    def test_compute_schmitt_basic(self):
+        """_compute_schmitt_trigger 基本行为."""
+        import filter.browse.app as app_module
+        filtered = np.sin(np.linspace(0, 4 * np.pi, 200))
+        t = np.arange(200, dtype=float)
+        cfg = {"show_sch": True, "ke": 0.15, "sm": 0.05, "ew": 60, "_fid": "sma"}
+        result = app_module._compute_schmitt_trigger(filtered, t, cfg)
+        assert result is not None
+        assert "sig" in result
+
+    def test_compute_schmitt_show_sch_false(self):
+        """show_sch=False 返回 None."""
+        import filter.browse.app as app_module
+        filtered = np.sin(np.linspace(0, 4 * np.pi, 200))
+        t = np.arange(200, dtype=float)
+        cfg = {"show_sch": False}
+        result = app_module._compute_schmitt_trigger(filtered, t, cfg)
+        assert result is None
+
+    def test_compute_schmitt_all_nan(self):
+        """全 NaN 滤波信号返回 None."""
+        import filter.browse.app as app_module
+        filtered = np.full(100, np.nan)
+        t = np.arange(100, dtype=float)
+        cfg = {"show_sch": True}
+        result = app_module._compute_schmitt_trigger(filtered, t, cfg)
+        assert result is None
+
+    def test_compute_schmitt_short_signal(self):
+        """len < 2 返回 None."""
+        import filter.browse.app as app_module
+        filtered = np.array([1.0])
+        t = np.array([0.0])
+        cfg = {"show_sch": True}
+        result = app_module._compute_schmitt_trigger(filtered, t, cfg)
+        assert result is None
+
+    def test_compute_prediction_no_show_pred(self):
+        """show_pred=False 返回空列表."""
+        import filter.browse.app as app_module
+        t = np.arange(50, dtype=float)
+        filtered = np.sin(t / 10.0)
+        cfg = {"show_pred": False}
+        result = app_module._compute_prediction_pairs(t, filtered, None, cfg, [])
+        assert result == []
+
+    def test_compute_prediction_no_schmitt(self):
+        """schmitt=None 返回空列表."""
+        import filter.browse.app as app_module
+        t = np.arange(50, dtype=float)
+        filtered = np.sin(t / 10.0)
+        cfg = {"show_pred": True}
+        result = app_module._compute_prediction_pairs(t, filtered, None, cfg, [])
+        assert result == []

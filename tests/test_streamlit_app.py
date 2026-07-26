@@ -9,7 +9,6 @@ as test_state.py).
 """
 import sys
 from typing import Any, Dict
-from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd

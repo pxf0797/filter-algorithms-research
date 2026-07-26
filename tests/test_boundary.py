@@ -2,16 +2,14 @@
 边界条件测试 — 空数据、短序列、数值稳定性、导入导出、P0 回归。
 """
 import numpy as np
-import pandas as pd
 import pytest
 
-from engine.filters import (
-    _compute_strategy_pnl, _find_all_pairs, _align_pnl_to_current_tf,
-    _fit_parabolic, _fit_physics_parabola, _schmitt_trigger,
-    apply_sma, apply_ema, FILTERS,
-)
+from engine.filters import apply_sma, apply_ema, FILTERS
+from engine.schmitt import _find_all_pairs, _fit_parabolic, _fit_physics_parabola, _schmitt_trigger
+from engine.strategy import _compute_strategy_pnl
+from engine.alignment import _align_pnl_to_current_tf
 from data.loader import _stock_name_lookup
-from browse.components_sidebar import TF_HIERARCHY, ALL_TFS
+from filter.shared.constants import TF_HIERARCHY, ALL_TFS
 
 
 # =========================================================================

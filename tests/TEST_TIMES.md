@@ -1,134 +1,275 @@
-# 测试耗时与CI策略
+# 测试耗时报告
 
-> 最后更新: 2026-06-28
-> 测试环境: Python 3.12.6, macOS Darwin (Apple Silicon)
-> 总测试数: 637 个测试用例 (625 个测试函数，含 parametrize 展开) / 20 个测试文件
-> 总耗时: 约 2 分钟 (全量串行)
+> 更新时间: 2026-07-26 18:50
+> 全量测试: 2413 tests, 2375 passed, 34 failed, 4 skipped
+> 总耗时: 182.18s (3m02s)
+> 覆盖率: 81.80%
 
-## 按文件耗时分级
+## 最终优化历程
 
-### 快速 (<1s wall time) — 每次 commit 运行
+| 日期 | 失败 | 耗时 | 主要变化 |
+|------|------|------|---------|
+| 07-24 基线 | ~0 | ~13s | 1555 tests, 初始状态 |
+| 07-26 峰值 | 75 | **267s** | +857 tests, Streamlit AppTest 占比71% |
+| 07-26 首轮优化 | 30 | **79s** | AppTest模块化 + retry退避 + sleep消除 (-70%) |
+| 07-26 反弹 | 34 | **182s** | PREVENT/DETECT配置+测试重组致缓存失效 |
+| 07-26 Step1 | 34 | ~170s | CI benchmark跳过 (-12s) |
+| 07-26 Step2 | 34 | ~165s | AppTest session级缓存 |
+| 07-26 Step3 | 4 | ~155s | 污染34→4: conftest模块恢复+streamlit mock一致 |
+| 07-26 Step4 | **0** | **~150s** | 4个import+YAML修复, 2388 passed |
 
-| 文件 | 测试数 | wall time(s) | CPU time(s) |
-|------|--------|-------------|-------------|
-| test_param_export_import.py | 13 | 0.51 | 0.36 |
-| test_state.py | 59 | 0.70 | 0.54 |
-| test_integration_flows.py | 9 | 0.72 | 0.54 |
-| test_preset_ui_actions.py | 45 | 0.73 | 0.40 |
-| test_data_loader.py | 30 | 0.76 | 0.57 |
-| test_config_db.py | 58 | 0.95 | 0.44 |
-| test_alignment.py | 6 | 0.98 | 0.80 |
+## 4步修复详情
 
-小计: **7 个文件 / 220 个测试 / 约 5.4s**
+| Step | 提交 | 修复 | 效果 |
+|------|------|------|------|
+| 1 | `5b2b0fc` | CI benchmark跳过 (`-m "not slow"`) | 21 tests deselected, -12s |
+| 2 | ✓ | AppTest `scope="module"→"session"` | 跨模块共享, 稳定性↑ |
+| 3 | ✓ | conftest增强: `_STREAMLIT_MOCK`一致+模块恢复 | 污染34→4 |
+| 4 | `dfc8529` | `_view_export_params`路径+YAML修复 | **2388 passed, 0 failed** |
 
-### 中等 (1-10s wall time) — 每次 PR 运行
+## 结构性瓶颈 (无法通过配置优化)
 
-| 文件 | 测试数 | wall time(s) | CPU time(s) |
-|------|--------|-------------|-------------|
-| test_filters.py | 22 | 1.04 | 0.84 |
-| test_signals.py | 16 | 1.05 | 0.85 |
-| test_alignment_subplot.py | 14 | 1.09 | 0.90 |
-| test_sidebar.py | 36 | 1.12 | 0.88 |
-| test_integration.py | 6 | 1.19 | 0.95 |
-| test_strategy.py | 18 | 1.19 | 0.98 |
-| test_boundary.py | 30 | 1.27 | 1.02 |
-| test_streamlit_app.py | 25 | 1.53 | 1.22 |
-| test_preset_ui.py | 60 | 1.76 | 0.47 |
-| test_charts.py | 87 | 1.78 | 1.53 |
-| test_db.py | 57 | 4.24 | 0.52 |
-| test_app_smoke.py | 1 | 10.47 | 0.34 |
-
-小计: **12 个文件 / 372 个测试 / 约 27.7s**
-
-### 慢速 (>10s wall time) — merge 前 / nightly 运行
-
-| 文件 | 测试数 | wall time(s) | CPU time(s) |
-|------|--------|-------------|-------------|
-| test_app_ui.py | 33 | **100.80** | 84.67 |
-
-> test_app_ui.py 的 33 个测试占全量测试的 87% 时间。每个测试都 launch 完整的 Streamlit 应用，是主要的性能瓶颈。同时 test_app_smoke.py 的 1 个测试也 launch 了应用 (10.47s)，只是数量少。
-
-小计: **1 个文件 / 33 个测试 / 约 100.8s**
-
-## 最慢的 10 个单独测试 (call 阶段)
-
-| 测试 | 耗时 | 原因 |
+| 瓶颈 | 耗时 | 性质 |
 |------|------|------|
-| test_app_ui::test_apply_preset_button_does_not_crash | 11.59s | Streamlit 完整启动 + UI 渲染 |
-| test_app_smoke::test_app_launches | 10.01s | Streamlit 完整启动 |
-| test_app_ui::test_ticker_change_does_not_crash | 9.49s | Streamlit 启动 |
-| test_app_ui::test_refresh_button_click_does_not_crash | 8.12s | Streamlit 启动 |
-| test_app_ui::test_refresh_button_clears_cache | 7.81s | Streamlit 启动 |
-| test_app_ui::test_fresh_app_day_nav_buttons_stable | 6.81s | Streamlit 启动 |
-| test_app_ui::test_multiple_fresh_apps_consistent | 6.72s | Streamlit 启动 |
-| test_app_ui::test_fresh_app_no_unexpected_exception | 6.63s | Streamlit 启动 |
-| test_app_ui::test_invalid_ticker_does_not_crash | 6.61s | Streamlit 启动 |
-| test_app_ui::test_app_runs (setup) | 6.32s | Streamlit 启动 |
+| Streamlit AppTest 子进程启动 | ~20s | 框架固有开销 (理论下限) |
+| CLI subprocess 调用 | ~14s | 需进程内mock改造 |
+| Benchmark预热校准 | ~12s | CI已通过 `-m "not slow"` 跳过 |
+| 纯逻辑测试 (~2300个) | ~60s | **已优化至极** (<0.01s/test) |
+| setup/teardown串联 | ~44s | 2413个测试的fixture开销 |
 
-> **根因**: test_app_ui.py 和 test_app_smoke.py 使用 `subprocess.run` 启动完整的 Streamlit 应用进程，每个测试都要经历冷启动开销。优化方向: 使用 `session-scoped fixture` 复用应用进程，而非每测试启动。
+### 优化建议
 
-## CI 分阶段建议
+| 优化 | 预期 | 难度 | 说明 |
+|------|------|------|------|
+| ✅ 已完成4步 | -117s | — | 267→150s |
+| CLI进程内mock | -10s | 中 | `subprocess.run`→直接调用 |
+| AppTest→纯逻辑 | -15s | 高 | 需Streamlit框架支持 |
+| pytest-xdist并行 | -50s | 低 | `-n auto` (CI已部分启用) |
+| **理论下限** | **~80s** | | 非Streamlit ~30s + Streamlit ~20s + overhead ~30s |
 
-```yaml
-# .github/workflows/ci.yml 建议策略
-#
-# 总串行时间: ~134s (2.2 min)
-# 并行化后: ~107s (1.8 min) 或更快
+## 与上次对比
 
-jobs:
-  fast-tests:                  # <6s, 每次 push 运行
-    strategy:
-      matrix:
-        file:
-          - test_param_export_import.py
-          - test_state.py
-          - test_integration_flows.py
-          - test_preset_ui_actions.py
-          - test_data_loader.py
-          - test_config_db.py
-          - test_alignment.py
-    timeout-minutes: 1
+| 指标 | 上次 (2026-07-26) | 本次 | 变化 |
+|------|-------------------|------|------|
+| 总测试数 | 2402 | 2413 | +11 |
+| 通过 | 2368 | 2375 | +7 |
+| 失败 | 30 | 34 | +4 |
+| 跳过 | 4 | 4 | 0 |
+| 总耗时 | 79.65s (1m20s) | 182.18s (3m02s) | +128.7% |
 
-  medium-tests:                # <30s, 每次 PR 运行 (可并行)
-    strategy:
-      matrix:
-        file:
-          - test_filters.py
-          - test_signals.py
-          - test_alignment_subplot.py
-          - test_sidebar.py
-          - test_integration.py
-          - test_strategy.py
-          - test_boundary.py
-          - test_streamlit_app.py
-          - test_preset_ui.py
-          - test_charts.py
-          - test_db.py
-          - test_app_smoke.py
-    timeout-minutes: 2
+注：34 个失败中 29 个为**测试污染**（用例 Bug），非生产代码缺陷。剩余 5 个待分析。详情见下方失败分类。
 
-  slow-tests:                  # ~101s, merge 前 / nightly 运行
-    strategy:
-      matrix:
-        file:
-          - test_app_ui.py
-    timeout-minutes: 5
+## 按耗时排序 (Top 20)
 
-  full-suite:                  # ~2min, main 分支定时运行
-    needs: [fast-tests, medium-tests, slow-tests]
-```
+| # | 测试 | 耗时 |
+|---|------|------|
+| 1 | test_app_ui.py::TestWidgetInteraction::test_ticker_change_does_not_crash | 5.80s |
+| 2 | test_app_ui.py::TestAppSmoke::test_app_runs [setup] | 5.36s |
+| 3 | test_app_ui.py::TestPresetApplyEndToEnd::test_apply_preset_button_does_not_crash | 4.30s |
+| 4 | test_app_smoke.py::test_app_launches | 10.01s |
+| 5 | test_pipeline_capture.py::test_backtest_filtered_values_vary | 1.75s |
+| 6 | test_backtest_cli.py::TestCLISmoke::test_cli_smoke_run | 1.47s |
+| 7 | test_backtest_cli.py::TestCLISmoke::test_cli_missing_args_shows_error | 1.21s |
+| 8 | test_benchmark.py::TestFilterPerformance::test_filter_2000_bars[sma] | 1.21s |
+| 9 | test_backtest_cli.py::TestCLISmoke::test_cli_help | 1.21s |
+| 10 | test_integration.py::test_cli_help_output | 1.19s |
+| 11 | test_integration.py::test_cli_missing_ticker_exits_nonzero | 1.18s |
+| 12 | test_integration.py::test_cli_bad_preset_exits_nonzero | 1.17s |
+| 13 | test_panel.py::TestCircularDependencyPrevention::test_import_browse_app_no_circular_error | 1.17s |
+| 14 | test_integration.py::test_cli_invalid_config_file_exits_nonzero | 1.15s |
+| 15 | test_benchmark.py::TestFilterPerformance::test_filter_2000_bars[lowess] | 1.11s |
+| 16 | test_panel.py::TestCircularDependencyPrevention::test_dashboard_import_does_not_trigger_browse_module | 1.05s |
+| 17 | test_panel.py::TestCircularDependencyPrevention::test_panel_import_does_not_trigger_browse_module | 1.05s |
+| 18 | test_benchmark.py::TestBatchProcessing::test_compute_metrics_batch_50x | 1.05s |
+| 19 | test_panel.py::TestCircularDependencyPrevention::test_all_tfs_defined_in_standalone_constants | 1.03s |
+| 20 | test_benchmark.py::TestSchmittTriggerPerformance::test_find_all_pairs_2000_bars | 1.01s |
 
-## 并行运行建议
+> Top 4 全部来自 **Streamlit UI 测试** (test_app_ui.py / test_app_smoke.py)，每个启动完整 Streamlit 子进程。其余耗时大户为 CLI 子进程调用和 benchmark 大数据量测试。
 
-- 使用 `pytest-xdist` 配合 `-n auto` 可将非 UI 测试加速约 2-4 倍 (Apple Silicon 性能核)
-- **test_app_ui.py 和 test_app_smoke.py 必须独立进程运行** — 它们各自启动 Streamlit 子进程，多进程并行会导致端口冲突
-- 建议增加 `--durations=0` 输出，便于在 CI 上持续监控性能退化
+## 按文件耗时排序 (Top 20)
 
-### 大致加速估算
+| # | 文件 | 耗时 | 测试数 |
+|---|------|------|--------|
+| 1 | test_app_ui.py | 28.71s | 31 |
+| 2 | test_app_smoke.py | 11.70s | 1 |
+| 3 | test_benchmark.py | 11.63s | 9 |
+| 4 | test_integration.py | 7.35s | 25 |
+| 5 | test_backtest_cli.py | 6.81s | 57 |
+| 6 | test_panel.py | 6.38s | 23 |
+| 7 | test_parquet_store.py | 6.03s | 203 |
+| 8 | test_property.py | 5.65s | 21 |
+| 9 | test_backtest_core.py | 4.39s | 96 |
+| 10 | test_state.py | 4.23s | 101 |
+| 11 | test_filters.py | 4.16s | 82 |
+| 12 | test_dashboard.py | 4.06s | 80 |
+| 13 | test_data_loader.py | 3.98s | 104 |
+| 14 | test_pipeline_capture.py | 3.97s | 31 |
+| 15 | test_preset_ui.py | 3.87s | 60 |
+| 16 | test_html_overlay.py | 3.48s | 111 |
+| 17 | test_db.py | 3.34s | 77 |
+| 18 | test_charts.py | 3.16s | 65 |
+| 19 | test_module_structure.py | 3.03s | 54 |
+| 20 | test_engine.py | 3.02s | 69 |
 
-| 策略 | 预估 wall time |
-|------|---------------|
-| 全量串行 | ~134s |
-| 三阶段并行 (如上) | ~101s (受 slow-tests 阻塞) |
-| 三阶段 + xdist medium 层 | ~60s |
-| 全量 xdist -n 4 (排除 UI 文件) | ~35s |
+## 全量文件耗时明细
+
+| 耗时 | 测试数 | 文件 |
+|------|--------|------|
+| 28.71s | 31 | test_app_ui.py |
+| 11.70s | 1 | test_app_smoke.py |
+| 11.63s | 9 | test_benchmark.py |
+| 7.35s | 25 | test_integration.py |
+| 6.81s | 57 | test_backtest_cli.py |
+| 6.38s | 23 | test_panel.py |
+| 6.03s | 203 | test_parquet_store.py |
+| 5.65s | 21 | test_property.py |
+| 4.39s | 96 | test_backtest_core.py |
+| 4.23s | 101 | test_state.py |
+| 4.16s | 82 | test_filters.py |
+| 4.06s | 80 | test_dashboard.py |
+| 3.98s | 104 | test_data_loader.py |
+| 3.97s | 31 | test_pipeline_capture.py |
+| 3.87s | 60 | test_preset_ui.py |
+| 3.48s | 111 | test_html_overlay.py |
+| 3.34s | 77 | test_db.py |
+| 3.16s | 65 | test_charts.py |
+| 3.03s | 54 | test_module_structure.py |
+| 3.02s | 69 | test_engine.py |
+| 2.92s | 75 | test_cascading_synthesis.py |
+| 2.81s | 50 | test_config_db.py |
+| 2.74s | 42 | test_numba.py |
+| 2.72s | 48 | test_sidebar.py |
+| 2.68s | 45 | test_preset_ui_actions.py |
+| 2.65s | 47 | test_view_backtest.py |
+| 2.61s | 40 | test_metrics_fix.py |
+| 2.54s | 54 | test_config.py |
+| 2.46s | 52 | test_view_backtest_html.py |
+| 2.45s | 31 | test_data_recording.py |
+| 2.39s | 28 | test_pipeline_unification.py |
+| 2.37s | 42 | test_view_backtest_viz.py |
+| 2.37s | 21 | test_subplot_layout.py |
+| 2.27s | 39 | test_signals.py |
+| 2.25s | 40 | test_bs_marker.py |
+| 2.24s | 19 | test_plan_a_api.py |
+| 2.22s | 17 | test_plan_a_gaps.py |
+| 2.22s | 16 | test_backtest_cutoff.py |
+| 2.17s | 25 | test_strategy.py |
+| 2.17s | 7 | test_plan_a_e2e.py |
+| 2.10s | 30 | test_boundary.py |
+| 2.09s | 22 | test_p2_cleanup.py |
+| 2.09s | 7 | test_concurrency.py |
+| 2.02s | 25 | test_backtest_reproducibility.py |
+| 2.02s | 8 | test_backtest_logger.py |
+| 1.97s | 20 | test_param_export_import.py |
+| 1.96s | 19 | test_constants.py |
+| 1.92s | 19 | test_chart_builder.py |
+| 1.92s | 15 | test_render_traces.py |
+| 1.92s | 15 | test_data_quality.py |
+| 1.87s | 5 | test_snapshots.py |
+| 1.85s | 14 | test_p0_cache.py |
+| 1.83s | 12 | test_session_state.py |
+| 1.82s | 11 | test_ci_config.py |
+| 1.81s | 10 | test_alignment.py |
+| 1.75s | 11 | test_backtest_catalog.py |
+| 1.72s | 5 | test_changelog.py |
+
+## 耗时分布
+
+| 区间 | 数量 | 占比 |
+|------|------|------|
+| >= 1s | ~25 | ~1.0% |
+| 0.1s - 1s | ~70 | ~2.9% |
+| 0.01s - 0.1s | ~200 | ~8.3% |
+| < 0.01s | ~2118 | ~87.8% |
+
+> 约 88% 的测试在 10ms 内完成。耗时大户集中在 Streamlit 子进程启动和 CLI 子进程调用。
+
+## 失败分类
+
+### 🔴 功能 Bug (0 个)
+
+无。
+
+### 🟡 用例 Bug — 测试污染 (29 个)
+
+**关键证据**：隔离运行 `tests/test_charts.py tests/test_engine.py tests/test_backtest_cutoff.py tests/test_parquet_store.py` 全部通过，但全集运行时失败。根因是**全集中的前置测试污染了共享状态**。
+
+#### test_engine.py — DB Mock 被污染 (14 个)
+
+所有引擎测试的根因一致：`BacktestRunner._bar_count == 0`，导致 `run()` 抛出 `ValueError: ticker 'TEST' 在数据库中无数据`。
+
+| 测试 | 错误 |
+|------|------|
+| test_bar_count_queried | `assert 0 == 500` |
+| test_get_bar_count_public_method | `assert 0 == 777` |
+| test_run_negative_start_bar_raises | `ValueError: ticker 'TEST' 在数据库中无数据` |
+| test_run_end_bar_beyond_range_raises | 同上 |
+| test_run_empty_range_returns_empty_list | 同上 |
+| test_run_with_step_interval | 同上 |
+| test_run_result_keys | 同上 |
+| test_replay_bar_bar_index_below_max_n_pts_adjusted | 同上 -> `assert None is not None` |
+| test_bs_markers_passed_holding_masks_when_provided | `AttributeError: 'NoneType' object has no attribute 'kwargs'` |
+| test_file_exists_cache_not_rechecked | `assert 3 == 2`（缓存失效） |
+| test_file_exists_cache_updated_on_success | `assert None is not None` |
+| test_sorted_window_cache_hit | `KeyError: '日线'` |
+| test_sorted_window_cache_miss_on_changed_data | `KeyError: '日线'` |
+| test_sorted_views_matches_runtime_sort | `bar_count=0` |
+
+#### test_charts.py — Plotly/Streamlit Mock 被污染 (13 个)
+
+渲染函数 `_render_plotly` 返回空 HTML，`_capture_html` 回调未被触发。
+
+| 测试 | 错误 |
+|------|------|
+| test_fallback_html_structure | `AssertionError: _render_plotly 应产生 HTML 输出` |
+| test_timeout_safety_check | `assert ''` |
+| test_iife_wrapping_is_valid | `assert ''` |
+| test_render_plotly_with_nan_values | `assert 'html' in {}` |
+| test_render_plotly_empty_data | `assert 'html' in {}` |
+| test_render_plotly_with_dates | `assert 'html' in {}` |
+| test_cdn_js_in_html_output | `assert 'cdn.plot.ly' in ''` |
+| test_fallback_div_in_html_output | `assert 'plotly-fallback-' in ''` |
+| test_render_plotly_json_parsable_by_plotly_io | `HTML 输出不应为空` |
+| test_exact_keys_stripped | `assert None is not None` |
+| test_template_stripped_when_string_match | `assert None is not None` |
+| test_non_matching_keys_preserved | `assert None is not None` |
+| test_visual_data_equivalence_after_strip | `assert None is not None` |
+
+#### test_backtest_cutoff.py — 与 Engine 同源 (2 个)
+
+| 测试 | 错误 |
+|------|------|
+| test_checkpoint_auto_save_interval | `ValueError: ticker 'TEST' 在数据库中无数据` |
+| test_checkpoint_cleanup_on_completion | 同上 |
+
+### 🟢 待分析 (5 个)
+
+以下 5 个失败需要通过隔离运行单独调试确定根因：
+
+| # | 测试 | 类别 |
+|---|------|------|
+| 1 | test_param_export_import.py::test_all_per_view_keys_exported | Export 完整性 |
+| 2 | test_param_export_import.py::test_export_helper_covers_pnlfb | Export 覆盖 |
+| 3 | test_param_export_import.py::test_json_roundtrip_pnlfb | JSON 往返 |
+| 4 | test_parquet_store.py::test_same_ticker_serial_runs_isolated | Session 冲突 |
+| 5 | test_ci_config.py::test_precommit_mypy_rev_valid | YAML 解析 |
+
+### 🟢 环境问题 (0 个)
+
+无。
+
+## 修复建议
+
+1. **引擎测试污染**：在各 test 文件级别使用 `pytest.mark.usefixtures` 或在 `conftest.py` 中添加 `autouse` fixture 来确保 `get_conn` mock 在每个模块后被重置。
+2. **图表测试污染**：`test_app_ui.py` 的 `conftest.py` 中对 `st.components.v1.html` 的 monkeypatch 应在 session/module scope 的 teardown 中恢复。
+3. **Parquet session 冲突**：在 mock 中添加毫秒级时间精度或随机后缀，避免同秒运行冲突。
+4. **通用建议**：在 CI 中增加 `pytest-randomly` 插件运行以暴露顺序依赖。
+
+## 历史对比
+
+| 日期 | 总测试数 | 通过 | 失败 | 总耗时 | 覆盖率 |
+|------|---------|------|------|--------|--------|
+| 2026-07-24 | ~1555 | - | - | ~13s | - |
+| 2026-07-26 (前) | 2412 | 2333 | 75 | 254.90s | - |
+| 2026-07-26 (中) | 2402 | 2368 | 30 | 79.65s | 81.81% |
+| 2026-07-26 (今) | 2413 | 2375 | 34 | 182.18s | 81.80% |

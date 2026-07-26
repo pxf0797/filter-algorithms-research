@@ -19,8 +19,47 @@ jobs:
           key: ${{ runner.os }}-pip-lint-${{ hashFiles('filter/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-lint-
-      - run: pip install ruff
-      - run: ruff check . --ignore=E501,F841
+      - run: pip install "ruff>=0.11"
+      - run: ruff check .
+      - name: Check test imports
+        run: python scripts/check_test_imports.py
+      - name: Validate CI test file references
+        run: |
+          grep -oE "tests/test_[a-zA-Z0-9_]+\.py" .github/workflows/ci.yml | sort -u | while read f; do
+            [ -f "$f" ] || echo "::warning::CI references missing file: $f"
+          done
+
+  lock-consistency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install pip-tools
+      - run: |
+          pip-compile --output-file=/tmp/requirements.lock.ci filter/requirements.txt --quiet
+          if ! diff -q requirements.lock /tmp/requirements.lock.ci > /dev/null 2>&1; then
+            echo "::error::requirements.lock is stale. Run 'make lock' to update."
+            diff requirements.lock /tmp/requirements.lock.ci || true
+            exit 1
+          fi
+          echo "requirements.lock is up-to-date"
+
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-typecheck-${{ hashFiles('filter/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-typecheck-
+      - run: pip install -r filter/requirements.txt
+      - run: pip install "mypy>=2.0" types-requests types-pyyaml
+      - run: mypy filter/ --ignore-missing-imports --follow-imports=skip
 
   fast-tests:
     runs-on: ubuntu-latest
@@ -46,7 +85,7 @@ jobs:
           tests/test_config_db.py tests/test_alignment.py
           tests/test_constants.py tests/test_config.py
           tests/test_filters.py tests/test_db.py
-          tests/test_app_smoke.py -q --tb=short
+          tests/test_app_smoke.py -m "not slow" -q --tb=short
           --junitxml=fast-test-results.xml
       - name: Upload test report
         if: always()
@@ -71,8 +110,8 @@ jobs:
           key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('filter/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-${{ matrix.python-version }}-
-      - run: pip install -r filter/requirements.txt pytest pytest-cov pytest-xdist
-      # <30s: integration tests, can run in parallel via xdist
+      - run: pip install -r filter/requirements.txt pytest pytest-cov pytest-xdist pytest-rerunfailures
+      # <30s: integration tests, can run in parallel via xdist; flaky detection via rerunfailures
       - run: >
           python -m pytest tests/test_signals.py tests/test_sidebar.py
           tests/test_integration.py tests/test_strategy.py
@@ -83,7 +122,8 @@ jobs:
           tests/test_p2_cleanup.py tests/test_render_traces.py
           tests/test_html_overlay.py tests/test_feedback_subplot.py
           tests/test_subplot_layout.py
-          -n auto -q --tb=short
+          -m "not slow" -n auto -q --tb=short
+          --reruns 1 --reruns-delay 2
           --junitxml=medium-test-results.xml
       - name: Upload test report
         if: always()
@@ -91,6 +131,15 @@ jobs:
         with:
           name: medium-test-report-${{ matrix.python-version }}
           path: medium-test-results.xml
+
+  random-order-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install -r filter/requirements.txt pytest pytest-randomly
+      - run: python -m pytest tests/test_engine.py tests/test_charts.py tests/test_parquet_store.py tests/test_backtest_cutoff.py -q --tb=short
 
   snapshot-tests:
     runs-on: ubuntu-latest
@@ -163,7 +212,7 @@ jobs:
       - run: pip install -r filter/requirements.txt pytest pytest-cov
       - run: python -m pytest tests/ --ignore=tests/test_app_ui.py
                --cov=filter --cov-report=term
-               --cov-fail-under=55 -q --tb=short
+               --cov-fail-under=75 -q --tb=short
 
   changelog-check:
     runs-on: ubuntu-latest

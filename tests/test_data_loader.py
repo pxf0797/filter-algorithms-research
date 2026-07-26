@@ -232,13 +232,8 @@ class TestFetchStock:
         df = _mock_ohlc_df(days=10)
         df.iloc[-1, df.columns.get_loc("Close")] = np.nan
 
-        def yf_side_effect(ticker, **kw):
-            if kw.get("interval") == "1wk":
-                raise ValueError("API error")
-            return df
-
-        with patch("filter.data.fetcher.yf.download",
-                   side_effect=yf_side_effect), \
+        with patch("filter.data.fetcher._download_with_retry",
+                   side_effect=[df, ValueError("API error")]), \
              patch("filter.data.fetcher.upsert_kline"), \
              patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(df.dropna(subset=["Close"]))):
@@ -346,7 +341,7 @@ class TestFetchStock:
 
     def test_yfinance_exception(self):
         """yfinance 本身抛出异常时冒泡."""
-        with patch("filter.data.fetcher.yf.download",
+        with patch("filter.data.fetcher._download_with_retry",
                    side_effect=ConnectionError("network error")):
             from data.loader import _fetch_stock
             with pytest.raises(ConnectionError):
@@ -646,9 +641,7 @@ class TestDisplayCacheVersioning:
 
     def test_is_cache_valid_data_tampered(self, tmp_path):
         """数据被篡改后版本校验失败。"""
-        import json
         import pandas as pd
-        import numpy as np
         from data.loader import _save_version, _is_cache_valid
         parquet_path, _ = self._write_test_parquet(tmp_path, "AAPL", "日线")
         _save_version(parquet_path)
@@ -677,7 +670,7 @@ class TestDisplayCacheVersioning:
 
     def test_load_display_cache_valid(self, tmp_path, monkeypatch):
         """有效缓存正常返回 DataFrame。"""
-        from data.loader import _save_version, load_display_cache
+        from data.loader import _save_version
         # 在临时路径模拟 display 目录
         display_root = tmp_path / "data" / "display"
         ticker_dir = display_root / "AAPL"
@@ -711,13 +704,11 @@ class TestDisplayCacheVersioning:
 
     def test_load_display_cache_auto_invalidation(self, tmp_path, monkeypatch):
         """数据变更后缓存自动失效 — load_display_cache 返回 None。"""
-        import json
         import pandas as pd
-        import numpy as np
         import time
         from data.loader import (
             _save_version, _is_cache_valid, _invalidate_cache,
-            _compute_version, _version_path,
+            _version_path,
         )
         # 步骤 1: 写入测试 parquet 和 version
         parquet_path, _ = self._write_test_parquet(tmp_path, "AAPL", "日线")
@@ -1002,7 +993,7 @@ class TestFetchStockEdgeCases:
 
     def test_yfinance_download_network_error(self):
         """yfinance 网络错误冒泡为异常."""
-        with patch("filter.data.fetcher.yf.download",
+        with patch("filter.data.fetcher._download_with_retry",
                    side_effect=ConnectionError("network timeout")):
             from data.loader import _fetch_stock
             with pytest.raises(ConnectionError, match="network timeout"):
@@ -1389,3 +1380,484 @@ class TestParquetPartitioning:
             assert found, "Partitioned parquet file should exist"
         finally:
             syn.__file__ = orig_file
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# T3-1: _compute_version — pq.ParquetFile metadata 测试
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestComputeVersionMetadata:
+    """验证 _compute_version 使用 pq.ParquetFile.metadata.num_rows 的正确性。"""
+
+    def test_rows_from_parquet_file_matches_read_parquet(self, tmp_path):
+        """pq.ParquetFile.metadata.num_rows 与 pd.read_parquet 的行数一致。"""
+        import pyarrow.parquet as pq
+        from data.loader import _compute_version
+
+        # 写入测试数据
+        dates = pd.date_range("2024-01-01", periods=25, freq="D")
+        df = pd.DataFrame({
+            "Date": dates,
+            "Open": np.arange(25, dtype=float) + 100,
+            "High": np.arange(25, dtype=float) + 101,
+            "Low": np.arange(25, dtype=float) + 99,
+            "Close": np.arange(25, dtype=float) + 100,
+            "Volume": np.full(25, 5000, dtype=float),
+        })
+        parquet_path = tmp_path / "test.parquet"
+        df.to_parquet(parquet_path, index=False)
+
+        # 方式 1: pq.ParquetFile.metadata.num_rows
+        pf = pq.ParquetFile(parquet_path)
+        pq_rows = pf.metadata.num_rows
+
+        # 方式 2: pd.read_parquet
+        loaded = pd.read_parquet(parquet_path)
+        pd_rows = len(loaded)
+
+        assert pq_rows == pd_rows, (
+            f"pq.ParquetFile rows={pq_rows} != pd.read_parquet rows={pd_rows}"
+        )
+
+        # _compute_version 返回的 rows 与两者一致
+        version = _compute_version(parquet_path)
+        assert version["rows"] == pq_rows
+        assert version["rows"] == pd_rows
+
+    def test_version_dict_contains_rows(self, tmp_path):
+        """_compute_version 返回的 dict 中 rows 值与实际行数一致。"""
+        from data.loader import _compute_version
+
+        for n in [1, 5, 50, 100]:
+            dates = pd.date_range("2024-01-01", periods=n, freq="D")
+            df = pd.DataFrame({
+                "Date": dates,
+                "Open": np.full(n, 100.0), "High": np.full(n, 101.0),
+                "Low": np.full(n, 99.0), "Close": np.full(n, 100.5),
+                "Volume": np.full(n, 1000, dtype=float),
+            })
+            p = tmp_path / f"test_{n}.parquet"
+            df.to_parquet(p, index=False)
+            version = _compute_version(p)
+            assert version["rows"] == n, f"n={n}: expected rows={n}, got {version['rows']}"
+
+    def test_version_rows_with_varying_data(self, tmp_path):
+        """不同数据量的文件返回正确的行数。"""
+        from data.loader import _compute_version
+
+        sizes = [10, 30, 42, 77, 128]
+        for size in sizes:
+            dates = pd.date_range("2024-01-01", periods=size, freq="D")
+            np.random.seed(42)
+            df = pd.DataFrame({
+                "Date": dates,
+                "Open": np.random.randn(size) + 100,
+                "High": np.random.randn(size) + 101,
+                "Low": np.random.randn(size) + 99,
+                "Close": np.random.randn(size) + 100,
+                "Volume": np.random.randint(1000, 10000, size),
+            })
+            p = tmp_path / f"vary_{size}.parquet"
+            df.to_parquet(p, index=False)
+            version = _compute_version(p)
+            assert version["rows"] == size
+
+    def test_version_mtime_is_reasonable(self, tmp_path):
+        """_compute_version 返回的 mtime 与文件 stat 结果一致。"""
+        from data.loader import _compute_version
+
+        dates = pd.date_range("2024-01-01", periods=10, freq="D")
+        df = pd.DataFrame({
+            "Date": dates,
+            "Open": np.full(10, 100.0), "High": np.full(10, 101.0),
+            "Low": np.full(10, 99.0), "Close": np.full(10, 100.5),
+            "Volume": np.full(10, 1000, dtype=float),
+        })
+        p = tmp_path / "mtime_test.parquet"
+        df.to_parquet(p, index=False)
+
+        # 记录写入后的 mtime
+        written_mtime = p.stat().st_mtime
+        version = _compute_version(p)
+
+        assert isinstance(version["mtime"], float)
+        assert version["mtime"] == pytest.approx(written_mtime, abs=0.1)
+
+    def test_version_rows_is_int(self, tmp_path):
+        """_compute_version 返回的 rows 值的类型是 int。"""
+        from data.loader import _compute_version
+
+        dates = pd.date_range("2024-01-01", periods=15, freq="D")
+        df = pd.DataFrame({
+            "Date": dates,
+            "Open": np.full(15, 100.0), "High": np.full(15, 101.0),
+            "Low": np.full(15, 99.0), "Close": np.full(15, 100.5),
+            "Volume": np.full(15, 1000, dtype=float),
+        })
+        p = tmp_path / "type_test.parquet"
+        df.to_parquet(p, index=False)
+        version = _compute_version(p)
+        assert isinstance(version["rows"], int), (
+            f"rows should be int, got {type(version['rows'])}"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# T3-2: _download_with_retry — yfinance 重试测试
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestDownloadWithRetry:
+    """验证 _download_with_retry 的重试与退避行为。"""
+
+    def test_success_no_retry(self):
+        """成功时不重试：mock yf.download 返回正常数据。"""
+        from filter.data.fetcher import _download_with_retry
+
+        mock_df = pd.DataFrame({"Close": [100.0, 101.0]})
+        with patch("filter.data.fetcher.yf.download", return_value=mock_df) as mock_dl:
+            result = _download_with_retry("AAPL")
+            assert result.equals(mock_df)
+            # 只调用 1 次（无重试）
+            assert mock_dl.call_count == 1
+            # 验证传入了 timeout 和 progress 参数
+            _, call_kw = mock_dl.call_args
+            assert call_kw["timeout"] == 30
+            assert call_kw["progress"] is False
+
+    def test_first_fail_second_success(self):
+        """第 1 次失败第 2 次成功：mock 前 1 次抛异常。"""
+        from filter.data.fetcher import _download_with_retry
+
+        mock_df = pd.DataFrame({"Close": [100.0, 101.0]})
+        with patch("filter.data.fetcher.yf.download",
+                   side_effect=[ValueError("timeout"), mock_df]) as mock_dl, \
+             patch("filter.data.fetcher.time.sleep") as mock_sleep:
+            result = _download_with_retry("AAPL")
+            assert result.equals(mock_df)
+            assert mock_dl.call_count == 2
+            # 退避时间: 第 1 次失败后 sleep(1s)
+            mock_sleep.assert_called_once_with(1)
+
+    def test_first_fail_second_fail_third_success(self):
+        """前 2 次失败第 3 次成功。"""
+        from filter.data.fetcher import _download_with_retry
+
+        mock_df = pd.DataFrame({"Close": [100.0, 101.0]})
+        with patch("filter.data.fetcher.yf.download",
+                   side_effect=[ValueError("fail1"), ValueError("fail2"), mock_df]) as mock_dl, \
+             patch("filter.data.fetcher.time.sleep") as mock_sleep:
+            result = _download_with_retry("AAPL")
+            assert result.equals(mock_df)
+            assert mock_dl.call_count == 3
+            # 退避时间: 1s → 2s
+            assert mock_sleep.call_count == 2
+            mock_sleep.assert_any_call(1)
+            mock_sleep.assert_any_call(2)
+
+    def test_three_failures_then_raise(self):
+        """3 次全部失败后 raise 原始异常。"""
+        from filter.data.fetcher import _download_with_retry
+
+        with patch("filter.data.fetcher.yf.download",
+                   side_effect=ValueError("network error")) as mock_dl, \
+             patch("filter.data.fetcher.time.sleep"):
+            with pytest.raises(ValueError, match="network error"):
+                _download_with_retry("AAPL")
+            assert mock_dl.call_count == 3
+
+    def test_three_failures_connection_error(self):
+        """ConnectionError 类型也按相同规则重试并最终 raise。"""
+        from filter.data.fetcher import _download_with_retry
+
+        with patch("filter.data.fetcher.yf.download",
+                   side_effect=ConnectionError("refused")) as mock_dl, \
+             patch("filter.data.fetcher.time.sleep"):
+            with pytest.raises(ConnectionError, match="refused"):
+                _download_with_retry("AAPL")
+            assert mock_dl.call_count == 3
+
+    def test_backoff_timing_sequence(self):
+        """退避时间序列: 1s → 2s → 4s。"""
+        from filter.data.fetcher import _download_with_retry
+
+        with patch("filter.data.fetcher.yf.download",
+                   side_effect=[ValueError("e1"), ValueError("e2"), ValueError("e3")]) as mock_dl, \
+             patch("filter.data.fetcher.time.sleep") as mock_sleep:
+            try:
+                _download_with_retry("AAPL")
+            except ValueError:
+                pass
+
+        assert mock_sleep.call_count == 2  # 只有前 2 次失败会 sleep
+        # 验证参数序列: 2^0=1, 2^1=2
+        expected_calls = [1, 2]
+        actual_calls = [call.args[0] for call in mock_sleep.call_args_list]
+        assert actual_calls == expected_calls, (
+            f"Expected sleep({expected_calls}), got {actual_calls}"
+        )
+
+    def test_passes_kwargs_to_yf_download(self):
+        """kwargs 正确传递给 yf.download。"""
+        from filter.data.fetcher import _download_with_retry
+
+        mock_df = pd.DataFrame({"Close": [100.0]})
+        with patch("filter.data.fetcher.yf.download",
+                   return_value=mock_df) as mock_dl:
+            _download_with_retry("AAPL", period="1y", interval="1d")
+            _, call_kw = mock_dl.call_args
+            assert call_kw["period"] == "1y"
+            assert call_kw["interval"] == "1d"
+
+    def test_sleep_not_called_on_success(self):
+        """成功时 sleep 完全不调用。"""
+        from filter.data.fetcher import _download_with_retry
+
+        mock_df = pd.DataFrame({"Close": [100.0]})
+        with patch("filter.data.fetcher.yf.download", return_value=mock_df), \
+             patch("filter.data.fetcher.time.sleep") as mock_sleep:
+            _download_with_retry("AAPL")
+            mock_sleep.assert_not_called()
+
+    def test_max_retries_is_three(self):
+        """验证最大重试次数为 3。"""
+        from filter.data.fetcher import _download_with_retry
+
+        with patch("filter.data.fetcher.yf.download",
+                   side_effect=ValueError("fail")) as mock_dl, \
+             patch("filter.data.fetcher.time.sleep"):
+            try:
+                _download_with_retry("AAPL")
+            except ValueError:
+                pass
+        # 总计 3 次尝试（1 次初始 + 2 次重试）
+        assert mock_dl.call_count == 3
+
+
+class TestGetMinTfAndCount:
+    """_get_min_tf_and_count 测试."""
+
+    def _make_mock_conn(self, bar_count):
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.__exit__.return_value = False
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = bar_count
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+        return mock_conn
+
+    def test_empty_configs(self):
+        """空 configs 返回 ("", 0)."""
+        from filter.backtest.panel import _get_min_tf_and_count
+        result = _get_min_tf_and_count([], "TEST")
+        assert result == ("", 0)
+
+    def test_single_view_config(self):
+        """单视图配置返回正确 min_tf."""
+        from filter.backtest.panel import _get_min_tf_and_count
+        configs = [{"tf": "日线", "n_pts": 120}]
+        mock_conn = self._make_mock_conn(500)
+
+        with patch("filter.data.db.get_conn", return_value=mock_conn):
+            min_tf, bar_count = _get_min_tf_and_count(configs, "TEST")
+        assert min_tf == "日线"
+        assert bar_count == 500
+
+    def test_multiple_views_finest_tf(self):
+        """多视图: 取最精细 TF (ALL_TFS 索引最小)."""
+        from filter.backtest.panel import _get_min_tf_and_count
+        configs = [
+            {"tf": "日线", "n_pts": 120},
+            {"tf": "60分钟", "n_pts": 60},  # 更精细
+            {"tf": "周线", "n_pts": 26},
+        ]
+        mock_conn = self._make_mock_conn(1000)
+
+        with patch("filter.data.db.get_conn", return_value=mock_conn):
+            min_tf, bar_count = _get_min_tf_and_count(configs, "TEST")
+        assert min_tf == "60分钟"  # 最精细周期
+
+    def test_invalid_tf_not_crash(self):
+        """无效 TF 名称不崩溃，被跳过."""
+        from filter.backtest.panel import _get_min_tf_and_count
+        configs = [{"tf": "invalid_tf_name", "n_pts": 50}]
+        result = _get_min_tf_and_count(configs, "TEST")
+        assert result == ("", 0)  # 所有 TF 无效
+
+    def test_no_tf_field_handled(self):
+        """视图缺少 tf 字段时跳过."""
+        from filter.backtest.panel import _get_min_tf_and_count
+        configs = [{"n_pts": 120}]  # no "tf" key
+        result = _get_min_tf_and_count(configs, "TEST")
+        assert result == ("", 0)
+
+
+class TestGetBarDateFromDb:
+    """_get_bar_date_from_db 测试."""
+
+    def _make_mock_conn(self, date_value):
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.__exit__.return_value = False
+        if date_value is not None:
+            mock_row = MagicMock()
+            mock_row.__getitem__.return_value = date_value
+            mock_conn.execute.return_value.fetchone.return_value = mock_row
+        else:
+            mock_conn.execute.return_value.fetchone.return_value = None
+        return mock_conn
+
+    def test_returns_date_string(self):
+        """正常返回日期字符串."""
+        from filter.backtest.panel import _get_bar_date_from_db
+        mock_conn = self._make_mock_conn("2026-01-15")
+        with patch("filter.data.db.get_conn", return_value=mock_conn):
+            result = _get_bar_date_from_db("TEST", "日线", 5)
+        assert result == "2026-01-15"
+
+    def test_no_row_returns_empty_string(self):
+        """无数据行返回空字符串."""
+        from filter.backtest.panel import _get_bar_date_from_db
+        mock_conn = self._make_mock_conn(None)
+        with patch("filter.data.db.get_conn", return_value=mock_conn):
+            result = _get_bar_date_from_db("TEST", "日线", 9999)
+        assert result == ""
+
+
+class TestLoadWindowDataEdgeCases:
+    """_load_window_data 边界测试."""
+
+    def test_missing_date_column(self):
+        """缺少 Date 列返回 None."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 60, "_fid": "sma", "show_sch": True,
+                    "show_strategy": False, "show_pred": False, "pv": {"window": 11}}]
+
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.__exit__.return_value = False
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 200
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs)
+
+        df_no_date = pd.DataFrame({"Close": [100.0, 101.0, 102.0]})
+        with patch("filter.backtest.engine.load_display_cache", return_value=df_no_date):
+            result = runner._load_window_data("日线", 60)
+            assert result is None
+
+    def test_missing_close_column(self):
+        """缺少 Close 列返回 None."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 60, "_fid": "sma", "show_sch": True,
+                    "show_strategy": False, "show_pred": False, "pv": {"window": 11}}]
+
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 200
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs)
+
+        df_no_close = pd.DataFrame({"Date": ["2026-01-01"], "Open": [100.0]})
+        with patch("filter.backtest.engine.load_display_cache", return_value=df_no_close):
+            result = runner._load_window_data("日线", 60)
+            assert result is None
+
+    def test_cutoff_date_filtering(self):
+        """cutoff_date 过滤: 只保留日期 <= cutoff 的数据."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 60, "_fid": "sma", "show_sch": True,
+                    "show_strategy": False, "show_pred": False, "pv": {"window": 11}}]
+
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 200
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+        mock_conn.execute.return_value.fetchall.return_value = [
+            {"ts": f"2026-01-{i+1:02d}", "open": 100.0, "high": 101.0,
+             "low": 99.0, "close": 100.0, "volume": 1000}
+            for i in range(200)
+        ]
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs)
+
+        # 10 days of data, cutoff at day 5
+        df = pd.DataFrame({
+            "Date": [f"2026-01-{i+1:02d}" for i in range(10)],
+            "Close": [100 + i for i in range(10)],
+            "Open": [100 + i for i in range(10)],
+            "High": [101 + i for i in range(10)],
+            "Low": [99 + i for i in range(10)],
+        })
+        with patch("filter.backtest.engine.load_display_cache", return_value=df):
+            result = runner._load_window_data("日线", 60, cutoff_date="2026-01-05")
+            assert result is not None
+            t, noisy, ohlc, dates = result
+            # 只应有5天数据 (1-5)
+            assert len(noisy) == 5
+
+    def test_ohlc_fallback_no_open_high_low(self):
+        """缺少 OHLC 列时使用 Close 填充."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 60, "_fid": "sma", "show_sch": True,
+                    "show_strategy": False, "show_pred": False, "pv": {"window": 11}}]
+
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 200
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+        mock_conn.execute.return_value.fetchall.return_value = [
+            {"ts": f"2026-01-{i+1:02d}", "open": 100.0, "high": 101.0,
+             "low": 99.0, "close": 100.0, "volume": 1000}
+            for i in range(200)
+        ]
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs)
+
+        df_close_only = pd.DataFrame({
+            "Date": ["2026-01-01", "2026-01-02", "2026-01-03"],
+            "Close": [100.0, 101.0, 102.0],
+        })
+        with patch("filter.backtest.engine.load_display_cache", return_value=df_close_only):
+            result = runner._load_window_data("日线", 60)
+            assert result is not None
+            t, noisy, ohlc, dates = result
+            assert "Open" in ohlc.columns
+            assert np.allclose(ohlc["Open"], noisy)
+
+    def test_empty_parquet_returns_none(self):
+        """加载空 parquet 返回 None."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 60, "_fid": "sma", "show_sch": True,
+                    "show_strategy": False, "show_pred": False, "pv": {"window": 11}}]
+
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 200
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+        mock_conn.execute.return_value.fetchall.return_value = [
+            {"ts": f"2026-01-{i+1:02d}", "open": 100.0, "high": 101.0,
+             "low": 99.0, "close": 100.0, "volume": 1000}
+            for i in range(200)
+        ]
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs)
+
+        df_single = pd.DataFrame({
+            "Date": ["2026-01-01"],
+            "Close": [100.0],
+        })
+        with patch("filter.backtest.engine.load_display_cache", return_value=df_single):
+            result = runner._load_window_data("日线", 60)
+            # len=1, 少于2 -> 返回 None
+            assert result is None
