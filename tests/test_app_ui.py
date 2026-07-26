@@ -23,9 +23,9 @@ import pytest
 _REAL_STREAMLIT = None
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def app():
-    """Module-scoped fixture: 加载 AppTest 一次，跨测试共享 from_file() 开销.
+    """Session-scoped fixture: 加载 AppTest 一次，跨所有测试模块共享 from_file() 开销.
 
     保存真实的 streamlit 模块引用到模块全局 _REAL_STREAMLIT，
     供 _refresh_app_state 在 conftest mock 注入后恢复。
@@ -47,9 +47,12 @@ def app():
     at = AppTest.from_file(_script)
     os.chdir(cwd)
 
+    # 初始运行一次：填充 session_state、title、sidebar 等
+    at.run(timeout=90)
+
     yield at
 
-    # ── 强制清理：防止 streamlit 内部状态污染下一个模块 ──
+    # ── 强制清理：防止 streamlit 内部状态污染 ──
     try:
         delattr(threading.current_thread(), "streamlit_script_run_ctx")
     except AttributeError:
@@ -71,16 +74,18 @@ def pytest_module_cleanup():
 
 @pytest.fixture(autouse=True)
 def _refresh_app_state(app):
-    """每个测试前重跑 AppTest 以获得独立的 widget 状态.
+    """每个测试前恢复真实 streamlit 模块引用.
 
     conftest 的 autouse mock 会在测试间隙重新注入 MagicMock。
-    使用模块级保存的 _REAL_STREAMLIT 引用恢复真实 streamlit，
+    使用 session 级保存的 _REAL_STREAMLIT 引用恢复真实 streamlit，
     避免 importlib.import_module 创建新对象导致 fragment 上下文错乱。
+
+    注意：不再在每测试前调用 app.run() — session-scoped fixture 已在
+    初始化时运行一次，读值测试直接使用缓存状态。交互测试自行调用 .run()。
     """
     import sys as _sys
 
     _sys.modules["streamlit"] = _REAL_STREAMLIT
-    app.run(timeout=90)
 
 
 def _fix_streamlit():
