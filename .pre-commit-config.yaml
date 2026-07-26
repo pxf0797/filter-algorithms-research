@@ -32,7 +32,8 @@ repos:
     hooks:
       - id: changelog-updated
         name: Check CHANGELOG.md updated
-        entry: bash -c 'git diff --cached --name-only | grep -qv "^CHANGELOG.md$" && git diff --cached --name-only | grep -qE "\.(py|toml|yaml|yml)$" && ! git diff --cached --name-only | grep -q "^CHANGELOG.md$" && echo "ERROR: Source files changed but CHANGELOG.md not updated. Stage CHANGELOG.md or run make changelog." && exit 1 || exit 0'
+        entry: |-
+          bash -c 'git diff --cached --name-only | grep -qv "^CHANGELOG.md$" && git diff --cached --name-only | grep -qE "\.(py|toml|yaml|yml)$" && ! git diff --cached --name-only | grep -q "^CHANGELOG.md$" && echo "ERROR: Source files changed but CHANGELOG.md not updated. Stage CHANGELOG.md or run make changelog." && exit 1 || exit 0'
         language: system
         pass_filenames: false
         always_run: true
