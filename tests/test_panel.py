@@ -34,9 +34,9 @@ class TestPanelImports:
 
 # ---------------------------------------------------------------------------
 # Helper: build a mock DB connection context manager for panel tests.
-# The code uses ``from data.db import get_conn``, so we must patch
-# ``data.db.get_conn`` (NOT ``filter.data.db.get_conn`` — they are
-# distinct module objects in sys.modules).
+# The code uses ``from filter.data.db import get_conn``, so we must patch
+# ``filter.data.db.get_conn``, because the module is stored as
+# ``filter.data.db`` in sys.modules.
 # ---------------------------------------------------------------------------
 
 def _mock_get_conn(row_data):
@@ -91,7 +91,7 @@ class TestGetMinTfAndCount:
         """Single valid TF, DB returns 500 bars."""
         from filter.backtest.panel import _get_min_tf_and_count
         configs = [{"tf": "日线"}]
-        with patch("data.db.get_conn", return_value=_mock_get_conn([500])):
+        with patch("filter.data.db.get_conn", return_value=_mock_get_conn([500])):
             min_tf, bar_count = _get_min_tf_and_count(configs, "AAPL")
             assert min_tf == "日线"
             assert bar_count == 500
@@ -100,7 +100,7 @@ class TestGetMinTfAndCount:
         """Multiple TFs pick the one with the smallest index in ALL_TFS."""
         from filter.backtest.panel import _get_min_tf_and_count
         configs = [{"tf": "周线"}, {"tf": "日线"}]
-        with patch("data.db.get_conn", return_value=_mock_get_conn([300])):
+        with patch("filter.data.db.get_conn", return_value=_mock_get_conn([300])):
             min_tf, bar_count = _get_min_tf_and_count(configs, "AAPL")
             assert min_tf == "日线"  # finer than 周线
 
@@ -108,7 +108,7 @@ class TestGetMinTfAndCount:
         """DB exception is caught, bar_count falls back to 0."""
         from filter.backtest.panel import _get_min_tf_and_count
         configs = [{"tf": "日线"}]
-        with patch("data.db.get_conn", side_effect=Exception("DB down")):
+        with patch("filter.data.db.get_conn", side_effect=Exception("DB down")):
             min_tf, bar_count = _get_min_tf_and_count(configs, "AAPL")
             assert min_tf == "日线"
             assert bar_count == 0
@@ -117,7 +117,7 @@ class TestGetMinTfAndCount:
         """DB returns None (no rows) -> bar_count = 0."""
         from filter.backtest.panel import _get_min_tf_and_count
         configs = [{"tf": "60分钟线"}]
-        with patch("data.db.get_conn", return_value=_mock_get_conn(None)):
+        with patch("filter.data.db.get_conn", return_value=_mock_get_conn(None)):
             min_tf, bar_count = _get_min_tf_and_count(configs, "AAPL")
             assert bar_count == 0
 
@@ -132,14 +132,14 @@ class TestGetBarDateEdgeCases:
     def test_no_row_found_returns_empty(self):
         """No matching row -> returns empty string."""
         from filter.backtest.panel import _get_bar_date_from_db
-        with patch("data.db.get_conn", return_value=_mock_get_conn(None)):
+        with patch("filter.data.db.get_conn", return_value=_mock_get_conn(None)):
             result = _get_bar_date_from_db("UNKNOWN", "日线", 99999)
             assert result == ""
 
     def test_db_exception_propagates(self):
         """DB connection exception propagates (no try/except in this function)."""
         from filter.backtest.panel import _get_bar_date_from_db
-        with patch("data.db.get_conn", side_effect=RuntimeError("DB unavailable")):
+        with patch("filter.data.db.get_conn", side_effect=RuntimeError("DB unavailable")):
             with pytest.raises(RuntimeError, match="DB unavailable"):
                 _get_bar_date_from_db("AAPL", "日线", 0)
 

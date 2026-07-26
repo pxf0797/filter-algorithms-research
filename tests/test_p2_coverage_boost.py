@@ -693,7 +693,7 @@ class TestGetMinTfAndCount:
         configs = [{"tf": "日线", "n_pts": 120}]
         mock_conn = self._make_mock_conn(500)
 
-        with patch("data.db.get_conn", return_value=mock_conn):
+        with patch("filter.data.db.get_conn", return_value=mock_conn):
             min_tf, bar_count = _get_min_tf_and_count(configs, "TEST")
         assert min_tf == "日线"
         assert bar_count == 500
@@ -708,7 +708,7 @@ class TestGetMinTfAndCount:
         ]
         mock_conn = self._make_mock_conn(1000)
 
-        with patch("data.db.get_conn", return_value=mock_conn):
+        with patch("filter.data.db.get_conn", return_value=mock_conn):
             min_tf, bar_count = _get_min_tf_and_count(configs, "TEST")
         assert min_tf == "60分钟"  # 最精细周期
 
@@ -746,7 +746,7 @@ class TestGetBarDateFromDb:
         """正常返回日期字符串."""
         from filter.backtest.panel import _get_bar_date_from_db
         mock_conn = self._make_mock_conn("2026-01-15")
-        with patch("data.db.get_conn", return_value=mock_conn):
+        with patch("filter.data.db.get_conn", return_value=mock_conn):
             result = _get_bar_date_from_db("TEST", "日线", 5)
         assert result == "2026-01-15"
 
@@ -754,7 +754,7 @@ class TestGetBarDateFromDb:
         """无数据行返回空字符串."""
         from filter.backtest.panel import _get_bar_date_from_db
         mock_conn = self._make_mock_conn(None)
-        with patch("data.db.get_conn", return_value=mock_conn):
+        with patch("filter.data.db.get_conn", return_value=mock_conn):
             result = _get_bar_date_from_db("TEST", "日线", 9999)
         assert result == ""
 

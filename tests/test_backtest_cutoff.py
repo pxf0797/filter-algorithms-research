@@ -181,7 +181,7 @@ class TestGetBarDateFromDb:
         mock_conn.__exit__.return_value = False
         mock_conn.execute.return_value.fetchone.return_value = ("2026-06-15",)
 
-        with patch("data.db.get_conn", return_value=mock_conn):
+        with patch("filter.data.db.get_conn", return_value=mock_conn):
             result = _get_bar_date_from_db("AAPL", "1d", 100)
             assert result == "2026-06-15"
 
