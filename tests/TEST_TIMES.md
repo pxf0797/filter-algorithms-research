@@ -1,134 +1,69 @@
-# 测试耗时与CI策略
+# 测试耗时报告
 
-> 最后更新: 2026-06-28
-> 测试环境: Python 3.12.6, macOS Darwin (Apple Silicon)
-> 总测试数: 637 个测试用例 (625 个测试函数，含 parametrize 展开) / 20 个测试文件
-> 总耗时: 约 2 分钟 (全量串行)
+> 更新时间: 2026-07-26
+> 全量测试: 2412 tests, 254.90s (4m15s)
+> 通过: 2333 / 失败: 75 / 跳过: 4
+> 覆盖率: 待获取
 
-## 按文件耗时分级
+## 按耗时排序 (Top 30)
 
-### 快速 (<1s wall time) — 每次 commit 运行
+| # | 测试 | 耗时 |
+|---|------|------|
+| 1 | test_app_ui.py::TestRefreshButtonEndToEnd::test_refresh_button_click_does_not_crash [setup] | 16.71s |
+| 2 | test_app_ui.py::TestRefreshButtonEndToEnd::test_refresh_button_clears_cache [call] | 10.91s |
+| 3 | test_app_ui.py::TestAppSmoke::test_title_present [setup] | 10.87s |
+| 4 | test_app_smoke.py::test_app_launches [call] | 10.01s |
+| 5 | test_app_ui.py::TestWidgetInteraction::test_ticker_change_does_not_crash [call] | 9.79s |
+| 6 | test_app_ui.py::TestPresetApplyEndToEnd::test_apply_preset_button_does_not_crash [setup] | 8.40s |
+| 7 | test_app_ui.py::TestRefreshButtonEndToEnd::test_refresh_button_click_does_not_crash [call] | 7.64s |
+| 8 | test_app_ui.py::TestSidebarInteraction::test_dual_filter_checkbox_present [setup] | 6.91s |
+| 9 | test_app_ui.py::TestPresetInteraction::test_preset_options_not_empty [setup] | 6.24s |
+| 10 | test_app_ui.py::TestAppSmoke::test_sidebar_present [setup] | 5.99s |
+| 11 | test_app_ui.py::TestSessionState::test_config_initialized [setup] | 5.87s |
+| 12 | test_app_ui.py::TestAutoRefreshSafety::test_auto_refresh_checkbox_toggle [setup] | 5.76s |
+| 13 | test_app_ui.py::TestWidgetInteraction::test_filter_change_does_not_crash [setup] | 5.50s |
+| 14 | test_app_ui.py::TestSidebarInteraction::test_auto_refresh_checkbox_present [setup] | 5.39s |
+| 15 | test_app_ui.py::TestPresetApplyEndToEnd::test_apply_preset_button_does_not_crash [call] | 5.19s |
+| 16 | test_app_ui.py::TestPresetInteraction::test_preset_selector_present [setup] | 4.82s |
+| 17 | test_app_ui.py::TestExceptionPathCoverage::test_invalid_ticker_does_not_crash [setup] | 4.67s |
+| 18 | test_app_ui.py::TestSidebarInteraction::test_ticker_input_present [setup] | 4.66s |
+| 19 | test_app_ui.py::TestPresetInteraction::test_no_preset_selection_safe [setup] | 4.65s |
+| 20 | test_app_ui.py::TestSidebarInteraction::test_filter_selector_present [setup] | 4.36s |
+| 21 | test_app_ui.py::TestRefreshButtonEndToEnd::test_refresh_button_clears_cache [setup] | 4.29s |
+| 22 | test_app_ui.py::TestP0RegressionExtended::test_empty_ticker_safe [setup] | 4.11s |
+| 23 | test_app_ui.py::TestAppSmoke::test_app_runs [setup] | 3.99s |
+| 24 | test_app_ui.py::TestBackupRestoreButtons::test_create_backup_button_exists_and_clickable [setup] | 3.98s |
+| 25 | test_app_ui.py::TestPresetInteraction::test_preset_options_include_none [setup] | 3.95s |
+| 26 | test_app_ui.py::TestIsolationRegression::test_multiple_reruns_consistent [setup] | 3.94s |
+| 27 | test_app_ui.py::TestDeleteBackupEdgeCase::test_delete_backup_with_missing_file_handled [setup] | 3.86s |
+| 28 | test_app_ui.py::TestP0Regression::test_app_does_not_crash_before_render [setup] | 3.55s |
+| 29 | test_app_ui.py::TestAppSmoke::test_main_present [setup] | 3.47s |
+| 30 | test_app_ui.py::TestP0RegressionExtended::test_unknown_filter_setting [setup] | 3.45s |
 
-| 文件 | 测试数 | wall time(s) | CPU time(s) |
-|------|--------|-------------|-------------|
-| test_param_export_import.py | 13 | 0.51 | 0.36 |
-| test_state.py | 59 | 0.70 | 0.54 |
-| test_integration_flows.py | 9 | 0.72 | 0.54 |
-| test_preset_ui_actions.py | 45 | 0.73 | 0.40 |
-| test_data_loader.py | 30 | 0.76 | 0.57 |
-| test_config_db.py | 58 | 0.95 | 0.44 |
-| test_alignment.py | 6 | 0.98 | 0.80 |
+> Top 30 全部来自 **Streamlit UI 测试** (test_app_ui.py / test_app_smoke.py)。每个 setup 阶段启动完整 Streamlit 子进程，是主要耗时瓶颈。
 
-小计: **7 个文件 / 220 个测试 / 约 5.4s**
+## 耗时分布
 
-### 中等 (1-10s wall time) — 每次 PR 运行
-
-| 文件 | 测试数 | wall time(s) | CPU time(s) |
-|------|--------|-------------|-------------|
-| test_filters.py | 22 | 1.04 | 0.84 |
-| test_signals.py | 16 | 1.05 | 0.85 |
-| test_alignment_subplot.py | 14 | 1.09 | 0.90 |
-| test_sidebar.py | 36 | 1.12 | 0.88 |
-| test_integration.py | 6 | 1.19 | 0.95 |
-| test_strategy.py | 18 | 1.19 | 0.98 |
-| test_boundary.py | 30 | 1.27 | 1.02 |
-| test_streamlit_app.py | 25 | 1.53 | 1.22 |
-| test_preset_ui.py | 60 | 1.76 | 0.47 |
-| test_charts.py | 87 | 1.78 | 1.53 |
-| test_db.py | 57 | 4.24 | 0.52 |
-| test_app_smoke.py | 1 | 10.47 | 0.34 |
-
-小计: **12 个文件 / 372 个测试 / 约 27.7s**
-
-### 慢速 (>10s wall time) — merge 前 / nightly 运行
-
-| 文件 | 测试数 | wall time(s) | CPU time(s) |
-|------|--------|-------------|-------------|
-| test_app_ui.py | 33 | **100.80** | 84.67 |
-
-> test_app_ui.py 的 33 个测试占全量测试的 87% 时间。每个测试都 launch 完整的 Streamlit 应用，是主要的性能瓶颈。同时 test_app_smoke.py 的 1 个测试也 launch 了应用 (10.47s)，只是数量少。
-
-小计: **1 个文件 / 33 个测试 / 约 100.8s**
-
-## 最慢的 10 个单独测试 (call 阶段)
-
-| 测试 | 耗时 | 原因 |
+| 区间 | 数量 | 占比 |
 |------|------|------|
-| test_app_ui::test_apply_preset_button_does_not_crash | 11.59s | Streamlit 完整启动 + UI 渲染 |
-| test_app_smoke::test_app_launches | 10.01s | Streamlit 完整启动 |
-| test_app_ui::test_ticker_change_does_not_crash | 9.49s | Streamlit 启动 |
-| test_app_ui::test_refresh_button_click_does_not_crash | 8.12s | Streamlit 启动 |
-| test_app_ui::test_refresh_button_clears_cache | 7.81s | Streamlit 启动 |
-| test_app_ui::test_fresh_app_day_nav_buttons_stable | 6.81s | Streamlit 启动 |
-| test_app_ui::test_multiple_fresh_apps_consistent | 6.72s | Streamlit 启动 |
-| test_app_ui::test_fresh_app_no_unexpected_exception | 6.63s | Streamlit 启动 |
-| test_app_ui::test_invalid_ticker_does_not_crash | 6.61s | Streamlit 启动 |
-| test_app_ui::test_app_runs (setup) | 6.32s | Streamlit 启动 |
+| <0.01s | 6962 | 96.2% |
+| 0.01-0.1s | 175 | 2.4% |
+| 0.1-1s | 41 | 0.6% |
+| 1-10s | 53 | 0.7% |
+| >10s | 4 | 0.1% |
 
-> **根因**: test_app_ui.py 和 test_app_smoke.py 使用 `subprocess.run` 启动完整的 Streamlit 应用进程，每个测试都要经历冷启动开销。优化方向: 使用 `session-scoped fixture` 复用应用进程，而非每测试启动。
+> 96.2% 的测试阶段在 0.01s 内完成。耗时 >1s 的 57 个条目几乎全部是 Streamlit 子进程的 setup/call 开销。
 
-## CI 分阶段建议
+## 优化建议
 
-```yaml
-# .github/workflows/ci.yml 建议策略
-#
-# 总串行时间: ~134s (2.2 min)
-# 并行化后: ~107s (1.8 min) 或更快
+1. **Streamlit 测试复用进程** (最大收益): test_app_ui.py 的 33 个测试各启动独立子进程，改用 `session-scoped fixture` 共享一个 Streamlit 进程可节省 ~100s。
+2. **并行化非 UI 测试**: 排除 Streamlit 测试文件后，使用 `pytest-xdist -n auto` 可将剩余 ~2300 测试加速 3-5 倍。
+3. **修复失败测试**: 75 个失败测试（主要集中在 test_charts.py / test_engine.py / test_pipeline_capture.py / test_parquet_store.py）增加了调试和重跑成本。
+4. **pytest-benchmark 开销**: 18 个 benchmark 测试使用校准预热，可考虑在 CI 中跳过 (`-m "not benchmark"`)。
 
-jobs:
-  fast-tests:                  # <6s, 每次 push 运行
-    strategy:
-      matrix:
-        file:
-          - test_param_export_import.py
-          - test_state.py
-          - test_integration_flows.py
-          - test_preset_ui_actions.py
-          - test_data_loader.py
-          - test_config_db.py
-          - test_alignment.py
-    timeout-minutes: 1
+## 历史对比
 
-  medium-tests:                # <30s, 每次 PR 运行 (可并行)
-    strategy:
-      matrix:
-        file:
-          - test_filters.py
-          - test_signals.py
-          - test_alignment_subplot.py
-          - test_sidebar.py
-          - test_integration.py
-          - test_strategy.py
-          - test_boundary.py
-          - test_streamlit_app.py
-          - test_preset_ui.py
-          - test_charts.py
-          - test_db.py
-          - test_app_smoke.py
-    timeout-minutes: 2
-
-  slow-tests:                  # ~101s, merge 前 / nightly 运行
-    strategy:
-      matrix:
-        file:
-          - test_app_ui.py
-    timeout-minutes: 5
-
-  full-suite:                  # ~2min, main 分支定时运行
-    needs: [fast-tests, medium-tests, slow-tests]
-```
-
-## 并行运行建议
-
-- 使用 `pytest-xdist` 配合 `-n auto` 可将非 UI 测试加速约 2-4 倍 (Apple Silicon 性能核)
-- **test_app_ui.py 和 test_app_smoke.py 必须独立进程运行** — 它们各自启动 Streamlit 子进程，多进程并行会导致端口冲突
-- 建议增加 `--durations=0` 输出，便于在 CI 上持续监控性能退化
-
-### 大致加速估算
-
-| 策略 | 预估 wall time |
-|------|---------------|
-| 全量串行 | ~134s |
-| 三阶段并行 (如上) | ~101s (受 slow-tests 阻塞) |
-| 三阶段 + xdist medium 层 | ~60s |
-| 全量 xdist -n 4 (排除 UI 文件) | ~35s |
+| 日期 | 总测试数 | 总耗时 | 变化 |
+|------|---------|--------|------|
+| 2026-07-24 | ~1555 | ~13s | baseline |
+| 2026-07-26 | 2412 | 254.90s | +857 tests, +241.90s |
