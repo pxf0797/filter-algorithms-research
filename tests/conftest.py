@@ -48,6 +48,14 @@ def _make_streamlit_mock():
 if "streamlit" not in sys.modules:
     sys.modules["streamlit"] = _make_streamlit_mock()
 
+# 保存初始 streamlit mock 引用：test_charts.py 等模块在收集阶段的
+# ``import streamlit as st`` 绑定到此对象。若后续 _mock_streamlit_module
+# 创建新 MagicMock 注入 sys.modules，经过 test_app_ui 的 _fix_streamlit()
+# 删模块后再恢复时，测试代码持有的 st 与 sys.modules["streamlit"] 将是
+# 不同对象，导致 monkeypatch.setattr 修改的是旧 mock 而运行时代码路径
+# 从 sys.modules 拿到新 mock，patch 不对齐。
+_STREAMLIT_MOCK = sys.modules["streamlit"]
+
 
 @pytest.fixture(autouse=True)
 def _mock_streamlit_module():
@@ -59,11 +67,13 @@ def _mock_streamlit_module():
     test_charts.py）导入链受真实 streamlit 污染。
 
     本 autouse fixture 在每个测试函数运行前检测：若 streamlit 已
-    被替换为真实模块，则重新注入 MagicMock。
+    被替换为真实模块，则重新注入 **保存的** MagicMock（复用初始实例，
+    确保 test_charts.py 等模块的 ``import streamlit as st`` 引用
+    与 sys.modules 中的对象一致）。
     """
     st_mod = sys.modules.get("streamlit")
     if st_mod is None or "MagicMock" not in type(st_mod).__name__:
-        sys.modules["streamlit"] = _make_streamlit_mock()
+        sys.modules["streamlit"] = _STREAMLIT_MOCK
     yield
     # 不主动拆 mock — 下一个测试的 setup 会处理状态检查
 
@@ -190,6 +200,9 @@ def _reset_db_connection():
         close_conn()
     except Exception:
         pass
+    # 强制清理可能的 mock patch 残留
+    import gc
+    gc.collect()
 
 
 @pytest.fixture(autouse=True)
@@ -239,6 +252,65 @@ def _restore_engine_get_conn():
         import filter.data.db as _dbmod
         if isinstance(eng.get_conn, MagicMock):
             eng.get_conn = _dbmod.get_conn
+    except Exception:
+        pass
+
+
+# 保存关键模块引用：test_app_ui 的 _fix_streamlit() 会从 sys.modules
+# 中删除 filter.* / data.* / browse.* / charts.* 等前缀模块。模块删除后
+# 若后续测试用 patch("data.store.xxx", ...) mock，patch 通过 importlib
+# 查找时拿到新导入的模块对象，而测试代码持有的类/函数引用仍指向旧模块，
+# 导致 mock 注入对被测代码无效。
+#
+# 策略：在收集阶段（此时 _fix_streamlit 尚未运行）显式导入会被删除的
+# 关键模块，确保测试模块（如 test_engine.py）的 import 拿到同一对象。
+# setup 阶段将保存的模块恢复到 sys.modules。
+#
+# 注意：不保存 data.db / data.loader 等状态可变模块 — 测试运行时可能
+# 修改其 DB_PATH / _local 等属性，恢复原始引用会覆盖测试变更导致副作用。
+_SAVED_SYSMODULES: dict[str, object] = {}
+for _mod_path in [
+    "filter.backtest.engine",   # engine 测试 core
+    "data.store",               # parquet_store 测试 core
+    "backtest.recorder",        # parquet_store 测试 import
+]:
+    try:
+        __import__(_mod_path, fromlist=["_"])
+        _SAVED_SYSMODULES[_mod_path] = sys.modules[_mod_path]
+    except ImportError:
+        pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_engine_state():
+    """每个测试后清理 engine 模块级状态并恢复被 test_app_ui 删除的关键模块。
+
+    问题根因:
+    test_app_ui 的 ``_fix_streamlit()`` 遍历 ``sys.modules`` 删除所有
+    filter.* / data.* / engine.* 等前缀模块。删除后引擎测试的模块级
+    ``from filter.backtest.engine import BacktestRunner`` 持有的类引用
+    与原模块不同，``patch("filter.backtest.engine.get_conn", ...)`` 通过
+    ``importlib`` 查找时拿到新导入的模块，两模块的 ``get_conn`` 不是同一
+    对象，导致 mock 注入对 BacktestRunner 无效（使用真实 DB 连接，bar_count=0）。
+
+    策略:
+    1. setup 阶段: 若关键模块被从 sys.modules 删除，恢复保存的原始引用
+       → patch() 能定位到正确模块
+    2. teardown 阶段: 用 ``is`` 身份比较确保 get_conn 未被 mock 残留替换
+       → 比 isinstance 检查更通用（覆盖 lambda/函数包装器等非 MagicMock）
+    """
+    # ── setup: 恢复被 test_app_ui 删除的关键模块 ──
+    for _mod_name, _mod_obj in _SAVED_SYSMODULES.items():
+        if _mod_name not in sys.modules:
+            sys.modules[_mod_name] = _mod_obj
+    yield  # ── 测试执行 ──
+    # ── teardown: 清理 get_conn mock 残留 ──
+    try:
+        import filter.backtest.engine as eng
+        if hasattr(eng, "get_conn"):
+            from filter.data.db import get_conn as real_get_conn
+            if eng.get_conn is not real_get_conn:
+                eng.get_conn = real_get_conn
     except Exception:
         pass
 
