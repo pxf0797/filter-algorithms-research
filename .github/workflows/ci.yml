@@ -37,7 +37,13 @@ jobs:
         with: {python-version: '3.12'}
       - run: pip install pip-tools
       - run: |
-          pip-compile --dry-run filter/requirements.txt 2>&1 | tee /dev/stderr | grep -q "is up-to-date" || (echo "::error::requirements.lock is stale" && exit 1)
+          pip-compile --output-file=/tmp/requirements.lock.ci filter/requirements.txt --quiet
+          if ! diff -q requirements.lock /tmp/requirements.lock.ci > /dev/null 2>&1; then
+            echo "::error::requirements.lock is stale. Run 'make lock' to update."
+            diff requirements.lock /tmp/requirements.lock.ci || true
+            exit 1
+          fi
+          echo "requirements.lock is up-to-date"
 
   type-check:
     runs-on: ubuntu-latest
