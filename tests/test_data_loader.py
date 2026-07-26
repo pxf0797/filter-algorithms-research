@@ -232,13 +232,8 @@ class TestFetchStock:
         df = _mock_ohlc_df(days=10)
         df.iloc[-1, df.columns.get_loc("Close")] = np.nan
 
-        def yf_side_effect(ticker, **kw):
-            if kw.get("interval") == "1wk":
-                raise ValueError("API error")
-            return df
-
-        with patch("filter.data.fetcher.yf.download",
-                   side_effect=yf_side_effect), \
+        with patch("filter.data.fetcher._download_with_retry",
+                   side_effect=[df, ValueError("API error")]), \
              patch("filter.data.fetcher.upsert_kline"), \
              patch("filter.data.fetcher.query_kline",
                    return_value=_query_result(df.dropna(subset=["Close"]))):
@@ -346,7 +341,7 @@ class TestFetchStock:
 
     def test_yfinance_exception(self):
         """yfinance 本身抛出异常时冒泡."""
-        with patch("filter.data.fetcher.yf.download",
+        with patch("filter.data.fetcher._download_with_retry",
                    side_effect=ConnectionError("network error")):
             from data.loader import _fetch_stock
             with pytest.raises(ConnectionError):
@@ -1002,7 +997,7 @@ class TestFetchStockEdgeCases:
 
     def test_yfinance_download_network_error(self):
         """yfinance 网络错误冒泡为异常."""
-        with patch("filter.data.fetcher.yf.download",
+        with patch("filter.data.fetcher._download_with_retry",
                    side_effect=ConnectionError("network timeout")):
             from data.loader import _fetch_stock
             with pytest.raises(ConnectionError, match="network timeout"):
