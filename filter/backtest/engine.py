@@ -97,6 +97,12 @@ class BacktestRunner:
         # bar 总数
         self._bar_count: int = self._query_bar_count()
 
+        # B15: 文件存在性缓存 — 避免逐 bar os.path.exists()
+        self._file_exists: dict[str, bool] = {}
+
+        # B16: 窗口数据排序缓存 — 避免逐 bar set_index().sort_index()
+        self._sorted_window_cache: dict[str, tuple] = {}
+
         # P0-3: 一次性预加载全部 bar 信息到内存，避免逐 bar LIMIT 1 OFFSET N
         self._MAX_BAR_CACHE = 200_000
         self._bar_info_cache: list[dict] = self._load_all_bar_info()
@@ -169,6 +175,13 @@ class BacktestRunner:
 
         results: list[dict] = []
 
+        # B17: 预计算排好序的视图索引 — 避免逐 bar ALL_TFS.index()
+        self._sorted_views: list[tuple[int, dict]] = sorted(
+            enumerate(self.configs),
+            key=lambda x: ALL_TFS.index(x[1]["tf"]),
+            reverse=True,  # 粗→细
+        )
+
         for bar_index in range(start_bar, end_bar, step_interval):
             bar_info = self._get_bar_info(bar_index)
             cutoff_date = bar_info["cutoff_date"]
@@ -185,19 +198,13 @@ class BacktestRunner:
             # 存储每 TF 的 PnL 结果，供低周期视图做跨周期对齐
             tf_pnl_cache: dict[str, dict] = {}
 
-            sorted_views = sorted(
-                enumerate(self.configs),
-                key=lambda x: ALL_TFS.index(x[1]["tf"]),
-                reverse=True,  # 粗→细
-            )
-
             # P3-2: 多视图并行计算 — 预加载窗口数据，然后并行运行管道
             _use_parallel = os.environ.get("BACKTEST_PARALLEL_VIEWS", "1") == "1"
-            if _use_parallel and len(sorted_views) > 1:
+            if _use_parallel and len(self._sorted_views) > 1:
                 # 阶段 1: 预加载所有窗口数据
                 preloaded: dict[str, tuple] = {}
                 ewma_inits: dict[str, Optional[dict]] = {}
-                for view_index, view_cfg in sorted_views:
+                for view_index, view_cfg in self._sorted_views:
                     tf = view_cfg["tf"]
                     n_pts = view_cfg.get("n_pts", 120)
                     view_key = f"v{view_index}_{tf}"
@@ -213,7 +220,7 @@ class BacktestRunner:
                 if n_views > 0:
                     pipeline_futures: dict = {}
                     with ThreadPoolExecutor(max_workers=min(n_views, 4)) as executor:
-                        for view_index, view_cfg in sorted_views:
+                        for view_index, view_cfg in self._sorted_views:
                             view_key = f"v{view_index}_{view_cfg['tf']}"
                             if view_key not in preloaded:
                                 continue
@@ -240,7 +247,7 @@ class BacktestRunner:
                             view_outputs[view_key] = stage_output
             else:
                 # 顺序模式（原有逻辑，保持兼容）
-                for view_index, view_cfg in sorted_views:
+                for view_index, view_cfg in self._sorted_views:
                     tf = view_cfg["tf"]
                     n_pts = view_cfg.get("n_pts", 120)
                     view_key = f"v{view_index}_{tf}"
@@ -539,16 +546,32 @@ class BacktestRunner:
         """
         df = load_display_cache(self.ticker, tf)
         if df is None:
-            if not (Path(__file__).parent.parent.parent / "data" / "display" / self.ticker / f"{tf}.parquet").exists():
+            # B15: lazy 文件存在性检查 — 首次检查后缓存结果
+            if tf not in self._file_exists:
+                _display_dir = Path(__file__).parent.parent.parent / "data" / "display"
+                _parquet_path = _display_dir / self.ticker / f"{tf}.parquet"
+                self._file_exists[tf] = _parquet_path.exists()
+            if not self._file_exists[tf]:
                 logger.warning("parquet 不存在: {}", Path(__file__).parent.parent.parent / "data" / "display" / self.ticker / f"{tf}.parquet")
             return None
+        # B15: 文件存在时更新缓存标记
+        self._file_exists[tf] = True
 
         if "Date" not in df.columns or "Close" not in df.columns:
             logger.warning("parquet {}/{} 缺少 Date/Close 列", self.ticker, tf)
             return None
 
         df["Date"] = pd.to_datetime(df["Date"])
-        df = df.set_index("Date").sort_index()
+
+        # B16: 缓存 set_index().sort_index() 结果 — 数据内容不变时跳过重排
+        _sig = (len(df), str(df["Date"].iloc[0]), str(df["Date"].iloc[-1]),
+                str(df["Close"].iloc[0]))
+        _cached = self._sorted_window_cache.get(tf)
+        if _cached is not None and _cached[0] == _sig:
+            df = _cached[1].copy()
+        else:
+            df = df.set_index("Date").sort_index()
+            self._sorted_window_cache[tf] = (_sig, df.copy())
 
         # Per-bar windowing: filter to cutoff_date, keep last n_pts bars
         if cutoff_date is not None:

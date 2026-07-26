@@ -138,6 +138,11 @@ def _render_preset_selector(market, ticker_code) -> None:
     if selected_preset:
         p = selected_preset
         st.sidebar.caption(f"💡 {p['description']}")
+
+        def _cancel_preset_action() -> None:
+            AppState.pop("_preset_action")
+            AppState.pop("_preset_action_id")
+
         c1, c2, c3, c4 = st.sidebar.columns([1.2, 1, 1, 0.8])
         with c1:
             # P2-opt: on_click callback — Streamlit auto-reruns, no explicit st.rerun() needed
@@ -190,8 +195,7 @@ def _render_preset_selector(market, ticker_code) -> None:
             with cc2:
                 # P1-4: on_click callback — Streamlit auto-reruns after callback
                 st.button("取消", key="update_cancel_btn", use_container_width=True,
-                          on_click=lambda: (AppState.pop("_preset_action"),
-                                            AppState.pop("_preset_action_id")))
+                          on_click=_cancel_preset_action)
         elif _action == "rename":
             st.sidebar.caption(f"重命名 **{target['name']}**")
             new_name = st.sidebar.text_input("新名称", value=target["name"],
@@ -212,8 +216,7 @@ def _render_preset_selector(market, ticker_code) -> None:
             with cc2:
                 # P1-4: on_click callback — Streamlit auto-reruns after callback
                 st.button("取消", key="rename_cancel_btn", use_container_width=True,
-                          on_click=lambda: (AppState.pop("_preset_action"),
-                                            AppState.pop("_preset_action_id")))
+                          on_click=_cancel_preset_action)
         elif _action == "delete":
             st.sidebar.error(f"确认删除 **{target['name']}**？此操作不可恢复。")
             cc1, cc2 = st.sidebar.columns(2)
@@ -229,8 +232,7 @@ def _render_preset_selector(market, ticker_code) -> None:
             with cc2:
                 # P1-4: on_click callback — Streamlit auto-reruns after callback
                 st.button("取消", key="delete_cancel_btn", use_container_width=True,
-                          on_click=lambda: (AppState.pop("_preset_action"),
-                                            AppState.pop("_preset_action_id")))
+                          on_click=_cancel_preset_action)
 
     # Save as preset
     with st.sidebar.expander("💾 保存 / 另存为预设", expanded=False):
@@ -398,13 +400,13 @@ def _render_data_validation(market, ticker_code) -> None:
 
 def _render_filter_selectors() -> tuple:
     """Render filter selector widgets. Returns (filter_id, dual, filter_id2)."""
-    filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),
-        format_func=lambda x: FILTERS.get(x, {}).get("name", x), key="global_f")
+    filter_id = st.sidebar.selectbox("滤波器", list(FILTERS.keys()),  # type: ignore[arg-type]
+        format_func=lambda x: FILTERS.get(x, {}).get("name", x), key="global_f")  # type: ignore[arg-type,return-value]
     dual = st.sidebar.checkbox("双滤波对比", value=False, key="global_dual")
     filter_id2 = None
     if dual:
-        filter_id2 = st.sidebar.selectbox("滤波器 2", list(FILTERS.keys()),
-            format_func=lambda x: FILTERS.get(x, {}).get("name", x), key="global_f2")
+        filter_id2 = st.sidebar.selectbox("滤波器 2", list(FILTERS.keys()),  # type: ignore[arg-type]
+            format_func=lambda x: FILTERS.get(x, {}).get("name", x), key="global_f2")  # type: ignore[arg-type,return-value]
     return filter_id, dual, filter_id2
 
 
@@ -464,11 +466,11 @@ def _render_db_backup() -> None:
                         st.error(f"恢复失败: {e}")
             with c_r2:
                 # P2-opt: on_click callback — Streamlit auto-reruns, no explicit st.rerun()
+                def _delete_snapshot_cb() -> None:
+                    os.remove(snapshots[selected_idx][0])
+                    logger.info(f"Snapshot deleted: {snap_labels[selected_idx]}")
                 st.button("删除此备份", key="del_snap_btn", use_container_width=True,
-                          on_click=lambda idx=selected_idx: (
-                              os.remove(snapshots[idx][0]),
-                              logger.info(f"Snapshot deleted: {snap_labels[idx]}"),
-                          ))
+                          on_click=_delete_snapshot_cb)
 
 
 def _view_export_params(cfg, i) -> dict:
@@ -489,11 +491,11 @@ def _render_export_config(configs, filter_id, filter_id2, dual, market, ticker_c
     }
     for i, cfg in enumerate(configs):
         export_data.update(_view_export_params(cfg, i))
-        f1 = FILTERS.get(filter_id, {})
+        f1: dict = FILTERS.get(filter_id, {})  # type: ignore[assignment]
         for pname, pval in cfg.get("pv", {}).items():
             label = f1["params"].get(pname, (pname,))[0]
             export_data[f"{label}_v{i}_f1_{filter_id}"] = pval
-        f2 = FILTERS.get(filter_id2, {}) if filter_id2 else {}
+        f2: dict = FILTERS.get(filter_id2, {}) if filter_id2 else {}  # type: ignore[assignment]
         for pname, pval in cfg.get("pv2", {}).items():
             label = f2["params"].get(pname, (pname,))[0]
             export_data[f"{label}_v{i}_f2_{filter_id2}"] = pval

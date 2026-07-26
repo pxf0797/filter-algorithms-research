@@ -94,7 +94,7 @@ def _determine_subplot_layout(has_s, has_strategy, has_cross, has_alignment, _hi
                 if has_alignment:
                     rows = 8
                     rh = [0.48, 0.11, 0.06, 0.06, 0.08, 0.24, 0.05, 0.18]
-                    titles = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}持仓状态", "同向性判断")
+                    titles: tuple[str, ...] = ("价格&滤波", "残差", "速度v", "a&±ε", "Sig_t", "PnL收益(%)", f"{_higher_tf}持仓状态", "同向性判断")
                     pnl_row = 6
                     cross_row = 7
                     align_row = 8
@@ -240,13 +240,20 @@ def _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row, colorblind: 
     _pnl_x = f"x{pnl_row}"; _pnl_y = f"y{pnl_row}"
     _pnl_annotations = []  # collected annotations (replaces fig.add_annotation)
     # Trace merge: 逐笔交易段合并为 2 条 (多/空), NaN 分隔
-    _l_seg, _s_seg = [], []
-    _l_entry_x, _l_entry_y = [], []  # ▲ 入场标记
-    _s_entry_x, _s_entry_y = [], []
-    _l_exit_sl_x,   _l_exit_sl_y   = [], []  # ✕ 止损离场
-    _l_exit_tp_x,   _l_exit_tp_y   = [], []  # ○ 止盈离场
-    _s_exit_sl_x,   _s_exit_sl_y   = [], []
-    _s_exit_tp_x,   _s_exit_tp_y   = [], []
+    _l_seg: list[tuple[float, float]] = []
+    _s_seg: list[tuple[float, float]] = []
+    _l_entry_x: list[float] = []
+    _l_entry_y: list[float] = []  # ▲ 入场标记
+    _s_entry_x: list[float] = []
+    _s_entry_y: list[float] = []
+    _l_exit_sl_x: list[float] = []
+    _l_exit_sl_y: list[float] = []  # ✕ 止损离场
+    _l_exit_tp_x: list[float] = []
+    _l_exit_tp_y: list[float] = []  # ○ 止盈离场
+    _s_exit_sl_x: list[float] = []
+    _s_exit_sl_y: list[float] = []
+    _s_exit_tp_x: list[float] = []
+    _s_exit_tp_y: list[float] = []
     for trade in trade_records:
         seg_t = t[trade["entry_idx"]:trade["exit_idx"] + 1]
         curve = long_pnl if trade["type"] == "long" else short_pnl

@@ -233,6 +233,8 @@ def _compute_strategy_display(t, filtered, schmitt, all_pairs, pred_pairs, cfg, 
 
     has_strategy = show_strategy and long_pnl is not None and len(trade_records) > 0
     if has_strategy and trade_records:
+        assert long_pnl is not None
+        assert short_pnl is not None
         c4, c5, c6 = st.columns(3)
         win_trades = sum(1 for tr in trade_records if tr["return_pct"] > 0)
         long_ret = long_pnl[-1] - 100.0
@@ -881,7 +883,7 @@ def main() -> None:
                                       AppState.get("_min_tf", ""), ALL_TFS)
 
     # PIPELINE_CAPTURE: per-step data collector (populated by _render_chart)
-    _capture_collector = {} if "_pipeline_capture" in st.session_state else None
+    _capture_collector: dict[str, object] | None = {} if "_pipeline_capture" in st.session_state else None
 
     grid_cols = []
     for row_idx in range(2):
