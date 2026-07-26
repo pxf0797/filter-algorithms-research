@@ -6,6 +6,7 @@ filter/db.py — SQLite 数据层
 import os
 import sqlite3
 import shutil
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
@@ -15,62 +16,69 @@ from loguru import logger
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "market.db"
 SNAPSHOT_DIR = DB_PATH.parent / "snapshots"
 
-# 模块级连接复用：避免每次操作创建新连接的开销 (P2-3 B38)
-_conn: Optional[sqlite3.Connection] = None
-_conn_db_path: Optional[str] = None
+# Thread-local connection storage (fix: B38 singleton was not thread-safe —
+# ThreadPoolExecutor workers in _fetch_all_timeframes couldn't use the
+# main-thread connection due to check_same_thread=True, causing upsert_kline
+# to fail silently and data to never persist to SQLite).
+_local = threading.local()
 
 
 def get_conn() -> sqlite3.Connection:
-    """获取数据库连接（模块级复用）。
+    """获取数据库连接（线程本地复用）。
 
-    首次调用时创建连接并配置 WAL 模式、同步参数和性能 PRAGMA。
-    后续调用返回同一连接实例，避免重复创建连接的开销。
-    当 DB_PATH 变更时自动重建连接（测试场景支持）。
+    每个线程首次调用时创建并配置 WAL 模式、同步参数和性能 PRAGMA。
+    同一线程内后续调用返回同一连接实例，避免重复创建连接的开销。
+    当 DB_PATH 变更时自动重建当前线程的连接（测试场景支持）。
 
     Returns
     -------
     sqlite3.Connection
-        配置好的数据库连接对象（模块级单例）。
+        配置好的数据库连接对象（线程本地单例）。
     """
-    global _conn, _conn_db_path
     current_path = str(DB_PATH)
 
-    # DB_PATH 未变且连接有效：直接复用
-    if _conn is not None and _conn_db_path == current_path:
-        return _conn
+    conn = getattr(_local, "conn", None)
+    conn_path = getattr(_local, "conn_path", None)
 
-    # 需要重建连接（首次调用或 DB_PATH 变更）
-    if _conn is not None:
+    # 同线程、同路径：直接复用
+    if conn is not None and conn_path == current_path:
+        return conn
+
+    # 路径变更或首次调用：关闭旧连接（若存在）并创建新连接
+    if conn is not None:
         try:
-            _conn.close()
+            conn.close()
         except Exception:
             pass
+
     logger.debug("Connecting to DB: {}", current_path)
-    _conn = sqlite3.connect(current_path)
-    _conn.execute("PRAGMA journal_mode=WAL")
-    _conn.execute("PRAGMA synchronous=NORMAL")
-    _conn.execute("PRAGMA busy_timeout=5000")
-    _conn.execute("PRAGMA mmap_size=268435456")      # 256MB mmap (P0-4)
-    _conn.execute("PRAGMA temp_store=MEMORY")          # temp tables in memory (P0-4)
-    _conn.execute("PRAGMA cache_size=-32768")          # 32MB page cache (P0-4)
-    _conn.row_factory = sqlite3.Row
-    _conn_db_path = current_path
-    return _conn
+    conn = sqlite3.connect(current_path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA mmap_size=268435456")      # 256MB mmap (P0-4)
+    conn.execute("PRAGMA temp_store=MEMORY")          # temp tables in memory (P0-4)
+    conn.execute("PRAGMA cache_size=-32768")          # 32MB page cache (P0-4)
+    conn.row_factory = sqlite3.Row
+
+    _local.conn = conn
+    _local.conn_path = current_path
+    return conn
 
 
 def close_conn():
-    """关闭模块级数据库连接。
+    """关闭当前线程的数据库连接。
 
     用于测试清理和 DB_PATH 变更时重建连接。
     """
-    global _conn, _conn_db_path
-    if _conn is not None:
+    conn = getattr(_local, "conn", None)
+    if conn is not None:
         try:
-            _conn.close()
+            conn.close()
         except Exception:
             pass
-        _conn = None
-    _conn_db_path = None
+        _local.conn = None
+        _local.conn_path = None
 
 
 def init_db():

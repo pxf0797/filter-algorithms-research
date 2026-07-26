@@ -984,7 +984,7 @@ class TestPragmaOptimization:
         assert conn2 is conn3, "get_conn() should return the same connection instance"
 
     def test_connection_reuse_persists_across_operations(self, db_target):
-        """验证多次数据库操作使用同一连接（P2-3 B38）。"""
+        """验证多次数据库操作使用同一连接（P2-3 B38 → 线程本地复用）。"""
         import data.db as db
 
         # 执行写操作（内部调用 get_conn）
@@ -995,8 +995,9 @@ class TestPragmaOptimization:
         result = db.query_kline("AAPL", "日线", n_pts=5)
         assert len(result) == 5
 
-        # 验证连接未因多次 with get_conn() as conn: 而损坏
-        assert db._conn is not None, "Connection should persist after operations"
+        # 验证当前线程的连接仍然有效（线程本地复用）
+        conn = getattr(db._local, "conn", None)
+        assert conn is not None, "Connection should persist after operations"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1041,3 +1042,224 @@ class TestForceUpdateBatch:
         df_empty = pd.DataFrame(columns=["Open", "High", "Low", "Close", "Volume"])
         # 空 DataFrame 不应引发异常
         force_update_kline("TEST_EMPTY", "日线", df_empty)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# B38 Thread-Safety Regression: 数据刷新持久化修复
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestThreadLocalConnection:
+    """验证线程本地连接修复：多线程写入后数据正确持久化。"""
+
+    def test_same_thread_returns_same_connection(self, db_target):
+        """同一线程多次调用 get_conn() 返回同一连接实例。"""
+        import data.db as db
+        conn1 = db.get_conn()
+        conn2 = db.get_conn()
+        assert conn1 is conn2, "同一线程应复用连接"
+
+    def test_different_threads_get_different_connections(self, db_target):
+        """不同线程调用 get_conn() 返回不同连接实例。"""
+        import data.db as db
+        import threading
+
+        results = {}
+        barrier = threading.Barrier(3, timeout=5)
+
+        def worker(tid):
+            conn = db.get_conn()
+            results[tid] = id(conn)
+            barrier.wait()
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=10)
+
+        # 三个线程应有三个不同的连接实例
+        assert len(set(results.values())) == 3, (
+            f"Expected 3 unique connections, got {len(set(results.values()))}"
+        )
+
+    def test_write_in_worker_thread_persisted_to_main_thread(self, db_target):
+        """工作线程写入后，主线程可读取（模拟 _fetch_all_timeframes 场景）。
+
+        这是 B38 回归的精确重现：ThreadPoolExecutor worker 线程通过
+        upsert_kline 写入数据，然后在主线程通过 query_kline 读取。
+        修复前，worker 线程因 check_same_thread 限制无法使用主线程的
+        单例连接，导致数据静默丢失。
+        """
+        import data.db as db
+        import threading
+        import pandas as pd
+        import numpy as np
+
+        db_module, db_path = db_target
+
+        dates = pd.date_range("2024-01-01", periods=30, freq="D")
+        np.random.seed(42)
+        df = pd.DataFrame({
+            "Open": np.random.randn(30) + 100,
+            "High": np.random.randn(30) + 101,
+            "Low": np.random.randn(30) + 99,
+            "Close": np.random.randn(30) + 100,
+            "Volume": np.random.randint(1000, 10000, 30),
+        }, index=dates)
+
+        errors = []
+        barrier = threading.Barrier(2, timeout=5)
+
+        def worker_write():
+            try:
+                barrier.wait()
+                db_module.upsert_kline("THREAD_TEST", "日线", df)
+            except Exception as e:
+                errors.append(str(e))
+
+        t = threading.Thread(target=worker_write)
+        t.start()
+        t.join(timeout=10)
+
+        assert not errors, f"Worker thread write failed: {errors}"
+
+        # 主线程读取：应看到 worker 线程写入的 30 条数据
+        result = db_module.query_kline("THREAD_TEST", "日线", n_pts=50)
+        assert len(result) == 30, (
+            f"Expected 30 rows written by worker thread, got {len(result)}"
+        )
+
+    def test_close_conn_closes_current_thread_only(self, db_target):
+        """close_conn() 只关闭当前线程的连接，不影响其他线程。"""
+        import data.db as db
+        import threading
+
+        # 主线程创建连接
+        main_conn = db.get_conn()
+        worker_conn_id = [None]
+
+        def worker():
+            worker_conn_id[0] = id(db.get_conn())
+
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=10)
+
+        # 关闭主线程连接
+        db.close_conn()
+
+        # 主线程连接应被清除
+        assert getattr(db._local, "conn", None) is None, (
+            "close_conn should clear the current thread's connection"
+        )
+
+        # worker 线程的连接不受影响（通过 id 验证已创建）
+        assert worker_conn_id[0] is not None, "Worker thread should have a connection"
+
+    def test_multiple_parallel_writes_all_persisted(self, db_target):
+        """多个工作线程并行写入，全部数据正确持久化。
+
+        模拟 _fetch_all_timeframes 8 个周期并行写入的完整场景。
+        """
+        import data.db as db
+        import threading
+        import pandas as pd
+        import numpy as np
+
+        db_module, db_path = db_target
+        n_threads = 8
+        rows_per_thread = 10
+
+        errors = []
+        barrier = threading.Barrier(n_threads, timeout=10)
+
+        def worker_write(tid):
+            try:
+                dates = pd.date_range(
+                    f"2024-{tid+1:02d}-01", periods=rows_per_thread, freq="D"
+                )
+                df = pd.DataFrame({
+                    "Open": np.full(rows_per_thread, 100.0 + tid),
+                    "High": np.full(rows_per_thread, 101.0 + tid),
+                    "Low": np.full(rows_per_thread, 99.0 + tid),
+                    "Close": np.full(rows_per_thread, 100.5 + tid),
+                    "Volume": np.full(rows_per_thread, 1000 * (tid + 1), dtype=float),
+                }, index=dates)
+                barrier.wait()
+                db_module.upsert_kline("PARALLEL_TEST", "日线", df)
+            except Exception as e:
+                errors.append(f"thread_{tid}: {e}")
+
+        threads = [threading.Thread(target=worker_write, args=(i,))
+                   for i in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=15)
+
+        assert not errors, f"Worker thread writes failed: {errors}"
+
+        # 主线程读取：应看到所有 n_threads * rows_per_thread 条数据
+        result = db_module.query_kline("PARALLEL_TEST", "日线", n_pts=500)
+        expected = n_threads * rows_per_thread
+        assert len(result) == expected, (
+            f"Expected {expected} rows from {n_threads} parallel writes, "
+            f"got {len(result)}"
+        )
+
+    def test_version_serialisation_roundtrip(self, db_target):
+        """_save_version 后 _is_cache_valid 返回 True 表示数据可被正确读取。"""
+        import json
+        import pandas as pd
+        import numpy as np
+        from pathlib import Path
+
+        # 创建 display parquet 并保存版本
+        tmp = db_target[1].parent
+        parquet_path = tmp / "test_version.parquet"
+        dates = pd.date_range("2024-01-01", periods=20, freq="D")
+        df = pd.DataFrame({
+            "Date": dates,
+            "Open": np.arange(20, dtype=float) + 100,
+            "High": np.arange(20, dtype=float) + 101,
+            "Low": np.arange(20, dtype=float) + 99,
+            "Close": np.arange(20, dtype=float) + 100,
+            "Volume": np.full(20, 5000, dtype=float),
+        })
+        df.to_parquet(parquet_path, index=False)
+
+        # 直接内联 _save_version 逻辑验证版本写入
+        import pyarrow.parquet as pq
+        mtime = parquet_path.stat().st_mtime
+        nrows = pq.ParquetFile(parquet_path).metadata.num_rows
+        vp = parquet_path.with_suffix(".version.json")
+        vp.write_text(json.dumps({"mtime": mtime, "rows": nrows}))
+
+        # 验证缓存有效
+        from data.loader import _is_cache_valid
+        assert _is_cache_valid(parquet_path), "Fresh version should validate"
+
+        # 模拟刷新：写入新数据 → mtime 变化 → version 更新
+        df2 = pd.DataFrame({
+            "Date": pd.date_range("2024-02-01", periods=25, freq="D"),
+            "Open": np.arange(25, dtype=float) + 200,
+            "High": np.arange(25, dtype=float) + 201,
+            "Low": np.arange(25, dtype=float) + 199,
+            "Close": np.arange(25, dtype=float) + 200,
+            "Volume": np.full(25, 8000, dtype=float),
+        })
+        df2.to_parquet(parquet_path, index=False)
+
+        # 旧 version 应失效
+        assert not _is_cache_valid(parquet_path), (
+            "Version should be invalid after data change (mtime mismatch)"
+        )
+
+        # 写入新 version
+        mtime2 = parquet_path.stat().st_mtime
+        nrows2 = pq.ParquetFile(parquet_path).metadata.num_rows
+        vp.write_text(json.dumps({"mtime": mtime2, "rows": nrows2}))
+
+        # 新 version 应有效，行数对应新数据
+        assert _is_cache_valid(parquet_path), "Updated version should validate"
+        assert nrows2 == 25, f"Expected 25 rows after refresh, got {nrows2}"
