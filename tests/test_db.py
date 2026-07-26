@@ -639,11 +639,14 @@ class TestSnapshotBackup:
 
     def test_snapshot_list(self, populate_kline):
         """list_snapshots 返回正确列表。"""
-        import time
+        from datetime import datetime
         db_module, _ = populate_kline
-        db_module.snapshot_db()
-        time.sleep(1.1)  # 确保不同秒，避免文件名冲突
-        db_module.snapshot_db()
+        # Mock 时间替代 sleep：生成不同秒的快照文件名
+        times = [datetime(2026, 1, 1, 12, 0, 0), datetime(2026, 1, 1, 12, 0, 5)]
+        with patch('data.db.datetime') as mock_dt:
+            mock_dt.now.side_effect = times
+            db_module.snapshot_db()
+            db_module.snapshot_db()
         snaps = db_module.list_snapshots()
         assert len(snaps) == 2
         # 每条记录包含 path, mtime, size_mb, label
@@ -691,13 +694,15 @@ class TestSnapshotBackup:
 
     def test_prune_snapshots(self, populate_kline):
         """创建 3 个快照 → prune(max_keep=2) → 保留 2 个。"""
-        import time
+        from datetime import datetime
         db_module, _ = populate_kline
-        db_module.snapshot_db()
-        time.sleep(1.1)
-        db_module.snapshot_db()
-        time.sleep(1.1)
-        db_module.snapshot_db()
+        # Mock 时间替代 sleep：生成不同秒的快照文件名
+        times = [datetime(2026, 1, 1, 12, 0, 0), datetime(2026, 1, 1, 12, 0, 5), datetime(2026, 1, 1, 12, 0, 10)]
+        with patch('data.db.datetime') as mock_dt:
+            mock_dt.now.side_effect = times
+            db_module.snapshot_db()
+            db_module.snapshot_db()
+            db_module.snapshot_db()
         assert len(db_module.list_snapshots()) == 3
         db_module.prune_snapshots(max_keep=2)
         assert len(db_module.list_snapshots()) == 2

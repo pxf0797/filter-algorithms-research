@@ -568,15 +568,20 @@ class TestPipelineCaptureCleanup:
     def test_second_session_creates_separate_dir(self, tmp_path):
         """Each start_session call creates a separate session directory."""
         from filter.backtest.capture import PipelineCapture
-        import time
+        from datetime import datetime, timedelta
+        from itertools import count
 
         capture = PipelineCapture(output_dir=str(tmp_path), ticker="AAPL")
-        sid1 = capture.start_session()
-        assert sid1 != ""
-        # Sleep to ensure the next timestamp is different
-        time.sleep(1.1)
-        sid2 = capture.start_session()
-        assert sid2 != ""
+
+        # Mock 时间替代 sleep：每个 datetime.now() 返回递增的时间戳
+        counter = count()
+        with patch('filter.backtest.capture.datetime') as mock_dt:
+            mock_dt.now.side_effect = lambda *a, **kw: datetime(2026, 1, 1, 12, 0, 0) + timedelta(seconds=next(counter) * 10)
+            sid1 = capture.start_session()
+            assert sid1 != ""
+            sid2 = capture.start_session()
+            assert sid2 != ""
+
         assert sid1 != sid2, (
             f"Expected different session IDs, got {sid1!r} and {sid2!r}"
         )

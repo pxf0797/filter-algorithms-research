@@ -989,19 +989,21 @@ class TestConcurrencySafety:
 
     def test_same_ticker_serial_runs_isolated(self, tmp_path):
         """同一 ticker 串行运行使用不同的 session 目录。"""
-        import time
+        from datetime import datetime, timedelta
+        from itertools import count
+        from unittest import mock
 
         store = ParquetStore(str(tmp_path), "AAPL", [{"name": "v0"}])
 
-        sid1 = store.start_session()
-        dir1 = store._session_dir
-        store.end_session()
-
-        # 等待至少 1 秒以确保时间戳不同（session ID 精度为秒级）
-        time.sleep(1.1)
-
-        sid2 = store.start_session()
-        dir2 = store._session_dir
+        # Mock 时间替代 sleep：每个 datetime.now() 返回递增的时间戳
+        counter = count()
+        with mock.patch('data.store.datetime') as mock_dt:
+            mock_dt.now.side_effect = lambda *a, **kw: datetime(2026, 1, 1, 12, 0, 0) + timedelta(seconds=next(counter) * 10)
+            sid1 = store.start_session()
+            dir1 = store._session_dir
+            store.end_session()
+            sid2 = store.start_session()
+            dir2 = store._session_dir
 
         assert dir1 != dir2, (
             f"Serial runs should use different session dirs: {dir1} == {dir2}"
