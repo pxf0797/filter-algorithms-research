@@ -384,7 +384,7 @@ class TestRenderParams:
 
     @patch("browse.components_sidebar.FILTERS", {})
     def test_render_params_unknown_filter_warning(self):
-        """未知 filter_id 触发 st.warning 并提前返回 None."""
+        """未知 filter_id 触发 st.warning 但始终返回 cfg dict（修复: 不再返回 None）."""
         mock_warning = MagicMock()
         mock_cols = [MagicMock() for _ in range(5)]
         with patch("browse.components_sidebar.st.warning", mock_warning), \
@@ -406,7 +406,100 @@ class TestRenderParams:
             )
 
         mock_warning.assert_called_once()
-        assert cfg is None
+        # ★ 修复验证: cfg 始终是 dict，不是 None
+        assert cfg is not None
+        assert isinstance(cfg, dict)
+        # 核心 key 必须存在
+        for k in ["_fid", "_dual", "_fid2", "tf", "n_pts", "show_sch",
+                  "ke", "sm", "ew", "show_pred", "n_ext", "fit_mode",
+                  "pv", "pv2", "fc", "fc2"]:
+            assert k in cfg, f"缺少必要key: {k}"
+        assert cfg["pv"] == {}
+
+    @patch("browse.components_sidebar.FILTERS", {
+        "sma": {
+            "name": "SMA",
+            "func": lambda x: x,
+            "params": {"window": ("窗口大小", 3, 101, 2, 11)},
+        },
+    })
+    def test_render_params_valid_filter_sets_pv(self):
+        """有效 filter_id 正确设置 pv 和 fc."""
+        with patch("browse.components_sidebar.st.columns",
+                   return_value=[MagicMock() for _ in range(5)]), \
+             patch("browse.components_sidebar.st.selectbox",
+                   return_value="日线"), \
+             patch("browse.components_sidebar.st.checkbox",
+                   return_value=True), \
+             patch("browse.components_sidebar.st.button",
+                   return_value=False), \
+             patch("browse.components_sidebar.st.session_state",
+                   {}, create=True), \
+             patch("browse.components_sidebar.st.expander"), \
+             patch("browse.components_sidebar.st.slider",
+                   return_value=50.0), \
+             patch("browse.components_sidebar.st.color_picker",
+                   return_value="#ff6b6b"):
+            from browse.components_sidebar import _render_params
+            cfg = _render_params(
+                key="v1", filter_id="sma", dual=False,
+                filter_id2=None, tf_default="日线",
+            )
+
+        # pv 为 dict（具体值由 mock slider 决定）
+        assert "pv" in cfg
+        assert isinstance(cfg["pv"], dict)
+        assert "pv2" in cfg
+        assert isinstance(cfg["pv2"], dict)
+        # fc 来自 color_picker mock 或 session_state fallback
+        assert "fc" in cfg
+        # fc2 在 dual=False 时固定为默认颜色
+        assert "fc2" in cfg
+
+    @patch("browse.components_sidebar.FILTERS", {
+        "sma": {
+            "name": "SMA",
+            "func": lambda x: x,
+            "params": {"window": ("窗口大小", 3, 101, 2, 11)},
+        },
+        "ema": {
+            "name": "EMA",
+            "func": lambda x: x,
+            "params": {"span": ("跨度", 2, 100, 1, 10)},
+        },
+    })
+    def test_render_params_dual_filter_sets_pv_and_pv2(self):
+        """dual=True + 有效 filter_id2 正确设置 pv 和 pv2."""
+        mock_cols_1 = [MagicMock() for _ in range(5)]
+        with patch("browse.components_sidebar.st.columns",
+                   return_value=mock_cols_1), \
+             patch("browse.components_sidebar.st.selectbox",
+                   return_value="60分钟"), \
+             patch("browse.components_sidebar.st.checkbox",
+                   return_value=True), \
+             patch("browse.components_sidebar.st.button",
+                   return_value=False), \
+             patch("browse.components_sidebar.st.session_state",
+                   {}, create=True), \
+             patch("browse.components_sidebar.st.expander"), \
+             patch("browse.components_sidebar.st.slider",
+                   return_value=50.0), \
+             patch("browse.components_sidebar.st.color_picker",
+                   return_value="#ff6b6b"):
+            from browse.components_sidebar import _render_params
+            cfg = _render_params(
+                key="v2", filter_id="sma", dual=True,
+                filter_id2="ema", tf_default="60分钟",
+            )
+
+        assert cfg["_dual"] is True
+        assert cfg["_fid2"] == "ema"
+        assert "pv" in cfg
+        assert isinstance(cfg["pv"], dict)
+        assert "pv2" in cfg
+        assert isinstance(cfg["pv2"], dict)
+        assert "fc" in cfg
+        assert "fc2" in cfg
 
     @patch("browse.components_sidebar.FILTERS", {
         "sma": {

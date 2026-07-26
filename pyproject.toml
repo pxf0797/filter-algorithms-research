@@ -6,11 +6,18 @@ target-version = "py311"
 select = ["E", "F", "W"]
 ignore = ["E501"]
 
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "filter-research"
 version = "3.5.0"
 description = "多周期股票滤波分析工具"
 requires-python = ">=3.11"
+
+[tool.setuptools.packages.find]
+include = ["filter*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

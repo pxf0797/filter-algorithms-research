@@ -239,28 +239,26 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
 
     # 滤波参数 — 可折叠
     sf = FILTERS.get(filter_id)
+    cfg["pv"] = {}
     if sf is None:
         st.warning(f"未知 filter_id: {filter_id}，跳过滤波参数")
-        cfg["pv"] = {}
-        return
-    cfg["pv"] = {}
-    f1 = list(sf["params"].items())
-    with st.expander(f"滤波参数 · {sf['name']}", expanded=exp_all):
-        fc1 = st.columns([1]*len(f1) + [0.25])
-        for j, (pn, sp) in enumerate(f1):
-            with fc1[j]:
-                cfg["pv"][pn] = _render_param_slider(*sp, key_suffix=f"{key}_f1_{filter_id}", container=st)
-        with fc1[-1]:
-            cfg["fc"] = st.color_picker("", "#00d4aa", key=f"{key}_fc", label_visibility="collapsed")
+    else:
+        f1 = list(sf["params"].items())
+        with st.expander(f"滤波参数 · {sf['name']}", expanded=exp_all):
+            fc1 = st.columns([1]*len(f1) + [0.25])
+            for j, (pn, sp) in enumerate(f1):
+                with fc1[j]:
+                    cfg["pv"][pn] = _render_param_slider(*sp, key_suffix=f"{key}_f1_{filter_id}", container=st)
+            with fc1[-1]:
+                cfg["fc"] = st.color_picker("", "#00d4aa", key=f"{key}_fc", label_visibility="collapsed")
 
     # 滤波参数2（可选）
+    cfg["pv2"] = {}
     if dual and filter_id2:
         sf2 = FILTERS.get(filter_id2)
         if sf2 is None:
             st.warning(f"未知 filter_id2: {filter_id2}，跳过滤波参数2")
-            cfg["pv2"] = {}
         else:
-            cfg["pv2"] = {}
             f2 = list(sf2["params"].items())
             with st.expander(f"滤波参数2 · {sf2['name']}", expanded=exp_all):
                 fc2 = st.columns([1]*len(f2) + [0.25])
@@ -270,7 +268,6 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
                 with fc2[-1]:
                     cfg["fc2"] = st.color_picker("", "#ff6b6b", key=f"{key}_fc2", label_visibility="collapsed")
     else:
-        cfg["pv2"] = {}
         cfg["fc2"] = "#ff6b6b"
 
     # 从 session_state 读取最终值（导入参数唯一真相源，含_imp_备份防rerun丢失）
@@ -286,11 +283,12 @@ def _render_params(key: str, filter_id: str, dual: bool, filter_id2: Optional[st
         st.session_state.get(f"_imp_{key}_fm", cfg["fit_mode"]))
     cfg["n_ext"] = st.session_state.get(f"{key}_next",
         st.session_state.get(f"_imp_{key}_next", cfg["n_ext"]))
-    for pname in sf["params"]:
-        label = sf["params"][pname][0]
-        sk = f"{label}_{key}_f1_{filter_id}"
-        cfg["pv"][pname] = st.session_state.get(sk,
-            st.session_state.get(f"_imp_{sk}", cfg["pv"].get(pname, 0)))
+    if sf is not None:
+        for pname in sf["params"]:
+            label = sf["params"][pname][0]
+            sk = f"{label}_{key}_f1_{filter_id}"
+            cfg["pv"][pname] = st.session_state.get(sk,
+                st.session_state.get(f"_imp_{sk}", cfg["pv"].get(pname, 0)))
     if dual and sf2 is not None:
         for pname in sf2["params"]:
             label = sf2["params"][pname][0]

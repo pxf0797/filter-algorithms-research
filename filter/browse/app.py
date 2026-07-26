@@ -299,6 +299,13 @@ def _prepare_chart_data(params: dict) -> dict:
         market, ticker_code, tf, n_pts,
         window_start=window_start, cutoff_date=cutoff_date)
 
+    # ★ Early exit: data loading failed — skip expensive computation
+    if err is not None or t is None or len(t) < 2:
+        return {
+            "err": err or f"数据点不足 ({len(t) if t is not None else 0})",
+            "t": t, "dates": dates, "ticker_full": ticker_full,
+        }
+
     # ── Step 2: Date markers ──
     marker_positions, marker_labels = _date_markers(dates, tf)
 
