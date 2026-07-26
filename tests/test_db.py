@@ -83,6 +83,9 @@ def db_target(tmp_path):
     orig_db = db.DB_PATH
     orig_snap = db.SNAPSHOT_DIR
 
+    # 关闭旧连接（若存在），确保 DB_PATH 变更后重建连接 (P2-3 B38)
+    db.close_conn()
+
     db.DB_PATH = db_path
     db.SNAPSHOT_DIR = snap_dir
     db.init_db()
@@ -90,6 +93,7 @@ def db_target(tmp_path):
     yield db, db_path
 
     # 清理 — 避免影响其他模块/测试
+    db.close_conn()
     db.DB_PATH = orig_db
     db.SNAPSHOT_DIR = orig_snap
 
@@ -380,14 +384,13 @@ class TestCheckDataHealth:
     def test_health_null_values(self, db_target):
         """有空值返回 warn。"""
         db_module, db_path = db_target
-        # 使用 db_module.get_conn() 确保 WAL 可见性一致
+        # 使用 db_module.get_conn() 确保 WAL 可见性一致（P2-3 B38: 不复用后不关闭）
         conn = db_module.get_conn()
         conn.execute("INSERT INTO kline VALUES (?,?,?,?,?,?,?,?)",
                      ("NULLTEST", "日线", "2026-06-01", 100.0, 101.0, 99.0, None, 1000.0))
         conn.execute("INSERT INTO kline VALUES (?,?,?,?,?,?,?,?)",
                      ("NULLTEST", "日线", "2026-06-02", 101.0, 102.0, 100.0, 101.0, 2000.0))
         conn.commit()
-        conn.close()
         report = db_module.check_data_health("NULLTEST")
         assert report["status"] == "warn"
         assert any("空值" in i for i in report["issues"])
@@ -422,7 +425,6 @@ class TestCheckDataHealth:
                      ("BUGTEST", "60分钟", "2026-06-01 09:00", 100.0, 101.0, 99.0, None, 1000.0))
 
         conn.commit()
-        conn.close()
 
         report = db_module.check_data_health("BUGTEST")
         issues = report["issues"]
@@ -438,7 +440,6 @@ class TestCheckDataHealth:
             conn.execute("INSERT INTO kline VALUES (?,?,?,?,?,?,?,?)",
                          ("GAPTEST", "日线", d, 100.0, 101.0, 99.0, 100.0 + i, 1000))
         conn.commit()
-        conn.close()
         report = db_module.check_data_health("GAPTEST")
         assert report["status"] == "warn"
         assert any("缺口" in i for i in report["issues"])
@@ -455,7 +456,6 @@ class TestCheckDataHealth:
         # 实际上这个不能通过"行数为零但周期存在"覆盖 —
         # 通过插入0行记录到另一个tf得到空周期名
         conn.commit()
-        conn.close()
         report = db_module.check_data_health("ZEROTEST")
         assert report["status"] in ("ok", "warn")
 
@@ -936,54 +936,67 @@ class TestConcurrentAccess:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 class TestPragmaOptimization:
-    """验证 get_conn() 返回的连接正确设置了性能 PRAGMA。"""
+    """验证 get_conn() 返回的连接正确设置了性能 PRAGMA。（P2-3 B38: 连接复用后不再逐测试关闭）"""
 
     def test_mmap_size_set(self):
         """get_conn() 应设置 mmap_size。"""
         from filter.data.db import get_conn
 
         conn = get_conn()
-        try:
-            mmap = conn.execute("PRAGMA mmap_size").fetchone()[0]
-            # mmap_size 应 > 0（即已启用 memory-mapped I/O）
-            assert mmap > 0, f"mmap_size should be > 0, got {mmap}"
-        finally:
-            conn.close()
+        mmap = conn.execute("PRAGMA mmap_size").fetchone()[0]
+        # mmap_size 应 > 0（即已启用 memory-mapped I/O）
+        assert mmap > 0, f"mmap_size should be > 0, got {mmap}"
 
     def test_temp_store_memory(self):
         """get_conn() 应设置 temp_store=MEMORY。"""
         from filter.data.db import get_conn
 
         conn = get_conn()
-        try:
-            val = conn.execute("PRAGMA temp_store").fetchone()[0]
-            # 0=DEFAULT, 1=FILE, 2=MEMORY
-            assert val == 2, f"temp_store should be 2 (MEMORY), got {val}"
-        finally:
-            conn.close()
+        val = conn.execute("PRAGMA temp_store").fetchone()[0]
+        # 0=DEFAULT, 1=FILE, 2=MEMORY
+        assert val == 2, f"temp_store should be 2 (MEMORY), got {val}"
 
     def test_cache_size_set(self):
         """get_conn() 应设置 cache_size 为负值（KB）。"""
         from filter.data.db import get_conn
 
         conn = get_conn()
-        try:
-            cache = conn.execute("PRAGMA cache_size").fetchone()[0]
-            # 负值表示 KB，正数表示页数。我们设置的是 -32768
-            assert cache != 0, f"cache_size should be non-zero, got {cache}"
-        finally:
-            conn.close()
+        cache = conn.execute("PRAGMA cache_size").fetchone()[0]
+        # 负值表示 KB，正数表示页数。我们设置的是 -32768
+        assert cache != 0, f"cache_size should be non-zero, got {cache}"
 
     def test_busy_timeout_set(self):
         """get_conn() 应设置 busy_timeout。"""
         from filter.data.db import get_conn
 
         conn = get_conn()
-        try:
-            timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
-            assert timeout == 5000, f"busy_timeout should be 5000, got {timeout}"
-        finally:
-            conn.close()
+        timeout = conn.execute("PRAGMA busy_timeout").fetchone()[0]
+        assert timeout == 5000, f"busy_timeout should be 5000, got {timeout}"
+
+    def test_connection_reuse(self):
+        """验证 get_conn() 多次调用返回同一连接实例（P2-3 B38）。"""
+        from filter.data.db import get_conn
+
+        conn1 = get_conn()
+        conn2 = get_conn()
+        conn3 = get_conn()
+        assert conn1 is conn2, "get_conn() should return the same connection instance"
+        assert conn2 is conn3, "get_conn() should return the same connection instance"
+
+    def test_connection_reuse_persists_across_operations(self, db_target):
+        """验证多次数据库操作使用同一连接（P2-3 B38）。"""
+        import data.db as db
+
+        # 执行写操作（内部调用 get_conn）
+        df = _make_ohlc_df(days=5)
+        db.upsert_kline("AAPL", "日线", df)
+
+        # 执行读操作（内部调用 get_conn）
+        result = db.query_kline("AAPL", "日线", n_pts=5)
+        assert len(result) == 5
+
+        # 验证连接未因多次 with get_conn() as conn: 而损坏
+        assert db._conn is not None, "Connection should persist after operations"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

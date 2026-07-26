@@ -9,6 +9,7 @@ import re as _re
 import numpy as np
 import pandas as pd
 from datetime import datetime, timezone as _dt_timezone, timedelta as _dt_timedelta
+from functools import lru_cache as _lru_cache
 from pathlib import Path
 from loguru import logger
 from typing import Optional as _Optional
@@ -170,8 +171,9 @@ def _get_query_start_for_synthesis(last_completed_ts, tf: str):
 # DB 查询
 # ═══════════════════════════════════════════════════════════════
 
+@_lru_cache(maxsize=128)
 def _query_tf_from_db(ticker_code: str, tf: str, cutoff_date: str, n_pts: int) -> list:
-    """查询指定周期在截止日期前的最近 n_pts 条已完成 K 线。
+    """查询指定周期在截止日期前的最近 n_pts 条已完成 K 线（LRU 缓存）。
 
     Parameters
     ----------
@@ -205,8 +207,9 @@ def _query_tf_from_db(ticker_code: str, tf: str, cutoff_date: str, n_pts: int) -
     ]
 
 
+@_lru_cache(maxsize=128)
 def _query_tf_for_period(ticker_code: str, tf: str, period_start: str, period_end: str) -> list:
-    """查询指定周期在时间区间 [period_start, period_end] 内的所有 K 线（用于合成，无 n_pts 限制）。
+    """查询指定周期在时间区间 [period_start, period_end] 内的所有 K 线（LRU 缓存）。
 
     Parameters
     ----------
@@ -237,6 +240,15 @@ def _query_tf_for_period(ticker_code: str, tf: str, period_start: str, period_en
         {"Date": r[0], "Open": r[1], "High": r[2], "Low": r[3], "Close": r[4], "Volume": r[5]}
         for r in rows
     ]
+
+
+def clear_query_cache():
+    """清除 DB 查询的 LRU 缓存。
+
+    用于测试确保缓存状态独立，以及数据库更新后强制重新查询。
+    """
+    _query_tf_from_db.cache_clear()
+    _query_tf_for_period.cache_clear()
 
 
 def _find_immediate_finer_tf(tf: str, tfs: list) -> _Optional[str]:

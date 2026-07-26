@@ -169,7 +169,12 @@ def _extract_trade_records(df: pd.DataFrame, view_prefix: str) -> list[dict]:
 
 
 def _render_kpi_cards(metrics: dict) -> None:
-    """渲染 KPI 指标卡片行。"""
+    """渲染 KPI 指标卡片 — 三层分层展示。
+
+    Tier 1 (核心): Sharpe, 最大回撤, 胜率, 总PnL — 大号 KPI 卡片
+    Tier 2 (次要): 年化收益, 波动率, Calmar — 小号指标行
+    Tier 3 (详情): 其余指标 — 折叠面板
+    """
     import math
 
     # Sanitize NaN/Inf values that would crash f-string formatting.
@@ -182,57 +187,81 @@ def _render_kpi_cards(metrics: dict) -> None:
 
     st.subheader("核心指标")
 
-    cols = st.columns(6)
-    cols[0].metric(
-        "累计收益",
-        f"{_safe.get('total_return_pct', 0):.2f}%",
-    )
-    cols[1].metric(
+    # ── Tier 1: 核心 KPI（大号卡片）──
+    t1_cols = st.columns(4)
+    t1_cols[0].metric(
         "Sharpe",
         f"{_safe.get('sharpe_ratio', 0):.3f}",
     )
-    cols[2].metric(
+    t1_cols[1].metric(
         "最大回撤",
         f"{_safe.get('max_drawdown_pct', 0):.2f}%",
     )
-    cols[3].metric(
+    t1_cols[2].metric(
         "胜率",
         f"{_safe.get('win_rate_pct', 0):.1f}%",
     )
-    cols[4].metric(
-        "交易次数",
-        str(_safe.get('total_trades', 0)),
+    t1_cols[3].metric(
+        "总PnL",
+        f"{_safe.get('total_return_pct', 0):.2f}%",
     )
-    cols[5].metric(
+
+    # ── Tier 2: 次要指标（小号指标行）──
+    t2_cols = st.columns(3)
+    t2_cols[0].metric(
+        "年化收益",
+        f"{_safe.get('annualized_return_pct', 0):.2f}%",
+    )
+    t2_cols[1].metric(
+        "年化波动",
+        f"{_safe.get('annualized_volatility_pct', 0):.2f}%",
+    )
+    t2_cols[2].metric(
         "Calmar",
         f"{_safe.get('calmar_ratio', 0):.3f}",
     )
 
-    cols2 = st.columns(6)
-    cols2[0].metric(
-        "盈利因子",
-        f"{_safe.get('profit_factor', 0):.2f}",
-    )
-    cols2[1].metric(
-        "Sortino",
-        f"{_safe.get('sortino_ratio', 0):.3f}",
-    )
-    cols2[2].metric(
-        "年化收益",
-        f"{_safe.get('annualized_return_pct', 0):.2f}%",
-    )
-    cols2[3].metric(
-        "年化波动",
-        f"{_safe.get('annualized_volatility_pct', 0):.2f}%",
-    )
-    cols2[4].metric(
-        "最大水下天数",
-        str(_safe.get('max_drawdown_duration', 0)),
-    )
-    cols2[5].metric(
-        "平均交易收益",
-        f"{_safe.get('avg_trade_return_pct', 0):.2f}%",
-    )
+    # ── Tier 3: 详情指标（折叠面板）──
+    with st.expander("查看详细指标", expanded=False):
+        d_cols = st.columns(6)
+        d_cols[0].metric(
+            "交易次数",
+            str(_safe.get('total_trades', 0)),
+        )
+        d_cols[1].metric(
+            "盈利因子",
+            f"{_safe.get('profit_factor', 0):.2f}",
+        )
+        d_cols[2].metric(
+            "Sortino",
+            f"{_safe.get('sortino_ratio', 0):.3f}",
+        )
+        d_cols[3].metric(
+            "最大水下天数",
+            str(_safe.get('max_drawdown_duration', 0)),
+        )
+        d_cols[4].metric(
+            "平均交易收益",
+            f"{_safe.get('avg_trade_return_pct', 0):.2f}%",
+        )
+        d_cols[5].metric(
+            "盈利交易",
+            str(_safe.get('winning_trades', 0)),
+        )
+
+        d_cols2 = st.columns(6)
+        d_cols2[0].metric(
+            "亏损交易",
+            str(_safe.get('losing_trades', 0)),
+        )
+        d_cols2[1].metric(
+            "平均盈利%",
+            f"{_safe.get('avg_win_pct', 0):.2f}%",
+        )
+        d_cols2[2].metric(
+            "平均亏损%",
+            f"{_safe.get('avg_loss_pct', 0):.2f}%",
+        )
 
     # 指标 CSV 导出
     metrics_df = pd.DataFrame(list(_safe.items()), columns=["指标", "数值"])
@@ -357,7 +386,7 @@ def _render_view_comparison(df: pd.DataFrame, views: list[str], colorblind: bool
 
 
 def _render_trade_table(df: pd.DataFrame, view_prefix: str) -> None:
-    """渲染交易明细表。"""
+    """渲染交易明细表（分页 + 搜索/排序）。"""
     st.subheader("交易明细")
 
     trade_col = f"{view_prefix}_trade"
@@ -385,16 +414,67 @@ def _render_trade_table(df: pd.DataFrame, view_prefix: str) -> None:
     }
     trades_df = trades_df.rename(columns={k: v for k, v in rename_map.items() if k in trades_df.columns})
 
-    st.dataframe(trades_df, use_container_width=True, height=300)
+    # ── 搜索 ──
+    search_term = st.text_input("搜索交易类型", key=f"trade_search_{view_prefix}",
+                                placeholder="输入关键词筛选交易类型...", label_visibility="collapsed")
+    if search_term:
+        search_mask = trades_df["交易类型"].astype(str).str.contains(search_term, case=False, na=False)
+        if "离场原因" in trades_df.columns:
+            search_mask |= trades_df["离场原因"].astype(str).str.contains(search_term, case=False, na=False)
+        trades_df = trades_df[search_mask]
 
-    # CSV 导出
+    total_rows = len(trades_df)
+    if total_rows == 0:
+        st.caption("无匹配的交易记录")
+        return
+
+    # ── 排序 ──
+    sort_options = _build_sort_options(trades_df)
+    if sort_options:
+        sort_by = st.selectbox("排序", list(sort_options.keys()), key=f"trade_sort_{view_prefix}")
+        sort_col_name = sort_options[sort_by]
+        if sort_col_name in trades_df.columns:
+            trades_df = trades_df.sort_values(sort_col_name, ascending=False)
+
+    # ── 分页 ──
+    page_size = 50
+    total_pages = max(1, (total_rows + page_size - 1) // page_size)
+    page_options = [f"第 {p} 页 (共 {total_rows} 条)" for p in range(1, total_pages + 1)]
+    selected_page_label = st.selectbox(
+        "选择页码",
+        page_options,
+        key=f"trade_page_{view_prefix}",
+        label_visibility="collapsed",
+    )
+    page_idx = page_options.index(selected_page_label)
+    start = page_idx * page_size
+    end = min(start + page_size, total_rows)
+
+    st.caption(f"显示第 {start + 1}–{end} 条，共 {total_rows} 条交易")
+    st.dataframe(trades_df.iloc[start:end], use_container_width=True, height=400)
+
+    # CSV 导出（导出全部交易，而非仅当前页）
     csv = trades_df.to_csv(index=False).encode("utf-8")
     st.download_button(
-        label="导出交易明细 CSV",
+        label=f"导出全部交易明细 CSV ({total_rows} 条)",
         data=csv,
         file_name=f"{view_prefix}_trades.csv",
         mime="text/csv",
     )
+
+
+def _build_sort_options(trades_df: pd.DataFrame) -> dict:
+    """根据交易表列名构建排序选项。
+
+    返回 label -> 实际列名 的映射。"""
+    options = {}
+    if "收益%" in trades_df.columns:
+        options["按收益%降序"] = "收益%"
+    if "交易类型" in trades_df.columns:
+        options["按交易类型"] = "交易类型"
+    if "离场原因" in trades_df.columns:
+        options["按离场原因"] = "离场原因"
+    return options
 
 
 def _render_signal_stats(df: pd.DataFrame, view_prefix: str) -> None:

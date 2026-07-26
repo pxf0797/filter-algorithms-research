@@ -3546,3 +3546,115 @@ class TestBufferToTableNoneHandling:
         assert np.isnan(table.column("v0_filtered")[5].as_py())
         assert table.column("v0_long_pos")[5].as_py() is False
         assert table.column("bar_timestamp")[5].is_valid is False
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P2-3 B46: CSV导出保持float32 — 验证不转换为float64避免内存翻倍
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestCsvExportFloat32Preservation:
+    """验证 CSV 导出时 float32 列保持原 dtype，不转换为 float64。"""
+
+    def test_merged_dataframe_keeps_float32_dtypes(self, tmp_path):
+        """_merge_parts_and_export_csv 后，float32 列不应被转换为 float64（P2-3 B46）。"""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}],
+                              save_debug_data=True)
+        store.start_session()
+
+        # 添加含真实 float32 值的数据行
+        for i in range(3):
+            n = 50
+            t = np.arange(n, dtype=float)
+            output = {
+                "bar_index": i,
+                "bar_timestamp": f"2026-01-{i+1:02d}T10:00:00",
+                "cutoff_date": f"2026-01-{i+1:02d}",
+                "views": {
+                    "v0_日线": {
+                        "t": t,
+                        "schmitt": {"sig": np.zeros(n, dtype=int), "eps": np.full(n, 0.1)},
+                        "filtered": np.random.RandomState(i).randn(n).cumsum() * 0.01 + 100,
+                        "long_pnl": np.linspace(100, 110, n),
+                        "short_pnl": np.linspace(100, 105, n),
+                        "long_mask": np.zeros(n, dtype=bool),
+                        "short_mask": np.zeros(n, dtype=bool),
+                        "trade_records": [],
+                        "bs_markers": {"entry_markers": [], "exit_markers": []},
+                    },
+                },
+            }
+            store.append_row(
+                output["bar_index"], output["bar_timestamp"],
+                output["cutoff_date"], output,
+            )
+        store.flush()
+        store.end_session()
+
+        # 读取合并后的 Parquet 并转换为 pandas（与 CSV 导出逻辑相同）
+        merged_path = store._session_dir / "backtest_result.parquet"
+        table = pq.read_table(str(merged_path))
+        df = table.to_pandas()
+
+        # 验证 float32 列未被转换为 float64
+        float32_cols = [c for c in df.columns if df[c].dtype == np.float32]
+        float64_cols = [c for c in df.columns if df[c].dtype == np.float64]
+
+        assert len(float32_cols) > 0, (
+            f"Expected float32 columns in DataFrame, got dtypes: {df.dtypes.to_dict()}"
+        )
+        # close 和视图浮点列应为 float32，不应为 float64
+        assert "close" in float32_cols, f"close 列应为 float32, got {df['close'].dtype}"
+        view_float_cols = ["v0_filtered", "v0_eps"]
+        for col in view_float_cols:
+            if col in df.columns:
+                assert df[col].dtype == np.float32, (
+                    f"{col} 应为 float32 而非 {df[col].dtype}"
+                )
+        # 确认没有 float32→float64 转换残留
+        for col in float32_cols:
+            assert df[col].dtype == np.float32, (
+                f"Column {col} should be float32, got {df[col].dtype}"
+            )
+
+    def test_csv_export_write_succeeds_with_float32(self, tmp_path):
+        """CSV 导出本身应正常完成（float32 写入不应报错）。"""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}],
+                              save_debug_data=True)
+        store.start_session()
+
+        for i in range(2):
+            n = 50
+            t = np.arange(n, dtype=float)
+            output = {
+                "bar_index": i,
+                "bar_timestamp": f"2026-01-{i+1:02d}T10:00:00",
+                "cutoff_date": f"2026-01-{i+1:02d}",
+                "views": {
+                    "v0_日线": {
+                        "t": t,
+                        "schmitt": {"sig": np.zeros(n, dtype=int), "eps": np.full(n, 0.1)},
+                        "filtered": np.random.RandomState(i).randn(n).cumsum() * 0.01 + 100,
+                        "long_pnl": np.linspace(100, 110, n),
+                        "short_pnl": np.linspace(100, 105, n),
+                        "long_mask": np.zeros(n, dtype=bool),
+                        "short_mask": np.zeros(n, dtype=bool),
+                        "trade_records": [],
+                        "bs_markers": {"entry_markers": [], "exit_markers": []},
+                    },
+                },
+            }
+            store.append_row(
+                output["bar_index"], output["bar_timestamp"],
+                output["cutoff_date"], output,
+            )
+        store.flush()
+        store.end_session()
+
+        # 验证 CSV 文件存在
+        csv_path = store._session_dir / "backtest_result.csv"
+        assert csv_path.exists(), f"CSV file should exist at {csv_path}"
+
+        # 验证 CSV 内容可读
+        df_csv = pd.read_csv(str(csv_path))
+        assert len(df_csv) >= 2, f"CSV should have at least 2 rows, got {len(df_csv)}"
+        assert "close" in df_csv.columns, "close column should be in CSV"

@@ -258,6 +258,10 @@ class TestRenderKpiCards:
             "annualized_volatility_pct": 18.7,
             "max_drawdown_duration": 15,
             "avg_trade_return_pct": 0.37,
+            "avg_win_pct": 2.5,
+            "avg_loss_pct": -1.2,
+            "winning_trades": 30,
+            "losing_trades": 20,
         }
 
         with patch.object(dash_mod, "st") as mock_st:
@@ -265,8 +269,8 @@ class TestRenderKpiCards:
             mock_col = MagicMock()
             mock_st.columns.return_value = [mock_col] * 6
             _render_kpi_cards(metrics)
-            # 验证 metric 被调用了 12 次（第一行 6 + 第二行 6）
-            assert mock_col.metric.call_count == 12
+            # Tier 1 (4) + Tier 2 (3) + Tier 3 (3 + 3 + 3) = 16
+            assert mock_col.metric.call_count == 16
 
     def test_missing_keys_default_to_zero(self):
         """缺失的指标键使用默认值 0 渲染，不抛异常。"""
@@ -598,8 +602,8 @@ class TestKpiCardsWithNaNValues:
             mock_col = MagicMock()
             mock_st.columns.return_value = [mock_col] * 6
             _render_kpi_cards(metrics)
-            # 12 个 metric 调用全部完成，未因 NaN/Inf 触发 ValueError
-            assert mock_col.metric.call_count == 12
+            # 16 个 metric (Tier 1:4 + Tier 2:3 + Tier 3:9)，未因 NaN/Inf 触发 ValueError
+            assert mock_col.metric.call_count == 16
             # 验证传入 metric 的值已被 sanitized（不含 NaN/Inf）
             for call_args in mock_col.metric.call_args_list:
                 value_arg = call_args[0][1]  # 第二个位置参数是值
@@ -624,13 +628,15 @@ class TestKpiCardsWithNaNValues:
             mock_col = MagicMock()
             mock_st.columns.return_value = [mock_col] * 6
             _render_kpi_cards(metrics)
-            assert mock_col.metric.call_count == 12
-            # 有效数值保留原值格式
-            first_val = mock_col.metric.call_args_list[0][0][1]
-            assert "15.5" in first_val  # valid number preserved
-            # NaN sharpe → 被替换为 0.000
-            sharpe_val = mock_col.metric.call_args_list[1][0][1]
-            assert "0.000" in sharpe_val  # NaN replaced with 0
+            assert mock_col.metric.call_count == 16
+            # 收集所有 metric 值
+            all_vals = []
+            for call_args in mock_col.metric.call_args_list:
+                if call_args[0]:
+                    all_vals.append(call_args[0][1])
+            # 验证有效值出现，"0.000" 出现（NaN 被 sanitized）
+            assert any("15.5" in str(v) for v in all_vals), f"Expected '15.5' in metric values, got: {all_vals}"
+            assert any("0.000" in str(v) for v in all_vals), f"Expected '0.000' (sanitized NaN) in metric values"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1057,11 +1063,14 @@ class TestCsvDownloadButtons:
         })
 
         with patch.object(dash_mod, "st") as mock_st:
+            mock_st.text_input.return_value = ""
+            # 排序 selectbox 返回第一个选项, 分页 selectbox 返回对应页面
+            mock_st.selectbox.side_effect = lambda label, options, **kw: options[0] if isinstance(options, list) else "按收益%降序"
             _render_trade_table(df, "v0")
 
             download_calls = [
                 c for c in mock_st.download_button.call_args_list
-                if "导出交易明细" in str(c[1].get("label", ""))
+                if "导出" in str(c[1].get("label", "")) and "交易明细" in str(c[1].get("label", ""))
             ]
             assert len(download_calls) >= 1, "未找到 '导出交易明细 CSV' download_button"
 
@@ -1083,3 +1092,361 @@ class TestCsvDownloadButtons:
                 if "导出" in str(c[1].get("label", ""))
             ]
             assert len(download_calls) == 0, "无交易记录时不应出现下载按钮"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P3-1: KPI 分层展示
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestKpiTieredLayout:
+    """验证 KPI 分层展示：Tier 1 (4大卡片), Tier 2 (3小卡片), Tier 3 (折叠面板)."""
+
+    def test_tier1_has_four_columns(self):
+        """Tier 1 使用 4 列渲染核心 KPI。"""
+        from filter.backtest.dashboard import _render_kpi_cards
+        import filter.backtest.dashboard as dash_mod
+
+        metrics = {
+            "total_return_pct": 15.5, "sharpe_ratio": 1.23,
+            "max_drawdown_pct": -8.5, "win_rate_pct": 55.0,
+            "total_trades": 42, "calmar_ratio": 1.82,
+        }
+
+        with patch.object(dash_mod, "st") as mock_st:
+            mock_col = MagicMock()
+            mock_st.columns.return_value = [mock_col] * 6
+            _render_kpi_cards(metrics)
+
+            # 检查 st.columns 调用序列
+            columns_calls = mock_st.columns.call_args_list
+            # 至少应有一次 st.columns(4) — Tier 1
+            tier1_call = [c for c in columns_calls if c == ((4,),)]
+            assert len(tier1_call) >= 1, f"Tier 1 应使用 st.columns(4)，实际调用: {columns_calls}"
+
+    def test_tier2_has_three_columns(self):
+        """Tier 2 使用 3 列渲染次要指标。"""
+        from filter.backtest.dashboard import _render_kpi_cards
+        import filter.backtest.dashboard as dash_mod
+
+        metrics = {"annualized_return_pct": 12.3, "annualized_volatility_pct": 18.7, "calmar_ratio": 1.5}
+
+        with patch.object(dash_mod, "st") as mock_st:
+            mock_col = MagicMock()
+            mock_st.columns.return_value = [mock_col] * 6
+            _render_kpi_cards(metrics)
+
+            columns_calls = [c[0] for c in mock_st.columns.call_args_list]
+            three_col_calls = [args for args in columns_calls if args == (3,)]
+            assert len(three_col_calls) >= 1, f"Tier 2 应使用 st.columns(3)，实际调用: {columns_calls}"
+
+    def test_tier3_in_expander(self):
+        """Tier 3 详情在 st.expander 折叠面板中。"""
+        from filter.backtest.dashboard import _render_kpi_cards
+        import filter.backtest.dashboard as dash_mod
+
+        metrics = {"total_trades": 10, "sortino_ratio": 1.45, "profit_factor": 2.1}
+
+        with patch.object(dash_mod, "st") as mock_st:
+            mock_col = MagicMock()
+            mock_st.columns.return_value = [mock_col] * 6
+            _render_kpi_cards(metrics)
+
+            # 验证 expander 被调用
+            assert mock_st.expander.called, "Tier 3 应使用 st.expander 折叠面板"
+
+    def test_tier1_displays_correct_metrics(self):
+        """Tier 1 展示 Sharpe, Max Drawdown, Win Rate, Total PnL。"""
+        from filter.backtest.dashboard import _render_kpi_cards
+        import filter.backtest.dashboard as dash_mod
+
+        metrics = {
+            "total_return_pct": 15.5, "sharpe_ratio": 1.23,
+            "max_drawdown_pct": -8.5, "win_rate_pct": 55.0,
+            "annualized_return_pct": 12.3, "annualized_volatility_pct": 18.7,
+            "calmar_ratio": 1.82, "total_trades": 42,
+        }
+
+        with patch.object(dash_mod, "st") as mock_st:
+            mock_col = MagicMock()
+            mock_st.columns.return_value = [mock_col] * 6
+            _render_kpi_cards(metrics)
+
+            # metric 调用包含 label 参数（第一个位置参数）
+            all_metric_labels = []
+            for call_args in mock_col.metric.call_args_list:
+                if call_args[0]:
+                    all_metric_labels.append(call_args[0][0])
+
+            # Tier 1 核心指标
+            assert "Sharpe" in all_metric_labels
+            assert "最大回撤" in all_metric_labels
+            assert "胜率" in all_metric_labels
+            assert "总PnL" in all_metric_labels
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P3-1: 交易明细分页
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestTradeTablePagination:
+    """验证交易表分页和搜索功能。"""
+
+    # 辅助：让 selectbox 第1次调用返回排序选项，后续返回分页选项
+    _selectbox_side_effect_fn = None
+
+    def _make_selectbox_side_effect(self, page_option):
+        """生成 side_effect: 首次调用返回排序选项，后续返回分页选项。"""
+        call_count = [0]
+
+        def _side_effect(label, options, **kw):
+            if isinstance(options, list) and options and "第 " in str(options[0]):
+                return page_option
+            if isinstance(options, list) and options:
+                return options[0]  # 第一个排序选项
+            return page_option
+
+        return _side_effect
+
+    def test_pagination_controls_present(self):
+        """交易表分页控件存在（selectbox 用于页码选择、搜索框）。"""
+        from filter.backtest.dashboard import _render_trade_table
+        import filter.backtest.dashboard as dash_mod
+
+        # 构建超过 50 条的交易数据
+        trades = pd.DataFrame({
+            "v0_trade": ["long"] * 120,
+            "v0_trade_return": [1.0] * 120,
+            "v0_trade_reason": ["target"] * 120,
+        })
+
+        with patch.object(dash_mod, "st") as mock_st:
+            mock_st.text_input.return_value = ""
+            mock_st.selectbox.side_effect = self._make_selectbox_side_effect("第 1 页 (共 120 条)")
+            _render_trade_table(trades, "v0")
+
+            # 验证 selectbox 被调用（分页和排序）
+            assert mock_st.selectbox.called, "应包含分页/排序 selectbox"
+
+    def test_search_filters_trades(self):
+        """搜索框过滤交易记录。"""
+        from filter.backtest.dashboard import _render_trade_table
+        import filter.backtest.dashboard as dash_mod
+
+        trades = pd.DataFrame({
+            "v0_trade": ["long", "short", "long", "short", "long"],
+            "v0_trade_return": [1.0, -0.5, 2.0, -1.0, 0.5],
+            "v0_trade_reason": ["target", "stop", "signal", "stop", "target"],
+        })
+
+        with patch.object(dash_mod, "st") as mock_st:
+            mock_st.text_input.return_value = "stop"
+            mock_st.selectbox.side_effect = self._make_selectbox_side_effect("第 1 页 (共 2 条)")
+            _render_trade_table(trades, "v0")
+
+            # 验证 dataframe 被调用（说明搜索后有结果）
+            assert mock_st.dataframe.called
+
+    def test_no_match_shows_caption(self):
+        """搜索无匹配时显示提示信息。"""
+        from filter.backtest.dashboard import _render_trade_table
+        import filter.backtest.dashboard as dash_mod
+
+        trades = pd.DataFrame({
+            "v0_trade": ["long", "long", "long"],
+            "v0_trade_return": [1.0, 2.0, 0.5],
+        })
+
+        with patch.object(dash_mod, "st") as mock_st:
+            mock_st.text_input.return_value = "nonexistent"
+            mock_st.selectbox.side_effect = self._make_selectbox_side_effect("第 1 页 (共 3 条)")
+            _render_trade_table(trades, "v0")
+
+            # 应显示 "无匹配的交易记录"
+            caption_calls = [
+                c for c in mock_st.caption.call_args_list
+                if "无匹配" in str(c[0][0])
+            ]
+            assert len(caption_calls) >= 1, "搜索无匹配时应提示"
+
+    def test_default_page_size_fifty(self):
+        """默认每页显示 50 条。"""
+        from filter.backtest.dashboard import _render_trade_table
+        import filter.backtest.dashboard as dash_mod
+
+        trades = pd.DataFrame({
+            "v0_trade": ["long"] * 80,
+            "v0_trade_return": [1.0] * 80,
+            "v0_trade_reason": ["target"] * 80,
+        })
+
+        with patch.object(dash_mod, "st") as mock_st:
+            mock_st.text_input.return_value = ""
+            mock_st.selectbox.side_effect = self._make_selectbox_side_effect("第 1 页 (共 80 条)")
+            _render_trade_table(trades, "v0")
+
+            # 确认 dataframe 渲染时传入的数据不超过 50 行
+            if mock_st.dataframe.call_args:
+                df_arg = mock_st.dataframe.call_args[0][0]
+                assert len(df_arg) <= 50, f"首页应 ≤50 条，实际 {len(df_arg)} 条"
+
+    def test_export_downloads_full_dataset(self):
+        """CSV 导出按钮导出全部交易（非仅当前页）。"""
+        from filter.backtest.dashboard import _render_trade_table
+        import filter.backtest.dashboard as dash_mod
+
+        trades = pd.DataFrame({
+            "v0_trade": ["long"] * 120,
+            "v0_trade_return": [1.0] * 120,
+        })
+
+        with patch.object(dash_mod, "st") as mock_st:
+            mock_st.text_input.return_value = ""
+            mock_st.selectbox.side_effect = self._make_selectbox_side_effect("第 1 页 (共 120 条)")
+            _render_trade_table(trades, "v0")
+
+            # 导出按钮 label 中包含总条数
+            download_calls = mock_st.download_button.call_args_list
+            assert any(
+                "120" in str(c[1].get("label", "")) or "120" in str(c[0][0] if c[0] else "")
+                for c in download_calls
+            ), "导出按钮应显示全部交易条数"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P3-1: 缺失指标补全
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestMissingMetrics:
+    """验证新增的缺失指标: avg_win_pct, avg_loss_pct 已显示。"""
+
+    def test_avg_win_avg_loss_displayed(self):
+        """_render_kpi_cards 展示 avg_win_pct 和 avg_loss_pct。"""
+        from filter.backtest.dashboard import _render_kpi_cards
+        import filter.backtest.dashboard as dash_mod
+
+        metrics = {
+            "avg_win_pct": 2.5, "avg_loss_pct": -1.2,
+            "winning_trades": 30, "losing_trades": 20,
+            "total_return_pct": 15.5, "sharpe_ratio": 1.23,
+            "max_drawdown_pct": -8.5, "win_rate_pct": 55.0,
+            "annualized_return_pct": 12.3, "annualized_volatility_pct": 18.7,
+            "calmar_ratio": 1.82, "total_trades": 50,
+            "profit_factor": 2.1, "sortino_ratio": 1.45,
+            "max_drawdown_duration": 15, "avg_trade_return_pct": 0.5,
+        }
+
+        with patch.object(dash_mod, "st") as mock_st:
+            mock_col = MagicMock()
+            mock_st.columns.return_value = [mock_col] * 6
+            _render_kpi_cards(metrics)
+
+            all_metric_labels = []
+            for call_args in mock_col.metric.call_args_list:
+                if call_args[0]:
+                    all_metric_labels.append(call_args[0][0])
+
+            assert "平均盈利%" in all_metric_labels, "应展示 avg_win_pct (平均盈利%)"
+            assert "平均亏损%" in all_metric_labels, "应展示 avg_loss_pct (平均亏损%)"
+            assert "盈利交易" in all_metric_labels, "应展示 winning_trades"
+            assert "亏损交易" in all_metric_labels, "应展示 losing_trades"
+
+    def test_profit_factor_already_shown(self):
+        """profit_factor 原本已显示 — 验证仍在 Tier 3。"""
+        from filter.backtest.dashboard import _render_kpi_cards
+        import filter.backtest.dashboard as dash_mod
+
+        metrics = {"profit_factor": 2.5, "total_return_pct": 15.5}
+
+        with patch.object(dash_mod, "st") as mock_st:
+            mock_col = MagicMock()
+            mock_st.columns.return_value = [mock_col] * 6
+            _render_kpi_cards(metrics)
+
+            all_metric_labels = []
+            for call_args in mock_col.metric.call_args_list:
+                if call_args[0]:
+                    all_metric_labels.append(call_args[0][0])
+
+            assert "盈利因子" in all_metric_labels, "profit_factor (盈利因子) 仍应显示"
+
+    def test_metrics_import_build_sort_options(self):
+        """_build_sort_options 可导入且可调用。"""
+        from filter.backtest.dashboard import _build_sort_options
+
+        assert callable(_build_sort_options)
+
+        # 基本功能测试
+        trades_df = pd.DataFrame({
+            "收益%": [1.0, -0.5],
+            "交易类型": ["long", "short"],
+        })
+        opts = _build_sort_options(trades_df)
+        assert "按收益%降序" in opts
+        assert "按交易类型" in opts
+
+    def test_sort_options_no_columns(self):
+        """无相关列时返回空 dict。"""
+        from filter.backtest.dashboard import _build_sort_options
+
+        trades_df = pd.DataFrame({"other": [1, 2]})
+        opts = _build_sort_options(trades_df)
+        assert opts == {}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P3-1: 向后兼容 — 现有功能不受影响
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestBackwardCompatibilityP3:
+    """验证 P3-1 变更后的向后兼容性。"""
+
+    def test_existing_kpi_keys_still_work(self):
+        """旧版 metrics dict 键名仍能正常渲染不抛异常。"""
+        from filter.backtest.dashboard import _render_kpi_cards
+        import filter.backtest.dashboard as dash_mod
+
+        # 旧版 metrics dict（不含 avg_win_pct / avg_loss_pct）
+        old_metrics = {
+            "total_return_pct": 15.5,
+            "sharpe_ratio": 1.23,
+            "max_drawdown_pct": -8.5,
+            "win_rate_pct": 55.0,
+            "total_trades": 42,
+            "calmar_ratio": 1.82,
+            "profit_factor": 2.1,
+            "sortino_ratio": 1.45,
+            "annualized_return_pct": 12.3,
+            "annualized_volatility_pct": 18.7,
+            "max_drawdown_duration": 15,
+            "avg_trade_return_pct": 0.37,
+        }
+
+        with patch.object(dash_mod, "st") as mock_st:
+            mock_col = MagicMock()
+            mock_st.columns.return_value = [mock_col] * 6
+            # 不应抛异常
+            _render_kpi_cards(old_metrics)
+            assert mock_st.subheader.called
+
+    def test_empty_trade_df_still_works(self):
+        """空交易表仍正常渲染不抛异常。"""
+        from filter.backtest.dashboard import _render_trade_table
+        import filter.backtest.dashboard as dash_mod
+
+        df = pd.DataFrame({
+            "v0_trade": ["", "", ""],
+            "v0_trade_return": [None, None, None],
+        })
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_trade_table(df, "v0")
+            # 无交易时应显示 caption
+            caption_calls = [
+                c for c in mock_st.caption.call_args_list
+                if "无交易" in str(c[0][0])
+            ]
+            assert len(caption_calls) >= 1

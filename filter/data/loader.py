@@ -364,4 +364,5 @@ from filter.data.synth import (
     _synthesize_incomplete_bar,
     _query_tf_from_db,
     _query_tf_for_period,
+    clear_query_cache,
 )
