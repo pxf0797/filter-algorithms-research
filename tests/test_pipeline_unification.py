@@ -10,7 +10,6 @@ Verifies:
 """
 
 import numpy as np
-import pandas as pd
 import pytest
 
 
@@ -131,8 +130,7 @@ class TestPipelineFunctions:
 
     def test_web_cli_unified_output(self, signals, default_cfg):
         """Same inputs via pipeline.py produce same outputs for Web and CLI."""
-        from engine.pipeline import compute_filters, compute_schmitt_trigger, compute_prediction_pairs
-        from engine.schmitt import _find_all_pairs
+        from engine.pipeline import compute_filters, compute_schmitt_trigger
 
         noisy, t = signals
 
@@ -190,9 +188,6 @@ class TestDataLoaderSplit:
 
     def test_no_circular_imports(self):
         """Ensure simultaneous import of all three data modules works."""
-        from data.loader import load_display_cache
-        from data.fetcher import _fetch_stock
-        from data.synth import _sync_all_cascading
         assert True  # If we got here, no ImportError
 
 

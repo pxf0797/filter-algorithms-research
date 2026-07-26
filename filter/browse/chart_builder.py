@@ -6,14 +6,11 @@
 
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 from filter.browse.charts import (
-    _add_prediction_traces, _add_cross_pnl_subplot, _add_alignment_subplot,
-    _draw_holding_bands, _add_bs_markers,
+    _draw_holding_bands,
 )
 from filter.common.pnl_renderer import (
     PNL_BASELINE,
-    compute_combined_pnl,
     make_pnl_long_trace,
     make_pnl_short_trace,
     make_pnl_baseline_shape,

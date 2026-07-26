@@ -229,7 +229,6 @@ else:
 
     def test_all_tfs_accessible_from_panel_direct_import(self):
         """ALL_TFS 在 panel.py 中可访问且类型为 list。"""
-        from filter.backtest.panel import _get_min_tf_and_count
         # panel.py 内部使用 ALL_TFS，如果导入成功说明依赖正确
         # 直接导入验证
         from filter.shared.constants import ALL_TFS

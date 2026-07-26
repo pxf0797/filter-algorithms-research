@@ -19,14 +19,8 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from filter.data.config_db import (init_config_tables, list_presets, apply_preset,
-                        save_preset, delete_preset, rename_preset,
-                        get_history,
-                        import_json_files_as_presets, VIEW_PARAM_SPECS)
-from filter.data.db import (init_db, get_date_range, has_data,
-                check_data_health, get_db_size_mb, snapshot_db, list_snapshots,
-                restore_snapshot, prune_snapshots, clear_display_cache,
-                checkpoint_wal, validate_db, compare_with_db, force_update_kline,
-                DB_PATH)
+                        import_json_files_as_presets)
+from filter.data.db import (init_db, DB_PATH)
 
 # --- Import from new modules ---
 from filter.engine.schmitt import _find_all_pairs
@@ -34,13 +28,13 @@ from filter.engine.strategy import _compute_strategy_pnl, _compute_holding_masks
 from filter.engine.alignment import _align_pnl_to_current_tf
 from filter.engine.pipeline import compute_filters, compute_schmitt_trigger, compute_prediction_pairs
 from filter.data.loader import (
-    _fetch_all_timeframes, _fetch_stock, _sync_to_display,
+    _fetch_stock, _sync_to_display,
     load_display_cache, _stock_name_lookup,
 )
 from filter.browse.charts import (
     _render_plotly, _add_prediction_traces,
     _add_cross_pnl_subplot, _add_alignment_subplot,
-    _draw_holding_bands, _add_bs_markers,
+    _add_bs_markers,
 )
 from filter.browse.chart_builder import (
     _date_markers, _determine_subplot_layout, _insert_feedback_row,
@@ -51,14 +45,13 @@ from filter.browse.sidebar import (
     _handle_pending_apply, _render_config_import, _handle_initial_fetch,
     _render_refresh_row, _render_preset_selector, _render_health_check,
     _render_data_validation, _render_filter_selectors, _render_param_panels,
-    _render_db_backup, _view_export_params, _render_export_config,
+    _render_db_backup, _render_export_config,
     _render_config_history, _render_db_import_export, _run_auto_refresh,
 )
 from filter.engine.signals import compute_bs_markers, get_lower_tfs
 from filter.browse.components_sidebar import (
-    _render_params, ALL_TFS, DEFAULT_TFS, TF_HIERARCHY,
+    ALL_TFS, DEFAULT_TFS, TF_HIERARCHY,
 )
-from filter.shared.constants import TF_INTERVAL
 from filter.shared.state import AppState
 from filter.backtest.capture import PipelineCapture, PipelineStageData
 from filter.backtest.logger import log_data_load

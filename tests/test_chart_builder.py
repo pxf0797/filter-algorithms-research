@@ -1,5 +1,4 @@
 """P0-3 验证测试: chart_builder 模块可独立导入"""
-import importlib
 from unittest.mock import patch
 
 import numpy as np

@@ -8,10 +8,8 @@ Checks:
   5. T8: filters split — schmitt / strategy / alignment
   6. T11: 统一 — colors + PnL renderer
 """
-import importlib
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
@@ -65,7 +63,7 @@ class TestImports:
         assert ViewConfig is not None
 
     def test_shared_constants(self):
-        from shared.constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY, TF_INTERVAL
+        from shared.constants import ALL_TFS
         assert isinstance(ALL_TFS, (list, tuple))
         assert len(ALL_TFS) > 0
 
@@ -230,7 +228,7 @@ class TestColorsModule:
 
     def test_ticker_color_helper(self):
         """ticker_color 辅助函数返回有效颜色."""
-        from filter.constants.colors import ticker_color, COLORS
+        from filter.constants.colors import ticker_color
         for i in range(15):
             color = ticker_color(i)
             assert isinstance(color, str), f"ticker_color({i}) 应为 str"
@@ -240,7 +238,7 @@ class TestColorsModule:
 
     def test_view_color_helper(self):
         """view_color 辅助函数返回有效颜色."""
-        from filter.constants.colors import view_color, COLORS
+        from filter.constants.colors import view_color
         for i in range(8):
             color = view_color(i)
             assert isinstance(color, str), f"view_color({i}) 应为 str"
@@ -258,11 +256,6 @@ class TestPnlRendererModule:
             compute_combined_pnl,
             compute_drawdown,
             make_pnl_long_trace,
-            make_pnl_short_trace,
-            make_pnl_combined_trace,
-            make_drawdown_trace,
-            make_pnl_baseline_shape,
-            make_pnl_yaxis_config,
         )
         assert callable(compute_combined_pnl)
         assert callable(compute_drawdown)
@@ -356,7 +349,6 @@ class TestB75SysPathRemoval:
 
     def test_import_filter_does_not_modify_sys_path(self):
         """import filter 前后 sys.path 保持一致."""
-        import sys
         import copy
         path_before = copy.copy(sys.path)
         import filter  # noqa: F401

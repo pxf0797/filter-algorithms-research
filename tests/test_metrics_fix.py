@@ -10,7 +10,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
-import pytest
 
 # ── 确保 filter/ 可导入 (conftest.py 也会做，这里保险) ──
 _src = Path(__file__).resolve().parent.parent / "filter"

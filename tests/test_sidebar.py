@@ -6,13 +6,10 @@ These tests cover the non-Streamlit-widget parts of sidebar.py:
 - Any future pure-logic helpers extracted from widget functions
 """
 
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
-import pytest
 
 # Module under test
 from browse.components_sidebar import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY
@@ -797,7 +794,6 @@ class TestDataValidationParallel:
 
     def test_all_eight_tfs_submitted_to_executor(self):
         """验证 8 个 ALL_TFS 周期都被提交到 executor.submit。"""
-        from concurrent.futures import ThreadPoolExecutor
         from filter.browse.sidebar import _render_data_validation
 
         submitted_count = []
@@ -838,7 +834,6 @@ class TestDataValidationParallel:
 
     def test_single_tf_failure_does_not_block_others(self):
         """单个周期下载失败（抛异常），其他周期仍正常处理。"""
-        from concurrent.futures import ThreadPoolExecutor
         from filter.browse.sidebar import _render_data_validation
 
         submit_count = [0]
@@ -894,7 +889,6 @@ class TestDataValidationParallel:
         每个周期返回相同的 DataFrame 和 compare 报告，确认输出正确。
         """
         from filter.browse.sidebar import _render_data_validation
-        from concurrent.futures import ThreadPoolExecutor
 
         known_df = pd.DataFrame(
             {"Close": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0]},
@@ -945,7 +939,6 @@ class TestDataValidationParallel:
     def test_empty_ticker_skips_download(self):
         """空 ticker code 显示 warning 并跳过下载。"""
         from filter.browse.sidebar import _render_data_validation
-        from concurrent.futures import ThreadPoolExecutor
 
         submitted = [0]
 
@@ -975,7 +968,6 @@ class TestDataValidationParallel:
     def test_a_share_ticker_suffix_conversion(self):
         """A股市场：60xxxx 加 .SS，其他加 .SZ。"""
         from filter.browse.sidebar import _render_data_validation
-        from concurrent.futures import ThreadPoolExecutor
 
         full_codes = []
 
@@ -1034,7 +1026,6 @@ class TestDataValidationParallel:
     def test_data_insufficient_shows_warning_in_table(self):
         """数据不足（<5条有效Close）时结果行显示警告标记。"""
         from filter.browse.sidebar import _render_data_validation
-        from concurrent.futures import ThreadPoolExecutor
 
         # Only 3 valid Close rows (after dropping NaN)
         tiny_df = pd.DataFrame(

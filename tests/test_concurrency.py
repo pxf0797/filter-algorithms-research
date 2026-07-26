@@ -8,13 +8,10 @@ Covers patterns found in:
 
 import threading
 import time
-import queue
-from concurrent.futures import ThreadPoolExecutor, as_completed, Future
-from unittest.mock import MagicMock, patch
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
-import pytest
 
 
 # ---------------------------------------------------------------------------

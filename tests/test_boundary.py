@@ -2,7 +2,6 @@
 边界条件测试 — 空数据、短序列、数值稳定性、导入导出、P0 回归。
 """
 import numpy as np
-import pandas as pd
 import pytest
 
 from engine.filters import apply_sma, apply_ema, FILTERS

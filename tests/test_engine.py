@@ -14,7 +14,6 @@ Tests cover:
 """
 
 import json
-import hashlib
 import numpy as np
 import pandas as pd
 import pytest
@@ -856,7 +855,6 @@ class TestB15FileExistsCache:
 
     def test_file_exists_cache_lazy_init(self):
         """首次 _load_window_data 时为每个 TF 执行一次文件存在性检查，后续使用缓存."""
-        from pathlib import Path
 
         configs = [
             {"tf": "日线", "n_pts": 60, "_fid": "sma", "show_sch": True,

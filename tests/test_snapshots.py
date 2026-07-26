@@ -13,7 +13,6 @@ from pathlib import Path
 
 import numpy as np
 import plotly.graph_objects as go
-import pytest
 
 # Ensure filter is importable
 _src = Path(__file__).resolve().parent.parent / "filter"

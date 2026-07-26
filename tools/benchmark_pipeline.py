@@ -399,7 +399,7 @@ def print_text_report(results: dict) -> None:
     # 1. BacktestRunner
     r = stages.get("backtest_runner")
     if r and not r.get("skipped"):
-        print(f"\n  [1] BacktestRunner throughput")
+        print("\n  [1] BacktestRunner throughput")
         print(f"      Bars processed:     {r['bars_processed']}")
         print(f"      Wall time:          {r['total_sec']:.3f} s")
         print(f"      Throughput:         {r['bars_per_sec']:.1f} bars/sec")
@@ -410,7 +410,7 @@ def print_text_report(results: dict) -> None:
     # 2. Filter
     f = stages.get("filter")
     if f:
-        print(f"\n  [2] Filter computation (SMA, window=11)")
+        print("\n  [2] Filter computation (SMA, window=11)")
         print(f"      Signal size:        {f['signal_size']}")
         print(f"      Iterations:         {f['iterations']}")
         print(f"      Latency:            {f['us_per_call']:.1f} us/call")
@@ -418,7 +418,7 @@ def print_text_report(results: dict) -> None:
     # 3. Schmitt
     s = stages.get("schmitt")
     if s:
-        print(f"\n  [3] Schmitt trigger")
+        print("\n  [3] Schmitt trigger")
         print(f"      Signal size:        {s['signal_size']}")
         print(f"      Iterations:         {s['iterations']}")
         print(f"      Latency:            {s['us_per_call']:.1f} us/call")
@@ -426,7 +426,7 @@ def print_text_report(results: dict) -> None:
     # 4. Parquet write
     pw = stages.get("parquet_write")
     if pw:
-        print(f"\n  [4] Parquet write")
+        print("\n  [4] Parquet write")
         print(f"      Rows:               {pw['rows']}")
         print(f"      Columns:            {pw['columns']}")
         print(f"      File size:          {pw['file_size_bytes']:,} bytes")
@@ -436,7 +436,7 @@ def print_text_report(results: dict) -> None:
     # 5. Parquet read
     pr = stages.get("parquet_read")
     if pr:
-        print(f"\n  [5] Parquet read")
+        print("\n  [5] Parquet read")
         print(f"      Rows:               {pr['rows']}")
         print(f"      File size:          {pr['file_size_bytes']:,} bytes")
         print(f"      Read latency:       {pr['read_ms']:.2f} ms")
@@ -444,7 +444,7 @@ def print_text_report(results: dict) -> None:
     # 6. Event recording
     er = stages.get("event_recording")
     if er:
-        print(f"\n  [6] Event recording (JSONL)")
+        print("\n  [6] Event recording (JSONL)")
         print(f"      Events recorded:    {er['events_recorded']}")
         print(f"      Total time:         {er['total_sec']:.4f} s")
         print(f"      Latency:            {er['us_per_event']:.1f} us/event")
@@ -452,7 +452,7 @@ def print_text_report(results: dict) -> None:
     # 7. E2E
     e2e = stages.get("e2e")
     if e2e and not e2e.get("skipped"):
-        print(f"\n  [7] End-to-end pipeline")
+        print("\n  [7] End-to-end pipeline")
         print(f"      Wall time:          {e2e['total_sec']:.3f} s")
         print(f"      Throughput:         {e2e['bars_per_sec']:.1f} bars/sec")
 

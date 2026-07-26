@@ -37,10 +37,6 @@ import streamlit as st
 from browse.charts import (
     _contiguous_runs,
     _render_entry_marker,
-    _render_exit_marker_with_label,
-    _render_pnl_curves,
-    _render_baseline,
-    _render_fill_background,
     _render_plotly,
     _compact_floats,
 )
@@ -717,7 +713,6 @@ class TestPlotlyPayloadOptimization:
     def test_shared_layout_properties_stripped(self, monkeypatch):
         """匹配 _SHARED_LAYOUT_TEMPLATE 的 layout 属性从 payload 中移除."""
         from browse.charts import _SHARED_LAYOUT_TEMPLATE
-        from plotly.utils import PlotlyJSONEncoder
 
         captured = {}
 
@@ -1008,7 +1003,7 @@ class TestSharedLayoutStripping:
 
     def test_non_matching_keys_preserved(self, monkeypatch):
         """template / margin 等仅当值匹配共享模板时才剥离；不匹配的值保留."""
-        from browse.charts import _SHARED_LAYOUT_TEMPLATE, _render_plotly
+        from browse.charts import _render_plotly
 
         captured = {}
         def _capture_html(html, **kw):

@@ -298,10 +298,10 @@ def start_server(port: int, html_template: str, metadata: dict | None = None):
     url = f"http://localhost:{port}"
 
     print(f"\n{'='*60}")
-    print(f"  回测可视化服务器已启动")
+    print("  回测可视化服务器已启动")
     print(f"  地址: {url}")
-    print(f"  拖入 .parquet 文件即可查看可视化")
-    print(f"  按 Ctrl+C 停止服务器")
+    print("  拖入 .parquet 文件即可查看可视化")
+    print("  按 Ctrl+C 停止服务器")
     print(f"{'='*60}\n")
 
     webbrowser.open(url)
@@ -393,7 +393,7 @@ def embed_and_open(parquet_paths: list[str], metadata_path: str | None, html_tem
 
     file_url = "file://" + tmp_path
     print(f"[4/4] 写入临时文件: {tmp_path}")
-    print(f"       在浏览器中打开...")
+    print("       在浏览器中打开...")
     webbrowser.open(file_url)
     print(f"\n完成！如需再次查看，打开: {tmp_path}")
 

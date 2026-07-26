@@ -11,7 +11,6 @@ BS 仓位操作标识计算模块
 
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 
 from filter.shared.constants import TF_LOWER

@@ -9,13 +9,10 @@
 - KPI 卡片渲染不崩溃
 """
 
-import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
-import pytest
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -636,7 +633,7 @@ class TestKpiCardsWithNaNValues:
                     all_vals.append(call_args[0][1])
             # 验证有效值出现，"0.000" 出现（NaN 被 sanitized）
             assert any("15.5" in str(v) for v in all_vals), f"Expected '15.5' in metric values, got: {all_vals}"
-            assert any("0.000" in str(v) for v in all_vals), f"Expected '0.000' (sanitized NaN) in metric values"
+            assert any("0.000" in str(v) for v in all_vals), "Expected '0.000' (sanitized NaN) in metric values"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -6,7 +6,6 @@ Run: python -m pytest tests/test_benchmark.py --benchmark-only
 """
 
 import numpy as np
-import pandas as pd
 import pytest
 from engine.filters import (
     apply_sma, apply_ema, apply_wma, apply_alma,

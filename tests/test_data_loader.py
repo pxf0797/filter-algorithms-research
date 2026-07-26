@@ -641,9 +641,7 @@ class TestDisplayCacheVersioning:
 
     def test_is_cache_valid_data_tampered(self, tmp_path):
         """数据被篡改后版本校验失败。"""
-        import json
         import pandas as pd
-        import numpy as np
         from data.loader import _save_version, _is_cache_valid
         parquet_path, _ = self._write_test_parquet(tmp_path, "AAPL", "日线")
         _save_version(parquet_path)
@@ -672,7 +670,7 @@ class TestDisplayCacheVersioning:
 
     def test_load_display_cache_valid(self, tmp_path, monkeypatch):
         """有效缓存正常返回 DataFrame。"""
-        from data.loader import _save_version, load_display_cache
+        from data.loader import _save_version
         # 在临时路径模拟 display 目录
         display_root = tmp_path / "data" / "display"
         ticker_dir = display_root / "AAPL"
@@ -706,13 +704,11 @@ class TestDisplayCacheVersioning:
 
     def test_load_display_cache_auto_invalidation(self, tmp_path, monkeypatch):
         """数据变更后缓存自动失效 — load_display_cache 返回 None。"""
-        import json
         import pandas as pd
-        import numpy as np
         import time
         from data.loader import (
             _save_version, _is_cache_valid, _invalidate_cache,
-            _compute_version, _version_path,
+            _version_path,
         )
         # 步骤 1: 写入测试 parquet 和 version
         parquet_path, _ = self._write_test_parquet(tmp_path, "AAPL", "日线")
@@ -1469,7 +1465,6 @@ class TestComputeVersionMetadata:
     def test_version_mtime_is_reasonable(self, tmp_path):
         """_compute_version 返回的 mtime 与文件 stat 结果一致。"""
         from data.loader import _compute_version
-        import time
 
         dates = pd.date_range("2024-01-01", periods=10, freq="D")
         df = pd.DataFrame({

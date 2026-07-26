@@ -8,12 +8,10 @@
 """
 
 import numpy as np
-import pandas as pd
 from scipy.signal import savgol_filter, butter, sosfiltfilt, medfilt
 from scipy.ndimage import gaussian_filter1d
 from statsmodels.nonparametric.smoothers_lowess import lowess
 from pandas import DataFrame
-from typing import Any, Dict
 
 try:
     from numba import jit

@@ -232,25 +232,25 @@ class TestGetQueryStartForSynthesis:
 class TestOffsetToTz:
     def test_positive_offset(self):
         from data.loader import _offset_to_tz
-        from datetime import timezone, timedelta
+        from datetime import timedelta
         tz = _offset_to_tz("+08:00")
         assert tz.utcoffset(None) == timedelta(hours=8)
 
     def test_negative_offset(self):
         from data.loader import _offset_to_tz
-        from datetime import timezone, timedelta
+        from datetime import timedelta
         tz = _offset_to_tz("-04:00")
         assert tz.utcoffset(None) == timedelta(hours=-4)
 
     def test_utc_z(self):
         from data.loader import _offset_to_tz
-        from datetime import timezone, timedelta
+        from datetime import timedelta
         tz = _offset_to_tz("Z")
         assert tz.utcoffset(None) == timedelta(0)
 
     def test_empty_string(self):
         from data.loader import _offset_to_tz
-        from datetime import timezone, timedelta
+        from datetime import timedelta
         tz = _offset_to_tz("")
         assert tz.utcoffset(None) == timedelta(0)
 
@@ -923,14 +923,14 @@ class TestOffsetToTzEdgeCases:
 
     def test_zero_offset(self):
         from data.loader import _offset_to_tz
-        from datetime import timezone, timedelta
+        from datetime import timedelta
         tz = _offset_to_tz("+00:00")
         assert tz.utcoffset(None) == timedelta(0)
 
     def test_partial_hour_offset(self):
         """非整小时偏移如 +05:30."""
         from data.loader import _offset_to_tz
-        from datetime import timezone, timedelta
+        from datetime import timedelta
         tz = _offset_to_tz("+05:30")
         assert tz.utcoffset(None) == timedelta(hours=5, minutes=30)
 

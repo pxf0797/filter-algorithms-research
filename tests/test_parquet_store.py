@@ -1194,7 +1194,7 @@ class TestViewLabelMapping:
         session_dir = tmp_path / list(tmp_path.iterdir())[0].name
         meta_path = session_dir / "metadata.json"
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        assert "view_labels" in meta, f"view_labels missing from EventRecorder metadata"
+        assert "view_labels" in meta, "view_labels missing from EventRecorder metadata"
         assert meta["view_labels"] == {"v0": "日线", "v1": "60分钟"}
 
 

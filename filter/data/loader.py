@@ -340,14 +340,14 @@ def _sync_to_display(ticker_code: str, tf: str, n_pts: int = 120,
 # 向后兼容 — 委托给拆分的子模块
 # ═══════════════════════════════════════════════════════════════
 
-from filter.data.fetcher import (
+from filter.data.fetcher import (  # noqa: F401
     _fetch_stock,
     _fetch_all_timeframes,
     fetch_incremental,
     _stock_name_lookup,
 )
 
-from filter.data.synth import (
+from filter.data.synth import (  # noqa: F401
     _sync_all_cascading,
     _write_parquet,
     # Re-export cascade helper functions for backward compatibility
@@ -366,3 +366,4 @@ from filter.data.synth import (
     _query_tf_for_period,
     clear_query_cache,
 )
+

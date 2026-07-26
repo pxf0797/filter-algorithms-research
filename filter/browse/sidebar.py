@@ -13,19 +13,17 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 import yfinance as yf
 from loguru import logger
 
 from filter.data.config_db import (
-    apply_preset, delete_preset, get_history, import_json_files_as_presets,
-    list_presets, rename_preset, save_preset, VIEW_PARAM_SPECS,
+    apply_preset, delete_preset, get_history, list_presets, rename_preset, save_preset, VIEW_PARAM_SPECS,
 )
 from filter.data.db import (
     check_data_health, checkpoint_wal, clear_display_cache, compare_with_db,
-    force_update_kline, get_db_size_mb, has_data, init_db, list_snapshots,
+    force_update_kline, get_db_size_mb, has_data, list_snapshots,
     prune_snapshots, restore_snapshot, snapshot_db, validate_db, DB_PATH,
 )
 from filter.data.loader import _fetch_all_timeframes

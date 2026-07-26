@@ -7,7 +7,6 @@
 """
 
 import json
-import time
 from datetime import datetime
 from pathlib import Path
 
@@ -518,7 +517,6 @@ def _execute_full_backtest(
     """
     from filter.backtest.engine import BacktestRunner
     from filter.data.store import ParquetStore
-    import os as _os
 
     st.toast(f"开始完整回测: bar {start_bar} ~ {end_bar}")
     logger.info("开始完整回测: ticker={}, bars=[{}, {}]", ticker_code, start_bar, end_bar)
@@ -587,7 +585,6 @@ def _execute_full_backtest(
 def _render_past_sessions() -> None:
     """渲染历史回测 session 列表，支持加载。"""
     from filter.backtest.catalog import BacktestCatalog
-    from pathlib import Path as _Path
 
     try:
         catalog = BacktestCatalog("backtest_output")

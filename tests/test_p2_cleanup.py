@@ -8,11 +8,8 @@ tests/test_p2_cleanup.py — P2 代码清理修复的验证测试
   - 魔术字符串常量的正确性
 """
 
-import io
 import json
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 
 import numpy as np
 import pandas as pd
@@ -283,7 +280,6 @@ class TestLoguruMigration:
         """db.py __main__ 块使用 logger 而非 print。"""
         # 导入后重新执行 __name__ == "__main__" 块
         import data.db as db
-        import runpy
         # 不直接运行整个模块, 而是验证 print 已被替换
         # 检查模块级代码中不再有裸 print 调用（排除注释和文档字符串）
         source = Path(db.__file__).read_text(encoding="utf-8")
@@ -325,7 +321,6 @@ class TestLoguruMigration:
 
     def test_logger_output_via_caplog(self, caplog):
         """验证 logger.info/error 通过 caplog 捕获。"""
-        from loguru import logger
 
         # 将 loguru 日志桥接到标准 logging 以便 caplog 捕获
         import logging

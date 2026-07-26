@@ -3,9 +3,7 @@
 import subprocess
 import glob
 import os
-import numpy as np
 import pandas as pd
-import pytest
 
 PROJECT_ROOT = "/Users/xfpan/claude/filter_research"
 

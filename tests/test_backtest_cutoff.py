@@ -10,7 +10,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import json
-import numpy as np
 import pytest
 
 # ── 与 test_state.py 相同的方式导入 state 模块 ──────────────────────────────
@@ -350,7 +349,6 @@ class TestCheckpoint:
 
     def test_checkpoint_auto_save_interval(self, tmp_path):
         """验证 run() 按指定间隔自动保存断点。"""
-        from backtest.engine import _make_json_safe
 
         configs = _make_minimal_configs()
         cp_path = str(tmp_path / "auto_checkpoint.json")

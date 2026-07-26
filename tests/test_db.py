@@ -13,11 +13,9 @@ tests/test_db.py — 完整单元测试覆盖 filter/db.py 模块
 
 import os
 import json
-import shutil
 import sqlite3
-import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -684,7 +682,6 @@ class TestSnapshotBackup:
 
     def test_prune_snapshots_oserror_ignored(self, db_target):
         """prune_snapshots 遇到不可删除的文件时静默跳过。"""
-        import time
         db_module, _ = db_target
         db_module.snapshot_db()
         # mock os.remove 抛 OSError
@@ -787,7 +784,6 @@ class TestClearDisplayCache:
     def test_clear_display_cache_error_handling(self, tmp_path):
         """unlink 抛 OSError 时静默跳过。"""
         import data.db as db
-        import time
         db.DB_PATH = tmp_path / "test_market.db"
         display_dir = tmp_path / "display"
         display_dir.mkdir(parents=True, exist_ok=True)
@@ -1095,7 +1091,6 @@ class TestThreadLocalConnection:
         修复前，worker 线程因 check_same_thread 限制无法使用主线程的
         单例连接，导致数据静默丢失。
         """
-        import data.db as db
         import threading
         import pandas as pd
         import numpy as np
@@ -1171,7 +1166,6 @@ class TestThreadLocalConnection:
 
         模拟 _fetch_all_timeframes 8 个周期并行写入的完整场景。
         """
-        import data.db as db
         import threading
         import pandas as pd
         import numpy as np
@@ -1229,10 +1223,8 @@ class TestThreadLocalConnection:
 
     def test_version_serialisation_roundtrip(self, db_target):
         """_save_version 后 _is_cache_valid 返回 True 表示数据可被正确读取。"""
-        import json
         import pandas as pd
         import numpy as np
-        from pathlib import Path
 
         # 创建 display parquet 并保存版本
         tmp = db_target[1].parent

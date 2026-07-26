@@ -1,5 +1,4 @@
 """测试 view_backtest.py 可视化功能"""
-import json
 import os
 import sys
 import tempfile
@@ -36,7 +35,6 @@ class TestDateParsing:
 
     def test_serialize_nan_to_null(self):
         """NaN 应转为 None"""
-        import math
         assert serialize_value(float('nan')) is None
 
     def test_serialize_inf_to_null(self):
@@ -241,7 +239,6 @@ class TestSafeDateHandling:
     def test_timestamp_column_with_nat(self):
         """含有 NaT 的 timestamp 列应能正常序列化，不抛异常"""
         import pandas as pd
-        import numpy as np
         df = pd.DataFrame({
             "bar_index": [0, 1, 2],
             "bar_timestamp": pd.to_datetime(["2026-01-01", None, "2026-01-03"]),
@@ -387,7 +384,6 @@ class TestHeatmapZminZmaxFixed:
 
     def test_position_values_never_exceed_range(self):
         """确保 position 原始值不超出 [0, 1] 或 [True, False, None]"""
-        import numpy as np
         # 极端情况：混合各种合法值
         df = pd.DataFrame({
             "bar_index": range(6),

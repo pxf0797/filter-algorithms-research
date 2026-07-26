@@ -4,7 +4,8 @@
 #       + _compute_strategy_pnl 的 `if pair_end not in pred_map: continue` 静默丢弃。
 #       修复(入场与预测解耦)后：入场仅凭 sig；无预测的 pair 也入场，止损回退固定%。
 #       预期：应做多的 [16,37,51] 现在全部入场，被丢弃=[]。
-import sqlite3, sys
+import sqlite3
+import sys
 import numpy as np
 sys.path.insert(0, "filter")
 from services.filter_engine import (

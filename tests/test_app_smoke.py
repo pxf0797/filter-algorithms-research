@@ -1,7 +1,6 @@
 """通过 subprocess 验证应用可启动"""
 import subprocess
 import time
-import pytest
 
 
 def test_app_launches():

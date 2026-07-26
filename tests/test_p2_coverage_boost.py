@@ -11,7 +11,6 @@ P2-5 覆盖率提升测试 — 针对低覆盖率模块的补充测试。
 """
 
 import json
-import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -1445,7 +1444,6 @@ class TestCachedFunctions:
         import filter.browse.app as app_module
         noisy = np.sin(np.linspace(0, 4 * np.pi, 100))
         t = np.arange(100, dtype=float)
-        import time
         st_mod = sys.modules.get("streamlit")
         if hasattr(st_mod, "cache_data"):
             import importlib

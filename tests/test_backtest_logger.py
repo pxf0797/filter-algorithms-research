@@ -10,7 +10,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import json
-import numpy as np
 import pytest
 
 # ── 与 test_state.py 相同的方式导入 state 模块 ──────────────────────────────
@@ -71,7 +70,6 @@ class TestBacktestLogger:
     def test_log_mode_switch_writes_jsonl(self, tmp_path):
         """log_mode_switch 写入一条 JSONL 记录."""
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "filter"))
-        import json
         from backtest.logger import log_mode_switch
 
         with patch("backtest.logger.LOG_DIR", tmp_path):
@@ -89,7 +87,6 @@ class TestBacktestLogger:
 
     def test_log_data_load_writes_jsonl(self, tmp_path):
         """log_data_load 写入 JSONL."""
-        import json
         from backtest.logger import log_data_load
 
         with patch("backtest.logger.LOG_DIR", tmp_path):

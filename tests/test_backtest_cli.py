@@ -805,7 +805,6 @@ class TestCliDebugFlag:
         )
 
         # 验证 BacktestRunner 以 save_debug_data=True 创建
-        from filter.backtest.cli import BacktestRunner as RunnerClass
         # We check via the patch in _run_main_with_mocks; the runner was
         # created by main() with save_debug_data=args.debug=True
         # The mock doesn't capture constructor args, so we verify indirectly:

@@ -10,7 +10,6 @@ import uuid
 from pathlib import Path
 import numpy as np
 import streamlit as st
-import plotly.graph_objects as go
 
 from filter.engine.strategy import _compute_holding_masks
 

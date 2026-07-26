@@ -3,7 +3,6 @@
 import re
 from pathlib import Path
 
-import pytest
 from filter import __version__
 
 

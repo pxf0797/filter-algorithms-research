@@ -9,7 +9,6 @@ Verifies:
 
 import numpy as np
 import pytest
-from unittest import mock
 import sys
 
 pytestmark = pytest.mark.numba
@@ -264,7 +263,6 @@ class TestNumbaFallback:
         """Verify that the pure Python fallback path inside apply_kalman
         produces correct numerical results by simulating numba-unavailable."""
         from engine.filters import _kalman_core
-        import engine.filters as eng
 
         Q, R = 0.01, 1.0
         dt = float(time_index_500[1] - time_index_500[0])

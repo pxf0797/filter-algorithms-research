@@ -1,9 +1,6 @@
 """参数导入导出测试：验证导出JSON完整性、_imp_备份覆盖、自动检测参数变更"""
 import json
 import pytest
-import numpy as np
-from unittest.mock import MagicMock, patch
-import sys
 
 from data.config_db import VIEW_PARAM_SPECS
 
@@ -22,7 +19,6 @@ REQUIRED_GLOBAL_KEYS = ["market", "ticker", "global_f", "global_dual", "global_f
 @pytest.fixture
 def sample_config():
     """Provide a minimal valid config dict for import/export tests."""
-    import copy
     base = {
         "market": "港股 HK",
         "ticker": "TEST",

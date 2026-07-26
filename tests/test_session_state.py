@@ -2,8 +2,6 @@
 AppState _imp_ 清理 + Streamlit 缓存 TTL — 单元测试
 """
 import ast
-import sys
-import re
 from pathlib import Path
 from unittest.mock import MagicMock
 

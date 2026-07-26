@@ -4,11 +4,10 @@ tests/test_config_db.py — 完整单元测试覆盖 config_db 模块
 """
 
 import json
-import os
 import sqlite3
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 

@@ -8,7 +8,7 @@
 """
 
 import numpy as np
-from typing import Optional, List, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any
 from filter.engine.filters import FILTERS
 from filter.engine.schmitt import _schmitt_trigger, _fit_physics_parabola
 

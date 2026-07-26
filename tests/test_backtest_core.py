@@ -6,10 +6,8 @@
 """
 
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import json
 import numpy as np
 import pytest
 
@@ -1173,7 +1171,7 @@ class TestEngineViewOrdering:
 
     def test_build_default_configs_sorted_coarse_to_fine(self):
         """默认配置应按 ALL_TFS 降序 (粗→细) 排列."""
-        from filter.shared.constants import ALL_TFS, DEFAULT_TFS
+        from filter.shared.constants import ALL_TFS
         from filter.backtest.cli import _build_default_configs
 
         configs = _build_default_configs("TEST_TICKER")
@@ -1211,7 +1209,6 @@ class TestEngineViewOrdering:
 
     def test_engine_min_tf_is_finest_in_use(self, tmp_path):
         """_min_tf 应为 ALL_TFS 索引最小的周期 (最精细)."""
-        from filter.shared.constants import ALL_TFS
         from filter.backtest.engine import BacktestRunner
         from unittest.mock import patch
 

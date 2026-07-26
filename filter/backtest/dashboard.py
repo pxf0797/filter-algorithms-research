@@ -16,7 +16,6 @@ import streamlit as st
 from filter.common.pnl_renderer import (
     PNL_BASELINE,
     compute_combined_pnl,
-    compute_drawdown,
     make_pnl_long_trace,
     make_pnl_short_trace,
     make_pnl_combined_trace,
