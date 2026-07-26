@@ -28,7 +28,7 @@ if _pkg_dir not in sys.path:
 # Backward compatibility re-exports from shared
 from filter.shared.config import ViewConfig
 from filter.shared.constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY, TF_INTERVAL
-from filter.shared.state import AppState, ViewState
+from filter.shared.state import AppState, ViewState, StateStore, StreamlitStateStore, DictStateStore
 
 # Backward compatibility re-exports from engine
 from filter.engine.filters import FILTERS
