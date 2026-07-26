@@ -1,7 +1,7 @@
 """Test filter.constants — verify constant consistency and completeness."""
 
 import pytest
-from shared.constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY, TF_INTERVAL
+from shared.constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY, TF_INTERVAL, TF_LOWER
 
 
 class TestAllTfs:
@@ -64,6 +64,51 @@ class TestTfInterval:
         for tf in ("日线", "周线", "月线", "季线"):
             _, period = TF_INTERVAL[tf]
             assert period == "max", f"TF '{tf}' should use period='max', got '{period}'"
+
+
+class TestTfLower:
+    """B65: TF_LOWER 从 constants 导入且为 TF_HIERARCHY 的逆映射。"""
+
+    def test_all_keys_map_to_valid_tfs(self):
+        for src, dst in TF_LOWER.items():
+            if dst is not None:
+                assert dst in ALL_TFS, f"TF_LOWER maps '{src}' → '{dst}', but '{dst}' not in ALL_TFS"
+
+    def test_1min_maps_to_none(self):
+        assert TF_LOWER["1分钟"] is None, "1分钟 should map to None (no lower TF)"
+
+    def test_is_inverse_of_tf_hierarchy(self):
+        """TF_LOWER 是 TF_HIERARCHY 的逆映射（除了 None 边界）。"""
+        for tf in ALL_TFS:
+            higher = TF_HIERARCHY.get(tf)
+            if higher is not None:
+                assert TF_LOWER[higher] == tf, (
+                    f"TF_LOWER[{higher}] = {TF_LOWER[higher]}, expected {tf}"
+                )
+
+    def test_chain_from_seasonal_to_1min(self):
+        """Following TF_LOWER from 季线 reaches 1分钟."""
+        current = "季线"
+        chain = [current]
+        while True:
+            nxt = TF_LOWER[current]
+            if nxt is None:
+                break
+            chain.append(nxt)
+            current = nxt
+        assert chain[-1] == "1分钟"
+        assert len(chain) == 8
+
+    def test_maps_correctly(self):
+        """TF_LOWER maps each higher TF to its immediate lower TF."""
+        assert TF_LOWER["季线"] == "月线"
+        assert TF_LOWER["月线"] == "周线"
+        assert TF_LOWER["周线"] == "日线"
+        assert TF_LOWER["日线"] == "60分钟"
+        assert TF_LOWER["60分钟"] == "15分钟"
+        assert TF_LOWER["15分钟"] == "5分钟"
+        assert TF_LOWER["5分钟"] == "1分钟"
+        assert TF_LOWER["1分钟"] is None
 
 
 class TestImportConsistency:

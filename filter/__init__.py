@@ -6,11 +6,9 @@ filter — Stock filter & backtest application.
   engine   — filters, signals computation
   data     — loader, store, db, config_db
   browse   — Streamlit app, charts, sidebar
-  backtest — backtest engine, CLI, metrics, panel, recorder, optimizer, pipeline
+  backtest — backtest engine, CLI, metrics, panel, recorder, optimizer, capture
 """
 
-import sys
-import os
 import tomllib
 from pathlib import Path
 
@@ -18,12 +16,6 @@ from pathlib import Path
 _pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
 with open(_pyproject_path, "rb") as _fp:
     __version__ = tomllib.load(_fp)["project"]["version"]
-
-# Ensure filter/ is on sys.path so internal bare imports
-# (e.g. ``from shared.constants import ...``) resolve correctly.
-_pkg_dir = os.path.dirname(os.path.abspath(__file__))
-if _pkg_dir not in sys.path:
-    sys.path.insert(0, _pkg_dir)
 
 # Backward compatibility re-exports from shared
 from filter.shared.config import ViewConfig

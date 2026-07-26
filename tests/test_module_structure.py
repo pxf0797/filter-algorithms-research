@@ -447,3 +447,40 @@ class TestPnlRendererModule:
         config = make_pnl_yaxis_config(row=1)
         assert "yaxis1" in config
         assert config["yaxis1"]["ticksuffix"] == "%"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# P2-4: 工程债务清理测试
+# ══════════════════════════════════════════════════════════════════════
+
+class TestB68PipelineRename:
+    """B68: pipeline.py → capture.py — import 路径更新后正常工作."""
+
+    def test_capture_module_importable(self):
+        """from filter.backtest.capture import PipelineCapture, PipelineStageData."""
+        from filter.backtest.capture import PipelineCapture, PipelineStageData
+        assert PipelineCapture is not None
+        assert PipelineStageData is not None
+
+    def test_capture_module_is_enabled_method(self):
+        """PipelineCapture 包含 is_enabled 静态方法."""
+        from filter.backtest.capture import PipelineCapture
+        result = PipelineCapture.is_enabled()
+        assert isinstance(result, bool)
+
+
+class TestB75SysPathRemoval:
+    """B75: import filter 不修改 sys.path."""
+
+    def test_import_filter_does_not_modify_sys_path(self):
+        """import filter 前后 sys.path 保持一致."""
+        import sys
+        import copy
+        path_before = copy.copy(sys.path)
+        import filter  # noqa: F401
+        path_after = list(sys.path)
+        # filter/ 目录不应被新添加到 sys.path（pip install -e . 已解决路径问题）
+        assert path_before == path_after, (
+            f"sys.path 被 import filter 修改了!\n"
+            f"添加了: {set(path_after) - set(path_before)}"
+        )

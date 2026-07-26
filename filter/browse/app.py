@@ -60,7 +60,7 @@ from filter.browse.components_sidebar import (
 )
 from filter.shared.constants import TF_INTERVAL
 from filter.shared.state import AppState
-from filter.backtest.pipeline import PipelineCapture, PipelineStageData
+from filter.backtest.capture import PipelineCapture, PipelineStageData
 from filter.backtest.logger import log_data_load
 from filter.backtest.panel import render_backtest_panel, run_backtest_play, sync_backtest_cascading_data
 from filter.backtest.dashboard import render_backtest_dashboard
