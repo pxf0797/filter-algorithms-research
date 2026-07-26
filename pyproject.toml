@@ -42,6 +42,8 @@ dev = [
     "build>=1.0",
     "types-requests>=2.31",
     "types-pyyaml>=6.0",
+    "pytest-randomly>=3.15",
+    "pytest-timeout>=2.3",
 ]
 
 [tool.setuptools.packages.find]
@@ -53,7 +55,7 @@ norecursedirs = ["_archive", "__pycache__", ".hypothesis"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = ["-v", "--tb=short", "--strict-markers"]
+addopts = ["-v", "--tb=short", "--strict-markers", "--timeout=60"]
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "filter: filter algorithm tests",
