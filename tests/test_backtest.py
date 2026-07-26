@@ -322,19 +322,6 @@ class TestBacktestLogger:
             assert record["min_tf"] == "60分钟"
             assert record["bar_count"] == 500
 
-    def test_log_bar_navigation_writes_jsonl(self, tmp_path):
-        """log_bar_navigation 写入 JSONL."""
-        import json
-        from backtest.logger import log_bar_navigation
-
-        with patch("backtest.logger.LOG_DIR", tmp_path):
-            log_bar_navigation("AAPL", "60分钟", 50, 500, "2026-06-15")
-
-            record = json.loads(list(tmp_path.glob("*.jsonl"))[0].read_text().strip())
-            assert record["event"] == "bar_navigation"
-            assert record["bar_index"] == 50
-            assert record["total"] == 500
-
     def test_log_data_load_writes_jsonl(self, tmp_path):
         """log_data_load 写入 JSONL."""
         import json
@@ -348,19 +335,6 @@ class TestBacktestLogger:
             assert record["ticker"] == "MSFT"
             assert record["bar_count"] == 120
             assert record["elapsed_ms"] == 150.5
-
-    def test_log_error_writes_jsonl(self, tmp_path):
-        """log_error 写入错误 JSONL."""
-        import json
-        from backtest.logger import log_error
-
-        with patch("backtest.logger.LOG_DIR", tmp_path):
-            log_error("TSLA", "_sync_to_display", "数据库连接超时")
-
-            record = json.loads(list(tmp_path.glob("*.jsonl"))[0].read_text().strip())
-            assert record["event"] == "error"
-            assert record["location"] == "_sync_to_display"
-            assert "数据库连接超时" in record["error"]
 
     def test_log_dir_auto_created(self, tmp_path):
         """日志目录自动创建."""
@@ -1406,7 +1380,7 @@ class TestCheckpoint:
         assert runner2._ewma_state == {}
 
         resume_bar = runner2._restore_checkpoint(cp_path, configs)
-        assert resume_bar == 0  # save_checkpoint 中 bar_index 固定为 0
+        assert resume_bar == 0  # save_checkpoint 默认 bar_index=0
 
         # 验证 EWMA 状态恢复
         assert runner2._ewma_state == runner._ewma_state

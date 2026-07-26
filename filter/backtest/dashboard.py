@@ -117,26 +117,43 @@ def _compute_metrics_from_pnl(
 
 
 def _extract_trade_records(df: pd.DataFrame, view_prefix: str) -> list[dict]:
-    """从 DataFrame 的 trade 列提取交易记录列表。"""
+    """从 DataFrame 的 trade 列提取交易记录列表（向量化版本）。"""
     trade_col = f"{view_prefix}_trade"
     return_col = f"{view_prefix}_trade_return"
     reason_col = f"{view_prefix}_trade_reason"
 
-    records = []
     if trade_col not in df.columns:
-        return records
+        return []
 
-    for _, row in df.iterrows():
-        trade_val = row.get(trade_col)
-        if pd.isna(trade_val) or not trade_val:
-            continue
-        if isinstance(trade_val, str) and trade_val.strip():
-            records.append({
-                "return_pct": float(row.get(return_col, 0) or 0),
-                "reason": str(row.get(reason_col, "") or ""),
-            })
+    # 向量化筛选：trade 列为非空字符串
+    mask = (
+        df[trade_col].notna()
+        & (df[trade_col].astype(str).str.strip() != "")
+    )
 
-    return records
+    if not mask.any():
+        return []
+
+    # 确定可用的列并映射到期望的键名
+    col_map = {}
+    if return_col in df.columns:
+        col_map[return_col] = "return_pct"
+    if reason_col in df.columns:
+        col_map[reason_col] = "reason"
+
+    if not col_map:
+        return []
+
+    selected = df.loc[mask, list(col_map.keys())].copy()
+    selected = selected.rename(columns=col_map)
+
+    # 填充默认值，匹配原始逐行逻辑
+    if "return_pct" in selected.columns:
+        selected["return_pct"] = selected["return_pct"].fillna(0).astype(float)
+    if "reason" in selected.columns:
+        selected["reason"] = selected["reason"].fillna("").astype(str)
+
+    return selected.to_dict("records")
 
 
 def _render_kpi_cards(metrics: dict) -> None:
@@ -205,6 +222,16 @@ def _render_kpi_cards(metrics: dict) -> None:
         f"{_safe.get('avg_trade_return_pct', 0):.2f}%",
     )
 
+    # 指标 CSV 导出
+    metrics_df = pd.DataFrame(list(_safe.items()), columns=["指标", "数值"])
+    csv = metrics_df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="导出指标汇总 CSV",
+        data=csv,
+        file_name="backtest_metrics.csv",
+        mime="text/csv",
+    )
+
 
 def _render_pnl_chart(
     long_pnl: np.ndarray,
@@ -238,7 +265,7 @@ def _render_pnl_chart(
 
     # 做多 / 做空独立曲线 (虚线)
     fig.add_trace(
-        go.Scatter(
+        go.Scattergl(
             x=x_vals, y=long_pnl - 100.0,
             mode="lines",
             name="做多 PnL",
@@ -248,7 +275,7 @@ def _render_pnl_chart(
         row=1, col=1,
     )
     fig.add_trace(
-        go.Scatter(
+        go.Scattergl(
             x=x_vals, y=short_pnl - 100.0,
             mode="lines",
             name="做空 PnL",
@@ -260,7 +287,7 @@ def _render_pnl_chart(
 
     # max 组合曲线 (实线)
     fig.add_trace(
-        go.Scatter(
+        go.Scattergl(
             x=x_vals, y=cum_pnl,
             mode="lines",
             name="max(做多, 做空) PnL",
@@ -277,7 +304,7 @@ def _render_pnl_chart(
     peak = np.maximum.accumulate(combined)
     drawdown = np.where(peak != 0, (combined - peak) / peak * 100, 0.0)
     fig.add_trace(
-        go.Scatter(
+        go.Scattergl(
             x=x_vals, y=drawdown,
             mode="lines",
             name="回撤 %",
@@ -298,7 +325,7 @@ def _render_pnl_chart(
     fig.update_yaxes(title_text="PnL", row=1, col=1)
     fig.update_yaxes(title_text="回撤 %", row=2, col=1)
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config={"modeBarButtonsToAdd": ["downloadImage"]})
 
 
 def _render_view_comparison(df: pd.DataFrame, views: list[str]) -> None:
@@ -316,7 +343,7 @@ def _render_view_comparison(df: pd.DataFrame, views: list[str]) -> None:
             df[short_col].values.astype(float),
         )
         cum = combined - 100.0
-        fig.add_trace(go.Scatter(
+        fig.add_trace(go.Scattergl(
             y=cum,
             mode="lines",
             name=v,
@@ -333,7 +360,7 @@ def _render_view_comparison(df: pd.DataFrame, views: list[str]) -> None:
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config={"modeBarButtonsToAdd": ["downloadImage"]})
 
 
 def _render_trade_table(df: pd.DataFrame, view_prefix: str) -> None:
@@ -366,6 +393,15 @@ def _render_trade_table(df: pd.DataFrame, view_prefix: str) -> None:
     trades_df = trades_df.rename(columns={k: v for k, v in rename_map.items() if k in trades_df.columns})
 
     st.dataframe(trades_df, use_container_width=True, height=300)
+
+    # CSV 导出
+    csv = trades_df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        label="导出交易明细 CSV",
+        data=csv,
+        file_name=f"{view_prefix}_trades.csv",
+        mime="text/csv",
+    )
 
 
 def _render_signal_stats(df: pd.DataFrame, view_prefix: str) -> None:

@@ -667,3 +667,419 @@ class TestDetectPnlViewsEdgeCases:
         views = _detect_pnl_views(df)
         assert "v9" in views
         assert "v10" in views
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# T2-1: go.Scatter → go.Scattergl 类型验证
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestScatterglTraceType:
+    """验证 _render_pnl_chart 和 _render_view_comparison 使用 Scattergl 类型 trace。
+
+    修改前使用 go.Scatter；修改后必须使用 go.Scattergl 以提升大数据量渲染性能。
+    """
+
+    def test_pnl_chart_all_traces_are_scattergl(self):
+        """_render_pnl_chart 每条 data trace 均为 go.Scattergl 实例。"""
+        import plotly.graph_objects as go
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        np.random.seed(42)
+        n = 60
+        long_pnl = 100.0 * np.cumprod(np.full(n, 1.001))
+        short_pnl = 100.0 * np.cumprod(np.full(n, 1.0005))
+        df = pd.DataFrame({"bar_timestamp": pd.date_range("2024-01-01", periods=n, freq="h")})
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df)
+            fig = mock_st.plotly_chart.call_args[0][0]
+
+            for trace in fig.data:
+                assert isinstance(trace, go.Scattergl), (
+                    f"Trace '{trace.name}' 应为 go.Scattergl，实际为 {type(trace).__name__}"
+                )
+
+    def test_pnl_chart_trace_count_matches_expected(self):
+        """PnL chart 应有精确的 trace 数量：做多/做空/组合/回撤 = 4 条数据 trace。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        np.random.seed(42)
+        n = 60
+        long_pnl = 100.0 * np.cumprod(np.full(n, 1.001))
+        short_pnl = np.full(n, 100.0)
+        df = pd.DataFrame({"bar_timestamp": pd.date_range("2024-01-01", periods=n, freq="h")})
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df)
+            fig = mock_st.plotly_chart.call_args[0][0]
+
+            # 4 data traces: long, short, combined, drawdown
+            assert len(fig.data) == 4, f"Expected 4 data traces, got {len(fig.data)}"
+
+    def test_view_comparison_all_traces_are_scattergl(self):
+        """_render_view_comparison 每条 trace 均为 go.Scattergl 实例。"""
+        import plotly.graph_objects as go
+        from filter.backtest.dashboard import _render_view_comparison
+        import filter.backtest.dashboard as dash_mod
+
+        np.random.seed(42)
+        n = 50
+        df = pd.DataFrame({
+            "v0_pnl_long":  100.0 * np.cumprod(np.full(n, 1.001)),
+            "v0_pnl_short": np.full(n, 100.0),
+            "v1_pnl_long":  100.0 * np.cumprod(np.full(n, 1.0005)),
+            "v1_pnl_short": np.full(n, 100.0),
+            "v2_pnl_long":  100.0 * np.cumprod(np.full(n, 1.0003)),
+            "v2_pnl_short": np.full(n, 100.0),
+        })
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_view_comparison(df, ["v0", "v1", "v2"])
+            fig = mock_st.plotly_chart.call_args[0][0]
+
+            assert len(fig.data) == 3  # 每个 view 一条 trace
+            for trace in fig.data:
+                assert isinstance(trace, go.Scattergl), (
+                    f"View comparison trace '{trace.name}' 应为 go.Scattergl，"
+                    f"实际为 {type(trace).__name__}"
+                )
+
+    def test_view_comparison_single_view_no_crash(self):
+        """单视图对比也不崩溃。"""
+        from filter.backtest.dashboard import _render_view_comparison
+        import filter.backtest.dashboard as dash_mod
+
+        np.random.seed(42)
+        n = 30
+        df = pd.DataFrame({
+            "v0_pnl_long":  100.0 * np.cumprod(np.full(n, 1.001)),
+            "v0_pnl_short": np.full(n, 100.0),
+        })
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_view_comparison(df, ["v0"])
+            assert mock_st.plotly_chart.called
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# T2-2: _extract_trade_records 向量化版本测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestExtractTradeRecords:
+    """验证 _extract_trade_records 向量化版本的正确性。
+
+    修改前使用 iterrows() 逐行处理；修改后使用布尔 mask + 向量化赋值。
+    """
+
+    def test_basic_trade_records(self):
+        """基本场景：trade 列有值，return 和 reason 列也存在。"""
+        from filter.backtest.dashboard import _extract_trade_records
+
+        df = pd.DataFrame({
+            "v0_trade":        ["long", "short", "", "", "long"],
+            "v0_trade_return": [1.5, -0.5, None, None, 2.0],
+            "v0_trade_reason": ["target", "stop", None, None, "signal"],
+            "other_col":       [10, 20, 30, 40, 50],
+        })
+
+        result = _extract_trade_records(df, "v0")
+        assert len(result) == 3  # 仅 index 0,1,4 有 trade
+
+        # 检查每条记录都有 return_pct 和 reason
+        assert result[0]["return_pct"] == 1.5
+        assert result[0]["reason"] == "target"
+        assert result[1]["return_pct"] == -0.5
+        assert result[1]["reason"] == "stop"
+        assert result[2]["return_pct"] == 2.0
+        assert result[2]["reason"] == "signal"
+
+    def test_output_dict_keys_include_return_pct_and_reason(self):
+        """输出每条 dict 包含 return_pct 和 reason 键。"""
+        from filter.backtest.dashboard import _extract_trade_records
+
+        df = pd.DataFrame({
+            "v0_trade":        ["long"],
+            "v0_trade_return": [3.0],
+            "v0_trade_reason": ["entry"],
+        })
+
+        result = _extract_trade_records(df, "v0")
+        assert len(result) == 1
+        assert "return_pct" in result[0]
+        assert "reason" in result[0]
+        assert result[0]["return_pct"] == 3.0
+        assert result[0]["reason"] == "entry"
+
+    def test_empty_dataframe(self):
+        """空 DataFrame 返回空列表。"""
+        from filter.backtest.dashboard import _extract_trade_records
+
+        df = pd.DataFrame()
+        result = _extract_trade_records(df, "v0")
+        assert result == []
+
+    def test_no_trade_column(self):
+        """DataFrame 无 trade 列时返回空列表。"""
+        from filter.backtest.dashboard import _extract_trade_records
+
+        df = pd.DataFrame({
+            "v0_sig": [0, 1, 0],
+            "v0_pnl_long": [100.0, 101.0, 102.0],
+        })
+
+        result = _extract_trade_records(df, "v0")
+        assert result == []
+
+    def test_trade_column_all_nan_or_empty(self):
+        """trade 列全为 NaN 或空字符串时返回空列表。"""
+        from filter.backtest.dashboard import _extract_trade_records
+
+        df = pd.DataFrame({
+            "v0_trade":        [None, "", np.nan, None],
+            "v0_trade_return": [None, None, None, None],
+            "v0_trade_reason": [None, None, None, None],
+        })
+
+        result = _extract_trade_records(df, "v0")
+        assert result == []
+
+    def test_trade_column_all_empty_strings(self):
+        """trade 列全为空字符串时返回空列表。"""
+        from filter.backtest.dashboard import _extract_trade_records
+
+        df = pd.DataFrame({
+            "v0_trade": ["", "", ""],
+            "v0_trade_return": [None, None, None],
+        })
+
+        result = _extract_trade_records(df, "v0")
+        assert result == []
+
+    def test_mixed_trade_values(self):
+        """部分行有值、部分行无值的混合情况。"""
+        from filter.backtest.dashboard import _extract_trade_records
+
+        df = pd.DataFrame({
+            "v0_trade":        ["buy", "", None, "sell", ""],
+            "v0_trade_return": [5.0, None, None, -2.0, None],
+            "v0_trade_reason": ["entry", None, None, "exit", None],
+        })
+
+        result = _extract_trade_records(df, "v0")
+        assert len(result) == 2
+        assert result[0]["return_pct"] == 5.0
+        assert result[1]["return_pct"] == -2.0
+
+    def test_only_trade_column_no_return_or_reason(self):
+        """仅 trade 列存在，无 return/reason 列时返回空列表。
+
+        col_map 为空时，无可提取列，应返回空列表而非崩溃。
+        """
+        from filter.backtest.dashboard import _extract_trade_records
+
+        df = pd.DataFrame({
+            "v0_trade": ["long", "short"],
+        })
+
+        result = _extract_trade_records(df, "v0")
+        assert result == []
+
+    def test_only_trade_return_no_reason(self):
+        """仅 trade 和 return 列存在，无 reason 列。"""
+        from filter.backtest.dashboard import _extract_trade_records
+
+        df = pd.DataFrame({
+            "v0_trade":        ["buy", "sell"],
+            "v0_trade_return": [1.0, -0.5],
+        })
+
+        result = _extract_trade_records(df, "v0")
+        assert len(result) == 2
+        assert "return_pct" in result[0]
+        # reason 列不存在，不应出现在输出中
+        assert "reason" not in result[0]
+
+    def test_is_vectorized_not_iterrows(self):
+        """验证实现为向量化版本（无 iterrows 调用）。"""
+        from filter.backtest.dashboard import _extract_trade_records
+        import inspect
+
+        source = inspect.getsource(_extract_trade_records)
+        assert "iterrows" not in source, (
+            "_extract_trade_records 应使用向量化操作而非 iterrows()"
+        )
+        # 验证使用了向量化操作 mask
+        assert "notna()" in source or "mask" in source, (
+            "_extract_trade_records 应使用向量化 mask 筛选"
+        )
+
+    def test_null_return_pct_defaults_to_zero(self):
+        """return_pct 为 NaN 的行被填充为 0。"""
+        from filter.backtest.dashboard import _extract_trade_records
+
+        df = pd.DataFrame({
+            "v0_trade":        ["long"],
+            "v0_trade_return": [np.nan],
+            "v0_trade_reason": ["entry"],
+        })
+
+        result = _extract_trade_records(df, "v0")
+        assert len(result) == 1
+        assert result[0]["return_pct"] == 0.0
+
+    def test_null_reason_defaults_to_empty_string(self):
+        """reason 为 NaN 时被填充为空字符串。"""
+        from filter.backtest.dashboard import _extract_trade_records
+
+        df = pd.DataFrame({
+            "v0_trade":        ["long"],
+            "v0_trade_return": [1.0],
+            "v0_trade_reason": [np.nan],
+        })
+
+        result = _extract_trade_records(df, "v0")
+        assert len(result) == 1
+        assert result[0]["reason"] == ""
+
+    def test_whitespace_only_trade_ignored(self):
+        """trade 值为仅空白字符时被忽略。"""
+        from filter.backtest.dashboard import _extract_trade_records
+
+        df = pd.DataFrame({
+            "v0_trade":        ["  ", "\t", "valid"],
+            "v0_trade_return": [None, None, 3.0],
+            "v0_trade_reason": [None, None, "yes"],
+        })
+
+        result = _extract_trade_records(df, "v0")
+        assert len(result) == 1
+        assert result[0]["return_pct"] == 3.0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# T2-3: 导出功能测试
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestPnlChartExportConfig:
+    """验证 PnL 图表的 Plotly config 包含导出按钮。"""
+
+    def test_pnl_chart_config_has_download_image(self):
+        """_render_pnl_chart 的 st.plotly_chart config 包含 downloadImage 按钮。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        np.random.seed(42)
+        n = 30
+        long_pnl = 100.0 * np.cumprod(np.full(n, 1.001))
+        short_pnl = np.full(n, 100.0)
+        df = pd.DataFrame({"bar_timestamp": pd.date_range("2024-01-01", periods=n, freq="h")})
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df)
+            call_kwargs = mock_st.plotly_chart.call_args[1]
+
+            assert "config" in call_kwargs
+            assert "modeBarButtonsToAdd" in call_kwargs["config"]
+            assert call_kwargs["config"]["modeBarButtonsToAdd"] == ["downloadImage"]
+
+    def test_view_comparison_config_has_download_image(self):
+        """_render_view_comparison 的 config 也包含 downloadImage 按钮。"""
+        from filter.backtest.dashboard import _render_view_comparison
+        import filter.backtest.dashboard as dash_mod
+
+        np.random.seed(42)
+        n = 30
+        df = pd.DataFrame({
+            "v0_pnl_long":  100.0 * np.cumprod(np.full(n, 1.001)),
+            "v0_pnl_short": np.full(n, 100.0),
+        })
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_view_comparison(df, ["v0"])
+            call_kwargs = mock_st.plotly_chart.call_args[1]
+
+            assert "config" in call_kwargs
+            assert "modeBarButtonsToAdd" in call_kwargs["config"]
+            assert call_kwargs["config"]["modeBarButtonsToAdd"] == ["downloadImage"]
+
+    def test_use_container_width_is_true(self):
+        """图表使用全宽渲染。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        np.random.seed(42)
+        n = 30
+        long_pnl = 100.0 * np.cumprod(np.full(n, 1.001))
+        short_pnl = np.full(n, 100.0)
+        df = pd.DataFrame({"bar_timestamp": pd.date_range("2024-01-01", periods=n, freq="h")})
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df)
+            call_kwargs = mock_st.plotly_chart.call_args[1]
+            assert call_kwargs.get("use_container_width") is True
+
+
+class TestCsvDownloadButtons:
+    """验证 CSV 下载按钮在页面中正确渲染。"""
+
+    def test_kpi_metrics_download_button_present(self):
+        """_render_kpi_cards 包含 '导出指标汇总 CSV' download_button。"""
+        from filter.backtest.dashboard import _render_kpi_cards
+        import filter.backtest.dashboard as dash_mod
+
+        metrics = {
+            "total_return_pct": 15.5,
+            "total_trades": 10,
+        }
+
+        with patch.object(dash_mod, "st") as mock_st:
+            mock_col = MagicMock()
+            mock_st.columns.return_value = [mock_col] * 6
+            _render_kpi_cards(metrics)
+
+            # 验证 download_button 被调用且 label 正确
+            download_calls = [
+                c for c in mock_st.download_button.call_args_list
+                if "导出指标汇总" in str(c[1].get("label", ""))
+            ]
+            assert len(download_calls) >= 1, "未找到 '导出指标汇总 CSV' download_button"
+
+    def test_trade_table_download_button_present(self):
+        """_render_trade_table 包含 '导出交易明细 CSV' download_button。"""
+        from filter.backtest.dashboard import _render_trade_table
+        import filter.backtest.dashboard as dash_mod
+
+        df = pd.DataFrame({
+            "v0_trade":        ["long", "short"],
+            "v0_trade_return": [1.5, -0.5],
+        })
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_trade_table(df, "v0")
+
+            download_calls = [
+                c for c in mock_st.download_button.call_args_list
+                if "导出交易明细" in str(c[1].get("label", ""))
+            ]
+            assert len(download_calls) >= 1, "未找到 '导出交易明细 CSV' download_button"
+
+    def test_empty_trade_table_does_not_show_download(self):
+        """无交易记录时不显示下载按钮。"""
+        from filter.backtest.dashboard import _render_trade_table
+        import filter.backtest.dashboard as dash_mod
+
+        df = pd.DataFrame({
+            "v0_trade":        ["", "", ""],
+            "v0_trade_return": [None, None, None],
+        })
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_trade_table(df, "v0")
+            # 无交易行时只应调用 caption("无交易记录")
+            download_calls = [
+                c for c in mock_st.download_button.call_args_list
+                if "导出" in str(c[1].get("label", ""))
+            ]
+            assert len(download_calls) == 0, "无交易记录时不应出现下载按钮"

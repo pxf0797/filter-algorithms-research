@@ -41,19 +41,6 @@ def log_mode_switch(ticker: str, direction: str, min_tf: str, bar_count: int):
     })
 
 
-def log_bar_navigation(ticker: str, min_tf: str, bar_index: int, total: int,
-                       cutoff_date: str, elapsed_ms: float = 0):
-    """记录 bar 位置跳转事件。"""
-    _log_event("bar_navigation", {
-        "ticker": ticker,
-        "min_tf": min_tf,
-        "bar_index": bar_index,
-        "total": total,
-        "cutoff_date": cutoff_date,
-        "elapsed_ms": round(elapsed_ms, 1),
-    })
-
-
 def log_data_load(ticker: str, tf: str, bar_count: int, cutoff_date: str,
                   elapsed_ms: float = 0):
     """记录回测数据加载事件。"""
@@ -63,13 +50,4 @@ def log_data_load(ticker: str, tf: str, bar_count: int, cutoff_date: str,
         "bar_count": bar_count,
         "cutoff_date": cutoff_date,
         "elapsed_ms": round(elapsed_ms, 1),
-    })
-
-
-def log_error(ticker: str, location: str, error_msg: str):
-    """记录回测异常事件。"""
-    _log_event("error", {
-        "ticker": ticker,
-        "location": location,
-        "error": error_msg,
     })

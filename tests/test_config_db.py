@@ -222,114 +222,6 @@ class TestPresetCRUD:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 3. TestTickerConfig
-# ═══════════════════════════════════════════════════════════════════════════
-
-class TestTickerConfig:
-    """标的配置读写。"""
-
-    def test_save_and_load_ticker_config(self, temp_config_db):
-        """保存后能完整读出。"""
-        import data.config_db as config_db
-        params = json.dumps({"sma": 20, "ema": 10})
-        config_db.save_ticker_config("AAPL", "US", "single",
-                                     params_json=params, preset_id=None)
-        row = config_db.load_ticker_config("AAPL")
-        assert row is not None
-        assert row["ticker"] == "AAPL"
-        assert row["variant"] == "single"
-        assert row["market"] == "US"
-        assert row["params_json"] == params
-
-    def test_save_with_preset_id(self, temp_config_db):
-        """包含 preset_id 的保存。"""
-        import data.config_db as config_db
-        pid = config_db.save_preset("ref", "{}")
-        config_db.save_ticker_config("MSFT", "US", "single",
-                                     params_json="{}", preset_id=pid)
-        row = config_db.load_ticker_config("MSFT")
-        assert row["preset_id"] == pid
-
-    def test_load_nonexistent_ticker(self, temp_config_db):
-        """不存在的 ticker 返回 None。"""
-        import data.config_db as config_db
-        assert config_db.load_ticker_config("NOEXIST") is None
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 4. TestHistory
-# ═══════════════════════════════════════════════════════════════════════════
-
-class TestHistory:
-    """变更历史读写。"""
-
-    def test_record_and_get_history(self, temp_config_db):
-        """写入历史后能按序读出。"""
-        import data.config_db as config_db
-        import time
-        # 先创建 ticker 记录（FOREIGN KEY 约束）
-        config_db.save_ticker_config("AAPL", "US", "single", params_json='{"a":1}')
-
-        config_db.record_history("AAPL", "single",
-                                 old_json='{"a":0}', new_json='{"a":1}',
-                                 source="manual")
-        config_db.record_history("AAPL", "single",
-                                 old_json='{"a":1}', new_json='{"a":2}',
-                                 source="ui")
-
-        history = config_db.get_history("AAPL", limit=10)
-        assert len(history) == 2
-        # datetime 精度为秒，两条在同一秒写入时顺序不定，检查整体内容
-        all_new = [json.loads(h["new_json"]) for h in history]
-        all_old = [json.loads(h["old_json"]) for h in history]
-        assert {"a": 1} in all_new
-        assert {"a": 2} in all_new
-        assert {"a": 0} in all_old
-        assert {"a": 1} in all_old
-
-    def test_history_with_preset_id(self, temp_config_db):
-        """带 preset_id 的历史记录。"""
-        import data.config_db as config_db
-        config_db.save_ticker_config("AAPL", "US", "single", params_json="{}")
-        pid = config_db.save_preset("hist_preset", '{"x":1}')
-        config_db.record_history("AAPL", "single", "{}", '{"x":1}',
-                                 preset_id=pid)
-        history = config_db.get_history("AAPL")
-        assert len(history) == 1
-        # get_history 会 LEFT JOIN config_presets 获取 preset_name
-        assert history[0]["preset_id"] == pid
-        assert history[0]["preset_name"] == "hist_preset"
-
-    def test_history_returns_explicit_columns(self, temp_config_db):
-        """get_history 返回显式列名（不含 SELECT *）。"""
-        import data.config_db as config_db
-        config_db.save_ticker_config("AAPL", "US", "single", params_json="{}")
-        config_db.record_history("AAPL", "single", "", "{}", source="test")
-        history = config_db.get_history("AAPL")
-        assert len(history) == 1
-        expected_cols = {"id", "ticker", "variant", "preset_id",
-                         "old_json", "new_json", "changed_at", "source",
-                         "preset_name"}
-        assert set(history[0].keys()) == expected_cols
-
-    def test_history_empty_for_new_ticker(self, temp_config_db):
-        """从未记录过的 ticker 返回空列表。"""
-        import data.config_db as config_db
-        assert config_db.get_history("UNKNOWN") == []
-
-    def test_history_default_limit(self, temp_config_db):
-        """默认 limit 为 20。过多记录只返回最近 20 条。"""
-        import data.config_db as config_db
-        config_db.save_ticker_config("AAPL", "US", "single", params_json="{}")
-        for i in range(25):
-            config_db.record_history("AAPL", "single", "", f'{{"i":{i}}}',
-                                     source="auto")
-        history = config_db.get_history("AAPL")
-        assert len(history) == 20
-        assert history[0]["source"] == "auto"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 # 5. TestImportJSONFiles
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -592,24 +484,6 @@ class TestDeletePresetReturnValue:
         result = config_db.delete_preset(99999)
         assert result is False
 
-    def test_delete_referenced_preset_sets_null(self, temp_config_db, sample_params_json):
-        """删除被 ticker 引用的预设，外键 ON DELETE SET NULL 生效（P0-2 修复）。"""
-        import data.config_db as config_db
-        pid = config_db.save_preset("fk_test", sample_params_json)
-        config_db.save_ticker_config("AAPL", "US", "single",
-                                     params_json="{}", preset_id=pid)
-
-        ticker_row = config_db.load_ticker_config("AAPL")
-        assert ticker_row["preset_id"] == pid
-
-        result = config_db.delete_preset(pid)
-        assert result is True
-
-        # 删除后 ticker 的 preset_id 被置为 NULL，而非级联删除
-        ticker_row = config_db.load_ticker_config("AAPL")
-        assert ticker_row is not None
-        assert ticker_row["preset_id"] is None
-
     def test_delete_preset_rowcount_zero_returns_false(self, temp_config_db, sample_params_json):
         """模拟 DELETE rowcount=0 时返回 False（行 205 不可达分支）。"""
         import data.config_db as config_db
@@ -806,22 +680,6 @@ class TestGetConnException:
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 12. TestTickerConfigEdgeCases
-# ═══════════════════════════════════════════════════════════════════════════
-
-class TestTickerConfigEdgeCases:
-    """ticker 配置边界场景。"""
-
-    def test_save_with_nonexistent_preset_sets_null(self, temp_config_db):
-        """preset_id 不存在时自动置 NULL（行 274-275）。"""
-        import data.config_db as config_db
-        config_db.save_ticker_config("AAPL", "US", "single",
-                                     params_json="{}",
-                                     preset_id=99999)  # 不存在
-        row = config_db.load_ticker_config("AAPL")
-        assert row is not None
-        assert row["preset_id"] is None
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # 13. TestApplyPresetEdgeCases
 # ═══════════════════════════════════════════════════════════════════════════

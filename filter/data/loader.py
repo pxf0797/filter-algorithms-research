@@ -15,6 +15,7 @@ from pathlib import Path
 import os as _os
 
 import pandas as pd
+import pyarrow.parquet as pq
 from loguru import logger
 from typing import Any, Dict, Optional, Tuple
 from filter.data.db import get_conn, query_kline
@@ -174,8 +175,9 @@ def _compute_version(parquet_path: Path) -> Dict[str, Any]:
         ``{"mtime": float, "rows": int}``。
     """
     mtime = parquet_path.stat().st_mtime
-    df = pd.read_parquet(parquet_path)
-    return {"mtime": mtime, "rows": len(df)}
+    pf = pq.ParquetFile(parquet_path)
+    nrows = pf.metadata.num_rows
+    return {"mtime": mtime, "rows": nrows}
 
 
 def _save_version(parquet_path: Path) -> None:

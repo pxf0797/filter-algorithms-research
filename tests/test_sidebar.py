@@ -10,11 +10,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-# Ensure filter/ package is importable (conftest handles streamlit mock)
-_src = Path(__file__).resolve().parent.parent / "filter"
-if str(_src) not in sys.path:
-    sys.path.insert(0, str(_src))
-
+import numpy as np
+import pandas as pd
 import pytest
 
 # Module under test
@@ -597,3 +594,385 @@ class TestRenderParams:
             )
 
         assert cfg["stop_loss_pct"] == 5.0
+
+
+# ===================================================================
+# SECTION 8 — _render_data_validation 并行下载测试 (T4)
+# ===================================================================
+
+class TestDataValidationParallel:
+    """验证 _render_data_validation 使用 ThreadPoolExecutor 并行下载数据。
+
+    修改要点：
+    1. 使用 ThreadPoolExecutor(max_workers=4) 并行下载所有周期
+    2. 结果按 ALL_TFS 顺序排列（非完成顺序）
+    3. 单个周期失败不影响其他周期处理
+
+    所有测试均完全 mock yf.download / compare_with_db，避免网络访问。
+    """
+
+    # ── shared mock helpers ────────────────────────────────────────────
+
+    @staticmethod
+    def _make_mock_download():
+        """返回一个 mock yf.download，返回包含 5 条 Close 数据的 DataFrame。"""
+        def _inner(ticker, period="max", interval="1d", progress=False):
+            return pd.DataFrame(
+                {"Close": [100.0, 101.0, 102.0, 103.0, 104.0]},
+                index=pd.date_range("2024-01-01", periods=5, freq="D"),
+            )
+        return _inner
+
+    @staticmethod
+    def _make_mock_compare():
+        """返回一个 mock compare_with_db，返回 status='ok' 报告。"""
+        def _inner(ticker, tf, df):
+            return {
+                "db_count": 100, "yf_count": 5, "overlap_count": 5,
+                "fingerprint_match": True, "status": "ok",
+                "only_db": 0, "only_yf": 0,
+            }
+        return _inner
+
+    @staticmethod
+    def _make_mock_future(result=None, exc=None):
+        """创建一个 mock Future，支持 .result() 返回指定值或抛出异常。"""
+        f = MagicMock()
+        if exc:
+            f.result.side_effect = exc
+        else:
+            f.result.return_value = result
+        return f
+
+    @staticmethod
+    def _make_mock_st():
+        """构建最小的 st mock：button=True, expander 可用。"""
+        mock_st = MagicMock()
+        mock_st.button.return_value = True
+        mock_expander = MagicMock()
+        mock_st.sidebar.expander.return_value.__enter__.return_value = mock_expander
+        return mock_st
+
+    @staticmethod
+    def _patch_sidebar(*args):
+        """返回一个 context manager helper — 组合多个 sidebar patch 的 enter/exit。
+
+        用法:
+            with TestDataValidationParallel._patch_sidebar(st_patch, dl_patch, ...):
+                ...
+        """
+        from contextlib import ExitStack
+        stack = ExitStack()
+        for p in args:
+            stack.enter_context(p)
+        return stack
+
+    # ── tests ─────────────────────────────────────────────────────────
+
+    def test_button_click_triggers_processing(self):
+        """点击校验按钮后进入数据处理逻辑。"""
+        from filter.browse.sidebar import _render_data_validation
+
+        mock_st = self._make_mock_st()
+
+        with patch("filter.browse.sidebar.yf.download", side_effect=self._make_mock_download()), \
+             patch("filter.browse.sidebar.compare_with_db", side_effect=self._make_mock_compare()), \
+             patch("filter.browse.sidebar.force_update_kline"), \
+             patch("filter.browse.sidebar.clear_display_cache"), \
+             patch("filter.browse.sidebar.logger"), \
+             patch("filter.browse.sidebar.st", mock_st):
+            _render_data_validation("美股", "AAPL")
+
+        assert mock_st.caption.called, "应渲染 caption"
+        assert mock_st.dataframe.called, "结果应渲染为 dataframe"
+
+    def test_uses_thread_pool_executor_not_serial_loop(self):
+        """验证代码使用 ThreadPoolExecutor 并行下载，而非串行 for 循环。
+
+        通过检查源码确认 ThreadPoolExecutor 的存在。
+        """
+        from filter.browse.sidebar import _render_data_validation
+        import inspect
+
+        source = inspect.getsource(_render_data_validation)
+        assert "ThreadPoolExecutor" in source, (
+            "应使用 ThreadPoolExecutor 进行并行下载"
+        )
+        assert "max_workers" in source, (
+            "应指定 max_workers 参数控制并发数"
+        )
+
+    def test_all_eight_tfs_submitted_to_executor(self):
+        """验证 8 个 ALL_TFS 周期都被提交到 executor.submit。"""
+        from concurrent.futures import ThreadPoolExecutor
+        from filter.browse.sidebar import _render_data_validation
+
+        submitted_count = []
+
+        # 完全替换 ThreadPoolExecutor，返回一个 mock executor
+        class FakeExecutor:
+            def __init__(self, max_workers=4):
+                self.max_workers = max_workers
+                self._futures = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def submit(self, fn, *args, **kwargs):
+                submitted_count.append(1)
+                f = MagicMock()
+                f.result.return_value = pd.DataFrame(
+                    {"Close": [100.0] * 5},
+                    index=pd.date_range("2024-01-01", periods=5, freq="D"),
+                )
+                return f
+
+        with patch("filter.browse.sidebar.ThreadPoolExecutor", FakeExecutor), \
+             patch("filter.browse.sidebar.st", self._make_mock_st()), \
+             patch("filter.browse.sidebar.compare_with_db", side_effect=self._make_mock_compare()), \
+             patch("filter.browse.sidebar.force_update_kline"), \
+             patch("filter.browse.sidebar.clear_display_cache"), \
+             patch("filter.browse.sidebar.logger"), \
+             patch("filter.browse.sidebar.as_completed", lambda futures: list(futures)):
+            _render_data_validation("美股", "AAPL")
+
+        assert sum(submitted_count) == 8, (
+            f"应提交 8 个周期下载，实际 {sum(submitted_count)} 个"
+        )
+
+    def test_single_tf_failure_does_not_block_others(self):
+        """单个周期下载失败（抛异常），其他周期仍正常处理。"""
+        from concurrent.futures import ThreadPoolExecutor
+        from filter.browse.sidebar import _render_data_validation
+
+        submit_count = [0]
+
+        class FakeExecutorWithOneFailure:
+            def __init__(self, max_workers=4):
+                self.max_workers = max_workers
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def submit(self, fn, *args, **kwargs):
+                submit_count[0] += 1
+                f = MagicMock()
+                if submit_count[0] == 1:
+                    f.result.side_effect = Exception("download timeout")
+                else:
+                    f.result.return_value = pd.DataFrame(
+                        {"Close": [100.0] * 5},
+                        index=pd.date_range("2024-01-01", periods=5, freq="D"),
+                    )
+                return f
+
+        with patch("filter.browse.sidebar.ThreadPoolExecutor", FakeExecutorWithOneFailure), \
+             patch("filter.browse.sidebar.st", self._make_mock_st()), \
+             patch("filter.browse.sidebar.compare_with_db", side_effect=self._make_mock_compare()), \
+             patch("filter.browse.sidebar.force_update_kline"), \
+             patch("filter.browse.sidebar.clear_display_cache"), \
+             patch("filter.browse.sidebar.logger"), \
+             patch("filter.browse.sidebar.as_completed", lambda futures: list(futures)):
+            # Should not raise
+            _render_data_validation("美股", "AAPL")
+
+        # 8 timeframes were all submitted
+        assert submit_count[0] == 8
+
+    def test_results_processed_in_all_tfs_order(self):
+        """Phase 2 按 ALL_TFS 顺序遍历 raw_data，而非 as_completed 完成顺序。"""
+        from filter.browse.sidebar import _render_data_validation
+        import inspect
+
+        source = inspect.getsource(_render_data_validation)
+        assert "for tf in ALL_TFS:" in source, (
+            "Phase 2 应遍历 ALL_TFS（固定顺序），而非 raw_data keys（完成顺序）"
+        )
+
+    def test_parallel_result_matches_serial_for_known_data(self):
+        """使用已知数据验证并行处理与预期结果一致。
+
+        每个周期返回相同的 DataFrame 和 compare 报告，确认输出正确。
+        """
+        from filter.browse.sidebar import _render_data_validation
+        from concurrent.futures import ThreadPoolExecutor
+
+        known_df = pd.DataFrame(
+            {"Close": [100.0, 101.0, 102.0, 103.0, 104.0, 105.0]},
+            index=pd.date_range("2024-01-01", periods=6, freq="D"),
+        )
+
+        report_template = {
+            "db_count": 200, "yf_count": 6, "overlap_count": 6,
+            "fingerprint_match": True, "status": "ok",
+            "only_db": 0, "only_yf": 0,
+        }
+
+        def _mock_download(ticker, period="max", interval="1d", progress=False):
+            return known_df.copy()
+
+        def _mock_compare(ticker, tf, df):
+            return dict(report_template)
+
+        class FakeExecutor:
+            def __init__(self, max_workers=4):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def submit(self, fn, *args, **kwargs):
+                f = MagicMock()
+                f.result.return_value = fn(*args, **kwargs)
+                return f
+
+        mock_st = self._make_mock_st()
+
+        with patch("filter.browse.sidebar.yf.download", side_effect=_mock_download), \
+             patch("filter.browse.sidebar.compare_with_db", side_effect=_mock_compare), \
+             patch("filter.browse.sidebar.ThreadPoolExecutor", FakeExecutor), \
+             patch("filter.browse.sidebar.as_completed", lambda futures: list(futures)), \
+             patch("filter.browse.sidebar.force_update_kline"), \
+             patch("filter.browse.sidebar.clear_display_cache"), \
+             patch("filter.browse.sidebar.logger"), \
+             patch("filter.browse.sidebar.st", mock_st):
+            _render_data_validation("美股", "AAPL")
+
+        assert mock_st.dataframe.called, "校验结果应渲染为 dataframe"
+
+    def test_empty_ticker_skips_download(self):
+        """空 ticker code 显示 warning 并跳过下载。"""
+        from filter.browse.sidebar import _render_data_validation
+        from concurrent.futures import ThreadPoolExecutor
+
+        submitted = [0]
+
+        class FakeExecutorNoSubmit:
+            def __init__(self, max_workers=4):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def submit(self, fn, *args, **kwargs):
+                submitted[0] += 1
+                return MagicMock()
+
+        mock_st = self._make_mock_st()
+
+        with patch("filter.browse.sidebar.ThreadPoolExecutor", FakeExecutorNoSubmit), \
+             patch("filter.browse.sidebar.st", mock_st):
+            _render_data_validation("A股(沪深)", "   ")
+
+        mock_st.warning.assert_called()
+        assert submitted[0] == 0, "空 ticker 不应提交任何下载"
+
+    def test_a_share_ticker_suffix_conversion(self):
+        """A股市场：60xxxx 加 .SS，其他加 .SZ。"""
+        from filter.browse.sidebar import _render_data_validation
+        from concurrent.futures import ThreadPoolExecutor
+
+        full_codes = []
+
+        def _mock_download(ticker, period="max", interval="1d", progress=False):
+            full_codes.append(ticker)
+            return pd.DataFrame(
+                {"Close": [100.0] * 5},
+                index=pd.date_range("2024-01-01", periods=5, freq="D"),
+            )
+
+        class FakeExecutor:
+            def __init__(self, max_workers=4):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def submit(self, fn, *args, **kwargs):
+                f = MagicMock()
+                f.result.return_value = fn(*args, **kwargs)
+                return f
+
+        mock_st = self._make_mock_st()
+
+        with patch("filter.browse.sidebar.yf.download", side_effect=_mock_download), \
+             patch("filter.browse.sidebar.ThreadPoolExecutor", FakeExecutor), \
+             patch("filter.browse.sidebar.as_completed", lambda futures: list(futures)), \
+             patch("filter.browse.sidebar.compare_with_db", side_effect=self._make_mock_compare()), \
+             patch("filter.browse.sidebar.force_update_kline"), \
+             patch("filter.browse.sidebar.clear_display_cache"), \
+             patch("filter.browse.sidebar.logger"), \
+             patch("filter.browse.sidebar.st", mock_st):
+            _render_data_validation("A股(沪深)", "600115")
+
+        assert any("600115.SS" in str(c) for c in full_codes), \
+            f"60 开头应加 .SS，实际: {full_codes}"
+
+        full_codes.clear()
+
+        with patch("filter.browse.sidebar.yf.download", side_effect=_mock_download), \
+             patch("filter.browse.sidebar.ThreadPoolExecutor", FakeExecutor), \
+             patch("filter.browse.sidebar.as_completed", lambda futures: list(futures)), \
+             patch("filter.browse.sidebar.compare_with_db", side_effect=self._make_mock_compare()), \
+             patch("filter.browse.sidebar.force_update_kline"), \
+             patch("filter.browse.sidebar.clear_display_cache"), \
+             patch("filter.browse.sidebar.logger"), \
+             patch("filter.browse.sidebar.st", self._make_mock_st()):
+            _render_data_validation("A股(沪深)", "000001")
+
+        assert any("000001.SZ" in str(c) for c in full_codes), \
+            f"非60开头应加 .SZ，实际: {full_codes}"
+
+    def test_data_insufficient_shows_warning_in_table(self):
+        """数据不足（<5条有效Close）时结果行显示警告标记。"""
+        from filter.browse.sidebar import _render_data_validation
+        from concurrent.futures import ThreadPoolExecutor
+
+        # Only 3 valid Close rows (after dropping NaN)
+        tiny_df = pd.DataFrame(
+            {"Close": [100.0, np.nan, 102.0, np.nan, 103.0]},
+            index=pd.date_range("2024-01-01", periods=5, freq="D"),
+        )
+
+        class FakeExecutor:
+            def __init__(self, max_workers=4):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def submit(self, fn, *args, **kwargs):
+                f = MagicMock()
+                f.result.return_value = tiny_df.copy()
+                return f
+
+        mock_st = self._make_mock_st()
+
+        with patch("filter.browse.sidebar.ThreadPoolExecutor", FakeExecutor), \
+             patch("filter.browse.sidebar.as_completed", lambda futures: list(futures)), \
+             patch("filter.browse.sidebar.compare_with_db"), \
+             patch("filter.browse.sidebar.force_update_kline"), \
+             patch("filter.browse.sidebar.clear_display_cache"), \
+             patch("filter.browse.sidebar.logger"), \
+             patch("filter.browse.sidebar.st", mock_st):
+            _render_data_validation("美股", "AAPL")
+
+        assert mock_st.dataframe.called, "即使数据不足也应渲染结果表格"

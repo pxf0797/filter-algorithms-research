@@ -4,6 +4,7 @@
 从 ``data/loader.py`` 拆分，独立维护 yfinance 数据获取逻辑。
 """
 
+import time
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -79,6 +80,22 @@ def _fetch_all_timeframes(market: str, code: str) -> Dict[str, Tuple[bool, Any]]
             tf, ok, detail = fut.result()
             results[tf] = (ok, detail)
     return results
+
+
+def _download_with_retry(ticker, **kwargs):
+    """yfinance download 带指数退避重试。
+
+    成功时行为与直接调用 yf.download 完全一致；
+    失败时自动重试（1s → 2s → 4s），3 次均失败后抛出原始异常。
+    """
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            return yf.download(ticker, **kwargs, timeout=30, progress=False)
+        except Exception:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(2 ** attempt)  # 1s, 2s, 4s
 
 
 def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
@@ -160,11 +177,11 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
         last_date = get_latest_date(code, tf)
         if last_date:
             start_str = last_date[:10]  # 取日期部分 "YYYY-MM-DD"
-            data = yf.download(full, start=start_str, interval=interval, progress=False)
+            data = _download_with_retry(full, start=start_str, interval=interval)
         else:
-            data = yf.download(full, period=period, interval=interval, progress=False)
+            data = _download_with_retry(full, period=period, interval=interval)
     else:
-        data = yf.download(full, period=period, interval=interval, progress=False)
+        data = _download_with_retry(full, period=period, interval=interval)
     if data.empty:
         return None, None, None, full, f"无数据: {full}", None
 
@@ -178,7 +195,7 @@ def _fetch_stock(market: str, code: str, tf: str, n_pts: int,
         last_close = data["Close"].iloc[-1]
         if pd.isna(last_close):
             try:
-                w = yf.download(full, period="5d", interval="1wk", progress=False)
+                w = _download_with_retry(full, period="5d", interval="1wk")
                 if len(w) > 0:
                     if isinstance(w.columns, pd.MultiIndex):
                         w.columns = w.columns.droplevel(1)

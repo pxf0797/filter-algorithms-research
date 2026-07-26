@@ -10,6 +10,7 @@ import json
 import os
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -304,34 +305,51 @@ def _render_data_validation(market, ticker_code) -> None:
             rows = []
             has_conflict = False
             has_update = False
+            # Phase 1: parallel download of all timeframes (I/O-bound)
+            with st.spinner("校验全部周期中..."):
+                raw_data = {}
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    futures = {}
+                    for tf in ALL_TFS:
+                        interval, period = TF_INTERVAL[tf]
+                        future = executor.submit(yf.download, full_code, period=period, interval=interval, progress=False)
+                        futures[future] = tf
+                    for future in as_completed(futures):
+                        tf = futures[future]
+                        try:
+                            raw_data[tf] = future.result(timeout=30)
+                        except Exception as e:
+                            raw_data[tf] = e
+
+            # Phase 2: process results in ALL_TFS order (logic unchanged)
             for tf in ALL_TFS:
-                interval, period = TF_INTERVAL[tf]
-                with st.spinner(f"校验 {tf} ..."):
-                    try:
-                        data = yf.download(full_code, period=period, interval=interval, progress=False)
-                        if data.empty or len(data[data["Close"].notna()]) < 5:
-                            rows.append({"周期": tf, "DB": "-", "yf": "-", "重叠": "-",
-                                         "指纹": "⚠️ 数据不足", "仅DB": "-", "仅yf": "-", "操作": ""})
-                            continue
-                        data = data[data["Close"].notna()]
-                        report = compare_with_db(ticker_code, tf, data)
-                    except Exception as e:
+                try:
+                    data = raw_data[tf]
+                    if isinstance(data, Exception):
+                        raise data
+                    if data.empty or len(data[data["Close"].notna()]) < 5:
                         rows.append({"周期": tf, "DB": "-", "yf": "-", "重叠": "-",
-                                     "指纹": f"❌ {str(e)[:30]}", "仅DB": "-", "仅yf": "-", "操作": ""})
+                                     "指纹": "⚠️ 数据不足", "仅DB": "-", "仅yf": "-", "操作": ""})
                         continue
-                    db_c = report["db_count"]
-                    yf_c = report["yf_count"]
-                    fp = "✅" if report["fingerprint_match"] else "❌"
-                    status = report["status"]
-                    if status == "conflict":
-                        has_conflict = True
-                    elif status == "update_available":
-                        has_update = True
-                    rows.append({
-                        "周期": tf, "DB": db_c, "yf": yf_c,
-                        "重叠": report["overlap_count"], "指纹": fp,
-                        "仅DB": report["only_db"], "仅yf": report["only_yf"], "操作": status,
-                    })
+                    data = data[data["Close"].notna()]
+                    report = compare_with_db(ticker_code, tf, data)
+                except Exception as e:
+                    rows.append({"周期": tf, "DB": "-", "yf": "-", "重叠": "-",
+                                 "指纹": f"❌ {str(e)[:30]}", "仅DB": "-", "仅yf": "-", "操作": ""})
+                    continue
+                db_c = report["db_count"]
+                yf_c = report["yf_count"]
+                fp = "✅" if report["fingerprint_match"] else "❌"
+                status = report["status"]
+                if status == "conflict":
+                    has_conflict = True
+                elif status == "update_available":
+                    has_update = True
+                rows.append({
+                    "周期": tf, "DB": db_c, "yf": yf_c,
+                    "重叠": report["overlap_count"], "指纹": fp,
+                    "仅DB": report["only_db"], "仅yf": report["only_yf"], "操作": status,
+                })
 
             if rows:
                 import pandas as _pd

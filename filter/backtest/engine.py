@@ -328,10 +328,10 @@ class BacktestRunner:
     # 断点续跑
     # ------------------------------------------------------------------
 
-    def save_checkpoint(self, path: str) -> dict:
+    def save_checkpoint(self, path: str, bar_index: int = 0) -> dict:
         """将当前 runner 状态序列化到断点文件，返回状态字典。"""
         state = {
-            "bar_index": 0,  # caller tracks this；retained for from_checkpoint use
+            "bar_index": bar_index,
             "ewma_state": self._ewma_state,
             "bar_count": self._bar_count,
             "config_hash": self._config_hash(),
@@ -1060,9 +1060,10 @@ def replay_bar(
 # ═══════════════════════════════════════════════════════════════
 
 def _compute_and_log_metrics(results: list[dict], ticker: str) -> None:
-    """从回测结果中提取最后一步的 PnL 数据，计算核心指标并记录日志。
+    """从回测结果所有步骤和视图中聚合完整 PnL 时序，计算核心指标并记录日志。
 
-    从最后一步的第一个视图获取 PnL 和交易记录（跨视图指标计算暂未实现）。
+    遍历所有步骤和所有视图，将 long_pnl / short_pnl 数组纵向拼接为完整时序，
+    合并所有 trade_records，基于完整 PnL 序列计算 Sharpe/最大回撤/胜率等指标。
     结果通过 loguru 记录，便于后续查询和分析。
 
     Parameters
@@ -1081,24 +1082,34 @@ def _compute_and_log_metrics(results: list[dict], ticker: str) -> None:
         logger.debug("backtest.metrics module not available, skipping metrics")
         return
 
-    last_step = results[-1]
-    views = last_step.get("views", {})
-    if not views:
+    # ── 遍历所有 step × view 聚合 PnL 和交易记录 ──
+    long_pnl_segments: list[np.ndarray] = []
+    short_pnl_segments: list[np.ndarray] = []
+    all_trade_records: list[dict] = []
+    total_bars = 0
+
+    for step in results:
+        views = step.get("views", {})
+        for view_data in views.values():
+            lp = view_data.get("long_pnl")
+            sp = view_data.get("short_pnl")
+            if lp is not None and sp is not None:
+                long_pnl_segments.append(lp)
+                short_pnl_segments.append(sp)
+                total_bars += len(view_data.get("t", []))
+            tr = view_data.get("trade_records", [])
+            if tr:
+                all_trade_records.extend(tr)
+
+    if not long_pnl_segments:
         return
 
-    # 取第一个视图的 PnL 数据（未来可扩展为跨视图聚合）
-    first_view = next(iter(views.values()))
-    long_pnl = first_view.get("long_pnl")
-    short_pnl = first_view.get("short_pnl")
-    trade_records = first_view.get("trade_records", [])
-    n_bars = len(first_view.get("t", []))
-
-    if long_pnl is None or short_pnl is None:
-        return
+    aggregated_long = np.concatenate(long_pnl_segments)
+    aggregated_short = np.concatenate(short_pnl_segments)
 
     try:
         metrics = compute_backtest_metrics(
-            long_pnl, short_pnl, trade_records, n_bars,
+            aggregated_long, aggregated_short, all_trade_records, total_bars,
         )
         logger.info(
             "回测指标: ticker={}, total_return={}%, sharpe={}, max_dd={}%, trades={}, win_rate={}%",

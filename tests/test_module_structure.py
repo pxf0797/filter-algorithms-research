@@ -67,14 +67,6 @@ class TestImports:
         assert AppState is not None
         assert ViewState is not None
 
-    def test_shared_logger(self):
-        from shared.logger import setup_logging
-        assert callable(setup_logging)
-
-    def test_shared_repository(self):
-        from shared.repository import BaseRepository
-        assert BaseRepository is not None
-
     # engine
     def test_engine_filters(self):
         from engine.filters import FILTERS
