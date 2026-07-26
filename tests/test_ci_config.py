@@ -169,6 +169,50 @@ def test_ci_has_type_check_job():
     )
 
 
+def test_ci_ruff_does_not_ignore_f841():
+    """CI ruff step should NOT ignore F841 (unused variable).
+
+    F841 is enforced by pre-commit and pyproject.toml;
+    CI must be consistent — not silently ignore it.
+    """
+    ci_path = ROOT / ".github" / "workflows" / "ci.yml"
+    with open(ci_path) as f:
+        content = f.read()
+
+    # Find the lint job's ruff command
+    match = re.search(r"ruff check \.(.*)", content)
+    assert match is not None, "CI must have a 'ruff check .' command"
+
+    ruff_args = match.group(1)
+    assert "F841" not in ruff_args, (
+        f"CI ruff step must NOT ignore F841. Found: ruff check .{ruff_args}"
+    )
+
+
+def test_ci_coverage_threshold_matches_pyproject():
+    """CI coverage fail-under threshold should match pyproject.toml (65)."""
+    ci_path = ROOT / ".github" / "workflows" / "ci.yml"
+    with open(ci_path) as f:
+        ci_content = f.read()
+
+    # Extract --cov-fail-under value from CI
+    match = re.search(r"--cov-fail-under=(\d+)", ci_content)
+    assert match is not None, "CI coverage step must specify --cov-fail-under"
+    ci_threshold = int(match.group(1))
+
+    # Extract fail_under from pyproject.toml
+    pyproject_path = ROOT / "pyproject.toml"
+    pyproject_content = pyproject_path.read_text()
+    match = re.search(r"fail_under\s*=\s*(\d+)", pyproject_content)
+    assert match is not None, "pyproject.toml must have fail_under under [tool.coverage.report]"
+    pyproject_threshold = int(match.group(1))
+
+    assert ci_threshold == pyproject_threshold, (
+        f"Coverage threshold mismatch: "
+        f"CI={ci_threshold}, pyproject.toml={pyproject_threshold}"
+    )
+
+
 def test_no_stale_streamlit_app_paths():
     """Dockerfile/Makefile/README 中不应存在过时的 streamlit_app.py 路径。"""
     files_to_check = {

@@ -20,7 +20,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-pip-lint-
       - run: pip install ruff
-      - run: ruff check . --ignore=E501,F841
+      - run: ruff check .
 
   type-check:
     runs-on: ubuntu-latest
@@ -179,7 +179,7 @@ jobs:
       - run: pip install -r filter/requirements.txt pytest pytest-cov
       - run: python -m pytest tests/ --ignore=tests/test_app_ui.py
                --cov=filter --cov-report=term
-               --cov-fail-under=55 -q --tb=short
+               --cov-fail-under=65 -q --tb=short
 
   changelog-check:
     runs-on: ubuntu-latest
