@@ -1108,20 +1108,25 @@ class TestThreadLocalConnection:
         }, index=dates)
 
         errors = []
-        barrier = threading.Barrier(2, timeout=5)
+        ready = threading.Event()
+        done = threading.Event()
 
         def worker_write():
             try:
-                barrier.wait()
+                ready.set()
                 db_module.upsert_kline("THREAD_TEST", "日线", df)
             except Exception as e:
-                errors.append(str(e))
+                errors.append(f"{type(e).__name__}: {e}")
+            finally:
+                done.set()
 
         t = threading.Thread(target=worker_write)
         t.start()
+        ready.wait(timeout=5)
         t.join(timeout=10)
 
         assert not errors, f"Worker thread write failed: {errors}"
+        assert done.is_set(), "Worker thread should have completed"
 
         # 主线程读取：应看到 worker 线程写入的 30 条数据
         result = db_module.query_kline("THREAD_TEST", "日线", n_pts=50)
@@ -1171,10 +1176,13 @@ class TestThreadLocalConnection:
         rows_per_thread = 10
 
         errors = []
-        barrier = threading.Barrier(n_threads, timeout=10)
+        start_event = threading.Event()
+        done_count = [0]
+        done_lock = threading.Lock()
 
         def worker_write(tid):
             try:
+                start_event.wait(timeout=10)
                 dates = pd.date_range(
                     f"2024-{tid+1:02d}-01", periods=rows_per_thread, freq="D"
                 )
@@ -1185,19 +1193,26 @@ class TestThreadLocalConnection:
                     "Close": np.full(rows_per_thread, 100.5 + tid),
                     "Volume": np.full(rows_per_thread, 1000 * (tid + 1), dtype=float),
                 }, index=dates)
-                barrier.wait()
                 db_module.upsert_kline("PARALLEL_TEST", "日线", df)
             except Exception as e:
-                errors.append(f"thread_{tid}: {e}")
+                errors.append(f"thread_{tid}: {type(e).__name__}: {e}")
+            finally:
+                with done_lock:
+                    done_count[0] += 1
 
         threads = [threading.Thread(target=worker_write, args=(i,))
                    for i in range(n_threads)]
         for t in threads:
             t.start()
+        # Signal all threads to start simultaneously
+        start_event.set()
         for t in threads:
             t.join(timeout=15)
 
         assert not errors, f"Worker thread writes failed: {errors}"
+        assert done_count[0] == n_threads, (
+            f"Expected {n_threads} threads to complete, got {done_count[0]}"
+        )
 
         # 主线程读取：应看到所有 n_threads * rows_per_thread 条数据
         result = db_module.query_kline("PARALLEL_TEST", "日线", n_pts=500)
