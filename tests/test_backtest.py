@@ -1674,6 +1674,144 @@ class TestEngineViewOrdering:
             f"期望={sorted(tf_indices, reverse=True)}"
         )
 
+    # ── P0-4: 细周期组 ──────────────────────────────────────────────────────
+
+    def test_fine_period_group_min_tf_is_1min(self):
+        """细周期组 [60分,15分,5分,1分] — 验证 _min_tf 正确识别 1分."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.engine import BacktestRunner
+        from unittest.mock import patch
+
+        # finest→coarsest 输入 (违规顺序)
+        configs = [
+            {"tf": "1分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "5分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "15分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "60分钟", "n_pts": 60, "_fid": "sma", "_dual": False},
+        ]
+
+        with patch.object(BacktestRunner, "_query_bar_count", return_value=1000), \
+             patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
+            runner = BacktestRunner("3690", configs)
+
+        # configs 应排序为 coarsest→finest: [60分钟, 15分钟, 5分钟, 1分钟]
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in runner.configs]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"细周期组应粗→细排列, indices={tf_indices}"
+        )
+        # _min_tf 应是最精细的 1分钟 (ALL_TFS index=0)
+        assert runner._min_tf == "1分钟", (
+            f"_min_tf 应为 '1分钟', 实为 '{runner._min_tf}'"
+        )
+        assert ALL_TFS.index(runner._min_tf) == 0
+
+    # ── P0-5: 跳跃间隔 ──────────────────────────────────────────────────────
+
+    def test_skip_interval_sorted_coarse_to_fine(self):
+        """跳跃间隔 [月线,日线,5分,1分] ALL_TFS 索引 [6,4,1,0]."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.engine import BacktestRunner
+        from unittest.mock import patch
+
+        # finest→coarsest 输入
+        configs = [
+            {"tf": "1分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "5分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "日线", "n_pts": 60, "_fid": "sma", "_dual": False},
+            {"tf": "月线", "n_pts": 60, "_fid": "sma", "_dual": False},
+        ]
+
+        with patch.object(BacktestRunner, "_query_bar_count", return_value=1000), \
+             patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
+            runner = BacktestRunner("3690", configs)
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in runner.configs]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"跳跃间隔应粗→细排列, indices={tf_indices}"
+        )
+        # 月线(idx=6) → 日线(idx=4) → 5分钟(idx=1) → 1分钟(idx=0)
+        assert tf_indices == [6, 4, 1, 0]
+
+    # ── P0-6: 极端混合 ──────────────────────────────────────────────────────
+
+    def test_extreme_mixed_sorted_coarse_to_fine(self):
+        """全粗+细混合 [季线,日线,15分,1分] ALL_TFS 索引 [7,4,2,0]."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.engine import BacktestRunner
+        from unittest.mock import patch
+
+        # finest→coarsest 输入
+        configs = [
+            {"tf": "1分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "15分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "日线", "n_pts": 60, "_fid": "sma", "_dual": False},
+            {"tf": "季线", "n_pts": 60, "_fid": "sma", "_dual": False},
+        ]
+
+        with patch.object(BacktestRunner, "_query_bar_count", return_value=1000), \
+             patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
+            runner = BacktestRunner("3690", configs)
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in runner.configs]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"极端混合应粗→细排列, indices={tf_indices}"
+        )
+        assert tf_indices == [7, 4, 2, 0]
+        assert runner._min_tf == "1分钟"
+
+    # ── P1-3: 3 视图 ────────────────────────────────────────────────────────
+
+    def test_three_views_sorted_coarse_to_fine(self):
+        """3 视图 [周线,60分,1分] — 非4视图场景."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.engine import BacktestRunner
+        from unittest.mock import patch
+
+        # finest→coarsest 输入
+        configs = [
+            {"tf": "1分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "60分钟", "n_pts": 60, "_fid": "sma", "_dual": False},
+            {"tf": "周线", "n_pts": 60, "_fid": "sma", "_dual": False},
+        ]
+
+        with patch.object(BacktestRunner, "_query_bar_count", return_value=1000), \
+             patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
+            runner = BacktestRunner("3690", configs)
+
+        assert len(runner.configs) == 3
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in runner.configs]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"3视图应粗→细排列, indices={tf_indices}"
+        )
+        # 周线(idx=5) → 60分钟(idx=3) → 1分钟(idx=0)
+        assert tf_indices == [5, 3, 0]
+
+    # ── P1-4: 相同周期 ──────────────────────────────────────────────────────
+
+    def test_identical_tfs_sort_is_stable(self):
+        """相同周期边界 [日线,日线,日线,日线] — 排序后不变."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.engine import BacktestRunner
+        from unittest.mock import patch
+
+        configs = [
+            {"tf": "日线", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "日线", "n_pts": 60, "_fid": "savgol", "_dual": False},
+            {"tf": "日线", "n_pts": 70, "_fid": "ema", "_dual": False},
+            {"tf": "日线", "n_pts": 80, "_fid": "kalman", "_dual": False},
+        ]
+
+        with patch.object(BacktestRunner, "_query_bar_count", return_value=1000), \
+             patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
+            runner = BacktestRunner("3690", configs)
+
+        assert len(runner.configs) == 4
+        # 所有 tf 索引应相等 (都是 4)
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in runner.configs]
+        assert all(idx == 4 for idx in tf_indices)
+        # 排序应为稳定排序，n_pts 顺序不变
+        assert [c["n_pts"] for c in runner.configs] == [50, 60, 70, 80]
+
 
 # ── TestViewTimeframeMapping ──────────────────────────────────────────────────
 
@@ -1717,6 +1855,67 @@ class TestViewTimeframeMapping:
                 f"configs[{i+1}].tf={configs[i+1]['tf']}"
                 f"(idx={tf_indices[i+1]})"
             )
+
+    # ── P0-5ext: 任意4周期映射单调性 ────────────────────────────────────────
+
+    def test_arbitrary_four_tfs_mapping_monotonic(self):
+        """验证任意4个ALL_TFS周期的映射单调性."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.engine import BacktestRunner
+        from unittest.mock import patch
+
+        # 任意4个周期（不等间距，从季线到1分钟）
+        configs = [
+            {"tf": "1分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "60分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "周线", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "季线", "n_pts": 50, "_fid": "sma", "_dual": False},
+        ]
+
+        with patch.object(BacktestRunner, "_query_bar_count", return_value=1000), \
+             patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
+            runner = BacktestRunner("3690", configs)
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in runner.configs]
+        # 严格降序 (无相等、无逆序)
+        for i in range(len(tf_indices) - 1):
+            assert tf_indices[i] > tf_indices[i + 1], (
+                f"索引应严格递减: configs[{i}].tf={runner.configs[i]['tf']}"
+                f"(idx={tf_indices[i]}) <= "
+                f"configs[{i+1}].tf={runner.configs[i+1]['tf']}"
+                f"(idx={tf_indices[i+1]})"
+            )
+
+    # ── 参数化: 多种 TF 组合 ─────────────────────────────────────────────────
+
+    @pytest.mark.parametrize("tfs", [
+        ["周线", "日线", "60分钟", "15分钟"],
+        ["月线", "周线", "日线", "60分钟"],
+        ["季线", "月线", "周线", "日线"],
+        ["60分钟", "15分钟", "5分钟", "1分钟"],
+        ["月线", "日线", "5分钟", "1分钟"],
+    ])
+    def test_diverse_tf_combinations_sorted(self, tfs):
+        """验证 ALL_TFS 任意子集的排序一致性."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.engine import BacktestRunner
+        from unittest.mock import patch
+
+        configs = [
+            {"tf": tf, "n_pts": 60 - i * 10, "_fid": "sma", "_dual": False}
+            for i, tf in enumerate(tfs)
+        ]
+
+        with patch.object(BacktestRunner, "_query_bar_count", return_value=1000), \
+             patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
+            runner = BacktestRunner("3690", configs)
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in runner.configs]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"组合 {tfs} 应粗→细排列, indices={tf_indices}"
+        )
+        # v0 应是最粗糙的周期
+        assert runner.configs[0]["tf"] == max(tfs, key=lambda x: ALL_TFS.index(x))
 
 
 # ── TestConfigsSortingEdgeCases ───────────────────────────────────────────────
@@ -1803,3 +2002,60 @@ class TestConfigsSortingEdgeCases:
              patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
             with pytest.raises(ValueError):
                 BacktestRunner("3690", configs)
+
+    # ── P0-7: 空 configs ─────────────────────────────────────────────────────
+
+    def test_empty_configs_raises(self):
+        """空 configs 列表 — 应在 BacktestRunner 构造时触发 ValueError."""
+        from filter.backtest.engine import BacktestRunner
+
+        with pytest.raises(ValueError, match="configs 不能为空"):
+            BacktestRunner("3690", [])
+
+    # ── P1-1: 单视图非默认周期 ──────────────────────────────────────────────
+
+    def test_single_config_non_default_tf(self):
+        """1 视图非 DEFAULT 周期 [月线]."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.engine import BacktestRunner
+        from unittest.mock import patch
+
+        configs = [
+            {"tf": "月线", "n_pts": 60, "_fid": "sma", "_dual": False},
+        ]
+
+        with patch.object(BacktestRunner, "_query_bar_count", return_value=1000), \
+             patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
+            runner = BacktestRunner("3690", configs)
+
+        assert len(runner.configs) == 1
+        assert runner.configs[0]["tf"] == "月线"
+        assert ALL_TFS.index(runner.configs[0]["tf"]) == 6
+
+    # ── P1-2: 非默认已排序幂等性 ────────────────────────────────────────────
+
+    def test_non_default_already_sorted_idempotent(self):
+        """非 DEFAULT_TFS 排序幂等性 — 已排序的再排序不变."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.engine import BacktestRunner
+        from unittest.mock import patch
+
+        # 已按 coarsest→finest 排列的非默认周期 [周线,日线,60分钟,15分钟]
+        configs = [
+            {"tf": "周线", "n_pts": 60, "_fid": "sma", "_dual": False},
+            {"tf": "日线", "n_pts": 60, "_fid": "sma", "_dual": False},
+            {"tf": "60分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "15分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+        ]
+
+        with patch.object(BacktestRunner, "_query_bar_count", return_value=1000), \
+             patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
+            runner = BacktestRunner("3690", configs)
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in runner.configs]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"已排序非默认 configs 应保持不变, indices={tf_indices}"
+        )
+        # 幂等性：tfs 列表应与输入一致
+        expected_tfs = ["周线", "日线", "60分钟", "15分钟"]
+        assert [c["tf"] for c in runner.configs] == expected_tfs

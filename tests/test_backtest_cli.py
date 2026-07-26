@@ -656,3 +656,116 @@ class TestConfigsViewOrdering:
         assert tf_indices == sorted(tf_indices, reverse=True), (
             f"默认配置应粗→细排列, indices={tf_indices}"
         )
+
+    # ── P0-1: 粗周期组 ──────────────────────────────────────────────────────
+
+    def test_build_configs_from_params_coarse_group(self):
+        """粗周期组 (周线/日线/60分/15分) 应排序为 coarsest→finest."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.cli import _build_configs_from_params
+
+        # 粗周期组 [周线,日线,60分钟,15分钟] ALL_TFS 索引 [5,4,3,2]
+        params = {
+            "global_f": "sma",
+            "global_dual": False,
+            "v0_tf": "周线", "v0_n": 60, "v0_ke": 0.15, "v0_sm": 0.05,
+            "v1_tf": "日线", "v1_n": 60, "v1_ke": 0.1, "v1_sm": 0.05,
+            "v2_tf": "60分钟", "v2_n": 50, "v2_ke": 0.1, "v2_sm": 0.05,
+            "v3_tf": "15分钟", "v3_n": 50, "v3_ke": 0.1, "v3_sm": 0.05,
+        }
+
+        configs = _build_configs_from_params(params)
+        assert len(configs) == 4
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in configs]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"粗周期组应粗→细排列, indices={tf_indices}, "
+            f"期望={sorted(tf_indices, reverse=True)}"
+        )
+        # v0 应是最粗糙的 (周线, index=5)
+        assert ALL_TFS.index(configs[0]["tf"]) == 5
+        assert configs[0]["tf"] == "周线"
+
+    # ── P0-2: 更粗周期组 ────────────────────────────────────────────────────
+
+    def test_build_configs_from_params_coarser_group(self):
+        """更粗周期组 (月线/周线/日线/60分) 应排序为 coarsest→finest."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.cli import _build_configs_from_params
+
+        # 更粗周期组 [月线,周线,日线,60分钟] ALL_TFS 索引 [6,5,4,3]
+        params = {
+            "global_f": "sma",
+            "global_dual": False,
+            "v0_tf": "月线", "v0_n": 60, "v0_ke": 0.15, "v0_sm": 0.05,
+            "v1_tf": "周线", "v1_n": 60, "v1_ke": 0.1, "v1_sm": 0.05,
+            "v2_tf": "日线", "v2_n": 50, "v2_ke": 0.1, "v2_sm": 0.05,
+            "v3_tf": "60分钟", "v3_n": 50, "v3_ke": 0.1, "v3_sm": 0.05,
+        }
+
+        configs = _build_configs_from_params(params)
+        assert len(configs) == 4
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in configs]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"更粗周期组应粗→细排列, indices={tf_indices}"
+        )
+        assert ALL_TFS.index(configs[0]["tf"]) == 6  # 月线
+        assert configs[0]["tf"] == "月线"
+
+    # ── P0-3: 最粗周期组 ────────────────────────────────────────────────────
+
+    def test_build_default_configs_like_coarsest_group(self):
+        """最粗周期组 (季线/月线/周线/日线) 应排序为 coarsest→finest."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.cli import _build_configs_from_params
+
+        # 最粗周期组 [季线,月线,周线,日线] ALL_TFS 索引 [7,6,5,4]
+        params = {
+            "global_f": "sma",
+            "global_dual": False,
+            "v0_tf": "季线", "v0_n": 60, "v0_ke": 0.15, "v0_sm": 0.05,
+            "v1_tf": "月线", "v1_n": 60, "v1_ke": 0.1, "v1_sm": 0.05,
+            "v2_tf": "周线", "v2_n": 50, "v2_ke": 0.1, "v2_sm": 0.05,
+            "v3_tf": "日线", "v3_n": 50, "v3_ke": 0.1, "v3_sm": 0.05,
+        }
+
+        configs = _build_configs_from_params(params)
+        assert len(configs) == 4
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in configs]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"最粗周期组应粗→细排列, indices={tf_indices}"
+        )
+        assert ALL_TFS.index(configs[0]["tf"]) == 7  # 季线
+        assert configs[0]["tf"] == "季线"
+
+    # ── P1-5: CLI 非 DEFAULT_TFS JSON 加载排序 ──────────────────────────────
+
+    def test_load_configs_from_file_non_default_tfs(self, tmp_path):
+        """CLI 非 DEFAULT_TFS 的 JSON 文件加载后排序正确."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.cli import _load_configs_from_file
+        import json
+
+        # 非 DEFAULT_TFS: [周线,日线,60分钟,15分钟] — finest→coarsest 写入
+        cfg = tmp_path / "non_default_tfs.json"
+        cfg.write_text(json.dumps({
+            "configs": [
+                {"tf": "15分钟", "n_pts": 50},
+                {"tf": "60分钟", "n_pts": 50},
+                {"tf": "日线", "n_pts": 60},
+                {"tf": "周线", "n_pts": 60},
+            ],
+        }, ensure_ascii=False))
+
+        result = _load_configs_from_file(str(cfg))
+        assert len(result) == 4
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in result]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"非默认周期 JSON 加载后应粗→细排列, indices={tf_indices}"
+        )
+        # v0 应为最粗糙的周线 (index=5)
+        assert ALL_TFS.index(result[0]["tf"]) == 5
+        assert result[0]["tf"] == "周线"
