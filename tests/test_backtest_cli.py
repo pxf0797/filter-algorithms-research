@@ -556,3 +556,103 @@ class TestMainBoundary:
             with pytest.raises(SystemExit) as exc:
                 main()
             assert exc.value.code == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# configs 视图排序测试 — 防止周期颠倒回归
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestConfigsViewOrdering:
+    """验证 configs 始终按 coarsest→finest (ALL_TFS 索引降序) 排列。
+
+    这是对 P0 周期颠倒修复的回归测试：
+    所有生成 configs 的入口都必须强制按 ALL_TFS 索引降序排列。
+    """
+
+    def test_build_configs_from_params_reversed_input_sorted(self):
+        """_build_configs_from_params: 即使 v0=finest v3=coarsest 输入也输出 coarsest→finest."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.cli import _build_configs_from_params
+
+        # 故意翻转：v0 设最精细(5分钟)，v3 设最粗糙(日线)
+        params = {
+            "global_f": "sma",
+            "global_dual": False,
+            "v0_tf": "5分钟", "v0_n": 50, "v0_ke": 0.1, "v0_sm": 0.05,
+            "v1_tf": "15分钟", "v1_n": 50, "v1_ke": 0.1, "v1_sm": 0.05,
+            "v2_tf": "60分钟", "v2_n": 50, "v2_ke": 0.1, "v2_sm": 0.05,
+            "v3_tf": "日线", "v3_n": 50, "v3_ke": 0.1, "v3_sm": 0.05,
+        }
+
+        configs = _build_configs_from_params(params)
+        assert len(configs) == 4
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in configs]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"翻转输入后输出仍应粗→细排列, indices={tf_indices}, "
+            f"期望={sorted(tf_indices, reverse=True)}"
+        )
+
+    def test_load_configs_from_file_sorts_reversed_list(self, tmp_path):
+        """_load_configs_from_file: finest→coarsest 的 JSON configs 列表加载后排序."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.cli import _load_configs_from_file
+        import json
+
+        # 写入 finest→coarsest 顺序
+        cfg = tmp_path / "reversed_configs.json"
+        cfg.write_text(json.dumps({
+            "configs": [
+                {"tf": "5分钟", "n_pts": 50},
+                {"tf": "15分钟", "n_pts": 50},
+                {"tf": "60分钟", "n_pts": 50},
+                {"tf": "日线", "n_pts": 50},
+            ],
+        }, ensure_ascii=False))
+
+        result = _load_configs_from_file(str(cfg))
+        assert len(result) == 4
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in result]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"JSON configs 列表颠倒，加载后应粗→细排列, indices={tf_indices}"
+        )
+
+    def test_load_configs_from_file_sorts_reversed_preset(self, tmp_path):
+        """_load_configs_from_file: finest→coarsest 平铺预设参数加载后排序."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.cli import _load_configs_from_file
+        import json
+
+        # 平铺预设参数中 v0=finest, v3=coarsest
+        cfg = tmp_path / "reversed_preset.json"
+        cfg.write_text(json.dumps({
+            "global_f": "sma",
+            "global_dual": False,
+            "v0_tf": "5分钟", "v0_n": 50,
+            "v1_tf": "15分钟", "v1_n": 50,
+            "v2_tf": "60分钟", "v2_n": 50,
+            "v3_tf": "日线", "v3_n": 50,
+        }, ensure_ascii=False))
+
+        result = _load_configs_from_file(str(cfg))
+        assert len(result) == 4
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in result]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"预设参数 tf 颠倒，加载后应粗→细排列, indices={tf_indices}"
+        )
+
+    def test_build_default_configs_sorted_coarse_to_fine(self):
+        """_build_default_configs 输出按 ALL_TFS 降序 (粗→细) 排列."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.cli import _build_default_configs
+
+        configs = _build_default_configs("TEST_TICKER")
+        assert len(configs) == 4
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in configs]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"默认配置应粗→细排列, indices={tf_indices}"
+        )

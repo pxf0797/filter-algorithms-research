@@ -65,6 +65,8 @@ class BacktestRunner:
             raise ValueError("configs 不能为空")
 
         self.ticker = ticker.strip()
+        # 确保 configs 按 coarsest→finest 排序 (v0=coarsest, v3=finest)
+        configs = sorted(configs, key=lambda c: ALL_TFS.index(c["tf"]), reverse=True)
         self.configs = configs
 
         # ── 提取周期信息 ──
@@ -74,16 +76,14 @@ class BacktestRunner:
         )
         self._min_tf: str = self._tfs_in_use[0]  # ALL_TFS 索引最小 = 最精细
 
-        # P0: 检测 v0~v2 是否按粗→细排列（view idx 0 = coarsest main period）
-        # 违反此约定会导致 v0 滤波值出现在错误周期上（如 v0=15min 而非日线）
+        # P0: 防御性检测 — 排序后应始终通过（保留为 INFO 级别便于排查异常）
         _tf_ix = [ALL_TFS.index(c["tf"]) for c in configs]
         if len(_tf_ix) >= 3 and (
             _tf_ix[0] < _tf_ix[1] or _tf_ix[1] < _tf_ix[2]
         ):
-            logger.warning(
-                "configs 视图排序可能违反粗→细约定(v0=coarsest, v3=finest): "
-                "tf_indices={}, 回测输出列周期分配可能不正确",
-                _tf_ix,
+            logger.info(
+                "configs 视图排序检查 (v0=coarsest, v3=finest): "
+                "ALL_TFS_indices={}", _tf_ix,
             )
 
         # 每 TF 的最大 n_pts（多个视图可能共享同一 TF）

@@ -171,16 +171,17 @@ def _build_configs_from_params(params: dict) -> list:
 
         configs.append(cfg)
 
-    # P0: 检测构建的 configs 是否按粗→细排列 (v0=coarsest main period)
-    # 检查 v0~v2 的 ALL_TFS 索引是否严格降序,
-    # 忽略 v3(可能为周线/月线等更长周期用于上下文), 避免误报
+    # 确保 configs 按 coarsest→finest 排序 (v0=最粗糙, v3=最精细)
+    configs.sort(key=lambda c: ALL_TFS.index(c["tf"]), reverse=True)
+
+    # P0: 防御性检测 — 排序后应始终通过（保留为 INFO 级别便于排查异常）
     _indices = [ALL_TFS.index(c["tf"]) for c in configs]
     if len(_indices) >= 3 and (
         _indices[0] < _indices[1] or _indices[1] < _indices[2]
     ):
-        logger.warning(
-            "预设 configs 视图排序违反粗→细约定(v0=coarsest, v3=finest): "
-            "tf_indices={}, 回测输出列周期可能不正确", _indices,
+        logger.info(
+            "预设 configs 视图排序检查 (v0=coarsest, v3=finest): "
+            "ALL_TFS_indices={}", _indices,
         )
 
     return configs
@@ -260,6 +261,8 @@ def _load_configs_from_file(path: str) -> list:
             if not isinstance(configs, list) or len(configs) == 0:
                 logger.error("configs/view_configs 字段为空或格式不正确")
                 sys.exit(1)
+            # 确保 configs 按 coarsest→finest 排序
+            configs.sort(key=lambda c: ALL_TFS.index(c["tf"]), reverse=True)
             return configs
 
     # 格式 2: 平铺预设参数
@@ -312,6 +315,8 @@ def _build_default_configs(ticker: str) -> list:
         }
         configs.append(cfg)
 
+    # 确保 configs 按 coarsest→finest 排序
+    configs.sort(key=lambda c: ALL_TFS.index(c["tf"]), reverse=True)
     return configs
 
 

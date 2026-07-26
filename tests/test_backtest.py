@@ -1648,3 +1648,158 @@ class TestEngineViewOrdering:
         assert runner._tfs_in_use == ["15分钟", "60分钟", "日线"], (
             f"_tfs_in_use 应细→粗排列, 实为 {runner._tfs_in_use}"
         )
+
+    def test_runner_sorts_finest_first_configs(self):
+        """BacktestRunner 构造函数自动排序 finest→coarsest 输入."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.engine import BacktestRunner
+        from unittest.mock import patch
+
+        # finest→coarsest 的输入顺序
+        configs = [
+            {"tf": "5分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "15分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "60分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "日线", "n_pts": 50, "_fid": "sma", "_dual": False},
+        ]
+
+        with patch.object(BacktestRunner, "_query_bar_count", return_value=1000), \
+             patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
+            runner = BacktestRunner("3690", configs)
+
+        # self.configs 应已排序为 coarsest→finest
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in runner.configs]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"引擎构造函数应对 finest→coarsest 输入排序, indices={tf_indices}, "
+            f"期望={sorted(tf_indices, reverse=True)}"
+        )
+
+
+# ── TestViewTimeframeMapping ──────────────────────────────────────────────────
+
+
+class TestViewTimeframeMapping:
+    """验证 v0=coarsest, v3=finest 映射约定。
+
+    DEFAULT_TFS 定义: ["日线", "60分钟", "15分钟", "5分钟"]
+    ALL_TFS 索引: 日线=4, 60分钟=3, 15分钟=2, 5分钟=1
+    """
+
+    def test_v0_is_coarsest_v3_is_finest(self):
+        """DEFAULT_TFS 中 v0=日线(coarsest), v3=5分钟(finest)."""
+        from filter.shared.constants import DEFAULT_TFS, ALL_TFS
+
+        assert len(DEFAULT_TFS) == 4
+        # v0 索引应最大 (最粗糙)
+        assert ALL_TFS.index(DEFAULT_TFS[0]) > ALL_TFS.index(DEFAULT_TFS[1]), (
+            f"v0({DEFAULT_TFS[0]}) 应比 v1({DEFAULT_TFS[1]}) 粗糙"
+        )
+        assert ALL_TFS.index(DEFAULT_TFS[0]) > ALL_TFS.index(DEFAULT_TFS[2])
+        assert ALL_TFS.index(DEFAULT_TFS[0]) > ALL_TFS.index(DEFAULT_TFS[3])
+        # v3 索引应最小 (最精细)
+        assert ALL_TFS.index(DEFAULT_TFS[3]) < ALL_TFS.index(DEFAULT_TFS[0]), (
+            f"v3({DEFAULT_TFS[3]}) 应比 v0({DEFAULT_TFS[0]}) 精细"
+        )
+
+    def test_all_tfs_index_monotonic(self):
+        """configs 的 ALL_TFS 索引应严格按照 coarsest→finest 排列（即降序）."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.cli import _build_default_configs
+
+        configs = _build_default_configs("TEST")
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in configs]
+
+        # 严格降序 (无相等、无逆序)
+        for i in range(len(tf_indices) - 1):
+            assert tf_indices[i] > tf_indices[i + 1], (
+                f"索引应严格递减: configs[{i}].tf={configs[i]['tf']}"
+                f"(idx={tf_indices[i]}) <= "
+                f"configs[{i+1}].tf={configs[i+1]['tf']}"
+                f"(idx={tf_indices[i+1]})"
+            )
+
+
+# ── TestConfigsSortingEdgeCases ───────────────────────────────────────────────
+
+
+class TestConfigsSortingEdgeCases:
+    """边界条件：单条、两条、已排序、非法 tf 等场景."""
+
+    def test_single_config(self):
+        """单条 config 排序不报错且保持自身."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.engine import BacktestRunner
+        from unittest.mock import patch
+
+        configs = [
+            {"tf": "日线", "n_pts": 60, "_fid": "sma", "_dual": False},
+        ]
+
+        with patch.object(BacktestRunner, "_query_bar_count", return_value=1000), \
+             patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
+            runner = BacktestRunner("3690", configs)
+
+        # 单条 config 时，排序是恒等变换
+        assert len(runner.configs) == 1
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in runner.configs]
+        assert tf_indices == sorted(tf_indices, reverse=True)
+
+    def test_two_configs(self):
+        """两条 config 的排序正确：粗→细."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.engine import BacktestRunner
+        from unittest.mock import patch
+
+        # finest→coarsest 输入
+        configs = [
+            {"tf": "5分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "日线", "n_pts": 60, "_fid": "sma", "_dual": False},
+        ]
+
+        with patch.object(BacktestRunner, "_query_bar_count", return_value=1000), \
+             patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
+            runner = BacktestRunner("3690", configs)
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in runner.configs]
+        # 日线(idx=4) > 5分钟(idx=1)
+        assert tf_indices == [4, 1], (
+            f"两条 config 应排序为 [日线, 5分钟], indices={tf_indices}"
+        )
+
+    def test_already_sorted_configs(self):
+        """已排序的 configs 不受影响（幂等性）."""
+        from filter.shared.constants import ALL_TFS
+        from filter.backtest.engine import BacktestRunner
+        from unittest.mock import patch
+
+        # 已按 coarsest→finest 排列
+        configs = [
+            {"tf": "日线", "n_pts": 60, "_fid": "sma", "_dual": False},
+            {"tf": "60分钟", "n_pts": 60, "_fid": "sma", "_dual": False},
+            {"tf": "15分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+            {"tf": "5分钟", "n_pts": 50, "_fid": "sma", "_dual": False},
+        ]
+
+        with patch.object(BacktestRunner, "_query_bar_count", return_value=1000), \
+             patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
+            runner = BacktestRunner("3690", configs)
+
+        tf_indices = [ALL_TFS.index(c["tf"]) for c in runner.configs]
+        assert tf_indices == sorted(tf_indices, reverse=True), (
+            f"已排序 configs 应保持粗→细, indices={tf_indices}"
+        )
+
+    def test_invalid_tf_raises(self):
+        """非法的 tf 值在排序时引发 ValueError（因 ALL_TFS.index 查找失败）."""
+        from filter.backtest.engine import BacktestRunner
+        from unittest.mock import patch
+
+        configs = [
+            {"tf": "日线", "n_pts": 60, "_fid": "sma", "_dual": False},
+            {"tf": "NONEXISTENT_TF", "n_pts": 50, "_fid": "sma", "_dual": False},
+        ]
+
+        with patch.object(BacktestRunner, "_query_bar_count", return_value=1000), \
+             patch.object(BacktestRunner, "_load_all_bar_info", return_value=[{}]):
+            with pytest.raises(ValueError):
+                BacktestRunner("3690", configs)
