@@ -8,6 +8,7 @@ Checks:
   5. T8: filters split — schmitt / strategy / alignment
   6. T11: 统一 — colors + PnL renderer
 """
+import re
 import sys
 from pathlib import Path
 
@@ -323,6 +324,110 @@ class TestPnlRendererModule:
         assert "yaxis1" in config
         assert config["yaxis1"]["ticksuffix"] == "%"
 
+    def test_compute_combined_pnl_all_equal(self):
+        """compute_combined_pnl — long/short 相同时结果等于任一方."""
+        from filter.common.pnl_renderer import compute_combined_pnl
+        long = np.array([100.0, 102.0, 99.0, 105.0])
+        short = np.array([100.0, 102.0, 99.0, 105.0])
+        result = compute_combined_pnl(long, short)
+        np.testing.assert_array_equal(result, long)
+        np.testing.assert_array_equal(result, short)
+
+    def test_compute_combined_pnl_alternating_dominance(self):
+        """compute_combined_pnl — 前半段做多赢、后半段做空赢，逐点验证 max."""
+        from filter.common.pnl_renderer import compute_combined_pnl
+        long = np.array([100.0, 105.0, 98.0, 99.0])
+        short = np.array([100.0, 101.0, 103.0, 106.0])
+        result = compute_combined_pnl(long, short)
+        expected = np.array([100.0, 105.0, 103.0, 106.0])
+        np.testing.assert_array_equal(result, expected)
+
+    def test_compute_combined_pnl_mixed_signs(self):
+        """compute_combined_pnl — 正负混合值时 max 正确选取."""
+        from filter.common.pnl_renderer import compute_combined_pnl
+        long = np.array([-5.0, 3.0, -1.0, 0.0])
+        short = np.array([2.0, -1.0, -3.0, 1.0])
+        result = compute_combined_pnl(long, short)
+        expected = np.array([2.0, 3.0, -1.0, 1.0])
+        np.testing.assert_array_equal(result, expected)
+
+    def test_compute_drawdown_recovery_then_new_peak(self):
+        """compute_drawdown — 峰值→谷底→恢复→新高，新高点回撤归零."""
+        from filter.common.pnl_renderer import compute_drawdown
+        pnl = np.array([100.0, 95.0, 98.0, 102.0, 105.0])
+        result = compute_drawdown(pnl)
+        # index 1: (95-100)/100*100 = -5.0
+        assert result[1] == pytest.approx(-5.0)
+        # index 2: (98-100)/100*100 = -2.0
+        assert result[2] == pytest.approx(-2.0)
+        # index 3: 新峰值 102, 回撤归零
+        assert result[3] == pytest.approx(0.0)
+        # index 4: 新峰值 105, 回撤归零
+        assert result[4] == pytest.approx(0.0)
+
+    def test_compute_drawdown_constant_series(self):
+        """compute_drawdown — 恒定 PnL 回撤全为零."""
+        from filter.common.pnl_renderer import compute_drawdown
+        pnl = np.array([100.0, 100.0, 100.0, 100.0])
+        result = compute_drawdown(pnl)
+        expected = np.zeros_like(pnl)
+        np.testing.assert_array_equal(result, expected)
+
+    def test_compute_drawdown_empty_and_single(self):
+        """compute_drawdown — 空数组返回空，单元素返回 [0.0]."""
+        from filter.common.pnl_renderer import compute_drawdown
+        result_empty = compute_drawdown(np.array([]))
+        assert len(result_empty) == 0
+        result_single = compute_drawdown(np.array([100.0]))
+        np.testing.assert_array_equal(result_single, np.array([0.0]))
+
+    def test_make_pnl_long_trace_with_row(self):
+        """make_pnl_long_trace — row=2 时 xaxis/yaxis 为 x2/y2."""
+        from filter.common.pnl_renderer import make_pnl_long_trace
+        x = np.arange(5)
+        pnl = np.array([100.0, 102.0, 101.0, 103.0, 105.0])
+        trace = make_pnl_long_trace(x, pnl, row=2)
+        assert trace["xaxis"] == "x2"
+        assert trace["yaxis"] == "y2"
+
+    def test_make_pnl_long_trace_custom_dash_width(self):
+        """make_pnl_long_trace — dash 和 width 参数传递到 line dict."""
+        from filter.common.pnl_renderer import make_pnl_long_trace
+        x = np.arange(5)
+        pnl = np.array([100.0, 102.0, 101.0, 103.0, 105.0])
+        trace = make_pnl_long_trace(x, pnl, dash="dot", width=3.0)
+        assert trace["line"]["dash"] == "dot"
+        assert trace["line"]["width"] == 3.0
+
+    def test_make_pnl_combined_trace_subtracts_baseline(self):
+        """make_pnl_combined_trace — y 值为 combined - 100.0 (PNL_BASELINE)."""
+        from filter.common.pnl_renderer import make_pnl_combined_trace
+        x = np.arange(4)
+        combined = np.array([100.0, 105.0, 98.0, 110.0])
+        trace = make_pnl_combined_trace(x, combined)
+        expected_y = combined - 100.0
+        np.testing.assert_array_equal(trace["y"], expected_y)
+
+    def test_make_drawdown_trace_includes_fill(self):
+        """make_drawdown_trace — 包含 fill='tozeroy' 和 fillcolor."""
+        from filter.common.pnl_renderer import make_drawdown_trace
+        x = np.arange(5)
+        pnl = np.array([100.0, 102.0, 99.0, 105.0, 103.0])
+        trace = make_drawdown_trace(x, pnl)
+        assert trace["fill"] == "tozeroy"
+        assert "fillcolor" in trace
+        assert isinstance(trace["fillcolor"], str)
+
+    def test_make_pnl_baseline_shape_custom_y(self):
+        """make_pnl_baseline_shape — y0 和 y1 反映自定义 y 参数."""
+        from filter.common.pnl_renderer import make_pnl_baseline_shape
+        shape = make_pnl_baseline_shape(row=1, y=105.0)
+        assert shape["y0"] == 105.0
+        assert shape["y1"] == 105.0
+        shape_default = make_pnl_baseline_shape(row=1)
+        assert shape_default["y0"] == 100.0
+        assert shape_default["y1"] == 100.0
+
 
 # ══════════════════════════════════════════════════════════════════════
 # P2-4: 工程债务清理测试
@@ -358,3 +463,55 @@ class TestB75SysPathRemoval:
             f"sys.path 被 import filter 修改了!\n"
             f"添加了: {set(path_after) - set(path_before)}"
         )
+
+
+# ══════════════════════════════════════════════════════════════════════
+# 版本一致性测试 (来自 test_version.py)
+# ══════════════════════════════════════════════════════════════════════
+
+def test_version_format():
+    """验证 filter.__version__ 符合 semver 格式（MAJOR.MINOR.PATCH）。"""
+    from filter import __version__
+    assert re.match(r"\d+\.\d+\.\d+", __version__), (
+        f"filter.__version__ ('{__version__}') 不符合 semver 格式 (MAJOR.MINOR.PATCH)"
+    )
+
+
+def test_no_hardcoded_mismatched_versions():
+    """检查项目文件中无过时的硬编码版本号（与 filter.__version__ 不一致的）。"""
+    from filter import __version__
+    project_root = Path(__file__).resolve().parent.parent
+    current_version = __version__
+
+    scan_patterns = ["*.py", "*.md", "*.toml", "*.cfg", "*.yaml", "*.yml"]
+    skip_dirs = {".git", "__pycache__", ".venv", "venv", "node_modules", ".claude"}
+
+    mismatches = []
+    for pattern in scan_patterns:
+        for filepath in project_root.rglob(pattern):
+            parts = set(filepath.parts)
+            if skip_dirs & parts:
+                continue
+
+            try:
+                content = filepath.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+
+            version_pattern = re.compile(r'\bv?(\d+\.\d+\.\d+)\b')
+            for match in version_pattern.finditer(content):
+                found = match.group(1)
+                if found == current_version:
+                    continue
+                # pyproject.toml and __init__.py define the canonical version
+                if filepath.name in ("pyproject.toml", "__init__.py"):
+                    continue
+                mismatches.append(
+                    f"  {filepath.relative_to(project_root)}: found '{found}'"
+                )
+
+    if mismatches:
+        print(f"\n⚠ 发现 {len(mismatches)} 处版本号与当前版本 '{current_version}' 不一致：")
+        for m in mismatches:
+            print(m)
+        print("（提示：文档中的版本引用可能需要同步更新）")

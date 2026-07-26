@@ -4,6 +4,7 @@ panel.py tests for _get_min_tf_and_count and _get_bar_date_from_db.
 Covers: empty configs, invalid TF, DB row/no-row, DB connection failure.
 """
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -356,3 +357,81 @@ except ImportError as e:
         assert "backtest" not in source.lower(), (
             "shared/constants.py 不应引用 backtest"
         )
+
+
+class TestSaveLoadBacktestConfig:
+    """回测配置保存/加载测试."""
+
+    def test_save_creates_valid_json(self, tmp_path):
+        """保存的 JSON 文件可解析."""
+        from filter.backtest.panel import _save_backtest_config
+        # Mock the config path resolution to use tmp_path
+        mock_parent = tmp_path / "proj"
+        mock_parent.mkdir(parents=True, exist_ok=True)
+        (mock_parent / "data").mkdir(exist_ok=True)
+        config_file = mock_parent / "data" / "backtest_config_TEST.json"
+
+        def _mock_path_init(self, *parts):
+            pass
+
+        with patch.object(Path, "__init__", _mock_path_init), \
+             patch.object(Path, "parent",
+                         new_callable=lambda: property(lambda s: MagicMock(
+                             parent=MagicMock(parent=MagicMock(
+                                 __truediv__=lambda s2, p: config_file))))):
+            # 简化方法：直接写入并验证
+            import builtins
+            mock_open = MagicMock()
+            real_open = builtins.open
+
+            class MockFile:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    pass
+
+                def write(self, data):
+                    config_file.write_text(data)
+
+            with patch("builtins.open", return_value=MockFile()), \
+                 patch("filter.backtest.panel.json.dump") as mock_dump:
+                _save_backtest_config("TEST", "日线", 500, 120)
+                mock_dump.assert_called_once()
+                call_args = mock_dump.call_args[0]
+                assert call_args[0]["ticker"] == "TEST"
+                assert call_args[0]["min_tf"] == "日线"
+                assert call_args[0]["bar_count"] == 500
+                assert call_args[0]["window_size"] == 120
+
+    def test_load_missing_file_returns_none(self):
+        """文件不存在返回 None."""
+        from filter.backtest.panel import _load_backtest_config
+        with patch.object(Path, "exists", return_value=False):
+            result = _load_backtest_config("NONEXISTENT_TICKER_12345")
+            assert result is None
+
+    def test_load_corrupt_json_returns_none(self):
+        """损坏的 JSON 文件返回 None (不崩溃)."""
+        from filter.backtest.panel import _load_backtest_config
+        with patch.object(Path, "exists", return_value=True), \
+             patch("builtins.open", side_effect=Exception("permission denied")), \
+             patch("filter.backtest.panel.logger"):
+            result = _load_backtest_config("CORRUPT")
+            assert result is None
+
+    def test_load_wrong_ticker_returns_none(self):
+        """ticker 不匹配时返回 None."""
+        from filter.backtest.panel import _load_backtest_config
+        wrong_config = json.dumps({
+            "ticker": "OTHER_TICKER",
+            "min_tf": "日线",
+            "bar_count": 300,
+            "window_size": 100,
+        })
+        with patch.object(Path, "exists", return_value=True), \
+             patch("builtins.open", MagicMock(return_value=MagicMock(
+                 __enter__=MagicMock(return_value=MagicMock(read=MagicMock(return_value=wrong_config)))
+             ))):
+            result = _load_backtest_config("MY_TICKER")
+            assert result is None

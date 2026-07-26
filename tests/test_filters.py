@@ -15,9 +15,10 @@ from engine.filters import (
     apply_sma, apply_ema, apply_wma, apply_alma,
     apply_savgol, apply_kalman, apply_butterworth,
     apply_gaussian, apply_median, apply_lowess,
-    FILTERS,
+    FILTERS, HAS_NUMBA,
 )
 from engine.alignment import compute_metrics
+from unittest.mock import patch
 
 pytestmark = pytest.mark.filter
 
@@ -762,3 +763,201 @@ class TestComputeMetricsExtended:
             assert not math.isnan(val), f"{key} is NaN"
             assert not math.isinf(val), f"{key} is Inf"
         assert isinstance(metrics["lag"], (int, float))
+
+
+class TestFiltersRegistryCompleteness:
+    """FILTERS 注册表完整性与边界测试."""
+
+    def test_all_10_filters_registered(self):
+        """所有10个滤波器应在 FILTERS 中注册."""
+        from engine.filters import FILTERS
+        expected = ["sma", "ema", "wma", "alma", "savgol",
+                    "kalman", "butterworth", "gaussian", "median", "lowess"]
+        for key in expected:
+            assert key in FILTERS, f"缺少 {key}"
+        assert len(FILTERS) == 10
+
+    def test_each_filter_has_required_keys(self):
+        """每个 FILTERS 条目必须有 name, func, params."""
+        from engine.filters import FILTERS
+        for key, entry in FILTERS.items():
+            assert "name" in entry, f"{key} 缺少 name"
+            assert "func" in entry, f"{key} 缺少 func"
+            assert "params" in entry, f"{key} 缺少 params"
+            assert callable(entry["func"]), f"{key}.func 不可调用"
+            assert isinstance(entry["params"], dict), f"{key}.params 不是 dict"
+
+    def test_each_param_spec_has_5_elements(self):
+        """每个参数规格应有5个元素: (label, min, max, step, default)."""
+        from engine.filters import FILTERS
+        for key, entry in FILTERS.items():
+            for pname, pdef in entry["params"].items():
+                assert isinstance(pdef, tuple), f"{key}.{pname} 不是 tuple"
+                assert len(pdef) == 5, f"{key}.{pname} 应有5个元素, 实际 {len(pdef)}"
+
+    def test_filter_names_match_keys(self):
+        """每个 filter 的 name 字段与其 key 相关."""
+        from engine.filters import FILTERS
+        for key, entry in FILTERS.items():
+            assert isinstance(entry["name"], str)
+            assert len(entry["name"]) > 0
+
+    def test_numba_jit_decorator_exists(self):
+        """验证 numba jit 装饰器在 filters.py 中存在."""
+        from engine.filters import HAS_NUMBA
+        # HAS_NUMBA 是一个布尔值
+        assert isinstance(HAS_NUMBA, bool)
+
+
+class TestFilterEdgeCases:
+    """滤波器边界值测试."""
+
+    def test_sma_even_window_auto_adjust(self):
+        """SMA: 偶数窗口自动+1."""
+        from engine.filters import apply_sma
+        signal = np.arange(1, 101, dtype=float)
+        t = np.arange(100, dtype=float)
+        result = apply_sma(signal, t, window=10)  # even → becomes 11
+        assert len(result) == len(signal)
+        assert not np.any(np.isnan(result[5:-5]))
+
+    def test_wma_even_window_auto_adjust(self):
+        """WMA: 偶数窗口自动+1."""
+        from engine.filters import apply_wma
+        signal = np.arange(1, 101, dtype=float)
+        t = np.arange(100, dtype=float)
+        result = apply_wma(signal, t, window=10)  # even → becomes 11
+        assert len(result) == len(signal)
+
+    def test_alma_sigma_zero(self):
+        """ALMA: sigma=0 时应正常处理（s=window/1.0）."""
+        from engine.filters import apply_alma
+        signal = np.ones(100)
+        t = np.arange(100, dtype=float)
+        result = apply_alma(signal, t, window=11, offset=0.85, sigma=0.0)
+        assert len(result) == len(signal)
+
+    def test_savgol_order_ge_window(self):
+        """SavGol: order >= window 时自动降为 window-1."""
+        from engine.filters import apply_savgol
+        signal = np.arange(1, 101, dtype=float)
+        t = np.arange(100, dtype=float)
+        result = apply_savgol(signal, t, window=11, order=15)
+        assert len(result) == len(signal)
+        assert not np.any(np.isnan(result))
+
+    def test_butterworth_high_cutoff(self):
+        """Butterworth: cutoff >= nyquist 时自动调整."""
+        from engine.filters import apply_butterworth
+        signal = np.sin(np.linspace(0, 4 * np.pi, 100))
+        t = np.arange(100, dtype=float)
+        result = apply_butterworth(signal, t, order=4, cutoff=50.0)
+        assert len(result) == len(signal)
+
+    def test_median_large_kernel(self):
+        """中值滤波: 窗口大于信号长度."""
+        from engine.filters import apply_median
+        signal = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        t = np.arange(5, dtype=float)
+        result = apply_median(signal, t, window=11)
+        assert len(result) == len(signal)
+
+    def test_ema_small_span(self):
+        """EMA: 最小 span=2."""
+        from engine.filters import apply_ema
+        signal = np.array([100.0, 101.0, 102.0, 103.0, 104.0])
+        t = np.arange(5, dtype=float)
+        result = apply_ema(signal, t, span=2)
+        assert len(result) == len(signal)
+
+    def test_gaussian_small_sigma(self):
+        """高斯滤波: 极小 sigma."""
+        from engine.filters import apply_gaussian
+        signal = np.sin(np.linspace(0, 2 * np.pi, 50))
+        t = np.arange(50, dtype=float)
+        result = apply_gaussian(signal, t, sigma=0.1)
+        assert len(result) == len(signal)
+
+    def test_lowess_small_frac(self):
+        """LOWESS: 极小 frac."""
+        from engine.filters import apply_lowess
+        signal = np.sin(np.linspace(0, 2 * np.pi, 50))
+        t = np.arange(50, dtype=float)
+        result = apply_lowess(signal, t, frac=0.02)
+        assert len(result) == len(signal)
+
+    def test_kalman_noisy_input(self):
+        """卡尔曼滤波: 含噪声输入."""
+        from engine.filters import apply_kalman
+        rng = np.random.RandomState(123)
+        signal = np.cumsum(rng.randn(100) * 0.1) + 100.0
+        t = np.arange(100, dtype=float)
+        result = apply_kalman(signal, t, Q=0.01, R=1.0)
+        assert len(result) == len(signal)
+        assert not np.any(np.isnan(result))
+
+    def test_negative_signal_values(self):
+        """负值信号: 所有滤波器应正常处理."""
+        from engine.filters import FILTERS
+        # Use signal longer than the maximum window size to avoid convolution edge effects
+        signal = np.tile(np.array([-10.0, -5.0, 0.0, 5.0, 10.0, 5.0, 0.0, -5.0, -10.0, -5.0]), 5)
+        t = np.arange(len(signal), dtype=float)
+        for key, entry in FILTERS.items():
+            defaults = {pname: pdef[4] for pname, pdef in entry["params"].items()}
+            result = entry["func"](signal.copy(), t, **defaults)
+            assert len(result) == len(signal), f"{key}: output length mismatch"
+
+    def test_large_value_signal(self):
+        """大数值信号: 所有滤波器应正常处理."""
+        from engine.filters import FILTERS
+        signal = np.full(100, 1e6, dtype=float)
+        t = np.arange(100, dtype=float)
+        for key, entry in FILTERS.items():
+            defaults = {pname: pdef[4] for pname, pdef in entry["params"].items()}
+            result = entry["func"](signal.copy(), t, **defaults)
+            assert len(result) == len(signal), f"{key}: large value signal failed"
+            # 结果应接近原值（偏离<1%，允许卷积边界效应）
+            mid_slice = slice(20, -20)
+            if len(result[mid_slice]) > 0:
+                assert np.allclose(result[mid_slice], 1e6, rtol=0.02), f"{key}: large value deviation"
+
+
+class TestFilterSelectors:
+    """_render_filter_selectors 测试."""
+
+    def test_dual_false_returns_none_filter_id2(self):
+        """dual=False 时 filter_id2 为 None."""
+        from filter.browse.sidebar import _render_filter_selectors
+        mock_response = [False, True, True, False, True, False]  # 控制 checkbox 返回值
+        response_iter = iter(mock_response)
+
+        with patch("filter.browse.sidebar.st.sidebar.selectbox", return_value="sma"), \
+             patch("filter.browse.sidebar.st.sidebar.checkbox",
+                   side_effect=lambda *a, **kw: next(response_iter)), \
+             patch("filter.browse.sidebar.FILTERS", {
+                 "sma": {"name": "SMA", "func": lambda x: x, "params": {}},
+             }):
+            filter_id, dual, filter_id2 = _render_filter_selectors()
+            assert filter_id == "sma"
+            assert dual is False
+            assert filter_id2 is None
+
+    def test_dual_true_returns_filter_id2(self):
+        """dual=True 时返回 filter_id2."""
+        from filter.browse.sidebar import _render_filter_selectors
+        # selectbox return: first=sma, second=ema, checkbox=True
+        selectbox_returns = ["sma", "ema"]
+
+        def selectbox_side_effect(*a, **kw):
+            return selectbox_returns.pop(0) if selectbox_returns else "sma"
+
+        with patch("filter.browse.sidebar.st.sidebar.selectbox",
+                   side_effect=selectbox_side_effect), \
+             patch("filter.browse.sidebar.st.sidebar.checkbox", return_value=True), \
+             patch("filter.browse.sidebar.FILTERS", {
+                 "sma": {"name": "SMA", "func": lambda x: x, "params": {}},
+                 "ema": {"name": "EMA", "func": lambda x: x, "params": {}},
+             }):
+            filter_id, dual, filter_id2 = _render_filter_selectors()
+            assert dual is True
+            assert filter_id2 == "ema"

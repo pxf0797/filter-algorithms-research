@@ -9,10 +9,13 @@ Covers:
   - session cleanup
 """
 
+import glob
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import numpy as np
 import pandas as pd
@@ -598,3 +601,122 @@ class TestPipelineCaptureCleanup:
         capture = PipelineCapture(ticker="AAPL")
         summary = capture.end_session()
         assert summary == {}
+
+
+class TestPipelineForViewEdgeCases:
+    """_compute_pipeline_for_view 边界测试."""
+
+    def test_no_schmitt_no_strategy(self):
+        """show_sch=False, show_strategy=False: 返回基本结构."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 60, "_fid": "sma", "show_sch": False,
+                    "show_strategy": False, "show_pred": False, "pv": {"window": 11}}]
+
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 200
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs)
+
+        t = np.arange(50, dtype=float)
+        noisy = np.sin(t / 10.0) + 100.0
+        ohlc = pd.DataFrame({
+            "Open": noisy, "High": noisy + 1, "Low": noisy - 1,
+            "Close": noisy, "Volume": np.full(50, 1000.0),
+        })
+        dates = pd.DatetimeIndex(pd.date_range("2026-01-01", periods=50, freq="D"))
+        window_data = (t, noisy, ohlc, dates)
+
+        view_cfg = {
+            "tf": "日线", "_fid": "sma", "pv": {"window": 11},
+            "_dual": False, "show_sch": False, "show_strategy": False,
+            "show_pred": False,
+        }
+
+        result = runner._compute_pipeline_for_view(view_cfg, window_data)
+        assert "t" in result
+        assert "noisy" in result
+        assert "filtered" in result
+        assert result["schmitt"] is None
+        assert result["long_pnl"] is not None
+        assert result["short_pnl"] is not None
+        assert result["trade_records"] == []
+
+    def test_with_ewma_init(self):
+        """带 EWMA 初始状态的管道计算."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 60, "_fid": "sma", "show_sch": True,
+                    "show_strategy": False, "show_pred": False, "pv": {"window": 11}}]
+
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 200
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs)
+
+        t = np.arange(200, dtype=float)
+        noisy = np.sin(t / 20.0) + 100.0
+        ohlc = pd.DataFrame({
+            "Open": noisy, "High": noisy + 1, "Low": noisy - 1,
+            "Close": noisy, "Volume": np.full(200, 1000.0),
+        })
+        dates = pd.DatetimeIndex(pd.date_range("2026-01-01", periods=200, freq="D"))
+        window_data = (t, noisy, ohlc, dates)
+
+        view_cfg = {
+            "tf": "日线", "_fid": "sma", "pv": {"window": 11},
+            "_dual": False, "show_sch": True, "show_strategy": False,
+            "show_pred": False, "ke": 0.15, "sm": 0.05, "ew": 60,
+        }
+
+        result = runner._compute_pipeline_for_view(
+            view_cfg, window_data,
+            ewma_init={"init_mu": 0.5, "init_sigma": 0.1, "state": 1, "dur": 5},
+        )
+        assert result["schmitt"] is not None
+
+
+# ── 回测基线一致性 (来自 test_pipeline_baseline_parity.py) ──
+
+PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+
+
+def test_backtest_filtered_values_vary():
+    """回测中filtered值应随bar变化，不应恒常。
+
+    验证 _sync_data 在 bar 循环内逐 bar 调用后，粗TF（日线/60分钟/周线）
+    的部分K线随每个bar的 cutoff_date 变化，反映在 filtered 值上。
+    """
+    result = subprocess.run(
+        [
+            "python3", "-m", "filter.backtest.cli",
+            "--ticker", "3690", "--preset", "3690_HK",
+            "--start-bar", "50", "--end-bar", "80",
+        ],
+        capture_output=True, text=True,
+        cwd=PROJECT_ROOT,
+    )
+    assert result.returncode == 0, f"回测CLI失败: {result.stderr[-500:]}"
+
+    dirs = sorted(
+        glob.glob(os.path.join(PROJECT_ROOT, "backtest_output", "3690_*")),
+        reverse=True,
+    )
+    assert dirs, "未找到回测输出目录"
+
+    df = pd.read_parquet(os.path.join(dirs[0], "backtest_result.parquet"))
+    for col in ["v0_filtered", "v1_filtered", "v2_filtered", "v3_filtered"]:
+        if col in df.columns:
+            vals = df[col].dropna()
+            n = len(vals)
+            unique = vals.nunique()
+            assert unique >= n * 0.3, (
+                f"{col} 在 {n} 个bar中只有 {unique} 个唯一值 "
+                f"（至少需要 {int(n * 0.3)}）— 级联合成可能未逐bar执行"
+            )

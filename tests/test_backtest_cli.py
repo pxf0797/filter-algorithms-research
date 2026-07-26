@@ -873,3 +873,92 @@ class TestCliDebugFlag:
         assert call_kwargs.get("save_debug_data") is False, (
             f"ParquetStore should receive save_debug_data=False by default, got {call_kwargs}"
         )
+
+
+class TestRunBacktestPlay:
+    """_run_backtest_play 边缘情况."""
+
+    def test_not_playing_returns_false(self):
+        """非播放状态返回 False."""
+        from filter.backtest.panel import _run_backtest_play
+        with patch("filter.backtest.panel.AppState.get", return_value=False):
+            result = _run_backtest_play()
+            assert result is False
+
+    def test_not_in_cb_mode_stops_playing(self):
+        """非回测模式: 停止播放."""
+        from filter.backtest.panel import _run_backtest_play
+        with patch("filter.backtest.panel.AppState.get") as mock_get:
+            mock_get.side_effect = lambda key, default=None: {
+                "_is_playing": True,
+                "_cb_mode": False,  # 非回测模式
+            }.get(key, default)
+            with patch("filter.backtest.panel.AppState.set") as mock_set:
+                result = _run_backtest_play()
+                assert result is False
+                mock_set.assert_called_with("_is_playing", False)
+
+    def test_total_zero_stops_playing(self):
+        """bar_count=0: 停止播放."""
+        from filter.backtest.panel import _run_backtest_play
+        with patch("filter.backtest.panel.AppState.get") as mock_get:
+            mock_get.side_effect = lambda key, default=None: {
+                "_is_playing": True,
+                "_cb_mode": True,
+                "_min_tf_bar_count": 0,
+            }.get(key, default)
+            with patch("filter.backtest.panel.AppState.set") as mock_set:
+                result = _run_backtest_play()
+                assert result is False
+                mock_set.assert_called_with("_is_playing", False)
+
+    def test_reached_end_stops_playing(self):
+        """到达末尾 (bar_index >= total) 停止播放."""
+        from filter.backtest.panel import _run_backtest_play
+
+        # Custom class that supports both dict-like and attribute-like access
+        class FakeSessionState(dict):
+            __getattr__ = dict.__getitem__
+            __setattr__ = dict.__setitem__
+            __delattr__ = dict.__delitem__
+
+        fake_ss = FakeSessionState({"_bar_index": 100})
+
+        with patch("filter.backtest.panel.AppState.get") as mock_get, \
+             patch("filter.backtest.panel.st") as mock_st:
+            mock_st.session_state = fake_ss
+            mock_get.side_effect = lambda key, default=None: {
+                "_is_playing": True,
+                "_cb_mode": True,
+                "_min_tf_bar_count": 100,
+            }.get(key, default)
+            result = _run_backtest_play()
+            assert result is False
+
+    def test_advances_bar_index(self):
+        """播放时 bar_index 前进."""
+        from filter.backtest.panel import _run_backtest_play
+
+        class FakeSessionState(dict):
+            __getattr__ = dict.__getitem__
+            __setattr__ = dict.__setitem__
+            __delattr__ = dict.__delitem__
+
+        fake_ss = FakeSessionState({"_bar_index": 0})
+
+        with patch("filter.backtest.panel.AppState.get") as mock_get, \
+             patch("filter.backtest.panel.st") as mock_st:
+            mock_st.session_state = fake_ss
+            mock_get.side_effect = lambda key, default=None: {
+                "_is_playing": True,
+                "_cb_mode": True,
+                "_min_tf_bar_count": 50,
+                "_fetched_ticker": "AAPL",
+                "_min_tf": "日线",
+            }.get(key, default)
+            with patch("filter.backtest.panel._get_bar_date_from_db",
+                       return_value="2026-01-16"), \
+                 patch("filter.backtest.panel.AppState.set"):
+                result = _run_backtest_play()
+                assert result is True
+                assert fake_ss["_bar_index"] == 1

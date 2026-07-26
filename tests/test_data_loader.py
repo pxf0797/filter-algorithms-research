@@ -1631,3 +1631,233 @@ class TestDownloadWithRetry:
                 pass
         # 总计 3 次尝试（1 次初始 + 2 次重试）
         assert mock_dl.call_count == 3
+
+
+class TestGetMinTfAndCount:
+    """_get_min_tf_and_count 测试."""
+
+    def _make_mock_conn(self, bar_count):
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.__exit__.return_value = False
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = bar_count
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+        return mock_conn
+
+    def test_empty_configs(self):
+        """空 configs 返回 ("", 0)."""
+        from filter.backtest.panel import _get_min_tf_and_count
+        result = _get_min_tf_and_count([], "TEST")
+        assert result == ("", 0)
+
+    def test_single_view_config(self):
+        """单视图配置返回正确 min_tf."""
+        from filter.backtest.panel import _get_min_tf_and_count
+        configs = [{"tf": "日线", "n_pts": 120}]
+        mock_conn = self._make_mock_conn(500)
+
+        with patch("filter.data.db.get_conn", return_value=mock_conn):
+            min_tf, bar_count = _get_min_tf_and_count(configs, "TEST")
+        assert min_tf == "日线"
+        assert bar_count == 500
+
+    def test_multiple_views_finest_tf(self):
+        """多视图: 取最精细 TF (ALL_TFS 索引最小)."""
+        from filter.backtest.panel import _get_min_tf_and_count
+        configs = [
+            {"tf": "日线", "n_pts": 120},
+            {"tf": "60分钟", "n_pts": 60},  # 更精细
+            {"tf": "周线", "n_pts": 26},
+        ]
+        mock_conn = self._make_mock_conn(1000)
+
+        with patch("filter.data.db.get_conn", return_value=mock_conn):
+            min_tf, bar_count = _get_min_tf_and_count(configs, "TEST")
+        assert min_tf == "60分钟"  # 最精细周期
+
+    def test_invalid_tf_not_crash(self):
+        """无效 TF 名称不崩溃，被跳过."""
+        from filter.backtest.panel import _get_min_tf_and_count
+        configs = [{"tf": "invalid_tf_name", "n_pts": 50}]
+        result = _get_min_tf_and_count(configs, "TEST")
+        assert result == ("", 0)  # 所有 TF 无效
+
+    def test_no_tf_field_handled(self):
+        """视图缺少 tf 字段时跳过."""
+        from filter.backtest.panel import _get_min_tf_and_count
+        configs = [{"n_pts": 120}]  # no "tf" key
+        result = _get_min_tf_and_count(configs, "TEST")
+        assert result == ("", 0)
+
+
+class TestGetBarDateFromDb:
+    """_get_bar_date_from_db 测试."""
+
+    def _make_mock_conn(self, date_value):
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.__exit__.return_value = False
+        if date_value is not None:
+            mock_row = MagicMock()
+            mock_row.__getitem__.return_value = date_value
+            mock_conn.execute.return_value.fetchone.return_value = mock_row
+        else:
+            mock_conn.execute.return_value.fetchone.return_value = None
+        return mock_conn
+
+    def test_returns_date_string(self):
+        """正常返回日期字符串."""
+        from filter.backtest.panel import _get_bar_date_from_db
+        mock_conn = self._make_mock_conn("2026-01-15")
+        with patch("filter.data.db.get_conn", return_value=mock_conn):
+            result = _get_bar_date_from_db("TEST", "日线", 5)
+        assert result == "2026-01-15"
+
+    def test_no_row_returns_empty_string(self):
+        """无数据行返回空字符串."""
+        from filter.backtest.panel import _get_bar_date_from_db
+        mock_conn = self._make_mock_conn(None)
+        with patch("filter.data.db.get_conn", return_value=mock_conn):
+            result = _get_bar_date_from_db("TEST", "日线", 9999)
+        assert result == ""
+
+
+class TestLoadWindowDataEdgeCases:
+    """_load_window_data 边界测试."""
+
+    def test_missing_date_column(self):
+        """缺少 Date 列返回 None."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 60, "_fid": "sma", "show_sch": True,
+                    "show_strategy": False, "show_pred": False, "pv": {"window": 11}}]
+
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.__exit__.return_value = False
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 200
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs)
+
+        df_no_date = pd.DataFrame({"Close": [100.0, 101.0, 102.0]})
+        with patch("filter.backtest.engine.load_display_cache", return_value=df_no_date):
+            result = runner._load_window_data("日线", 60)
+            assert result is None
+
+    def test_missing_close_column(self):
+        """缺少 Close 列返回 None."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 60, "_fid": "sma", "show_sch": True,
+                    "show_strategy": False, "show_pred": False, "pv": {"window": 11}}]
+
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 200
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs)
+
+        df_no_close = pd.DataFrame({"Date": ["2026-01-01"], "Open": [100.0]})
+        with patch("filter.backtest.engine.load_display_cache", return_value=df_no_close):
+            result = runner._load_window_data("日线", 60)
+            assert result is None
+
+    def test_cutoff_date_filtering(self):
+        """cutoff_date 过滤: 只保留日期 <= cutoff 的数据."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 60, "_fid": "sma", "show_sch": True,
+                    "show_strategy": False, "show_pred": False, "pv": {"window": 11}}]
+
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 200
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+        mock_conn.execute.return_value.fetchall.return_value = [
+            {"ts": f"2026-01-{i+1:02d}", "open": 100.0, "high": 101.0,
+             "low": 99.0, "close": 100.0, "volume": 1000}
+            for i in range(200)
+        ]
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs)
+
+        # 10 days of data, cutoff at day 5
+        df = pd.DataFrame({
+            "Date": [f"2026-01-{i+1:02d}" for i in range(10)],
+            "Close": [100 + i for i in range(10)],
+            "Open": [100 + i for i in range(10)],
+            "High": [101 + i for i in range(10)],
+            "Low": [99 + i for i in range(10)],
+        })
+        with patch("filter.backtest.engine.load_display_cache", return_value=df):
+            result = runner._load_window_data("日线", 60, cutoff_date="2026-01-05")
+            assert result is not None
+            t, noisy, ohlc, dates = result
+            # 只应有5天数据 (1-5)
+            assert len(noisy) == 5
+
+    def test_ohlc_fallback_no_open_high_low(self):
+        """缺少 OHLC 列时使用 Close 填充."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 60, "_fid": "sma", "show_sch": True,
+                    "show_strategy": False, "show_pred": False, "pv": {"window": 11}}]
+
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 200
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+        mock_conn.execute.return_value.fetchall.return_value = [
+            {"ts": f"2026-01-{i+1:02d}", "open": 100.0, "high": 101.0,
+             "low": 99.0, "close": 100.0, "volume": 1000}
+            for i in range(200)
+        ]
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs)
+
+        df_close_only = pd.DataFrame({
+            "Date": ["2026-01-01", "2026-01-02", "2026-01-03"],
+            "Close": [100.0, 101.0, 102.0],
+        })
+        with patch("filter.backtest.engine.load_display_cache", return_value=df_close_only):
+            result = runner._load_window_data("日线", 60)
+            assert result is not None
+            t, noisy, ohlc, dates = result
+            assert "Open" in ohlc.columns
+            assert np.allclose(ohlc["Open"], noisy)
+
+    def test_empty_parquet_returns_none(self):
+        """加载空 parquet 返回 None."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 60, "_fid": "sma", "show_sch": True,
+                    "show_strategy": False, "show_pred": False, "pv": {"window": 11}}]
+
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 200
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+        mock_conn.execute.return_value.fetchall.return_value = [
+            {"ts": f"2026-01-{i+1:02d}", "open": 100.0, "high": 101.0,
+             "low": 99.0, "close": 100.0, "volume": 1000}
+            for i in range(200)
+        ]
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs)
+
+        df_single = pd.DataFrame({
+            "Date": ["2026-01-01"],
+            "Close": [100.0],
+        })
+        with patch("filter.backtest.engine.load_display_cache", return_value=df_single):
+            result = runner._load_window_data("日线", 60)
+            # len=1, 少于2 -> 返回 None
+            assert result is None

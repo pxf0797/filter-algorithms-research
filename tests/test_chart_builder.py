@@ -1,7 +1,8 @@
 """P0-3 验证测试: chart_builder 模块可独立导入"""
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import numpy as np
+import pandas as pd
 
 
 def test_chart_builder_importable():
@@ -244,3 +245,141 @@ class TestEmptyDataE2E:
         assert "data" in params, (
             "_build_chart_figure 第一个参数应为 'data'"
         )
+
+
+class TestPrepareChartDataErrorPaths:
+    """_prepare_chart_data 错误路径测试."""
+
+    def test_data_loading_error_short_circuits(self):
+        """数据加载失败: 返回含 err 的 dict."""
+        import filter.browse.app as app_module
+        with patch.object(app_module, "_load_chart_data",
+                         return_value=(None, None, None, None, None, "网络错误")):
+            with patch.object(app_module, "st") as mock_st:
+                mock_st.session_state = MagicMock()
+                mock_st.session_state.get = lambda key, default=None: default
+                params = {
+                    "market": "美股", "ticker_code": "AAPL",
+                    "cfg": {"tf": "日线", "n_pts": 120},
+                    "key": "v0", "compact": True,
+                    "higher_pnl": None,
+                    "window_start": None, "cutoff_date": None,
+                }
+                result = app_module._prepare_chart_data(params)
+                assert result["err"] == "网络错误"
+
+    def test_data_none_short_circuits(self):
+        """t=None (数据为空) 短路上返回."""
+        import filter.browse.app as app_module
+        with patch.object(app_module, "_load_chart_data",
+                         return_value=(None, None, None, None, None, None)):
+            with patch.object(app_module, "st") as mock_st:
+                mock_st.session_state = MagicMock()
+                mock_st.session_state.get = lambda key, default=None: default
+                params = {
+                    "market": "美股", "ticker_code": "AAPL",
+                    "cfg": {"tf": "日线", "n_pts": 120},
+                    "key": "v0", "compact": True,
+                    "higher_pnl": None,
+                    "window_start": None, "cutoff_date": None,
+                }
+                result = app_module._prepare_chart_data(params)
+                assert result["err"] is not None
+                assert "数据点不足" in str(result["err"])
+
+    def test_short_data_short_circuits(self):
+        """数据点 < 2 短路上返回."""
+        import filter.browse.app as app_module
+        with patch.object(app_module, "_load_chart_data",
+                         return_value=(np.array([0.0]), np.array([100.0]),
+                                      None, "AAPL", None, None)):
+            with patch.object(app_module, "st") as mock_st:
+                mock_st.session_state = MagicMock()
+                mock_st.session_state.get = lambda key, default=None: default
+                params = {
+                    "market": "美股", "ticker_code": "AAPL",
+                    "cfg": {"tf": "日线", "n_pts": 120},
+                    "key": "v0", "compact": True,
+                    "higher_pnl": None,
+                    "window_start": None, "cutoff_date": None,
+                }
+                result = app_module._prepare_chart_data(params)
+                assert result["err"] is not None
+                assert "数据点不足" in str(result["err"])
+
+
+class TestLoadChartData:
+    """_load_chart_data 边界测试."""
+
+    def test_parquet_load_error_causes_api_fallback(self):
+        """parquet 写入失败回退到 API."""
+        import filter.browse.app as app_module
+        with patch("filter.browse.app._sync_to_display") as mock_sync, \
+             patch("filter.browse.app.load_display_cache") as mock_load, \
+             patch("filter.browse.app._cached_fetch_stock") as mock_fetch, \
+             patch("filter.browse.app.log_data_load"):
+            # sync returns False (写入失败)
+            mock_sync.return_value = (False, 0)
+            mock_load.return_value = None
+
+            result = app_module._load_chart_data("美股", "AAPL", "日线", 120)
+            # 回退到 API
+            mock_fetch.assert_called_once()
+
+    def test_parquet_load_success(self):
+        """parquet 加载成功."""
+        import filter.browse.app as app_module
+        with patch("filter.browse.app._sync_to_display") as mock_sync, \
+             patch("filter.browse.app.load_display_cache") as mock_load, \
+             patch("filter.browse.app.log_data_load"):
+            mock_sync.return_value = (True, 100)
+            df = pd.DataFrame({
+                "Date": ["2026-01-03", "2026-01-01", "2026-01-02"],
+                "Close": [103.0, 101.0, 102.0],
+                "Open": [102.0, 100.0, 101.0],
+                "High": [104.0, 102.0, 103.0],
+                "Low": [101.0, 99.0, 100.0],
+            })
+            mock_load.return_value = df
+
+            t, noisy, ohlc, ticker_full, dates, err = app_module._load_chart_data(
+                "美股", "AAPL", "日线", 120,
+            )
+            assert err is None
+            assert len(noisy) == 3
+            assert ticker_full == "AAPL"
+            # 验证排序: 数据按 Date 升序排列
+            assert noisy[0] == 101.0  # 最早日期是 2026-01-01
+
+    def test_parquet_missing_columns(self):
+        """parquet 缺少必要列时返回错误."""
+        import filter.browse.app as app_module
+        with patch("filter.browse.app._sync_to_display") as mock_sync, \
+             patch("filter.browse.app.load_display_cache") as mock_load, \
+             patch("filter.browse.app.log_data_load"):
+            mock_sync.return_value = (True, 100)
+            df_no_date = pd.DataFrame({"Price": [100.0, 101.0, 102.0]})
+            mock_load.return_value = df_no_date
+
+            t, noisy, ohlc, ticker_full, dates, err = app_module._load_chart_data(
+                "美股", "AAPL", "日线", 120,
+            )
+            assert err is not None
+
+    def test_parquet_only_one_point(self):
+        """parquet 只有1个数据点: 返回错误."""
+        import filter.browse.app as app_module
+        with patch("filter.browse.app._sync_to_display") as mock_sync, \
+             patch("filter.browse.app.load_display_cache") as mock_load, \
+             patch("filter.browse.app.log_data_load"):
+            mock_sync.return_value = (True, 1)
+            df = pd.DataFrame({
+                "Date": ["2026-01-01"],
+                "Close": [100.0],
+            })
+            mock_load.return_value = df
+
+            t, noisy, ohlc, ticker_full, dates, err = app_module._load_chart_data(
+                "美股", "AAPL", "日线", 120,
+            )
+            assert err is not None

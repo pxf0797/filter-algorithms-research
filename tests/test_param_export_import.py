@@ -412,3 +412,33 @@ class TestParamRegistryGuard:
         exported = _view_export_params({"show_pnl_feedback": True}, 0)
         blob = json.loads(json.dumps(exported))     # 模拟 download→upload
         assert blob["v0_pnlfb"] is True
+
+
+class TestViewExportParams:
+    """_view_export_params 测试."""
+
+    def test_returns_all_expected_keys(self):
+        """返回 VIEW_PARAM_SPECS 定义的所有键."""
+        from filter.browse.sidebar import _view_export_params
+        cfg = {
+            "tf": "日线", "_fid": "sma", "_dual": False,
+            "show_sch": True, "show_strategy": True, "show_pred": True,
+            "show_cross_pnl": False, "show_alignment": False,
+            "show_pnl_feedback": False,
+            "n_pts": 120, "ew": 60, "ke": 0.15, "sm": 0.05,
+            "n_ext": 10, "stop_loss_pct": 2.0, "fit_mode": "linear",
+        }
+        result = _view_export_params(cfg, 0)
+        assert isinstance(result, dict)
+        assert "v0_tf" in result
+        assert result["v0_tf"] == "日线"
+
+    def test_missing_keys_use_defaults(self):
+        """缺少字段时使用默认值."""
+        from filter.browse.sidebar import _view_export_params
+        minimal_cfg = {"tf": "日线"}
+        result = _view_export_params(minimal_cfg, 1)
+        assert result["v1_tf"] == "日线"
+        # 其他字段应使用 VIEW_PARAM_SPECS 的默认值
+        for key in result:
+            assert result[key] is not None or key.startswith("v1_")

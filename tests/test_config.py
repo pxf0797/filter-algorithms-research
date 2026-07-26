@@ -1,6 +1,8 @@
 """Test filter.config — ViewConfig dataclass creation, serialization, defaults."""
 
+import json
 import pytest
+from unittest.mock import patch, MagicMock
 from shared.config import ViewConfig
 
 
@@ -416,3 +418,99 @@ class TestRequirementsSplit:
         """开发依赖中包含 pip-audit."""
         pkgs = self._parse_packages(dev_path)
         assert "pip-audit" in pkgs, "pip-audit 应在 requirements-dev.txt 中"
+
+
+class TestRenderExportConfig:
+    """_render_export_config 测试."""
+
+    def test_export_data_structure(self):
+        """导出数据结构正确."""
+        from filter.browse.sidebar import _render_export_config
+        from filter.engine.filters import FILTERS
+        configs = [{
+            "tf": "日线", "_fid": "sma", "_dual": False,
+            "show_sch": True, "show_strategy": True, "show_pred": True,
+            "show_cross_pnl": False, "show_alignment": False,
+            "show_pnl_feedback": False,
+            "n_pts": 120, "ew": 60, "ke": 0.15, "sm": 0.05,
+            "n_ext": 10, "stop_loss_pct": 2.0, "fit_mode": "linear",
+            "pv": {"window": 11}, "pv2": {}, "fc": "#00d4aa", "fc2": "#ff6b6b",
+        }]
+
+        with patch("filter.browse.sidebar.st.sidebar.download_button") as mock_download, \
+             patch("filter.browse.sidebar.st.sidebar.markdown"), \
+             patch("filter.browse.sidebar.FILTERS", FILTERS):
+            _render_export_config(configs, "sma", None, False, "美股", "AAPL")
+
+        assert mock_download.called
+        args = mock_download.call_args[0]
+        export_json = args[1]
+        export_data = json.loads(export_json)
+        assert export_data["market"] == "美股"
+        assert export_data["ticker"] == "AAPL"
+        assert export_data["global_f"] == "sma"
+
+
+class TestRenderConfigHistory:
+    """_render_config_history 测试."""
+
+    def test_no_ticker_skips_rendering(self):
+        """无 ticker 时跳过渲染."""
+        from filter.browse.sidebar import _render_config_history
+        with patch("filter.browse.sidebar.st") as mock_st:
+            _render_config_history("")
+            # expander 不应该被调用
+            mock_st.sidebar.expander.assert_not_called()
+
+    def test_with_records_displays_items(self):
+        """有历史记录时正确显示."""
+        from filter.browse.sidebar import _render_config_history
+        records = [
+            {"changed_at": "2026-01-15 10:00", "source": "ui", "preset_name": "MyPreset"},
+            {"changed_at": "2026-01-14 10:00", "source": "import", "preset_name": None},
+        ]
+
+        mock_expander = MagicMock()
+        mock_exp_ctxt = MagicMock()
+        mock_expander.return_value.__enter__.return_value = mock_exp_ctxt
+
+        with patch("filter.browse.sidebar.st") as mock_st:
+            mock_st.sidebar = MagicMock()
+            mock_st.sidebar.markdown = MagicMock()
+            mock_st.sidebar.expander = mock_expander
+            mock_st.sidebar.caption = MagicMock()
+            mock_st.caption = MagicMock()
+            with patch("filter.browse.sidebar.get_history", return_value=records):
+                _render_config_history("AAPL")
+
+            # 至少调用了 caption
+            caption_calls = (
+                mock_st.sidebar.caption.call_args_list +
+                mock_st.caption.call_args_list
+            )
+            assert len(caption_calls) >= 2  # 至少2条记录
+
+    def test_empty_records_shows_default(self):
+        """无历史记录时显示默认提示."""
+        from filter.browse.sidebar import _render_config_history
+
+        mock_expander = MagicMock()
+        mock_exp_ctxt = MagicMock()
+        mock_expander.return_value.__enter__.return_value = mock_exp_ctxt
+
+        with patch("filter.browse.sidebar.st") as mock_st:
+            mock_st.sidebar = MagicMock()
+            mock_st.sidebar.markdown = MagicMock()
+            mock_st.sidebar.expander = mock_expander
+            mock_st.sidebar.caption = MagicMock()
+            mock_st.caption = MagicMock()
+            with patch("filter.browse.sidebar.get_history", return_value=[]):
+                _render_config_history("AAPL")
+
+            # 验证至少渲染了 "暂无记录"
+            caption_calls = (
+                list(mock_st.sidebar.caption.call_args_list) +
+                list(mock_st.caption.call_args_list)
+            )
+            caption_texts = [str(c[0][0]) for c in caption_calls if c[0]]
+            assert any("暂无记录" in t for t in caption_texts)

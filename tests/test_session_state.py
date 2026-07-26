@@ -3,7 +3,7 @@ AppState _imp_ 清理 + Streamlit 缓存 TTL — 单元测试
 """
 import ast
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -242,3 +242,43 @@ class TestCacheTTL:
         if isinstance(cur, ast.Name):
             parts.append(cur.id)
         return ".".join(reversed(parts))
+
+
+class TestHandlePendingApply:
+    """_handle_pending_apply 测试."""
+
+    def test_no_pending_params(self):
+        """无等待参数时不报错."""
+        from filter.browse.sidebar import _handle_pending_apply
+        with patch("filter.browse.sidebar.AppState.has", return_value=False):
+            _handle_pending_apply()
+
+    def test_pending_params_none(self):
+        """等待参数为 None 时直接返回."""
+        from filter.browse.sidebar import _handle_pending_apply
+        with patch("filter.browse.sidebar.AppState.has", return_value=True), \
+             patch("filter.browse.sidebar.AppState.pop", return_value=None):
+            _handle_pending_apply()
+
+    def test_pending_params_applied(self):
+        """等待参数正常应用."""
+        from filter.browse.sidebar import _handle_pending_apply
+        params = {"key1": "val1", "key2": 42}
+
+        call_args = []
+
+        def fake_has(key):
+            return key == "_pending_apply_params"
+
+        def fake_pop(key):
+            return params
+
+        def fake_set(key, value):
+            call_args.append((key, value))
+
+        with patch("filter.browse.sidebar.AppState.has", side_effect=fake_has), \
+             patch("filter.browse.sidebar.AppState.pop", side_effect=fake_pop), \
+             patch("filter.browse.sidebar.AppState.set", side_effect=fake_set):
+            _handle_pending_apply()
+
+        assert len(call_args) == 3  # key1, key2, _import_data

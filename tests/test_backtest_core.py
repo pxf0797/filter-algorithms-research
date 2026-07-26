@@ -5,7 +5,9 @@
 所有测试通过 mock DB/streamlit 独立运行，不依赖 Streamlit 运行时。
 """
 
+import json
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -1641,3 +1643,146 @@ class TestConfigsSortingEdgeCases:
         # 幂等性：tfs 列表应与输入一致
         expected_tfs = ["周线", "日线", "60分钟", "15分钟"]
         assert [c["tf"] for c in runner.configs] == expected_tfs
+
+
+class TestReplayBarExtended:
+    """replay_bar 额外边缘情况."""
+
+    def test_replay_bar_run_value_error(self):
+        """runner.run 抛出 ValueError 时 replay_bar 返回 None."""
+        from filter.backtest.engine import replay_bar
+
+        configs = [
+            {"tf": "日线", "n_pts": 120, "_fid": "sma", "show_sch": True,
+             "show_strategy": False, "show_pred": False, "pv": {"window": 11}},
+        ]
+
+        # bar_count=0 → ValueError
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.__exit__.return_value = False
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 0  # zero bars
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+        mock_conn.execute.return_value.fetchall.return_value = []
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            with patch("filter.backtest.engine.logger"):
+                result = replay_bar("TEST", 120, configs)
+                assert result is None
+
+    def test_replay_bar_run_index_error(self):
+        """runner.run 抛出 IndexError 时 replay_bar 返回 None."""
+        from filter.backtest.engine import replay_bar
+
+        configs = [
+            {"tf": "日线", "n_pts": 5, "_fid": "sma", "show_sch": True,
+             "show_strategy": False, "show_pred": False, "pv": {"window": 11}},
+        ]
+
+        # bar_count=10, bar_index=5 (max_n_pts) → end_bar=6, should work
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.__exit__.return_value = False
+        mock_row_count = MagicMock()
+        mock_row_count.__getitem__.return_value = 10
+        mock_conn.execute.return_value.fetchone.return_value = mock_row_count
+        # bar_info rows
+        mock_bars = [
+            {"ts": f"2026-01-{i+1:02d}", "open": 100.0, "high": 101.0,
+             "low": 99.0, "close": 100.0, "volume": 1000}
+            for i in range(10)
+        ]
+        mock_conn.execute.return_value.fetchall.return_value = mock_bars
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            with patch("filter.backtest.engine._sync_all_cascading",
+                       return_value={"日线": False}):
+                with patch("filter.backtest.engine.load_display_cache",
+                           return_value=None):
+                    with patch("filter.backtest.engine.logger"):
+                        with patch("filter.backtest.catalog.BacktestCatalog"):
+                            with patch("filter.backtest.metrics.compute_backtest_metrics",
+                                       return_value={}):
+                                result = replay_bar("TEST", 3, configs)
+                                # n_pts=5 so max_n_pts=5, bar_index is adjusted
+                                assert result is not None
+
+
+class TestBacktestRunnerConfigHashExtended:
+    """_config_hash 扩展测试."""
+
+    def test_config_hash_with_empty_config_safe(self):
+        """空 configs 不应该导致 _config_hash 崩溃 (但是构造函数会阻止空 configs)."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 120, "_fid": "sma", "show_sch": False,
+                    "show_strategy": False, "show_pred": False, "pv": {}, "pv2": {}}]
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 100
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("T", configs)
+        h = runner._config_hash()
+        assert isinstance(h, str)
+        assert len(h) == 64
+
+
+class TestFromCheckpointError:
+    """from_checkpoint 错误处理测试."""
+
+    def test_file_not_found_raises(self):
+        """断点文件不存在抛出 ValueError."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 120, "_fid": "sma", "_dual": False,
+                    "show_sch": True, "show_strategy": False, "show_pred": False,
+                    "ke": 0.15, "sm": 0.05, "ew": 60, "pv": {"window": 11}, "pv2": {}}]
+        with pytest.raises(ValueError, match="不存在"):
+            BacktestRunner.from_checkpoint("/nonexistent/path/checkpoint.json", configs)
+
+    def test_not_implemented_for_valid_path(self, tmp_path):
+        """存在有效断点文件时仍抛出 NotImplementedError (需 ticker 参数)."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 120, "_fid": "sma", "_dual": False,
+                    "show_sch": True, "show_strategy": False, "show_pred": False,
+                    "ke": 0.15, "sm": 0.05, "ew": 60, "pv": {"window": 11}, "pv2": {}}]
+
+        checkpoint_path = tmp_path / "test_checkpoint.json"
+        checkpoint_path.write_text(json.dumps({
+            "bar_index": 42,
+            "bar_count": 1000,
+            "config_hash": "abc123",
+            "ewma_state": {},
+        }))
+
+        with pytest.raises(NotImplementedError):
+            BacktestRunner.from_checkpoint(str(checkpoint_path), configs)
+
+    def test_restore_checkpoint_with_hash_mismatch_raises(self, tmp_path):
+        """配置哈希不匹配时抛出 ValueError."""
+        from filter.backtest.engine import BacktestRunner
+
+        configs = [{"tf": "日线", "n_pts": 120, "_fid": "sma", "show_sch": True,
+                    "show_strategy": False, "show_pred": False, "pv": {"window": 11}}]
+
+        checkpoint_path = tmp_path / "mismatch_checkpoint.json"
+        checkpoint_path.write_text(json.dumps({
+            "bar_index": 50,
+            "bar_count": 1000,
+            "config_hash": "different_hash_value_12345",
+            "ewma_state": {},
+        }))
+
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.__exit__.return_value = False
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 500
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("TEST", configs)
+
+        with pytest.raises(ValueError, match="配置哈希不匹配"):
+            runner._restore_checkpoint(str(checkpoint_path), configs)

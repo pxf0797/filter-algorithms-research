@@ -15,7 +15,7 @@ import os
 import json
 import sqlite3
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import numpy as np
 import pandas as pd
@@ -1275,3 +1275,55 @@ class TestThreadLocalConnection:
         # 新 version 应有效，行数对应新数据
         assert _is_cache_valid(parquet_path), "Updated version should validate"
         assert nrows2 == 25, f"Expected 25 rows after refresh, got {nrows2}"
+
+
+class TestRenderDbBackup:
+    """_render_db_backup 按钮逻辑测试 (纯函数逻辑)."""
+
+    def test_db_size_format_in_caption(self):
+        """验证 get_db_size_mb 被调用以获取数据库大小."""
+        from filter.browse.sidebar import _render_db_backup
+
+        mock_col = MagicMock()
+
+        with patch("filter.browse.sidebar.st") as mock_st, \
+             patch("filter.browse.sidebar.get_db_size_mb",
+                   return_value=10.5) as mock_size, \
+             patch("filter.browse.sidebar.list_snapshots", return_value=[]), \
+             patch("filter.browse.sidebar.logger"):
+            mock_st.sidebar = MagicMock()
+            mock_st.sidebar.expander.return_value.__enter__ = MagicMock()
+            mock_st.sidebar.columns.return_value = [mock_col, mock_col]
+            mock_st.sidebar.button.return_value = False
+            mock_st.sidebar.selectbox.return_value = 0
+            mock_st.sidebar.caption = MagicMock()
+            mock_st.columns.return_value = [mock_col, mock_col]
+            mock_st.caption = MagicMock()
+            mock_st.button.return_value = False
+
+            _render_db_backup()
+
+            mock_size.assert_called_once()
+
+    def test_no_snapshots_shows_empty_message(self):
+        """无快照时: 至少不崩溃."""
+        from filter.browse.sidebar import _render_db_backup
+
+        mock_col = MagicMock()
+
+        with patch("filter.browse.sidebar.st") as mock_st, \
+             patch("filter.browse.sidebar.get_db_size_mb", return_value=5.0), \
+             patch("filter.browse.sidebar.list_snapshots", return_value=[]), \
+             patch("filter.browse.sidebar.logger"):
+            mock_st.sidebar = MagicMock()
+            mock_st.sidebar.expander.return_value.__enter__ = MagicMock()
+            mock_st.sidebar.columns.return_value = [mock_col, mock_col]
+            mock_st.sidebar.button.return_value = False
+            mock_st.sidebar.caption = MagicMock()
+            mock_st.sidebar.selectbox.return_value = 0
+            mock_st.columns.return_value = [mock_col, mock_col]
+            mock_st.caption = MagicMock()
+            mock_st.button.return_value = False
+
+            # 验证不抛出异常
+            _render_db_backup()

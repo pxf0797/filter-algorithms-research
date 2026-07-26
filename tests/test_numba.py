@@ -10,6 +10,7 @@ Verifies:
 import numpy as np
 import pytest
 import sys
+from unittest.mock import patch
 
 pytestmark = pytest.mark.numba
 
@@ -572,3 +573,116 @@ class TestTradePositionsNumba:
 
         assert lp_n == lp_p == 1
         assert sp_n == sp_p == 1
+
+
+class TestKalmanFilterNoNumba:
+    """卡尔曼滤波无 numba 时的纯 Python fallback 路径."""
+
+    def test_kalman_fallback_without_numba(self):
+        """模拟 numba 不可用时的 fallback 路径."""
+        import engine.filters as filt_mod
+        signal = np.sin(np.linspace(0, 2 * np.pi, 30)) + np.random.RandomState(42).randn(30) * 0.05
+        t = np.arange(30, dtype=float)
+
+        # 临时禁用 numba
+        with patch.object(filt_mod, "HAS_NUMBA", False):
+            result = filt_mod.apply_kalman(signal, t, Q=0.01, R=1.0)
+        assert len(result) == len(signal)
+        assert not np.any(np.isnan(result))
+
+
+class TestDrawdownMetricsNumbaFallback:
+    """_compute_drawdown_metrics 的纯 Python fallback 测试."""
+
+    def test_python_fallback_empty(self):
+        """空数组."""
+        from filter.backtest.metrics import _compute_drawdown_metrics_py
+        max_dd, max_dd_dur = _compute_drawdown_metrics_py(np.array([]))
+        assert max_dd == 0.0
+        assert max_dd_dur == 0
+
+    def test_python_fallback_monotonic_increase(self):
+        """单调增长."""
+        from filter.backtest.metrics import _compute_drawdown_metrics_py
+        pnl = np.linspace(100, 200, 100)
+        max_dd, max_dd_dur = _compute_drawdown_metrics_py(pnl)
+        assert max_dd == 0.0
+        assert max_dd_dur == 0
+
+    def test_python_fallback_monotonic_decrease(self):
+        """单调下降."""
+        from filter.backtest.metrics import _compute_drawdown_metrics_py
+        pnl = np.linspace(100, 50, 100)
+        max_dd, max_dd_dur = _compute_drawdown_metrics_py(pnl)
+        assert max_dd < 0
+        assert max_dd_dur == 99
+
+    def test_python_fallback_v_shape(self):
+        """V形恢复."""
+        from filter.backtest.metrics import _compute_drawdown_metrics_py
+        pnl = np.array([100, 110, 90, 80, 90, 100, 110])
+        max_dd, max_dd_dur = _compute_drawdown_metrics_py(pnl)
+        assert max_dd < 0
+        assert max_dd_dur >= 1
+
+    def test_numba_disabled_path(self):
+        """模拟 HAS_NUMBA=False 时使用纯 Python fallback."""
+        import filter.backtest.metrics as metrics_mod
+        pnl = np.linspace(100, 50, 100)
+        with patch.object(metrics_mod, "HAS_NUMBA", False):
+            max_dd, max_dd_dur = metrics_mod._compute_drawdown_metrics(pnl)
+        assert max_dd < 0
+        assert max_dd_dur == 99
+
+    def test_combined_pnl_long_dominant(self):
+        """long_pnl > short_pnl 时 combined = max(long, short) = long."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        long_pnl = np.linspace(100, 150, 100)
+        short_pnl = np.full(100, 100.0)
+        # 验证不崩溃
+        result = compute_backtest_metrics(long_pnl, short_pnl, [], 100)
+        assert "total_return_pct" in result
+
+    def test_combined_pnl_short_dominant(self):
+        """short_pnl > long_pnl 时 combined = max(long, short) = short."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        long_pnl = np.full(100, 100.0)
+        short_pnl = np.linspace(100, 150, 100)
+        result = compute_backtest_metrics(long_pnl, short_pnl, [], 100)
+        assert "total_return_pct" in result
+
+    def test_finite_returns_filtering(self):
+        """returns 中的 inf/nan 被过滤 (np.isfinite)."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        # PnL: the code handles division by near-zero via np.where fallback
+        pnl = np.array([1e-6, 100.0, 200.0, 300.0])
+        result = compute_backtest_metrics(pnl, pnl, [], 252)
+        assert "sharpe_ratio" in result
+
+    def test_zero_vol_returns_zero_sharpe(self):
+        """零波动率: sharpe=0."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        pnl = np.full(100, 100.0)  # flat
+        result = compute_backtest_metrics(pnl, pnl, [], 100)
+        assert result["sharpe_ratio"] == 0.0
+
+    def test_sortino_with_no_downside(self):
+        """无下行波动: Sortino=0."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        pnl = np.linspace(100, 200, 100)  # monotonic up
+        result = compute_backtest_metrics(pnl, pnl, [], 100)
+        assert result["sortino_ratio"] == 0.0  # no downside returns
+
+    def test_yearly_annualization(self):
+        """年化计算: 252 bars = 1 year."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        pnl = np.array([100.0, 110.0])
+        result = compute_backtest_metrics(pnl, pnl, [], 252)
+        assert result["annualized_return_pct"] == pytest.approx(10.0, rel=0.1)
+
+    def test_large_number_of_bars(self):
+        """大量 bar: 年化正常."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        pnl = np.linspace(100, 110, 504)  # 2 years
+        result = compute_backtest_metrics(pnl, pnl, [], 504)
+        assert result["total_trades"] == 0
