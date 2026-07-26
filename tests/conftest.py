@@ -6,6 +6,7 @@ import pure functions from filter/streamlit_app.py without triggering a
 Streamlit runtime environment.
 """
 
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -13,6 +14,16 @@ from unittest.mock import MagicMock
 import numpy as np
 import pandas as pd
 import pytest
+from hypothesis import HealthCheck, settings
+
+# ---------------------------------------------------------------------------
+# Hypothesis profiles — CI 模式减少 max_examples 以加速 CI 运行
+# ---------------------------------------------------------------------------
+settings.register_profile("ci", max_examples=30, deadline=2000,
+                          suppress_health_check=[HealthCheck.too_slow])
+settings.register_profile("dev", max_examples=100)
+if os.environ.get("CI"):
+    settings.load_profile("ci")
 
 # ---------------------------------------------------------------------------
 # Ensure the filter/ package directory is importable

@@ -19,20 +19,24 @@ import sys
 import pytest
 
 
-@pytest.fixture(scope="function")
+# 模块级全局：保存真实 streamlit 引用，供 autouse fixture 恢复
+_REAL_STREAMLIT = None
+
+
+@pytest.fixture(scope="module")
 def app():
-    """Function-scoped fixture: 每个测试独立的 AppTest 实例，避免上下文污染.
+    """Module-scoped fixture: 加载 AppTest 一次，跨测试共享 from_file() 开销.
 
-    若使用 module scope，前一个 AppTest 的 ScriptRunContext 会残留，
-    导致后续 _fresh_app() 调用时 fragment widget 创建失败。
-
-    teardown 阶段强制清理 thread-local ScriptRunContext 和 streamlit
-    全局 Runtime._instance，防止跨测试实例污染。
+    保存真实的 streamlit 模块引用到模块全局 _REAL_STREAMLIT，
+    供 _refresh_app_state 在 conftest mock 注入后恢复。
     """
+    global _REAL_STREAMLIT
     import gc
     import threading
 
     _fix_streamlit()
+    import streamlit
+    _REAL_STREAMLIT = streamlit  # 保存引用，供 autouse 恢复
     from streamlit.testing.v1 import AppTest
 
     _app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "filter"))
@@ -41,26 +45,42 @@ def app():
     cwd = os.getcwd()
     os.chdir(_app_dir)
     at = AppTest.from_file(_script)
-    at.run(timeout=90)
     os.chdir(cwd)
 
     yield at
 
-    # ── 强制清理：防止 streamlit 内部状态污染下一个测试的 AppTest ──
-    # 1. 清除当前线程的 ScriptRunContext (streamlit 通过 thread-local 存储)
+    # ── 强制清理：防止 streamlit 内部状态污染下一个模块 ──
     try:
         delattr(threading.current_thread(), "streamlit_script_run_ctx")
     except AttributeError:
         pass
-    # 2. 清除 streamlit Runtime 全局单例
     try:
         import streamlit.runtime.runtime as _runtime_mod
         _runtime_mod.Runtime._instance = None
     except Exception:
         pass
-    # 3. 删除 AppTest 引用并强制 GC
     del at
     gc.collect()
+
+
+def pytest_module_cleanup():
+    """模块级清理：所有测试运行后强制 GC，确保 fragment 上下文隔离."""
+    import gc
+    gc.collect()
+
+
+@pytest.fixture(autouse=True)
+def _refresh_app_state(app):
+    """每个测试前重跑 AppTest 以获得独立的 widget 状态.
+
+    conftest 的 autouse mock 会在测试间隙重新注入 MagicMock。
+    使用模块级保存的 _REAL_STREAMLIT 引用恢复真实 streamlit，
+    避免 importlib.import_module 创建新对象导致 fragment 上下文错乱。
+    """
+    import sys as _sys
+
+    _sys.modules["streamlit"] = _REAL_STREAMLIT
+    app.run(timeout=90)
 
 
 def _fix_streamlit():
@@ -255,13 +275,7 @@ class TestPresetInteraction:
 
 
 class TestWidgetInteraction:
-    """侧边栏控件交互操作测试 — 使用 function-scoped app fixture"""
-
-    def test_ticker_change_does_not_crash(self, app):
-        """切换 ticker 不导致应用崩溃"""
-        inp = app.sidebar.text_input[0]
-        inp.set_value("MSFT").run(timeout=90)
-        assert app.session_state["ticker"] == "MSFT"
+    """侧边栏控件交互操作测试 — 模块级 app fixture，测试自身调用 .run() 更新状态"""
 
     def test_filter_change_does_not_crash(self, app):
         """切换滤波器不导致应用崩溃"""
@@ -269,6 +283,13 @@ class TestWidgetInteraction:
         assert sel is not None, "global_f selectbox not found"
         sel.set_value("指数移动平均 (EMA)").run(timeout=90)
         assert app.session_state["global_f"] == "ema"
+
+    def test_ticker_change_does_not_crash(self, app):
+        """切换 ticker 不导致应用崩溃"""
+        inp = next((t for t in app.sidebar.text_input if t.key == "ticker"), None)
+        assert inp is not None, "ticker input not found"
+        inp.set_value("MSFT").run(timeout=90)
+        assert app.session_state["ticker"] == "MSFT"
 
     def test_dual_filter_toggle(self, app):
         """勾选双滤波对比 — session_state 更新"""
@@ -288,7 +309,8 @@ class TestP0RegressionExtended:
 
     def test_empty_ticker_safe(self, app):
         """空 ticker 不导致进程级崩溃"""
-        inp = app.sidebar.text_input[0]
+        inp = next((t for t in app.sidebar.text_input if t.key == "ticker"), None)
+        assert inp is not None, "ticker input not found"
         inp.set_value("").run(timeout=90)
         assert len(list(app.exception)) >= 0
 
