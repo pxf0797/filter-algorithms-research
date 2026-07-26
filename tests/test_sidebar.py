@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 # Module under test
-from browse.components_sidebar import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY
+from filter.shared.constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY
 
 
 # ===================================================================

@@ -9,7 +9,7 @@ from engine.schmitt import _find_all_pairs, _fit_parabolic, _fit_physics_parabol
 from engine.strategy import _compute_strategy_pnl
 from engine.alignment import _align_pnl_to_current_tf
 from data.loader import _stock_name_lookup
-from browse.components_sidebar import TF_HIERARCHY, ALL_TFS
+from filter.shared.constants import TF_HIERARCHY, ALL_TFS
 
 
 # =========================================================================
