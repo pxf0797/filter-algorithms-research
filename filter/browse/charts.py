@@ -18,7 +18,7 @@ from filter.engine.strategy import _compute_holding_masks
 # Module-level constants
 # ---------------------------------------------------------------------------
 _PLOTLY_CDN = "https://cdn.plot.ly/plotly-2.35.2.min.js"
-_PLOTLY_CDN_FALLBACK = "https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js"
+_PLOTLY_CDN_FALLBACK = "https://cdn.jsdelivr.net/npm/plotly.js@2.35.2/dist/plotly.min.js"
 
 # Shared layout template: common properties stripped from per-chart JSON.
 # charts.js applies these defaults before Plotly.newPlot, so omitting them

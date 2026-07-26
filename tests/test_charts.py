@@ -301,7 +301,7 @@ class TestRenderPlotlyHtml:
     def test_cdn_fallback_url(self):
         """应有 CDNJS fallback URL."""
         source = Path(_src / "browse" / "charts.py").read_text()
-        assert "cdnjs.cloudflare.com/ajax/libs/plotly.js" in source
+        assert "cdn.jsdelivr.net/npm/plotly.js" in source
 
     def test_html_contains_date_tip_div(self):
         """HTML 模板应包含 date-tip div."""
@@ -639,7 +639,7 @@ class TestCdnFallback:
 
         html = captured.get("html", "")
         assert "cdn.plot.ly" in html
-        assert "cdnjs.cloudflare.com" in html
+        assert "cdn.jsdelivr.net" in html
         assert "onerror=" in html
 
     def test_fallback_div_in_html_output(self, monkeypatch):
@@ -687,7 +687,7 @@ class TestPlotlyPayloadOptimization:
         assert "cdn.plot.ly" not in html, (
             "include_plotlyjs=False 时不应包含 CDN script 标签"
         )
-        assert "cdnjs.cloudflare.com" not in html, (
+        assert "cdn.jsdelivr.net" not in html, (
             "include_plotlyjs=False 时不应包含 fallback CDN"
         )
         assert "onerror=" not in html, (
