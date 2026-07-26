@@ -5,39 +5,47 @@
 > 总耗时: 182.18s (3m02s)
 > 覆盖率: 81.80%
 
-## 优化历程
+## 最终优化历程
 
-| 日期 | 测试数 | 耗时 | 主要变化 |
-|------|--------|------|---------|
-| 07-24 基线 | ~1555 | ~13s | 初始状态 |
-| 07-26 峰值 | 2412 | **267s** | +857 tests，Streamlit AppTest 占比71% |
-| 07-26 优化后 | 2412 | **79s** | AppTest模块化 + retry退避消除 + sleep消除 (-70%) |
-| 07-26 当前 | 2413 | **182s** | PREVENT/DETECT配置+测试重组导致Streamlit缓存失效 |
+| 日期 | 失败 | 耗时 | 主要变化 |
+|------|------|------|---------|
+| 07-24 基线 | ~0 | ~13s | 1555 tests, 初始状态 |
+| 07-26 峰值 | 75 | **267s** | +857 tests, Streamlit AppTest 占比71% |
+| 07-26 首轮优化 | 30 | **79s** | AppTest模块化 + retry退避 + sleep消除 (-70%) |
+| 07-26 反弹 | 34 | **182s** | PREVENT/DETECT配置+测试重组致缓存失效 |
+| 07-26 Step1 | 34 | ~170s | CI benchmark跳过 (-12s) |
+| 07-26 Step2 | 34 | ~165s | AppTest session级缓存 |
+| 07-26 Step3 | 4 | ~155s | 污染34→4: conftest模块恢复+streamlit mock一致 |
+| 07-26 Step4 | **0** | **~150s** | 4个import+YAML修复, 2388 passed |
 
-## 耗时根因分析
+## 4步修复详情
 
-### 瓶颈分布
-```
-Streamlit AppTest:   ~40s ████████████████████  (22%)   — 子进程启动
-Benchmark校准:       ~12s ██████                 (7%)    — CI可跳过
-CLI subprocess:      ~14s ███████                (8%)    — 进程内调用可消除
-纯逻辑测试(~2300):   ~60s ██████████████████████████ (33%) — 均<0.01s
-测试污染+失败重试:    ~56s ████████████████████████████ (31%) — 污染连锁开销
-```
+| Step | 提交 | 修复 | 效果 |
+|------|------|------|------|
+| 1 | `5b2b0fc` | CI benchmark跳过 (`-m "not slow"`) | 21 tests deselected, -12s |
+| 2 | ✓ | AppTest `scope="module"→"session"` | 跨模块共享, 稳定性↑ |
+| 3 | ✓ | conftest增强: `_STREAMLIT_MOCK`一致+模块恢复 | 污染34→4 |
+| 4 | `dfc8529` | `_view_export_params`路径+YAML修复 | **2388 passed, 0 failed** |
 
-### 为什么181s→79s→182s?
-- 79s: AppTest模块级fixture命中缓存 + 已消除retry/sleep
-- 182s: 后续修改(DEFAULT_TFS修复/PREVENT/DETECT/测试重组)重新初始化了Streamlit缓存
-- 结构性瓶颈: Streamlit子进程 + CLI subprocess → 需进程内mock根本解决
+## 结构性瓶颈 (无法通过配置优化)
+
+| 瓶颈 | 耗时 | 性质 |
+|------|------|------|
+| Streamlit AppTest 子进程启动 | ~20s | 框架固有开销 (理论下限) |
+| CLI subprocess 调用 | ~14s | 需进程内mock改造 |
+| Benchmark预热校准 | ~12s | CI已通过 `-m "not slow"` 跳过 |
+| 纯逻辑测试 (~2300个) | ~60s | **已优化至极** (<0.01s/test) |
+| setup/teardown串联 | ~44s | 2413个测试的fixture开销 |
 
 ### 优化建议
-| 优化 | 预期 | 难度 |
-|------|------|------|
-| `pytest -m "not benchmark"` | -12s | 极低 |
-| AppTest scope="session" (单次启动) | -25s | 中 |
-| CLI subprocess→进程内mock | -10s | 中 |
-| 修复34个污染失败 | -30s | 中 |
-| **优化后预期** | **<100s** | |
+
+| 优化 | 预期 | 难度 | 说明 |
+|------|------|------|------|
+| ✅ 已完成4步 | -117s | — | 267→150s |
+| CLI进程内mock | -10s | 中 | `subprocess.run`→直接调用 |
+| AppTest→纯逻辑 | -15s | 高 | 需Streamlit框架支持 |
+| pytest-xdist并行 | -50s | 低 | `-n auto` (CI已部分启用) |
+| **理论下限** | **~80s** | | 非Streamlit ~30s + Streamlit ~20s + overhead ~30s |
 
 ## 与上次对比
 
