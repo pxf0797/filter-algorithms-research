@@ -26,7 +26,7 @@ def app():
     from streamlit.testing.v1 import AppTest
 
     _app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "filter"))
-    _script = os.path.join(_app_dir, "streamlit_app.py")
+    _script = os.path.join(_app_dir, "browse", "app.py")
     sys.path.insert(0, _app_dir)
     cwd = os.getcwd()
     os.chdir(_app_dir)
@@ -80,7 +80,7 @@ def _fresh_app():
     from streamlit.testing.v1 import AppTest
 
     _app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "filter"))
-    _script = os.path.join(_app_dir, "streamlit_app.py")
+    _script = os.path.join(_app_dir, "browse", "app.py")
     sys.path.insert(0, _app_dir)
     cwd = os.getcwd()
     os.chdir(_app_dir)

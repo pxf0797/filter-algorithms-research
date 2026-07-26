@@ -11,6 +11,13 @@ filter — Stock filter & backtest application.
 
 import sys
 import os
+import tomllib
+from pathlib import Path
+
+# Read version from pyproject.toml (canonical source)
+_pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
+with open(_pyproject_path, "rb") as _fp:
+    __version__ = tomllib.load(_fp)["project"]["version"]
 
 # Ensure filter/ is on sys.path so internal bare imports
 # (e.g. ``from shared.constants import ...``) resolve correctly.
@@ -28,6 +35,7 @@ from filter.engine.filters import FILTERS
 from filter.engine.signals import compute_bs_markers, get_lower_tfs
 
 __all__ = [
+    "__version__",
     "ViewConfig",
     "ALL_TFS", "DEFAULT_TFS", "TF_HIERARCHY", "TF_INTERVAL",
     "AppState", "ViewState",

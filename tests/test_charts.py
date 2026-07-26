@@ -29,6 +29,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pytest
+import streamlit as st
 
 
 # Module under test
@@ -304,25 +305,21 @@ class TestRenderPlotlyHtml:
         assert "plotly_hover" in js_source
         assert "plotly_unhover" in js_source
 
-    def test_fallback_html_structure(self):
+    def test_fallback_html_structure(self, monkeypatch):
         """H4: _render_plotly 输出包含 plotly-fallback div + IIFE 结构."""
         from browse.charts import _render_plotly
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=[1, 2, 3], y=[1, 2, 3]))
 
-        import streamlit as st
         captured = {}
         def _capture_html(html, **kw):
             captured["html"] = html
             return MagicMock()
-        from unittest.mock import MagicMock
-        monkeypatch = pytest.MonkeyPatch()
         monkeypatch.setattr(st.components.v1, "html", _capture_html)
 
         _render_plotly(fig, height=300)
 
-        monkeypatch.undo()
         html = captured.get("html", "")
         assert html, "_render_plotly 应产生 HTML 输出"
 
@@ -335,24 +332,21 @@ class TestRenderPlotlyHtml:
     # -----------------------------------------------------------------
     # H5: timeout safety
     # -----------------------------------------------------------------
-    def test_timeout_safety_check(self):
+    def test_timeout_safety_check(self, monkeypatch):
         """H5: 输出包含 5秒 setTimeout 安全检查."""
         from browse.charts import _render_plotly
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=[1, 2, 3], y=[1, 2, 3]))
 
-        import streamlit as st
         captured = {}
         def _capture_html(html, **kw):
             captured["html"] = html
             return MagicMock()
-        monkeypatch = pytest.MonkeyPatch()
         monkeypatch.setattr(st.components.v1, "html", _capture_html)
 
         _render_plotly(fig, height=300)
 
-        monkeypatch.undo()
         html = captured.get("html", "")
         assert html
 
@@ -362,24 +356,21 @@ class TestRenderPlotlyHtml:
     # -----------------------------------------------------------------
     # IIFE 配对验证
     # -----------------------------------------------------------------
-    def test_iife_wrapping_is_valid(self):
+    def test_iife_wrapping_is_valid(self, monkeypatch):
         """修复验证: (function() { 和 })(); 配对，return 在函数内."""
         from browse.charts import _render_plotly
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=[1, 2, 3], y=[1, 2, 3]))
 
-        import streamlit as st
         captured = {}
         def _capture_html(html, **kw):
             captured["html"] = html
             return MagicMock()
-        monkeypatch = pytest.MonkeyPatch()
         monkeypatch.setattr(st.components.v1, "html", _capture_html)
 
         _render_plotly(fig, height=300)
 
-        monkeypatch.undo()
         html = captured.get("html", "")
         assert html
 
@@ -429,7 +420,6 @@ class TestRenderPlotlySerialization:
         def _capture_html(html, **kw):
             captured["html"] = html
             return MagicMock()
-        import streamlit as st
         monkeypatch.setattr(st.components.v1, "html", _capture_html)
 
         fig = _make_fig()
@@ -456,7 +446,6 @@ class TestRenderPlotlySerialization:
         def _capture_html(html, **kw):
             captured["html"] = html
             return MagicMock()
-        import streamlit as st
         monkeypatch.setattr(st.components.v1, "html", _capture_html)
 
         fig = _make_fig()
@@ -481,7 +470,6 @@ class TestRenderPlotlySerialization:
         def _capture_html(html, **kw):
             captured["html"] = html
             return MagicMock()
-        import streamlit as st
         monkeypatch.setattr(st.components.v1, "html", _capture_html)
 
         fig = go.Figure()  # 完全空白的 figure
@@ -499,7 +487,6 @@ class TestRenderPlotlySerialization:
         def _capture_html(html, **kw):
             captured["html"] = html
             return MagicMock()
-        import streamlit as st
         monkeypatch.setattr(st.components.v1, "html", _capture_html)
 
         from datetime import datetime
@@ -621,7 +608,6 @@ class TestCdnFallback:
         def _capture_html(html, **kw):
             captured["html"] = html
             return MagicMock()
-        import streamlit as st
         monkeypatch.setattr(st.components.v1, "html", _capture_html)
 
         fig = go.Figure()
@@ -640,7 +626,6 @@ class TestCdnFallback:
         def _capture_html(html, **kw):
             captured["html"] = html
             return MagicMock()
-        import streamlit as st
         monkeypatch.setattr(st.components.v1, "html", _capture_html)
 
         fig = go.Figure()

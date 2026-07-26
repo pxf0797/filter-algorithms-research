@@ -1,10 +1,10 @@
 """CHANGELOG validation tests — verifies format, existence, and version coverage."""
 
 import re
-import subprocess
 from pathlib import Path
 
 import pytest
+from filter import __version__
 
 
 @pytest.fixture(scope="module")
@@ -20,19 +20,6 @@ def changelog_content(changelog_path):
     if not content.strip():
         pytest.fail("CHANGELOG.md is empty")
     return content
-
-
-@pytest.fixture(scope="module")
-def latest_tag():
-    """Return the latest git tag (by creation date), or None if no tags."""
-    result = subprocess.run(
-        ["git", "tag", "--sort=-creatordate"],
-        cwd=Path(__file__).resolve().parent.parent,
-        capture_output=True,
-        text=True,
-    )
-    tags = [t.strip() for t in result.stdout.strip().split("\n") if t.strip()]
-    return tags[0] if tags else None
 
 
 def test_changelog_exists_and_nonempty(changelog_content):
@@ -59,25 +46,23 @@ def test_changelog_has_version_sections(changelog_content):
     )
 
 
-def test_latest_tag_in_changelog(changelog_content, latest_tag):
-    """Verify the latest git tag appears in CHANGELOG.md."""
-    if latest_tag is None:
-        pytest.skip("No git tags found — skipping version coverage check")
-    assert latest_tag in changelog_content, (
-        f"Latest git tag '{latest_tag}' not found in CHANGELOG.md. "
+def test_current_version_in_changelog(changelog_content):
+    """Verify the current package version (from filter.__version__) has a CHANGELOG entry."""
+    # CHANGELOG entries follow the convention: ## [vX.Y.Z]
+    version_entry = f"[v{__version__}]"
+    assert version_entry in changelog_content, (
+        f"Current version '{version_entry}' not found in CHANGELOG.md. "
         f"Run 'make changelog' to regenerate."
     )
 
 
 def test_no_empty_sections(changelog_content):
     """Warn if version sections have no entries (headers only, no bullet points)."""
-    # Find all version sections and check they have at least one bullet entry
     sections = re.split(r"^##\s+\[.+\]", changelog_content, flags=re.MULTILINE)
     empty_sections = []
     # The first split segment is content before the first version header — skip it
     for i, section in enumerate(sections[1:], start=1):
         if not re.search(r"^\s*-\s+", section, re.MULTILINE):
-            # Extract section header from original content
             headers = re.findall(r"^##\s+\[.+\]", changelog_content, re.MULTILINE)
             if i - 1 < len(headers):
                 empty_sections.append(headers[i - 1])

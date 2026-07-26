@@ -10,6 +10,10 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import numpy as np
+import pandas as pd
+import pytest
+
 # ---------------------------------------------------------------------------
 # Ensure the filter/ package directory is importable
 # ---------------------------------------------------------------------------
@@ -20,17 +24,37 @@ if str(_src) not in sys.path:
 # ---------------------------------------------------------------------------
 # Mock streamlit before any project module imports it
 # ---------------------------------------------------------------------------
-if "streamlit" not in sys.modules:
+def _make_streamlit_mock():
+    """创建 streamlit MagicMock，模拟核心装饰器/函数。"""
     mock_st = MagicMock()
-    # Support both @st.cache_resource and @st.cache_resource() usage
     mock_st.cache_resource = lambda f=None, **kw: f if callable(f) else (lambda g: g)
     mock_st.cache_data = lambda f=None, **kw: f if callable(f) else (lambda g: g)
     mock_st.fragment = lambda f=None, **kw: f if callable(f) else (lambda g: g)
-    sys.modules["streamlit"] = mock_st
+    return mock_st
 
-import numpy as np
-import pandas as pd
-import pytest
+
+# 收集阶段：pytest 导入各测试文件时，被测试模块通过 import streamlit 拿到 mock
+if "streamlit" not in sys.modules:
+    sys.modules["streamlit"] = _make_streamlit_mock()
+
+
+@pytest.fixture(autouse=True)
+def _mock_streamlit_module():
+    """全局 mock streamlit — 每次测试前确保 mock 就位。
+
+    背景: test_app_ui.py 的模块级 fixture 通过 _fix_streamlit()
+    删除 MagicMock 并导入真实的 streamlit 包。该 fixture teardown
+    后不会还原 mock，导致后续测试文件（如 test_backtest_cli.py、
+    test_charts.py）导入链受真实 streamlit 污染。
+
+    本 autouse fixture 在每个测试函数运行前检测：若 streamlit 已
+    被替换为真实模块，则重新注入 MagicMock。
+    """
+    st_mod = sys.modules.get("streamlit")
+    if st_mod is None or "MagicMock" not in type(st_mod).__name__:
+        sys.modules["streamlit"] = _make_streamlit_mock()
+    yield
+    # 不主动拆 mock — 下一个测试的 setup 会处理状态检查
 
 
 # ---------------------------------------------------------------------------

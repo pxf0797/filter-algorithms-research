@@ -625,11 +625,16 @@ def test_load_configs_from_flat_preset_format(tmp_path):
     configs = _load_configs_from_file(str(config_file))
 
     assert len(configs) == 4, f"平铺格式应生成4个视图配置, 实际{len(configs)}"
-    assert configs[0]["tf"] == "日线"
-    assert configs[0]["n_pts"] == 100
+    # configs 按 coarsest→finest 排序: 月线 > 周线 > 日线 > 60分钟
+    assert configs[0]["tf"] == "月线"
+    assert configs[0]["n_pts"] == 60
     assert configs[0]["_fid"] == "sma"
     assert configs[1]["tf"] == "周线"
+    assert configs[1]["n_pts"] == 80
+    assert configs[2]["tf"] == "日线"
+    assert configs[2]["n_pts"] == 100
     assert configs[3]["tf"] == "60分钟"
+    assert configs[3]["n_pts"] == 200
 
 
 def test_load_configs_missing_file_exits():
