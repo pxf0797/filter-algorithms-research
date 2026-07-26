@@ -571,7 +571,7 @@ def collect_current_params() -> Dict[str, Any]:
 # ═══════════════════════════════════════════════════════════
 
 if __name__ == "__main__":  # pragma: no cover
-    from data.db import init_db
+    from filter.data.db import init_db
     init_db()
     init_config_tables()
 

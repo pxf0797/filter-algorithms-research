@@ -191,7 +191,7 @@ def _query_tf_from_db(ticker_code: str, tf: str, cutoff_date: str, n_pts: int) -
     list
         dict 列表，每项包含 Date/Open/High/Low/Close/Volume 字段，按时间升序排列。
     """
-    from data.db import get_conn
+    from filter.data.db import get_conn
     with get_conn() as conn:
         rows = conn.execute(
             """SELECT ts, open, high, low, close, volume
@@ -227,7 +227,7 @@ def _query_tf_for_period(ticker_code: str, tf: str, period_start: str, period_en
     list
         dict 列表，每项包含 Date/Open/High/Low/Close/Volume 字段，按时间升序排列。
     """
-    from data.db import get_conn
+    from filter.data.db import get_conn
     with get_conn() as conn:
         rows = conn.execute(
             """SELECT ts, open, high, low, close, volume

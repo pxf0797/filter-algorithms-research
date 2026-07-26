@@ -41,7 +41,7 @@ def _get_bar_date_from_db(ticker_code, tf, bar_index):
         Date string from ``kline.ts`` for the bar at the requested
         offset, or an empty string if no row is found.
     """
-    from data.db import get_conn
+    from filter.data.db import get_conn
     with get_conn() as conn:
         row = conn.execute(
             "SELECT ts FROM kline WHERE ticker=? AND timeframe=? ORDER BY ts ASC LIMIT 1 OFFSET ?",
@@ -113,7 +113,7 @@ def _get_min_tf_and_count(configs, ticker_code) -> tuple:
 
     # 从 DB 查询全量 bar 数（parquet 只含当前窗口数据，不能用作 slider 上限）
     try:
-        from data.db import get_conn
+        from filter.data.db import get_conn
         with get_conn() as conn:
             row = conn.execute(
                 "SELECT COUNT(*) FROM kline WHERE ticker=? AND timeframe=?",
@@ -732,7 +732,7 @@ def sync_backtest_cascading_data(ticker_code: str, configs: list, cutoff_date: s
     -------
     None
     """
-    from data.loader import _sync_all_cascading
+    from filter.data.loader import _sync_all_cascading
 
     tfs_in_use = sorted(set(cfg["tf"] for cfg in configs),
                         key=lambda x: all_tfs.index(x))

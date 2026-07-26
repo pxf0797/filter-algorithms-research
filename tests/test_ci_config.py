@@ -190,7 +190,7 @@ def test_ci_ruff_does_not_ignore_f841():
 
 
 def test_ci_coverage_threshold_matches_pyproject():
-    """CI coverage fail-under threshold should match pyproject.toml (65)."""
+    """CI coverage fail-under threshold should match pyproject.toml (75)."""
     ci_path = ROOT / ".github" / "workflows" / "ci.yml"
     with open(ci_path) as f:
         ci_content = f.read()

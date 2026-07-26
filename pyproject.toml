@@ -68,5 +68,5 @@ source = ["filter"]
 omit = ["tests/*"]
 
 [tool.coverage.report]
-fail_under = 65
+fail_under = 75
 exclude_lines = ["pragma: no cover", "if __name__ == .__main__.:"]

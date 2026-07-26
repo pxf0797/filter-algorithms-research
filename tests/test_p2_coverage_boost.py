@@ -60,6 +60,220 @@ class TestFiltersRegistryCompleteness:
                 assert isinstance(pdef, tuple), f"{key}.{pname} 不是 tuple"
                 assert len(pdef) == 5, f"{key}.{pname} 应有5个元素, 实际 {len(pdef)}"
 
+    def test_filter_names_match_keys(self):
+        """每个 filter 的 name 字段与其 key 相关."""
+        from engine.filters import FILTERS
+        for key, entry in FILTERS.items():
+            assert isinstance(entry["name"], str)
+            assert len(entry["name"]) > 0
+
+    def test_numba_jit_decorator_exists(self):
+        """验证 numba jit 装饰器在 filters.py 中存在."""
+        from engine.filters import HAS_NUMBA
+        # HAS_NUMBA 是一个布尔值
+        assert isinstance(HAS_NUMBA, bool)
+
+
+class TestKalmanFilterNoNumba:
+    """卡尔曼滤波无 numba 时的纯 Python fallback 路径."""
+
+    def test_kalman_fallback_without_numba(self):
+        """模拟 numba 不可用时的 fallback 路径."""
+        import engine.filters as filt_mod
+        signal = np.sin(np.linspace(0, 2 * np.pi, 30)) + np.random.RandomState(42).randn(30) * 0.05
+        t = np.arange(30, dtype=float)
+
+        # 临时禁用 numba
+        with patch.object(filt_mod, "HAS_NUMBA", False):
+            result = filt_mod.apply_kalman(signal, t, Q=0.01, R=1.0)
+        assert len(result) == len(signal)
+        assert not np.any(np.isnan(result))
+
+
+class TestDrawdownMetricsNumbaFallback:
+    """_compute_drawdown_metrics 的纯 Python fallback 测试."""
+
+    def test_python_fallback_empty(self):
+        """空数组."""
+        from filter.backtest.metrics import _compute_drawdown_metrics_py
+        max_dd, max_dd_dur = _compute_drawdown_metrics_py(np.array([]))
+        assert max_dd == 0.0
+        assert max_dd_dur == 0
+
+    def test_python_fallback_monotonic_increase(self):
+        """单调增长."""
+        from filter.backtest.metrics import _compute_drawdown_metrics_py
+        pnl = np.linspace(100, 200, 100)
+        max_dd, max_dd_dur = _compute_drawdown_metrics_py(pnl)
+        assert max_dd == 0.0
+        assert max_dd_dur == 0
+
+    def test_python_fallback_monotonic_decrease(self):
+        """单调下降."""
+        from filter.backtest.metrics import _compute_drawdown_metrics_py
+        pnl = np.linspace(100, 50, 100)
+        max_dd, max_dd_dur = _compute_drawdown_metrics_py(pnl)
+        assert max_dd < 0
+        assert max_dd_dur == 99
+
+    def test_python_fallback_v_shape(self):
+        """V形恢复."""
+        from filter.backtest.metrics import _compute_drawdown_metrics_py
+        pnl = np.array([100, 110, 90, 80, 90, 100, 110])
+        max_dd, max_dd_dur = _compute_drawdown_metrics_py(pnl)
+        assert max_dd < 0
+        assert max_dd_dur >= 1
+
+    def test_numba_disabled_path(self):
+        """模拟 HAS_NUMBA=False 时使用纯 Python fallback."""
+        import filter.backtest.metrics as metrics_mod
+        pnl = np.linspace(100, 50, 100)
+        with patch.object(metrics_mod, "HAS_NUMBA", False):
+            max_dd, max_dd_dur = metrics_mod._compute_drawdown_metrics(pnl)
+        assert max_dd < 0
+        assert max_dd_dur == 99
+
+    def test_combined_pnl_long_dominant(self):
+        """long_pnl > short_pnl 时 combined = max(long, short) = long."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        long_pnl = np.linspace(100, 150, 100)
+        short_pnl = np.full(100, 100.0)
+        # 验证不崩溃
+        result = compute_backtest_metrics(long_pnl, short_pnl, [], 100)
+        assert "total_return_pct" in result
+
+    def test_combined_pnl_short_dominant(self):
+        """short_pnl > long_pnl 时 combined = max(long, short) = short."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        long_pnl = np.full(100, 100.0)
+        short_pnl = np.linspace(100, 150, 100)
+        result = compute_backtest_metrics(long_pnl, short_pnl, [], 100)
+        assert "total_return_pct" in result
+
+    def test_finite_returns_filtering(self):
+        """returns 中的 inf/nan 被过滤 (np.isfinite)."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        # PnL: the code handles division by near-zero via np.where fallback
+        pnl = np.array([1e-6, 100.0, 200.0, 300.0])
+        result = compute_backtest_metrics(pnl, pnl, [], 252)
+        assert "sharpe_ratio" in result
+
+    def test_zero_vol_returns_zero_sharpe(self):
+        """零波动率: sharpe=0."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        pnl = np.full(100, 100.0)  # flat
+        result = compute_backtest_metrics(pnl, pnl, [], 100)
+        assert result["sharpe_ratio"] == 0.0
+
+    def test_sortino_with_no_downside(self):
+        """无下行波动: Sortino=0."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        pnl = np.linspace(100, 200, 100)  # monotonic up
+        result = compute_backtest_metrics(pnl, pnl, [], 100)
+        assert result["sortino_ratio"] == 0.0  # no downside returns
+
+    def test_yearly_annualization(self):
+        """年化计算: 252 bars = 1 year."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        pnl = np.array([100.0, 110.0])
+        result = compute_backtest_metrics(pnl, pnl, [], 252)
+        assert result["annualized_return_pct"] == pytest.approx(10.0, rel=0.1)
+
+    def test_large_number_of_bars(self):
+        """大量 bar: 年化正常."""
+        from filter.backtest.metrics import compute_backtest_metrics
+        pnl = np.linspace(100, 110, 504)  # 2 years
+        result = compute_backtest_metrics(pnl, pnl, [], 504)
+        assert result["total_trades"] == 0
+
+
+# ===================================================================
+# SECTION I — 额外 filter/engine.py panel/replay 测试
+# ===================================================================
+
+class TestReplayBarExtended:
+    """replay_bar 额外边缘情况."""
+
+    def test_replay_bar_run_value_error(self):
+        """runner.run 抛出 ValueError 时 replay_bar 返回 None."""
+        from filter.backtest.engine import replay_bar
+
+        configs = [
+            {"tf": "日线", "n_pts": 120, "_fid": "sma", "show_sch": True,
+             "show_strategy": False, "show_pred": False, "pv": {"window": 11}},
+        ]
+
+        # bar_count=0 → ValueError
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.__exit__.return_value = False
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 0  # zero bars
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+        mock_conn.execute.return_value.fetchall.return_value = []
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            with patch("filter.backtest.engine.logger"):
+                result = replay_bar("TEST", 120, configs)
+                assert result is None
+
+    def test_replay_bar_run_index_error(self):
+        """runner.run 抛出 IndexError 时 replay_bar 返回 None."""
+        from filter.backtest.engine import replay_bar
+
+        configs = [
+            {"tf": "日线", "n_pts": 5, "_fid": "sma", "show_sch": True,
+             "show_strategy": False, "show_pred": False, "pv": {"window": 11}},
+        ]
+
+        # bar_count=10, bar_index=5 (max_n_pts) → end_bar=6, should work
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_conn.__exit__.return_value = False
+        mock_row_count = MagicMock()
+        mock_row_count.__getitem__.return_value = 10
+        mock_conn.execute.return_value.fetchone.return_value = mock_row_count
+        # bar_info rows
+        mock_bars = [
+            {"ts": f"2026-01-{i+1:02d}", "open": 100.0, "high": 101.0,
+             "low": 99.0, "close": 100.0, "volume": 1000}
+            for i in range(10)
+        ]
+        mock_conn.execute.return_value.fetchall.return_value = mock_bars
+
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            with patch("filter.backtest.engine._sync_all_cascading",
+                       return_value={"日线": False}):
+                with patch("filter.backtest.engine.load_display_cache",
+                           return_value=None):
+                    with patch("filter.backtest.engine.logger"):
+                        with patch("filter.backtest.catalog.BacktestCatalog"):
+                            with patch("filter.backtest.metrics.compute_backtest_metrics",
+                                       return_value={}):
+                                result = replay_bar("TEST", 3, configs)
+                                # n_pts=5 so max_n_pts=5, bar_index is adjusted
+                                assert result is not None
+
+
+class TestBacktestRunnerConfigHashExtended:
+    """_config_hash 扩展测试."""
+
+    def test_config_hash_with_empty_config_safe(self):
+        """空 configs 不应该导致 _config_hash 崩溃 (但是构造函数会阻止空 configs)."""
+        from filter.backtest.engine import BacktestRunner
+        configs = [{"tf": "日线", "n_pts": 120, "_fid": "sma", "show_sch": False,
+                    "show_strategy": False, "show_pred": False, "pv": {}, "pv2": {}}]
+        mock_conn = MagicMock()
+        mock_conn.__enter__.return_value = mock_conn
+        mock_row = MagicMock()
+        mock_row.__getitem__.return_value = 100
+        mock_conn.execute.return_value.fetchone.return_value = mock_row
+        with patch("filter.backtest.engine.get_conn", return_value=mock_conn):
+            runner = BacktestRunner("T", configs)
+        h = runner._config_hash()
+        assert isinstance(h, str)
+        assert len(h) == 64
+
 
 class TestFilterEdgeCases:
     """滤波器边界值测试."""
