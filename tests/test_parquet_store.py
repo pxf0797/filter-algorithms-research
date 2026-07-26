@@ -2427,7 +2427,7 @@ class TestMultiTickerIsolation:
     def test_pipeline_capture_two_tickers_separate_dirs(self, tmp_path, monkeypatch):
         """两个不同 ticker 的 PipelineCapture 写入不同 session 目录。"""
         monkeypatch.setenv("PIPELINE_CAPTURE", "1")
-        from backtest.pipeline import PipelineCapture
+        from filter.backtest.capture import PipelineCapture
 
         cap_a = PipelineCapture(str(tmp_path), "AAPL", {})
         cap_b = PipelineCapture(str(tmp_path), "TSLA", {})
@@ -2446,7 +2446,7 @@ class TestMultiTickerIsolation:
     def test_pipeline_capture_data_independent(self, tmp_path, monkeypatch):
         """两个 ticker 的 PipelineCapture 数据互不干扰。"""
         monkeypatch.setenv("PIPELINE_CAPTURE", "1")
-        from backtest.pipeline import PipelineCapture, PipelineStageData
+        from filter.backtest.capture import PipelineCapture, PipelineStageData
 
         cap_a = PipelineCapture(str(tmp_path), "AAPL", {})
         cap_b = PipelineCapture(str(tmp_path), "TSLA", {})
