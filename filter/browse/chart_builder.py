@@ -19,7 +19,7 @@ from filter.common.pnl_renderer import (
     make_pnl_baseline_shape,
     make_pnl_yaxis_config,
 )
-from filter.constants.colors import COLORS
+from filter.constants.colors import COLORS, COLORS_CB, get_colors
 
 
 def _date_markers(dates, tf) -> tuple:
@@ -231,8 +231,12 @@ def _add_schmitt_traces(t, schmitt, acc, all_pairs, sar, ssr):
     return traces, shapes
 
 
-def _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row):
-    """Return (traces, shapes, annotations, yaxes) for PnL subplot."""
+def _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row, colorblind: bool = False):
+    """Return (traces, shapes, annotations, yaxes) for PnL subplot.
+
+    色盲模式下: 颜色改用 CUD 调色板 + 线型/标记双编码区分做多(实线+circle)与做空(虚线+triangle-down)。
+    """
+    colors = get_colors(colorblind)
     _pnl_x = f"x{pnl_row}"; _pnl_y = f"y{pnl_row}"
     _pnl_annotations = []  # collected annotations (replaces fig.add_annotation)
     # Trace merge: 逐笔交易段合并为 2 条 (多/空), NaN 分隔
@@ -261,7 +265,7 @@ def _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row):
             (aplat_y := _l_exit_tp_y if trade["type"]=="long" else _s_exit_tp_y).append(seg_pnl[-1])
         if trade["exit_reason"] in ("stop_loss", "take_profit"):
             ret_pct = trade["return_pct"]
-            label_color = COLORS["exit_sl"] if trade["exit_reason"] == "stop_loss" else COLORS["exit_tp"]
+            label_color = colors["exit_sl"] if trade["exit_reason"] == "stop_loss" else colors["exit_tp"]
             arrow = "↑" if trade["type"] == "long" else "↓"
             _pnl_annotations.append(dict(x=seg_t[-1], y=seg_pnl[-1],
                 text=f"{arrow}{ret_pct:+.1f}%", showarrow=False,
@@ -269,39 +273,39 @@ def _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row):
                 xref=f"x{pnl_row}", yref=f"y{pnl_row}"))
     # Collect all PnL traces, shapes, annotations into return values
     _pnl_traces = [
-        make_pnl_long_trace(t, long_pnl, row=pnl_row),
-        make_pnl_short_trace(t, short_pnl, row=pnl_row),
+        make_pnl_long_trace(t, long_pnl, row=pnl_row, colorblind=colorblind),
+        make_pnl_short_trace(t, short_pnl, row=pnl_row, colorblind=colorblind),
     ]
     if _l_seg:
         xs, ys = zip(*_l_seg)
         _pnl_traces.append(dict(type="scattergl", x=list(xs), y=list(ys), mode="lines",
-            name="做多段", line=dict(color=COLORS["pnl_long"], width=3), showlegend=False,
+            name="做多段", line=dict(color=colors["pnl_long"], width=3), showlegend=False,
             xaxis=_pnl_x, yaxis=_pnl_y))
     if _s_seg:
         xs, ys = zip(*_s_seg)
         _pnl_traces.append(dict(type="scattergl", x=list(xs), y=list(ys), mode="lines",
-            name="做空段", line=dict(color=COLORS["pnl_short"], width=3), showlegend=False,
+            name="做空段", line=dict(color=colors["pnl_short"], width=3), showlegend=False,
             xaxis=_pnl_x, yaxis=_pnl_y))
     def _mk(xs, ys, sym, clr):
         if xs: _pnl_traces.append(dict(type="scattergl", x=xs, y=ys, mode="markers",
             marker=dict(color=clr, symbol=sym, size=8), showlegend=False,
             xaxis=_pnl_x, yaxis=_pnl_y))
-    _mk(_l_entry_x, _l_entry_y, "triangle-up", COLORS["pnl_long"])
-    _mk(_s_entry_x, _s_entry_y, "triangle-up", COLORS["pnl_short"])
-    _mk(_l_exit_sl_x, _l_exit_sl_y, "x", COLORS["exit_sl"])
-    _mk(_s_exit_sl_x, _s_exit_sl_y, "x", COLORS["exit_sl"])
-    _mk(_l_exit_tp_x, _l_exit_tp_y, "circle", COLORS["exit_tp"])
-    _mk(_s_exit_tp_x, _s_exit_tp_y, "circle", COLORS["exit_tp"])
+    _mk(_l_entry_x, _l_entry_y, "triangle-up", colors["pnl_long"])
+    _mk(_s_entry_x, _s_entry_y, "triangle-up", colors["pnl_short"])
+    _mk(_l_exit_sl_x, _l_exit_sl_y, "x", colors["exit_sl"])
+    _mk(_s_exit_sl_x, _s_exit_sl_y, "x", colors["exit_sl"])
+    _mk(_l_exit_tp_x, _l_exit_tp_y, "circle", colors["exit_tp"])
+    _mk(_s_exit_tp_x, _s_exit_tp_y, "circle", colors["exit_tp"])
     y_max_l = max(float(np.nanmax(long_pnl)), PNL_BASELINE) * 1.02
     _pnl_traces.append(dict(type="scattergl",
         x=[t[0], t[-1], t[-1], t[0]], y=[PNL_BASELINE, PNL_BASELINE, y_max_l, y_max_l],
-        fill="toself", fillcolor=COLORS["pnl_long_bg"],
+        fill="toself", fillcolor=colors["pnl_long_bg"],
         mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip",
         xaxis=_pnl_x, yaxis=_pnl_y))
     y_min_s = min(float(np.nanmin(short_pnl)), PNL_BASELINE) * 0.98
     _pnl_traces.append(dict(type="scattergl",
         x=[t[0], t[-1], t[-1], t[0]], y=[PNL_BASELINE, PNL_BASELINE, y_min_s, y_min_s],
-        fill="toself", fillcolor=COLORS["pnl_short_bg"],
+        fill="toself", fillcolor=colors["pnl_short_bg"],
         mode="lines", line=dict(width=0), showlegend=False, hoverinfo="skip",
         xaxis=_pnl_x, yaxis=_pnl_y))
     _pnl_shapes = [make_pnl_baseline_shape(pnl_row)]

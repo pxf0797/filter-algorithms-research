@@ -15,6 +15,34 @@ name = "filter-research"
 version = "3.5.0"
 description = "多周期股票滤波分析工具"
 requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.57",
+    "loguru>=0.7",
+    "numpy>=2.2",
+    "scipy>=1.17",
+    "plotly>=6.7",
+    "pandas>=2.3",
+    "statsmodels>=0.14",
+    "yfinance>=1.4",
+    "pyarrow>=14.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0",
+    "pytest-cov>=7.0",
+    "pytest-benchmark>=5.0",
+    "pytest-mock>=3.0",
+    "ruff>=0.11",
+    "mypy>=2.0",
+    "coverage>=7.0",
+    "pre-commit>=3.0",
+    "pip-tools>=7.0",
+    "pip-audit>=2.7",
+    "build>=1.0",
+    "types-requests>=2.31",
+    "types-pyyaml>=6.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["filter*"]

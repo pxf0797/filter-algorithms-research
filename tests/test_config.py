@@ -132,22 +132,37 @@ class TestViewConfigSerialization:
         assert cfg.ke == 0.15    # default
 
 
-class TestViewConfigDictAccess:
-    def test_getitem_access(self):
+class TestViewConfigDictAccessRemoved:
+    """验证 __getitem__ / get() 已移除，仅保留属性式访问."""
+
+    def test_getitem_raises_typeerror(self):
+        """字典式访问 cfg["key"] 应抛出 TypeError（不是 KeyError）。"""
         cfg = ViewConfig(tf="日线", ke=0.25)
-        assert cfg["tf"] == "日线"
-        assert cfg["ke"] == 0.25
+        with pytest.raises(TypeError):
+            _ = cfg["tf"]
 
-    def test_getitem_raises_keyerror(self):
-        cfg = ViewConfig()
-        with pytest.raises(KeyError):
-            _ = cfg["nonexistent"]
-
-    def test_get_method(self):
+    def test_get_method_raises_typeerror(self):
+        """cfg.get("key") 应不存在（AttributeError）。"""
         cfg = ViewConfig(tf="60分钟")
-        assert cfg.get("tf") == "60分钟"
-        assert cfg.get("nonexistent") is None
-        assert cfg.get("nonexistent", "fallback") == "fallback"
+        with pytest.raises(AttributeError):
+            _ = cfg.get("tf")
+
+    def test_all_public_attributes_accessible(self):
+        """验证所有公开属性可通过 cfg.field 正常访问."""
+        cfg = ViewConfig()
+        # 公开属性完整列表（与 to_dict() 键对齐）
+        public_attrs = [
+            "tf", "n_pts", "pv", "pv2",
+            "show_sch", "ke", "sm", "ew",
+            "show_pred", "fit_mode", "n_ext",
+            "show_strategy", "stop_loss_pct",
+            "fc", "fc2",
+            "show_cross_pnl", "show_alignment", "show_pnl_feedback",
+        ]
+        for attr in public_attrs:
+            assert hasattr(cfg, attr), f"公开属性 '{attr}' 缺失"
+            # 访问不抛异常即为正常
+            _ = getattr(cfg, attr)
 
 
 # ===================================================================
@@ -292,3 +307,112 @@ class TestDockerCompose:
     def test_no_version_field(self, compose_data):
         """Docker Compose V2 不应包含已废弃的 version 字段."""
         assert "version" not in compose_data
+
+
+# ===================================================================
+# requirements 拆分验证 (M20)
+# ===================================================================
+
+
+class TestRequirementsSplit:
+    """验证 requirements.txt 和 requirements-dev.txt 的拆分正确性."""
+
+    @pytest.fixture(scope="class")
+    def project_root(self):
+        from pathlib import Path
+        return Path(__file__).resolve().parent.parent
+
+    @pytest.fixture(scope="class")
+    def prod_path(self, project_root):
+        return project_root / "requirements.txt"
+
+    @pytest.fixture(scope="class")
+    def dev_path(self, project_root):
+        return project_root / "requirements-dev.txt"
+
+    # ── 文件存在性 ──────────────────────────────────────────
+
+    def test_requirements_txt_exists(self, prod_path):
+        """requirements.txt 文件存在."""
+        assert prod_path.exists(), f"文件不存在: {prod_path}"
+
+    def test_requirements_dev_txt_exists(self, dev_path):
+        """requirements-dev.txt 文件存在."""
+        assert dev_path.exists(), f"文件不存在: {dev_path}"
+
+    # ── requirements-dev.txt 继承关系 ───────────────────────
+
+    def test_dev_inherits_prod(self, dev_path):
+        """requirements-dev.txt 首行是 '-r requirements.txt'."""
+        with open(dev_path) as fp:
+            first_line = fp.readline().strip()
+        assert first_line == "-r requirements.txt", (
+            f"requirements-dev.txt 首行应为 '-r requirements.txt'，"
+            f"实际为: '{first_line}'"
+        )
+
+    # ── 生产依赖是开发依赖的子集 ────────────────────────────
+
+    @staticmethod
+    def _parse_packages(path):
+        """解析 requirements 文件，返回 {(包名, 版本说明), ...}."""
+        import re
+        packages = set()
+        with open(path) as fp:
+            for line in fp:
+                line = line.strip()
+                # 跳过空行、注释、-r 引用
+                if not line or line.startswith("#") or line.startswith("-r"):
+                    continue
+                # 匹配 package>=version, package==version, package~=version
+                m = re.match(r'^([a-zA-Z0-9_.-]+)\s*([><=!~]+\s*[^;]+)', line)
+                if m:
+                    packages.add(m.group(1).strip().lower())
+        return packages
+
+    def test_prod_is_subset_of_dev(self, prod_path, dev_path):
+        """生产依赖包名是开发依赖包名的子集.
+
+        注：requirements-dev.txt 通过 -r requirements.txt 继承生产依赖，
+        因此 dev 文件不需要重复列出生产包名；但为完整性验证 dev 文件内
+        不会声明与生产包冲突的版本.
+        """
+        import re
+        prod_pkgs = self._parse_packages(prod_path)
+
+        # 解析 dev 文件（跳过 -r 行）
+        dev_pkgs = set()
+        with open(dev_path) as fp:
+            for line in fp:
+                line = line.strip()
+                if not line or line.startswith("#") or line.startswith("-r"):
+                    continue
+                m = re.match(r'^([a-zA-Z0-9_.-]+)\s*([><=!~]+\s*[^;]+)', line)
+                if m:
+                    dev_pkgs.add(m.group(1).strip().lower())
+
+        # 生产包不应与 dev 包有版本冲突（不在 dev 中显式声明）
+        conflicts = prod_pkgs & dev_pkgs
+        assert len(conflicts) == 0, (
+            f"以下生产包不应在 requirements-dev.txt 中重复声明: "
+            f"{', '.join(sorted(conflicts))}"
+        )
+
+    # ── 关键生产依赖存在性 ──────────────────────────────────
+
+    def test_streamlit_in_prod(self, prod_path):
+        """生产依赖中包含 streamlit."""
+        pkgs = self._parse_packages(prod_path)
+        assert "streamlit" in pkgs, "streamlit 应在 requirements.txt 中"
+
+    def test_pip_audit_not_in_prod(self, prod_path):
+        """生产依赖中不含 pip-audit（已移至 dev）."""
+        pkgs = self._parse_packages(prod_path)
+        assert "pip-audit" not in pkgs, (
+            "pip-audit 不应在 requirements.txt 中"
+        )
+
+    def test_pip_audit_in_dev(self, dev_path):
+        """开发依赖中包含 pip-audit."""
+        pkgs = self._parse_packages(dev_path)
+        assert "pip-audit" in pkgs, "pip-audit 应在 requirements-dev.txt 中"

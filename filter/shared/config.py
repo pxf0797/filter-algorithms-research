@@ -150,16 +150,3 @@ class ViewConfig:
         kwargs = {k: v for k, v in d.items() if k in known}
         return cls(**kwargs)
 
-    # ------------------------------------------------------------------
-    # dict-like access (for gradual migration)
-    # ------------------------------------------------------------------
-
-    def __getitem__(self, key: str) -> Any:
-        """允许 ``cfg["tf"]`` 风格的访问（渐进迁移辅助）。"""
-        if hasattr(self, key):
-            return getattr(self, key)
-        raise KeyError(key)
-
-    def get(self, key: str, default: Any = None) -> Any:
-        """允许 ``cfg.get("tf", "日线")`` 风格的访问。"""
-        return getattr(self, key, default)

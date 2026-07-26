@@ -56,7 +56,7 @@ class TestCleanupOrphanedImpKeys:
         # 模拟 st.session_state 为 dict
         mock_st = MagicMock()
         mock_st.session_state = ss
-        monkeypatch.setattr("state.st", mock_st)
+        monkeypatch.setattr("shared.state.st", mock_st)
 
         AppState.cleanup_orphaned_imp_keys()
 
@@ -72,7 +72,7 @@ class TestCleanupOrphanedImpKeys:
         ss = _make_ss_with_imp()
         mock_st = MagicMock()
         mock_st.session_state = ss
-        monkeypatch.setattr("state.st", mock_st)
+        monkeypatch.setattr("shared.state.st", mock_st)
 
         AppState.cleanup_orphaned_imp_keys()
 
@@ -88,7 +88,7 @@ class TestCleanupOrphanedImpKeys:
         ss = _make_ss_with_imp()
         mock_st = MagicMock()
         mock_st.session_state = ss
-        monkeypatch.setattr("state.st", mock_st)
+        monkeypatch.setattr("shared.state.st", mock_st)
 
         AppState.cleanup_orphaned_imp_keys()
 
@@ -103,7 +103,7 @@ class TestCleanupOrphanedImpKeys:
         ss = {}
         mock_st = MagicMock()
         mock_st.session_state = ss
-        monkeypatch.setattr("state.st", mock_st)
+        monkeypatch.setattr("shared.state.st", mock_st)
 
         AppState.cleanup_orphaned_imp_keys()
 
@@ -116,7 +116,7 @@ class TestCleanupOrphanedImpKeys:
         ss = _make_ss_with_imp()
         mock_st = MagicMock()
         mock_st.session_state = ss
-        monkeypatch.setattr("state.st", mock_st)
+        monkeypatch.setattr("shared.state.st", mock_st)
 
         AppState.init_defaults()
 
@@ -134,7 +134,7 @@ class TestCleanupOrphanedImpKeys:
         ss["_imp_v5_ke"] = 0.3
         mock_st = MagicMock()
         mock_st.session_state = ss
-        monkeypatch.setattr("state.st", mock_st)
+        monkeypatch.setattr("shared.state.st", mock_st)
 
         AppState.cleanup_orphaned_imp_keys()
 

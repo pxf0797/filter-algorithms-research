@@ -56,7 +56,7 @@ from filter.browse.sidebar import (
 )
 from filter.engine.signals import compute_bs_markers, get_lower_tfs
 from filter.browse.components_sidebar import (
-    _render_params, ALL_TFS, DEFAULT_TFS, TF_HIERARCHY,
+    _render_params, ALL_TFS, DEFAULT_TFS, TF_HIERARCHY, _render_colorblind_toggle,
 )
 from filter.shared.constants import TF_INTERVAL
 from filter.shared.state import AppState
@@ -474,8 +474,10 @@ def _build_chart_figure(data: dict, cfg: dict, compact: bool = True) -> tuple:
                                         sar, ssr)
         all_traces += _tr; all_shapes += _sh
     if has_strategy:
+        colorblind = st.session_state.get("_colorblind_mode", False)
         _tr, _sh, _an, _ya = _add_pnl_traces(t, long_pnl, short_pnl,
-                                               trade_records, pnl_row)
+                                               trade_records, pnl_row,
+                                               colorblind=colorblind)
         all_traces += _tr; all_shapes += _sh
         all_annotations += _an; _layout_updates.update(_ya)
     if has_feedback and feedback_row is not None:
@@ -831,6 +833,9 @@ def main() -> None:
 
     # ── Filter selectors ──
     filter_id, dual, filter_id2 = _render_filter_selectors()
+
+    # ── 色盲友好模式 ──
+    _render_colorblind_toggle()
 
     # ── Pass 1: 2x2 parameter panels ──
     configs = _render_param_panels(filter_id, dual, filter_id2)
