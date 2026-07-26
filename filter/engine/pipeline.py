@@ -9,11 +9,8 @@
 
 import numpy as np
 from typing import Optional, List, Tuple, Dict, Any
-from filter.engine.filters import (
-    FILTERS,
-    _schmitt_trigger,
-    _fit_physics_parabola,
-)
+from filter.engine.filters import FILTERS
+from filter.engine.schmitt import _schmitt_trigger, _fit_physics_parabola
 
 
 def compute_filters(

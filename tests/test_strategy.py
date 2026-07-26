@@ -6,10 +6,8 @@ PnL computation (_compute_strategy_pnl, _add_prediction_traces).
 import numpy as np
 import pandas as pd
 import pytest
-from engine.filters import (
-    _fit_parabolic, _fit_physics_parabola,
-    _compute_strategy_pnl, _find_all_pairs,
-)
+from engine.schmitt import _fit_parabolic, _fit_physics_parabola, _find_all_pairs
+from engine.strategy import _compute_strategy_pnl
 from browse.charts import _add_prediction_traces
 
 
@@ -508,7 +506,7 @@ class TestSearchSortedConsistency:
 
     def test_align_pnl_searchsorted_consistency(self):
         """P0-1: _align_pnl_to_current_tf 的 searchsorted 与旧 np.where 等价。"""
-        from filter.engine.filters import _align_pnl_to_current_tf
+        from filter.engine.alignment import _align_pnl_to_current_tf
 
         np.random.seed(42)
         n_higher = 50
@@ -557,7 +555,7 @@ class TestSearchSortedConsistency:
 
     def test_cross_period_markers_with_eod(self):
         """P0-2: eod 退场 marker 正确设置为窗口最后一个 bar。"""
-        from filter.engine.filters import _align_pnl_to_current_tf
+        from filter.engine.alignment import _align_pnl_to_current_tf
 
         n_higher = 10
         n_current = 30

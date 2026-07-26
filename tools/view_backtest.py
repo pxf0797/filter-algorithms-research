@@ -24,16 +24,11 @@ from pathlib import Path
 
 import pandas as pd
 
+from filter.constants.colors import ticker_color
+
 # HTML 模板路径（相对于脚本所在目录）
 SCRIPT_DIR = Path(__file__).resolve().parent
 HTML_TEMPLATE = SCRIPT_DIR.parent / "docs" / "backtesting" / "回测结果可视化.html"
-
-# 多 Ticker 颜色调色板（深色背景可读）
-TICKER_COLORS = [
-    "#58a6ff", "#3fb950", "#f85149", "#d2991d", "#a371f7",
-    "#39d2c0", "#f78166", "#db61a2", "#8b949e", "#79c0ff",
-    "#56d364", "#e5534b",
-]
 
 
 def serialize_value(v):
@@ -149,7 +144,7 @@ def load_multi_parquet(paths: list[str]) -> dict:
             continue
 
         ticker_name = extract_ticker_name(path)
-        color = TICKER_COLORS[i % len(TICKER_COLORS)]
+        color = ticker_color(i)
 
         print(f"[{i + 1}/{len(paths)}] 加载 {ticker_name}: {parquet_path}")
         columns, stats = load_parquet(parquet_path)

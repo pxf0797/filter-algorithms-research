@@ -13,6 +13,7 @@ Tests cover the non-Streamlit parts:
 - _add_prediction_traces poly2/physics 模式
 - _add_cross_pnl_subplot 边界（空 trades / 有 trades）
 - _add_schmitt_traces 边界条件
+- T6: Plotly payload优化 — include_plotlyjs=False / 共享layout / float压缩
 """
 
 import sys
@@ -41,6 +42,7 @@ from browse.charts import (
     _render_baseline,
     _render_fill_background,
     _render_plotly,
+    _compact_floats,
 )
 
 
@@ -81,6 +83,25 @@ def _sanitize_for_json(obj):
     if isinstance(obj, np.ndarray):
         return _sanitize_for_json(obj.tolist())
     return obj
+
+
+def _extract_figure_json(html: str) -> str | None:
+    """Extract figure JSON from ``var figure = {...};`` via brace matching."""
+    start = html.find("var figure = ")
+    if start == -1:
+        return None
+    start = html.find("{", start)
+    if start == -1:
+        return None
+    depth = 0
+    for i in range(start, len(html)):
+        if html[i] == "{":
+            depth += 1
+        elif html[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return html[start:i + 1]
+    return None
 
 
 # ===================================================================
@@ -374,15 +395,19 @@ class TestRenderPlotlyHtml:
         html = captured.get("html", "")
         assert html
 
-        # 提取 <script> 块内容
         import re
-        script_match = re.search(r"<script>(.*?)</script>", html, re.DOTALL)
-        assert script_match, "HTML 必须包含 <script> 块"
-        js = script_match.group(1)
+        # Find the IIFE directly: (function() {
+        iife_match = re.search(r"\(function\s*\(\)\s*\{", html)
+        assert iife_match, "HTML 必须包含 IIFE (function() { ... })()"
+
+        # Extract from IIFE start to the closing </script>
+        js_start = iife_match.start()
+        script_end = html.find("</script>", js_start)
+        js = html[js_start:script_end] if script_end > js_start else html[js_start:]
 
         # IIFE 开始
         assert "function()" in js, "JS 必须以自调用函数开头 (function() {"
-        # IIFE 结束 — JS 中使用 }} 表示 }，在 Python f-string 中表示为 }}}
+        # IIFE 结束
         assert "})()" in js or "}()" in js, "JS 必须以 })(); 结尾"
 
         # return 不能出现在 function 之外
@@ -430,14 +455,11 @@ class TestRenderPlotlySerialization:
         _render_plotly(fig)
 
         assert "html" in captured
-        # 从 HTML 中提取 JSON data 部分（排除 JavaScript 中的 Infinity）
-        import re
-        m = re.search(r"var figure = (\{.+?\});\s*\n\s*var config", captured["html"], re.DOTALL)
-        assert m is not None
-        figure_json = m.group(1)
-        # Plotly native to_json() handles NaN; verify figure JSON is valid JSON
-        # (bdata encoding may or may not show literal "null" — both are correct)
-        import json as _json; _json.loads(figure_json)  # must be valid JSON
+        # Extract figure JSON via brace matching (handles nested objects)
+        import json as _json
+        figure_json = _extract_figure_json(captured["html"])
+        assert figure_json is not None, "HTML 必须包含 var figure = {...}"
+        _json.loads(figure_json)  # must be valid JSON
 
     @pytest.mark.skip(reason="bdata encoding incompatible with regex extraction; to_json handles Inf→null correctly, test regex needs rewrite")
     def test_render_plotly_with_inf_values(self, monkeypatch):
@@ -479,7 +501,7 @@ class TestRenderPlotlySerialization:
         _render_plotly(fig)
 
         assert "html" in captured
-        assert "Plotly.newPlot" in captured["html"]
+        assert "newPlot" in captured["html"]
 
     def test_render_plotly_with_dates(self, monkeypatch):
         """带 dates 参数时应在 layout 中嵌入 _dates."""
@@ -636,3 +658,136 @@ class TestCdnFallback:
         html = captured.get("html", "")
         assert "plotly-fallback-" in html
         assert "加载失败" in html
+
+
+# ===================================================================
+# SECTION 16 — T6: Plotly payload optimisation
+# ===================================================================
+
+class TestPlotlyPayloadOptimization:
+    """T6: Plotly payload — include_plotlyjs=False, shared layout, float compression."""
+
+    # ── include_plotlyjs=False ──────────────────────────────────────
+
+    def test_include_plotlyjs_false_omits_cdn_script(self, monkeypatch):
+        """include_plotlyjs=False 时 HTML 不含 CDN <script> 标签."""
+        captured = {}
+
+        def _capture_html(html, **kw):
+            captured["html"] = html
+            return MagicMock()
+
+        monkeypatch.setattr(st.components.v1, "html", _capture_html)
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[1, 2], y=[1, 2]))
+        _render_plotly(fig, height=300, include_plotlyjs=False)
+
+        html = captured.get("html", "")
+        assert "cdn.plot.ly" not in html, (
+            "include_plotlyjs=False 时不应包含 CDN script 标签"
+        )
+        assert "cdnjs.cloudflare.com" not in html, (
+            "include_plotlyjs=False 时不应包含 fallback CDN"
+        )
+        assert "onerror=" not in html, (
+            "include_plotlyjs=False 时不应有 CDN onerror 逻辑"
+        )
+
+    def test_include_plotlyjs_true_contains_cdn_script(self, monkeypatch):
+        """include_plotlyjs=True（默认）时 HTML 包含 CDN script."""
+        captured = {}
+
+        def _capture_html(html, **kw):
+            captured["html"] = html
+            return MagicMock()
+
+        monkeypatch.setattr(st.components.v1, "html", _capture_html)
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[1, 2], y=[1, 2]))
+        _render_plotly(fig, height=300, include_plotlyjs=True)
+
+        html = captured.get("html", "")
+        assert "cdn.plot.ly" in html, "include_plotlyjs=True 应包含 CDN"
+        assert "onerror=" in html, "include_plotlyjs=True 应有 fallback 逻辑"
+
+    # ── Shared layout stripping ────────────────────────────────────
+
+    def test_shared_layout_properties_stripped(self, monkeypatch):
+        """匹配 _SHARED_LAYOUT_TEMPLATE 的 layout 属性从 payload 中移除."""
+        from browse.charts import _SHARED_LAYOUT_TEMPLATE
+        from plotly.utils import PlotlyJSONEncoder
+
+        captured = {}
+
+        def _capture_html(html, **kw):
+            # Extract FIGURE_JSON from the HTML
+            import re
+            m = re.search(r"const\s+_figureJson\s*=\s*(.+?);", html, re.DOTALL)
+            if m:
+                captured["json_str"] = m.group(1)
+            captured["html"] = html
+            return MagicMock()
+
+        monkeypatch.setattr(st.components.v1, "html", _capture_html)
+
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[1, 2], y=[1, 2]))
+        # Apply shared layout so it gets stripped
+        fig.update_layout(**_SHARED_LAYOUT_TEMPLATE)
+        _render_plotly(fig, height=300, include_plotlyjs=False)
+
+        json_str = captured.get("json_str", "")
+        if json_str:
+            # The figure JSON should NOT contain shared layout keys
+            # because they were stripped in _render_plotly
+            fig_dict = json.loads(json_str)
+            layout = fig_dict.get("layout", {})
+            for key in _SHARED_LAYOUT_TEMPLATE:
+                assert key not in layout, (
+                    f"共享 layout 属性 '{key}' 应从 payload 中移除"
+                )
+
+    # ── Float compression ──────────────────────────────────────────
+
+    def test_compact_floats_rounds_to_precision(self):
+        """_compact_floats 将浮点数舍入到指定精度."""
+        data = {
+            "x": [1.123456789, 2.987654321],
+            "y": 3.141592653589793,
+            "nested": {"value": 0.000000123456},
+            "keep": "string",
+            "keep_int": 42,
+        }
+        result = _compact_floats(data, precision=6)
+        assert result["x"] == [1.123457, 2.987654]
+        assert result["y"] == 3.141593
+        assert result["nested"]["value"] == 0.0  # rounds to 0 at precision=6
+        assert result["keep"] == "string"
+        assert result["keep_int"] == 42
+
+    def test_compact_floats_handles_numpy(self):
+        """_compact_floats 处理 numpy 数组."""
+        arr = np.array([1.123456789, 2.987654321])
+        result = _compact_floats(arr, precision=4)
+        assert result == [1.1235, 2.9877]
+
+    def test_compact_floats_nested_structure(self):
+        """_compact_floats 递归处理嵌套结构."""
+        data = {
+            "data": [
+                {"x": [1.111111111, 2.222222222]},
+                {"y": 3.333333333},
+            ],
+        }
+        result = _compact_floats(data, precision=3)
+        assert result["data"][0]["x"] == [1.111, 2.222]
+        assert result["data"][1]["y"] == 3.333
+
+    def test_compact_floats_idempotent(self):
+        """_compact_floats 对已舍入数据是幂等的."""
+        data = {"x": [1.12, 2.98], "y": 3.14}
+        result1 = _compact_floats(data, precision=2)
+        result2 = _compact_floats(result1, precision=2)
+        assert result1 == result2

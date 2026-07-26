@@ -11,8 +11,8 @@ from engine.filters import (
     apply_sma, apply_ema, apply_wma, apply_alma,
     apply_savgol, apply_kalman, apply_butterworth,
     apply_gaussian, apply_median, apply_lowess,
-    compute_metrics,
 )
+from engine.alignment import compute_metrics
 
 # ---------------------------------------------------------------------------
 # Strategy: generate realistic signal arrays for property testing

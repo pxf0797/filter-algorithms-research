@@ -29,10 +29,9 @@ from filter.data.db import (init_db, get_date_range, has_data,
                 DB_PATH)
 
 # --- Import from new modules ---
-from filter.engine.filters import (
-    _find_all_pairs,
-    _compute_strategy_pnl, _align_pnl_to_current_tf, _compute_holding_masks,
-)
+from filter.engine.schmitt import _find_all_pairs
+from filter.engine.strategy import _compute_strategy_pnl, _compute_holding_masks
+from filter.engine.alignment import _align_pnl_to_current_tf
 from filter.engine.pipeline import compute_filters, compute_schmitt_trigger, compute_prediction_pairs
 from filter.data.loader import (
     _fetch_all_timeframes, _fetch_stock, _sync_to_display,
@@ -42,6 +41,7 @@ from filter.browse.charts import (
     _render_plotly, _add_prediction_traces,
     _add_cross_pnl_subplot, _add_alignment_subplot,
     _draw_holding_bands, _add_bs_markers,
+    _PLOTLY_CDN, _PLOTLY_CDN_FALLBACK,
 )
 from filter.browse.chart_builder import (
     _date_markers, _determine_subplot_layout, _insert_feedback_row,
@@ -260,6 +260,290 @@ def _compute_strategy_display(t, filtered, schmitt, all_pairs, pred_pairs, cfg, 
 # Chart rendering (main figure builder)
 # =====================================================================
 
+def _prepare_chart_data(params: dict) -> dict:
+    """Extract data loading, PnL alignment, and filter computation.
+
+    All pure computation from ``_render_chart`` steps 1–8.5 — no
+    Streamlit side effects (captions, warnings, session_state writes).
+
+    Parameters
+    ----------
+    params : dict
+        Keys: ``market``, ``ticker_code``, ``cfg``, ``key``,
+        ``compact``, ``higher_pnl``, ``window_start``, ``cutoff_date``.
+
+    Returns
+    -------
+    dict
+        All computed data needed for side effects and figure building.
+        Includes ``"err"`` — when non-None the caller should short-circuit.
+    """
+    market = params["market"]
+    ticker_code = params["ticker_code"]
+    cfg = params["cfg"]
+    higher_pnl = params.get("higher_pnl")
+    window_start = params.get("window_start")
+    cutoff_date = params.get("cutoff_date")
+
+    tf = cfg["tf"]
+    n_pts = cfg["n_pts"]
+
+    # ── Higher TF lookup ──
+    _higher_tf = TF_HIERARCHY.get(tf)
+    _raw_higher = None
+    if higher_pnl is None and _higher_tf is not None:
+        _raw_higher = st.session_state.get(f"_pnl_{_higher_tf}")
+
+    # ── Step 1: Load chart data ──
+    t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(
+        market, ticker_code, tf, n_pts,
+        window_start=window_start, cutoff_date=cutoff_date)
+
+    # ── Step 2: Date markers ──
+    marker_positions, marker_labels = _date_markers(dates, tf)
+
+    # ── Step 3: Align higher-period PnL ──
+    if _raw_higher is not None and dates is not None:
+        higher_pnl = _align_pnl_to_current_tf(
+            _raw_higher["dates"], _raw_higher["long_pnl"],
+            _raw_higher["short_pnl"],
+            _raw_higher["trade_records"], dates,
+        )
+    elif higher_pnl is None:
+        higher_pnl = None
+
+    # ── Step 4: Compute filters ──
+    filtered, filtered2 = _compute_filters(noisy, t, cfg)
+
+    # ── Step 5 info value (caption side effect stays in _render_chart) ──
+    rough = float(np.sum(np.diff(filtered, 2) ** 2)) if len(filtered) > 2 else 0.0
+
+    # ── Step 6: Schmitt trigger ──
+    schmitt = _compute_schmitt_trigger(filtered, t, cfg)
+    all_pairs = []
+    if schmitt is not None:
+        all_pairs = _find_all_pairs(schmitt["sig"])
+
+    # ── Step 7: Prediction curves ──
+    pred_pairs = _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs)
+
+    # ── Step 8: Strategy PnL (computation only; side effects via
+    #    _compute_strategy_display stay in _render_chart) ──
+    show_strategy = cfg.get("show_strategy", False)
+    stop_loss_pct = cfg.get("stop_loss_pct", 2.0)
+    long_pnl = short_pnl = None
+    trade_records = []
+    if show_strategy and schmitt is not None and len(pred_pairs) > 0:
+        import json as _json
+        all_pairs_tuple = tuple(tuple(p) for p in all_pairs)
+        pred_pairs_json = _json.dumps(pred_pairs, default=str)
+        long_pnl, short_pnl, trade_records = _cached_strategy_pnl(
+            t, filtered, schmitt["sig"], all_pairs_tuple, pred_pairs_json,
+            stop_loss_pct, cfg.get("n_ext", 10),
+        )
+
+    show_cross_pnl = cfg.get("show_cross_pnl", False)
+    show_alignment = cfg.get("show_alignment", False)
+    has_strategy = show_strategy and long_pnl is not None and len(trade_records) > 0
+    show_pnl_feedback = cfg.get("show_pnl_feedback", False)
+    has_feedback = has_strategy and show_pnl_feedback
+
+    # ── Holding masks ──
+    _align_masks = None
+    if higher_pnl is not None:
+        _align_masks = _compute_holding_masks(
+            len(t), higher_pnl["entry_markers"],
+            higher_pnl["exit_markers"])
+
+    # ── Step 8.5: BS markers ──
+    _op_tf = st.session_state.get("operating_tf", "日线")
+    _lower_tfs = st.session_state.get("_bs_lower_tfs", [])
+    _show_bs = (tf == _op_tf) or (tf in _lower_tfs)
+    bs_markers = None
+    if _show_bs:
+        _holding = _align_masks if _align_masks is not None else None
+        bs_markers = compute_bs_markers(
+            t, dates, schmitt, all_pairs, trade_records,
+            tf, _op_tf, higher_bs=None,
+            holding_masks=_holding,
+        )
+
+    return {
+        "t": t, "noisy": noisy, "ohlc": ohlc,
+        "ticker_full": ticker_full, "dates": dates, "err": err,
+        "marker_positions": marker_positions,
+        "marker_labels": marker_labels,
+        "higher_pnl": higher_pnl,
+        "filtered": filtered, "filtered2": filtered2,
+        "rough": rough,
+        "schmitt": schmitt, "all_pairs": all_pairs,
+        "pred_pairs": pred_pairs,
+        "long_pnl": long_pnl, "short_pnl": short_pnl,
+        "trade_records": trade_records,
+        "show_strategy": show_strategy, "show_cross_pnl": show_cross_pnl,
+        "show_alignment": show_alignment, "has_strategy": has_strategy,
+        "show_pnl_feedback": show_pnl_feedback,
+        "has_feedback": has_feedback,
+        "_align_masks": _align_masks,
+        "bs_markers": bs_markers,
+    }
+
+
+def _build_chart_figure(data: dict, cfg: dict, compact: bool = True) -> tuple:
+    """Build the multi-subplot Plotly figure from pre-computed data.
+
+    Pure function — no Streamlit side effects.  Handles subplot layout
+    determination, K-line trace building, indicator overlays, and
+    final figure assembly.
+
+    Parameters
+    ----------
+    data : dict
+        Output from ``_prepare_chart_data``.
+    cfg : dict
+        Per-view configuration dict.
+    compact : bool, default True
+        If True, use a smaller chart height.
+
+    Returns
+    -------
+    tuple of (go.Figure, int)
+        The assembled figure and its pixel height.
+    """
+    t = data["t"]
+    noisy = data["noisy"]
+    ohlc = data["ohlc"]
+    filtered = data["filtered"]
+    filtered2 = data["filtered2"]
+    schmitt = data["schmitt"]
+    all_pairs = data["all_pairs"]
+    pred_pairs = data["pred_pairs"]
+    long_pnl = data["long_pnl"]
+    short_pnl = data["short_pnl"]
+    trade_records = data["trade_records"]
+    higher_pnl = data["higher_pnl"]
+    _align_masks = data["_align_masks"]
+    bs_markers = data["bs_markers"]
+    marker_positions = data["marker_positions"]
+    marker_labels = data["marker_labels"]
+    has_strategy = data["has_strategy"]
+    show_cross_pnl = data["show_cross_pnl"]
+    show_alignment = data["show_alignment"]
+    has_feedback = data["has_feedback"]
+
+    # ── Step 9: Determine subplot layout ──
+    _higher_tf = TF_HIERARCHY.get(cfg["tf"])
+    has_s = schmitt is not None
+    has_cross = (show_cross_pnl and higher_pnl is not None and
+                 (len(higher_pnl.get("entry_markers", [])) > 0 or
+                  len(higher_pnl.get("exit_markers", [])) > 0))
+    has_alignment = (show_alignment and _align_masks is not None and
+                     (_align_masks[0].any() or _align_masks[1].any()))
+
+    rows, rh, titles, mr, rr, vr, sar, ssr, ar, pnl_row, cross_row, align_row = \
+        _determine_subplot_layout(has_s, has_strategy, has_cross,
+                                  has_alignment, _higher_tf)
+
+    feedback_row = None
+    if has_feedback and pnl_row is not None:
+        rows, rh, titles, feedback_row, cross_row, align_row = \
+            _insert_feedback_row(
+                rows, rh, titles, pnl_row, cross_row, align_row)
+
+    # ── Step 10: Build figure (A: one-shot go.Figure from raw dicts) ──
+    all_traces, all_shapes, all_annotations = [], [], []
+    _layout_updates = {}
+
+    all_traces += _add_main_price_traces(t, noisy, ohlc, filtered,
+                                          filtered2, cfg, mr)
+    for i, pp in enumerate(pred_pairs):
+        all_traces += _add_prediction_traces(t, filtered,
+            pp["fit_result"], pp["fit_start"], pp["pair_end"], row=mr,
+            n_extend=cfg.get("n_ext", 10), show_legend=(i == 0))
+    acc, _tr, _sh = _add_residual_traces(t, filtered, noisy, filtered2,
+                                           cfg, rr, vr)
+    all_traces += _tr; all_shapes += _sh
+    if has_s:
+        _tr, _sh = _add_schmitt_traces(t, schmitt, acc, all_pairs,
+                                        sar, ssr)
+        all_traces += _tr; all_shapes += _sh
+    if has_strategy:
+        _tr, _sh, _an, _ya = _add_pnl_traces(t, long_pnl, short_pnl,
+                                               trade_records, pnl_row)
+        all_traces += _tr; all_shapes += _sh
+        all_annotations += _an; _layout_updates.update(_ya)
+    if has_feedback and feedback_row is not None:
+        _sh, _ya = _add_feedback_subplot(t, trade_records, feedback_row)
+        all_shapes += _sh; _layout_updates.update(_ya)
+    if has_cross and higher_pnl is not None and cross_row is not None:
+        _sh, _ya = _add_cross_pnl_subplot(t, higher_pnl, row=cross_row)
+        all_shapes += _sh; _layout_updates.update(_ya)
+    if has_alignment and _align_masks is not None and align_row is not None:
+        long_mask, short_mask = _align_masks
+        _tr, _sh, _an, _ya = _add_alignment_subplot(
+            t, long_pnl, short_pnl, trade_records,
+            long_mask, short_mask, row=align_row)
+        all_traces += _tr; all_shapes += _sh
+        all_annotations += _an; _layout_updates.update(_ya)
+    if ar is not None and not np.all(np.isnan(filtered)):
+        all_traces.append(dict(type="scattergl", x=t, y=acc, mode="lines",
+            name="a", line=dict(color="#ffa502", width=1.5),
+            xaxis=f"x{ar}", yaxis=f"y{ar}"))
+        all_shapes.append(dict(type="line", x0=0, x1=1, xref="paper",
+            y0=0, y1=0, yref=f"y{ar}",
+            line=dict(color="gray", dash="dash"), opacity=0.5))
+    if bs_markers is not None:
+        all_annotations += _add_bs_markers(t, ohlc, bs_markers)
+
+    # 2. Get subplot layout skeleton from make_subplots
+    _skeleton = make_subplots(rows=rows, cols=1, shared_xaxes=True,
+        vertical_spacing=0.01, row_heights=rh, subplot_titles=titles)
+    layout_dict = _skeleton.layout.to_plotly_json()
+
+    # 3. Add shapes, annotations, and +epsilon crosshair line
+    all_shapes.append(dict(type="line", x0=0, x1=0, y0=0, y1=1,
+        xref="x", yref="paper",
+        line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"),
+        visible=False))
+    for pos in marker_positions:
+        all_shapes.append(dict(type="line", x0=pos, x1=pos,
+            yref="paper", y0=0, y1=1,
+            line=dict(color="rgba(255,255,255,0.10)", width=0.8,
+                      dash="dot"), layer="below"))
+    layout_dict["shapes"] = layout_dict.get("shapes", []) + all_shapes
+    layout_dict["annotations"] = \
+        layout_dict.get("annotations", []) + all_annotations
+
+    # 4. Final layout customizations
+    fh = (620 if has_s else 420) if compact else (960 if has_s else 700)
+    if has_cross: fh += 120
+    if has_alignment: fh += 75
+    layout_dict.update(template="plotly_dark", height=fh,
+        margin=dict(l=10, r=10, t=25, b=10), hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02,
+                    xanchor="right", x=1, font=dict(size=9)))
+    layout_dict.setdefault(f"xaxis{rows}", {}).update(title_text="",
+        tickvals=list(marker_positions), ticktext=list(marker_labels),
+        tickfont=dict(size=9, color="#8b949e"))
+    layout_dict.setdefault("xaxis", {}).update(rangeslider_visible=False)
+    for _r, _t in [(mr, "价格"), (rr, "残差"), (vr, "速度")]:
+        _yk = "yaxis" if _r == 1 else f"yaxis{_r}"
+        layout_dict.setdefault(_yk, {}).update(title_text=_t)
+    if has_s:
+        layout_dict.setdefault(f"yaxis{sar}", {}).update(title_text="a±ε")
+        layout_dict.setdefault(f"yaxis{ssr}", {}).update(
+            title_text="Sig", tickvals=[-1, 0, 1],
+            ticktext=["空", "观", "多"], range=[-1.5, 1.5])
+    if ar is not None:
+        layout_dict.setdefault(f"yaxis{ar}", {}).update(title_text="加速度")
+    for k, v in _layout_updates.items():
+        layout_dict.setdefault(k, {}).update(v)
+
+    # 5. ONE-SHOT Figure construction
+    fig = go.Figure(data=all_traces, layout=layout_dict)
+    return fig, fh
+
+
 @st.fragment
 def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, higher_pnl=None, window_start=None, cutoff_date=None, capture_collector=None) -> None:
     """Fragment wrapper around ``_render_chart`` for per-view independent re-rendering.
@@ -297,15 +581,13 @@ def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, higher_p
 
 
 def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, window_start=None, cutoff_date=None, capture_collector=None) -> None:
-    """Fetch data and render the multi-subplot chart figure.
+    """Orchestrate chart rendering by delegating to ``_prepare_chart_data``
+    and ``_build_chart_figure``.
 
-    This is the core chart builder.  It:
-    1. Loads chart data (from Parquet cache or yfinance API).
-    2. Computes primary (and optional secondary) filter output.
-    3. Computes Schmitt trigger signal and pair segmentation.
-    4. Computes prediction curves and strategy PnL.
-    5. Builds a ``plotly`` figure with dynamic subplot layout.
-    6. Renders the figure via ``_render_plotly``.
+    Handles all Streamlit side effects (captions, warnings,
+    session_state writes, pipeline capture) between data preparation
+    and figure rendering.  The two delegated functions are pure(er) and
+    independently testable.
 
     Parameters
     ----------
@@ -322,7 +604,6 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
         If True, reduce chart height.
     higher_pnl : dict or None
         Higher-timeframe PnL data from ``_align_pnl_to_current_tf``.
-        When non-None a cross-period PnL subplot is added.
     window_start : int or None
         Backtest mode — window start bar index for data loading.
     cutoff_date : str or None
@@ -336,215 +617,84 @@ def _render_chart(market, ticker_code, cfg, key, compact=True, higher_pnl=None, 
     None
     """
     tf = cfg["tf"]
-    n_pts = cfg["n_pts"]
-    logger.debug(f"Rendering chart: {ticker_code}/{tf} view={key} n_pts={n_pts}")
+    logger.debug(f"Rendering chart: {ticker_code}/{tf} view={key} n_pts={cfg['n_pts']}")
 
-    # 查找紧邻高周期tf，尝试从session_state获取其PnL数据
-    _higher_tf = TF_HIERARCHY.get(tf)
-    _raw_higher = None
-    if higher_pnl is None and _higher_tf is not None:
-        _raw_higher = st.session_state.get(f"_pnl_{_higher_tf}")
+    # ── Prepare all computed data ──
+    params = {
+        "market": market, "ticker_code": ticker_code, "cfg": cfg, "key": key,
+        "compact": compact, "higher_pnl": higher_pnl,
+        "window_start": window_start, "cutoff_date": cutoff_date,
+    }
+    data = _prepare_chart_data(params)
 
-    # ── Step 1: Load chart data ──
-    t, noisy, ohlc, ticker_full, dates, err = _load_chart_data(market, ticker_code, tf, n_pts, window_start=window_start, cutoff_date=cutoff_date)
+    # ── Early returns ──
+    err = data["err"]
+    t = data["t"]
     if err is not None:
         if "数据点不足" in str(err):
             st.caption(f"⏳ {tf} 在回测日期前无足够数据")
             return
         st.error(err)
         return
-
     # ★ 防御性检查：即使没报错，数据也可能不足
     if t is None or len(t) < 2:
         st.caption(f"⚠️ {tf} 数据点不足 ({len(t) if t is not None else 0})，无法渲染")
         return
 
-    # ── Step 2: Date markers ──
-    marker_positions, marker_labels = _date_markers(dates, cfg["tf"])
-
-    # ── Step 3: Align higher-period PnL ──
-    if _raw_higher is not None and dates is not None:
-        higher_pnl = _align_pnl_to_current_tf(
-            _raw_higher["dates"], _raw_higher["long_pnl"], _raw_higher["short_pnl"],
-            _raw_higher["trade_records"], dates,
-        )
-    elif higher_pnl is None:
-        higher_pnl = None
-
-    # ── Step 4: Compute filters ──
-    filtered, filtered2 = _compute_filters(noisy, t, cfg)
-
-    # ── Step 5: Info captions ──
-    rough = float(np.sum(np.diff(filtered, 2) ** 2)) if len(filtered) > 2 else 0.0
+    # ── Step 5: Info captions (side effect) ──
+    noisy = data["noisy"]
     c1, c2, c3 = st.columns(3)
-    c1.caption(f"{ticker_full}·{cfg['tf']}  |  ¥{noisy[-1]:.2f}")
-    c2.caption(f"σ={noisy.std():.2f}  平滑={rough:.1f}")
+    c1.caption(f"{data['ticker_full']}·{cfg['tf']}  |  ¥{noisy[-1]:.2f}")
+    c2.caption(f"σ={noisy.std():.2f}  平滑={data['rough']:.1f}")
     c3.caption(f"{len(t)} 点")
 
-    # ── Step 6: Schmitt trigger ──
-    schmitt = _compute_schmitt_trigger(filtered, t, cfg)
+    # ── Step 6: Schmitt warning (side effect) ──
+    schmitt = data["schmitt"]
     if cfg["show_sch"] and schmitt is None and len(t) > 0:
         st.warning(f"⚠️ 施密特信号不可用：bar数({len(t)}) < N_EWMA({cfg['ew']})。"
                    f"请降低 N_EWMA 至 ≤{len(t)} 或增加数据点数(N)。")
 
-    all_pairs = []
-    if schmitt is not None:
-        all_pairs = _find_all_pairs(schmitt["sig"])
+    # ── Step 8: Strategy PnL side effects (captions + session_state);
+    #    _cached_strategy_pnl was already warmed by _prepare_chart_data,
+    #    so this call hits the Streamlit cache instantly. ──
+    _compute_strategy_display(
+        t, data["filtered"], schmitt, data["all_pairs"],
+        data["pred_pairs"], cfg, tf, data["dates"])
 
-    # ── Step 7: Prediction curves ──
-    pred_pairs = _compute_prediction_pairs(t, filtered, schmitt, cfg, all_pairs)
-
-    # ── Step 8: Strategy PnL ──
-    long_pnl, short_pnl, trade_records = _compute_strategy_display(
-        t, filtered, schmitt, all_pairs, pred_pairs, cfg, tf, dates)
-    show_strategy = cfg.get("show_strategy", False)
-    show_cross_pnl = cfg.get("show_cross_pnl", False)
-    show_alignment = cfg.get("show_alignment", False)
-    has_strategy = show_strategy and long_pnl is not None and len(trade_records) > 0
-
-    show_pnl_feedback = cfg.get("show_pnl_feedback", False)
-    has_feedback = has_strategy and show_pnl_feedback
-
-    # ── Compute holding masks early (needed for both BS markers and alignment subplot) ──
-    _align_masks = None
-    if higher_pnl is not None:
-        _align_masks = _compute_holding_masks(
-            len(t), higher_pnl["entry_markers"], higher_pnl["exit_markers"])
-
-    # ── Step 8.5: BS markers (仓位操作标识) ──
-    _op_tf = st.session_state.get("operating_tf", "日线")
-    _lower_tfs = st.session_state.get("_bs_lower_tfs", [])
-    _show_bs = (tf == _op_tf) or (tf in _lower_tfs)
-    bs_markers = None
-    if _show_bs:
-        _holding = _align_masks if _align_masks is not None else None
-        bs_markers = compute_bs_markers(
-            t, dates, schmitt, all_pairs, trade_records,
-            tf, _op_tf, higher_bs=None,
-            holding_masks=_holding,
-        )
+    # ── Step 8.5: BS markers session_state write ──
+    bs_markers = data["bs_markers"]
+    if bs_markers is not None:
         st.session_state[f"_bs_{tf}"] = bs_markers
 
-    # ── Step 9: Determine subplot layout ──
-    has_s = schmitt is not None
-    has_cross = (show_cross_pnl and higher_pnl is not None and
-                 (len(higher_pnl.get("entry_markers", [])) > 0 or
-                  len(higher_pnl.get("exit_markers", [])) > 0))
-    has_alignment = (show_alignment and _align_masks is not None and
-                     (_align_masks[0].any() or _align_masks[1].any()))
-
-    rows, rh, titles, mr, rr, vr, sar, ssr, ar, pnl_row, cross_row, align_row = \
-        _determine_subplot_layout(has_s, has_strategy, has_cross, has_alignment, _higher_tf)
-
-    feedback_row = None
-    if has_feedback and pnl_row is not None:
-        rows, rh, titles, feedback_row, cross_row, align_row = _insert_feedback_row(
-            rows, rh, titles, pnl_row, cross_row, align_row)
-
-    # ── Step 10: Build figure (A: one-shot go.Figure from raw dicts) ──
-    # 1. Collect ALL trace dicts, shapes, annotations from _add_* functions
-    all_traces, all_shapes, all_annotations = [], [], []
-    _layout_updates = {}  # yaxis config dicts merged later
-
-    all_traces += _add_main_price_traces(t, noisy, ohlc, filtered, filtered2, cfg, mr)
-    for i, pp in enumerate(pred_pairs):
-        all_traces += _add_prediction_traces(t, filtered,
-            pp["fit_result"], pp["fit_start"], pp["pair_end"], row=mr,
-            n_extend=cfg.get("n_ext", 10), show_legend=(i == 0))
-    acc, _tr, _sh = _add_residual_traces(t, filtered, noisy, filtered2, cfg, rr, vr)
-    all_traces += _tr; all_shapes += _sh
-    if has_s:
-        _tr, _sh = _add_schmitt_traces(t, schmitt, acc, all_pairs, sar, ssr)
-        all_traces += _tr; all_shapes += _sh
-    if has_strategy:
-        _tr, _sh, _an, _ya = _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row)
-        all_traces += _tr; all_shapes += _sh; all_annotations += _an; _layout_updates.update(_ya)
-    if has_feedback and feedback_row is not None:
-        _sh, _ya = _add_feedback_subplot(t, trade_records, feedback_row)
-        all_shapes += _sh; _layout_updates.update(_ya)
-    if has_cross and higher_pnl is not None and cross_row is not None:
-        _sh, _ya = _add_cross_pnl_subplot(t, higher_pnl, row=cross_row)
-        all_shapes += _sh; _layout_updates.update(_ya)
-    if has_alignment and _align_masks is not None and align_row is not None:
-        long_mask, short_mask = _align_masks
-        _tr, _sh, _an, _ya = _add_alignment_subplot(t, long_pnl, short_pnl, trade_records,
-            long_mask, short_mask, row=align_row)
-        all_traces += _tr; all_shapes += _sh; all_annotations += _an
-        _layout_updates.update(_ya)
-    if ar is not None and not np.all(np.isnan(filtered)):
-        all_traces.append(dict(type="scattergl", x=t, y=acc, mode="lines", name="a",
-            line=dict(color="#ffa502", width=1.5), xaxis=f"x{ar}", yaxis=f"y{ar}"))
-        all_shapes.append(dict(type="line", x0=0, x1=1, xref="paper", y0=0, y1=0,
-            yref=f"y{ar}", line=dict(color="gray", dash="dash"), opacity=0.5))
-    if bs_markers is not None:
-        all_annotations += _add_bs_markers(t, ohlc, bs_markers)
-
-    # PIPELINE_CAPTURE: collect pipeline data for this view
+    # ── PIPELINE_CAPTURE: collect pipeline data ──
     if capture_collector is not None:
+        filtered = data["filtered"]
         _cap_v = np.gradient(filtered, t) if schmitt is not None else None
         _cap_a = np.gradient(_cap_v, t) if _cap_v is not None else None
         view_name = f"{key}_{tf}"
+        _am = data["_align_masks"]
         capture_collector[view_name] = PipelineStageData(
             view_name=view_name, tf=tf,
-            t=t, dates=dates, noisy=noisy, ohlc=ohlc,
-            filtered=filtered, filtered2=filtered2,
+            t=t, dates=data["dates"], noisy=noisy, ohlc=data["ohlc"],
+            filtered=filtered, filtered2=data["filtered2"],
             sig=schmitt.get("sig") if schmitt is not None else None,
             v=_cap_v, a=_cap_a,
             eps=schmitt.get("eps") if schmitt is not None else None,
             mu_v=schmitt.get("mu_v") if schmitt is not None else None,
             sigma_v=schmitt.get("sigma_v") if schmitt is not None else None,
-            all_pairs=all_pairs, prediction_pairs=pred_pairs,
-            trade_records=trade_records,
-            pnl_long=long_pnl, pnl_short=short_pnl,
-            higher_pnl=higher_pnl,
-            long_mask=_align_masks[0] if _align_masks is not None else None,
-            short_mask=_align_masks[1] if _align_masks is not None else None,
+            all_pairs=data["all_pairs"],
+            prediction_pairs=data["pred_pairs"],
+            trade_records=data["trade_records"],
+            pnl_long=data["long_pnl"], pnl_short=data["short_pnl"],
+            higher_pnl=data["higher_pnl"],
+            long_mask=_am[0] if _am is not None else None,
+            short_mask=_am[1] if _am is not None else None,
             bs_markers=bs_markers,
         )
 
-    # 2. Get subplot layout skeleton from make_subplots (layout only, discard empty traces)
-    _skeleton = make_subplots(rows=rows, cols=1, shared_xaxes=True,
-        vertical_spacing=0.01, row_heights=rh, subplot_titles=titles)
-    layout_dict = _skeleton.layout.to_plotly_json()
-
-    # 3. Add shapes, annotations, and +epsilon crosshair line
-    all_shapes.append(dict(type="line", x0=0, x1=0, y0=0, y1=1, xref="x", yref="paper",
-        line=dict(color="rgba(200,200,200,0.4)", width=1, dash="dot"), visible=False))
-    for pos in marker_positions:
-        all_shapes.append(dict(type="line", x0=pos, x1=pos, yref="paper", y0=0, y1=1,
-            line=dict(color="rgba(255,255,255,0.10)", width=0.8, dash="dot"), layer="below"))
-    layout_dict["shapes"] = layout_dict.get("shapes", []) + all_shapes
-    layout_dict["annotations"] = layout_dict.get("annotations", []) + all_annotations
-
-    # 4. Final layout customizations (matching original make_subplots-based setup)
-    fh = (620 if has_s else 420) if compact else (960 if has_s else 700)
-    if has_cross: fh += 120
-    if has_alignment: fh += 75
-    layout_dict.update(template="plotly_dark", height=fh,
-        margin=dict(l=10, r=10, t=25, b=10), hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
-            font=dict(size=9)))
-    # axis customizations
-    layout_dict.setdefault(f"xaxis{rows}", {}).update(title_text="",
-        tickvals=list(marker_positions), ticktext=list(marker_labels),
-        tickfont=dict(size=9, color="#8b949e"))
-    layout_dict.setdefault("xaxis", {}).update(rangeslider_visible=False)
-    for _r, _t in [(mr,"价格"),(rr,"残差"),(vr,"速度")]:
-        _yk = "yaxis" if _r == 1 else f"yaxis{_r}"
-        layout_dict.setdefault(_yk, {}).update(title_text=_t)
-    if has_s:
-        layout_dict.setdefault(f"yaxis{sar}", {}).update(title_text="a±ε")
-        layout_dict.setdefault(f"yaxis{ssr}", {}).update(title_text="Sig",
-            tickvals=[-1,0,1], ticktext=["空","观","多"], range=[-1.5,1.5])
-    if ar is not None:
-        layout_dict.setdefault(f"yaxis{ar}", {}).update(title_text="加速度")
-    # Merge yaxis updates from _add_* functions (e.g. PnL ticksuffix)
-    for k, v in _layout_updates.items():
-        layout_dict.setdefault(k, {}).update(v)
-
-    # 5. ONE-SHOT Figure construction — NO Python Trace objects created
-    fig = go.Figure(data=all_traces, layout=layout_dict)
-    _render_plotly(fig, height=fh + 30, dates=dates)
+    # ── Build and render figure ──
+    fig, fh = _build_chart_figure(data, cfg, compact=compact)
+    _render_plotly(fig, height=fh + 30, dates=data["dates"], include_plotlyjs=False)
 
 
 # =====================================================================
@@ -689,6 +839,17 @@ def main() -> None:
 
     # ── DB backup/restore ──
     _render_db_backup()
+
+    # ── M6: inject Plotly.js CDN into parent window once per page load ──
+    if not st.session_state.get("_plotly_cdn_injected"):
+        st.session_state["_plotly_cdn_injected"] = True
+        _cdn_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+<style>body{{margin:0;overflow:hidden}}</style></head><body>
+<script src="{_PLOTLY_CDN}"
+    onerror="this.onerror=null;this.src='{_PLOTLY_CDN_FALLBACK}';"></script>
+<script>window.parent.Plotly=window.parent.Plotly||Plotly;window.parent.__plotlyReady=true;</script>
+</body></html>"""
+        st.components.v1.html(_cdn_html, height=1)
 
     # ── Pass 2: 2x2 chart views ──
     cb_mode = AppState.get("_cb_mode", False)

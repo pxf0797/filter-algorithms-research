@@ -13,6 +13,17 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 
+from filter.common.pnl_renderer import (
+    PNL_BASELINE,
+    compute_combined_pnl,
+    compute_drawdown,
+    make_pnl_long_trace,
+    make_pnl_short_trace,
+    make_pnl_combined_trace,
+    make_drawdown_trace,
+)
+from filter.constants.colors import COLORS, view_color
+
 
 def render_backtest_dashboard(
     source: Union[str, Path, pd.DataFrame],
@@ -249,8 +260,7 @@ def _render_pnl_chart(
     """
     st.subheader("PnL 曲线")
 
-    combined = np.maximum(long_pnl, short_pnl)
-    cum_pnl = combined - 100.0  # 相对于 100 基准
+    combined = compute_combined_pnl(long_pnl, short_pnl)
 
     fig = make_subplots(
         rows=2, cols=1,
@@ -261,57 +271,35 @@ def _render_pnl_chart(
     )
 
     # PnL 曲线
-    x_vals = list(range(len(cum_pnl)))
+    x_vals = list(range(len(combined)))
 
     # 做多 / 做空独立曲线 (虚线)
     fig.add_trace(
-        go.Scattergl(
-            x=x_vals, y=long_pnl - 100.0,
-            mode="lines",
-            name="做多 PnL",
-            line=dict(color="#3fb950", width=1, dash="dot"),
-            opacity=0.5,
-        ),
+        go.Scattergl(**make_pnl_long_trace(
+            x_vals, long_pnl - PNL_BASELINE,
+            dash="dot", width=1, opacity=0.5, name="做多 PnL",
+        )),
         row=1, col=1,
     )
     fig.add_trace(
-        go.Scattergl(
-            x=x_vals, y=short_pnl - 100.0,
-            mode="lines",
-            name="做空 PnL",
-            line=dict(color="#f85149", width=1, dash="dot"),
-            opacity=0.5,
-        ),
+        go.Scattergl(**make_pnl_short_trace(
+            x_vals, short_pnl - PNL_BASELINE,
+            dash="dot", width=1, opacity=0.5, name="做空 PnL",
+        )),
         row=1, col=1,
     )
 
     # max 组合曲线 (实线)
     fig.add_trace(
-        go.Scattergl(
-            x=x_vals, y=cum_pnl,
-            mode="lines",
-            name="max(做多, 做空) PnL",
-            line=dict(color="#58a6ff", width=2),
-            fill="tozeroy",
-            fillcolor="rgba(88,166,255,0.08)",
-        ),
+        go.Scattergl(**make_pnl_combined_trace(x_vals, combined)),
         row=1, col=1,
     )
     # 零线
-    fig.add_hline(y=0, line_dash="dash", line_color="rgba(255,255,255,0.3)", row=1, col=1)
+    fig.add_hline(y=0, line_dash="dash", line_color=COLORS["zero_line"], row=1, col=1)
 
     # 回撤
-    peak = np.maximum.accumulate(combined)
-    drawdown = np.where(peak != 0, (combined - peak) / peak * 100, 0.0)
     fig.add_trace(
-        go.Scattergl(
-            x=x_vals, y=drawdown,
-            mode="lines",
-            name="回撤 %",
-            line=dict(color="#f85149", width=1.5),
-            fill="tozeroy",
-            fillcolor="rgba(248,81,73,0.15)",
-        ),
+        go.Scattergl(**make_drawdown_trace(x_vals, combined)),
         row=2, col=1,
     )
 
@@ -334,23 +322,22 @@ def _render_view_comparison(df: pd.DataFrame, views: list[str]) -> None:
 
     fig = go.Figure()
 
-    colors = ["#58a6ff", "#3fb950", "#f85149", "#d2991d"]
     for i, v in enumerate(views):
         long_col = f"{v}_pnl_long"
         short_col = f"{v}_pnl_short"
-        combined = np.maximum(
+        combined = compute_combined_pnl(
             df[long_col].values.astype(float),
             df[short_col].values.astype(float),
         )
-        cum = combined - 100.0
+        cum = combined - PNL_BASELINE
         fig.add_trace(go.Scattergl(
             y=cum,
             mode="lines",
             name=v,
-            line=dict(color=colors[i % len(colors)], width=2),
+            line=dict(color=view_color(i), width=2),
         ))
 
-    fig.add_hline(y=0, line_dash="dash", line_color="rgba(255,255,255,0.3)")
+    fig.add_hline(y=0, line_dash="dash", line_color=COLORS["zero_line"])
 
     fig.update_layout(
         template="plotly_dark",

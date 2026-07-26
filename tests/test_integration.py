@@ -27,16 +27,10 @@ if str(_src) not in sys.path:
     sys.path.insert(0, str(_src))
 
 # Phase 2 modularization: functions moved to services.filter_engine
-from engine.filters import (
-    FILTERS,
-    compute_metrics,
-    _schmitt_trigger,
-    _find_all_pairs,
-    _align_pnl_to_current_tf,
-    _compute_holding_masks,
-    _fit_parabolic,
-    _fit_physics_parabola,
-)
+from engine.filters import FILTERS
+from engine.alignment import compute_metrics, _align_pnl_to_current_tf
+from engine.schmitt import _schmitt_trigger, _find_all_pairs, _fit_parabolic, _fit_physics_parabola
+from engine.strategy import _compute_holding_masks
 
 
 # ===================================================================

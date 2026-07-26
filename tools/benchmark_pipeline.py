@@ -172,7 +172,8 @@ def benchmark_filter(n_bars: int) -> dict:
 
 def benchmark_schmitt(n_bars: int) -> dict:
     """Benchmark schmitt trigger computation speed."""
-    from filter.engine.filters import FILTERS, _schmitt_trigger
+    from filter.engine.filters import FILTERS
+    from filter.engine.schmitt import _schmitt_trigger
 
     noisy = generate_random_walk(n_bars)
     t_arr = np.arange(n_bars, dtype=float)

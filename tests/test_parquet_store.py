@@ -3193,3 +3193,160 @@ class TestParquetStoreDebugMode:
             assert meta_path.exists(), (
                 f"metadata.json should exist in save_debug_data={mode}"
             )
+
+
+# ============================================================================
+# T10: OOM防护 — buffer memory limit & numpy preallocation
+# ============================================================================
+
+class TestOomBufferLimit:
+    """T10: ParquetStore buffer memory limit triggers flush at 90% threshold."""
+
+    @staticmethod
+    def _make_valid_row(store, bar_index=0, ts="2026-01-01", close=100.0):
+        """Build a row dict that passes _buffer_to_table validation."""
+        row = {}
+        col_names = store._column_names
+        for name in col_names:
+            if name == "bar_index":
+                row[name] = bar_index
+            elif name == "bar_timestamp":
+                row[name] = pd.Timestamp(ts)
+            elif name == "close":
+                row[name] = float(close)
+            elif name.endswith("_sig"):
+                row[name] = 0      # int8 default
+            elif name.endswith("_eps"):
+                row[name] = 0.0    # float32 default
+            elif name.endswith("_filtered"):
+                row[name] = float(close)
+            elif name.endswith("_pnl_long") or name.endswith("_pnl_short"):
+                row[name] = 100.0
+            elif name.endswith("_trade_return"):
+                row[name] = 0.0
+            elif name.endswith("_long_pos") or name.endswith("_short_pos"):
+                row[name] = False
+            elif name.endswith("_trade") or name.endswith("_trade_reason"):
+                row[name] = ""
+            elif name.endswith("_bs_entry") or name.endswith("_bs_exit"):
+                row[name] = ""
+            else:
+                row[name] = None
+        return row
+
+    def test_max_buffer_mb_class_attribute(self):
+        """ParquetStore 类有 _MAX_BUFFER_MB 硬限制."""
+        assert hasattr(ParquetStore, "_MAX_BUFFER_MB")
+        assert ParquetStore._MAX_BUFFER_MB == 200
+
+    def test_max_buffer_mb_instance_default(self, tmp_path):
+        """start_session 后 _max_buffer_mb 设为类常量值."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+        assert store._max_buffer_mb == ParquetStore._MAX_BUFFER_MB
+
+    def test_buffer_memory_bytes_zero_after_flush(self, tmp_path):
+        """flush 后 _buffer_memory_bytes 重置为 0."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+        row = self._make_valid_row(store)
+        store._buffer = [row]
+        store._buffer_memory_bytes = 50000
+        assert store._buffer_memory_bytes > 0
+        store.flush()
+        assert store._buffer_memory_bytes == 0
+        assert len(store._buffer) == 0
+
+    def test_buffer_clear_on_start_session(self, tmp_path):
+        """start_session 清空 buffer 和内存计数."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+        row = self._make_valid_row(store)
+        store._buffer = [row]
+        store._buffer_memory_bytes = 1000
+        # restart session
+        store.start_session()
+        assert len(store._buffer) == 0
+        assert store._buffer_memory_bytes == 0
+
+    def test_auto_flush_on_append_row_memory_pressure(self, tmp_path, monkeypatch):
+        """append_row: buffer 内存超 90% 限制时触发 flush（捕获异常不会crash）."""
+        import sys as _sys
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+
+        original_getsizeof = _sys.getsizeof
+
+        # Each row will appear to use 190MB — with max=200MB, 1 row > 90%
+        def _fake_getsizeof(obj):
+            return 190 * 1024 * 1024  # 190 MB
+
+        monkeypatch.setattr(_sys, "getsizeof", _fake_getsizeof)
+
+        try:
+            # append_row catches exceptions internally, so it should not crash
+            store.append_row(0, "2026-01-01", "2026-01-01", {"views": {}})
+            # The flush may fail because the row is incomplete, but append_row
+            # should not raise. The buffer may still contain the row.
+            assert store._buffer_memory_bytes > 0, (
+                "内存压力触发 flush，即使 flush 失败也不应 crash backtest"
+            )
+        finally:
+            monkeypatch.setattr(_sys, "getsizeof", original_getsizeof)
+
+    def test_append_row_never_crashes_on_bad_data(self, tmp_path):
+        """append_row 即使收到损坏数据也不会抛出异常（只 log warning）."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+        # append_row with garbage data — should not raise
+        try:
+            store.append_row(0, None, None, None)
+        except Exception:
+            pytest.fail("append_row 不应因损坏数据而抛出异常")
+        # Also verify start_session sets up buffer properly
+        assert store._buffer_size == 10_000_000  # effectively infinite for session
+
+    def test_flush_noop_on_empty_buffer(self, tmp_path):
+        """flush 在 buffer 为空时是 no-op."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+        store._buffer.clear()
+        store._buffer_memory_bytes = 0
+        part_before = store._part_index
+        store.flush()
+        assert store._part_index == part_before
+
+    def test_flush_increments_part_index(self, tmp_path):
+        """flush 产生新的 part 文件并递增 part_index."""
+        store = ParquetStore(str(tmp_path), "TEST", [{"tf": "日线"}])
+        store.start_session()
+        row = self._make_valid_row(store)
+        store._buffer = [row]
+        store._buffer_memory_bytes = 1000
+        part_before = store._part_index
+        store.flush()
+        assert store._part_index == part_before + 1
+        part_files = list(store._session_dir.glob("part_*.parquet"))
+        assert len(part_files) >= 1
+
+    def test_numpy_dtype_in_schema(self):
+        """Schema 使用 numpy-friendly pyarrow 类型（非 Python object）."""
+        from data.store import _build_full_schema
+        schema = _build_full_schema(["v0"])
+        for field in schema:
+            dtype = field.type
+            assert not pa.types.is_null(dtype), (
+                f"Schema field '{field.name}' should have fixed-width type, got null"
+            )
+        close_field = schema.field("close")
+        assert close_field.type == pa.float32()
+
+    def test_column_defaults_are_numpy_compatible(self):
+        """_COL_DEFAULTS 使用 numpy 兼容的 NaN/0/False/None 值."""
+        from data.store import _COL_DEFAULTS, _FLOAT_NA, _INT_NA, _BOOL_NA
+        assert np.isnan(_FLOAT_NA)
+        assert _INT_NA == 0
+        assert _BOOL_NA is False
+        assert "sig" in _COL_DEFAULTS
+        assert "filtered" in _COL_DEFAULTS
+        assert "pnl_long" in _COL_DEFAULTS

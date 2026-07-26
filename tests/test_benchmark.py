@@ -12,9 +12,9 @@ from engine.filters import (
     apply_sma, apply_ema, apply_wma, apply_alma,
     apply_savgol, apply_kalman, apply_butterworth,
     apply_gaussian, apply_median, apply_lowess,
-    compute_metrics, _schmitt_trigger, _find_all_pairs,
-    _fit_parabolic, _fit_physics_parabola,
 )
+from engine.alignment import compute_metrics
+from engine.schmitt import _schmitt_trigger, _find_all_pairs, _fit_parabolic, _fit_physics_parabola
 
 # ---------------------------------------------------------------------------
 # Test data (shared across benchmarks)

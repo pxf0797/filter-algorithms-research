@@ -25,6 +25,87 @@ import numpy as np
 import pandas as pd
 from loguru import logger
 
+try:
+    from numba import njit
+    HAS_NUMBA = True
+except ImportError:
+    def njit(*args, **kwargs):
+        """Identity decorator: numba not installed, return function unchanged."""
+        return lambda f: f
+    HAS_NUMBA = False
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Numba-accelerated trade position computation
+# ═══════════════════════════════════════════════════════════════════════════
+
+@njit(cache=True)
+def _compute_trade_positions_numba(
+    entry_indices: np.ndarray,
+    exit_indices: np.ndarray,
+    is_long_arr: np.ndarray,
+    is_eod_arr: np.ndarray,
+    view_last_idx: int,
+) -> tuple:
+    """Compute long/short position flags from trade record arrays.
+
+    numba-accelerated replacement for the per-trade-record loop that
+    determines whether each side (long/short) is currently holding.
+
+    Parameters
+    ----------
+    entry_indices : ndarray of int64
+        Entry bar index for each trade record.
+    exit_indices : ndarray of float64
+        Exit bar index for each trade record (NaN if still open).
+    is_long_arr : ndarray of bool
+        True if the trade type is "long", False if "short".
+    is_eod_arr : ndarray of bool
+        True if the exit reason is "eod" (end-of-data forced close).
+    view_last_idx : int
+        Index of the last bar in the current view window.
+
+    Returns
+    -------
+    (long_pos, short_pos) : (int, int)
+        1 if holding, 0 if not.
+    """
+    long_pos = 0
+    short_pos = 0
+    n = len(entry_indices)
+    for i in range(n):
+        ei = entry_indices[i]
+        if ei <= view_last_idx:
+            xi = exit_indices[i]
+            if np.isnan(xi) or xi > view_last_idx or is_eod_arr[i]:
+                if is_long_arr[i]:
+                    long_pos = 1
+                else:
+                    short_pos = 1
+    return long_pos, short_pos
+
+
+def _compute_trade_positions_py(trade_records: list, view_last_idx: int) -> tuple:
+    """Pure Python fallback for :func:`_compute_trade_positions_numba`."""
+    long_pos = 0
+    short_pos = 0
+    for tr in trade_records:
+        entry_idx = tr.get("entry_idx")
+        exit_idx = tr.get("exit_idx")
+        tt = tr.get("type", "")
+        reason = str(tr.get("exit_reason", ""))
+        if entry_idx is not None and int(entry_idx) <= view_last_idx:
+            if (
+                exit_idx is None
+                or int(exit_idx) > view_last_idx
+                or reason == "eod"
+            ):
+                if tt == "long":
+                    long_pos = 1
+                elif tt == "short":
+                    short_pos = 1
+    return long_pos, short_pos
+
 
 class CSVBuilder:
     """累积逐 bar 数据，end_session 时写入 CSV。
@@ -212,23 +293,24 @@ class CSVBuilder:
             result[f"{prefix}_pnl_short"] = _last_value(short_pnl)
 
         # --- 持仓终值 (P4 fix: 从本周期 trade_records 计算，非跨周期对齐) ---
-        long_pos = 0
-        short_pos = 0
-        for tr in trade_records:
-            entry_idx = tr.get("entry_idx")
-            exit_idx = tr.get("exit_idx")
-            tt = tr.get("type", "")
-            reason = str(tr.get("exit_reason", ""))
-            if entry_idx is not None and int(entry_idx) <= view_last_idx:
-                if (
-                    exit_idx is None
-                    or int(exit_idx) > view_last_idx
-                    or reason == "eod"
-                ):
-                    if tt == "long":
-                        long_pos = 1
-                    elif tt == "short":
-                        short_pos = 1
+        if HAS_NUMBA and trade_records:
+            n_tr = len(trade_records)
+            entry_idx_arr = np.empty(n_tr, dtype=np.int64)
+            exit_idx_arr = np.empty(n_tr, dtype=np.float64)
+            is_long_arr = np.empty(n_tr, dtype=np.bool_)
+            is_eod_arr = np.empty(n_tr, dtype=np.bool_)
+            for j, tr in enumerate(trade_records):
+                entry_idx_arr[j] = tr.get("entry_idx", -1)
+                exit_idx_arr[j] = tr.get("exit_idx", np.nan)
+                is_long_arr[j] = (tr.get("type", "") == "long")
+                is_eod_arr[j] = (str(tr.get("exit_reason", "")) == "eod")
+            long_pos, short_pos = _compute_trade_positions_numba(
+                entry_idx_arr, exit_idx_arr, is_long_arr, is_eod_arr, view_last_idx,
+            )
+        else:
+            long_pos, short_pos = _compute_trade_positions_py(
+                trade_records, view_last_idx,
+            )
         result[f"{prefix}_long_pos"] = long_pos
         result[f"{prefix}_short_pos"] = short_pos
 

@@ -109,7 +109,7 @@ class TestPipelineFunctions:
 
     def test_compute_prediction_pairs(self, signals, default_cfg):
         from engine.pipeline import compute_filters, compute_schmitt_trigger, compute_prediction_pairs
-        from engine.filters import _find_all_pairs
+        from engine.schmitt import _find_all_pairs
         noisy, t = signals
         filtered, _ = compute_filters(noisy, t, default_cfg)
         schmitt = compute_schmitt_trigger(filtered, t, default_cfg)
@@ -132,7 +132,7 @@ class TestPipelineFunctions:
     def test_web_cli_unified_output(self, signals, default_cfg):
         """Same inputs via pipeline.py produce same outputs for Web and CLI."""
         from engine.pipeline import compute_filters, compute_schmitt_trigger, compute_prediction_pairs
-        from engine.filters import _find_all_pairs
+        from engine.schmitt import _find_all_pairs
 
         noisy, t = signals
 
@@ -300,7 +300,7 @@ class TestPipelineDeterminism:
 
     def test_full_pipeline_deterministic(self):
         from engine.pipeline import compute_filters, compute_schmitt_trigger, compute_prediction_pairs
-        from engine.filters import _find_all_pairs
+        from engine.schmitt import _find_all_pairs
 
         np.random.seed(123)
         t = np.arange(500, dtype=float)
