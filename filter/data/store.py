@@ -124,11 +124,13 @@ class ParquetStore:
         ticker: str,
         view_configs: list[dict],
         save_debug_data: bool = True,
+        track_pnl_from_price: bool = False,
     ) -> None:
         self._output_dir = Path(output_dir)
         self._ticker = ticker
         self._view_configs = view_configs
         self._save_debug_data = save_debug_data
+        self._track_pnl_from_price = track_pnl_from_price
 
         # ── set in start_session ──
         self._session_dir: Optional[Path] = None
@@ -189,6 +191,11 @@ class ParquetStore:
         self._total_row_count = 0
         self._buffer_memory_bytes = 0
         self._last_pnl: dict[str, float] = {}
+
+        # ── Price-based PnL tracking state (当 track_pnl_from_price=True 时生效) ──
+        self._prev_pos: dict[str, bool] = {}          # 上一条 bar 的持仓状态
+        self._entry_capital: dict[str, float] = {}     # 当前持仓的入场资本
+        self._entry_filtered: dict[str, float] = {}    # 当前持仓的入场滤波价格
 
         # ── Pending events for post-hoc trade/BS matching ──
         # Key: "v0:2026-04-01", Value: {"v0_trade": "exit_long", ...}
@@ -424,16 +431,58 @@ class ParquetStore:
                     for col in _VIEW_COLUMNS:
                         row[f"{prefix}_{col}"] = _COL_DEFAULTS[col]
 
-            # ── PnL freeze: when a position is closed, lock PnL at last known value ──
+            # ── PnL freeze / price-based tracking ──
             long_pos = row.get(f"{prefix}_long_pos", False)
             short_pos = row.get(f"{prefix}_short_pos", False)
-            for pnl_key, pos_flag in [("pnl_long", long_pos), ("pnl_short", short_pos)]:
+            for pnl_key, pos_flag, is_short in [
+                ("pnl_long", long_pos, False), ("pnl_short", short_pos, True)
+            ]:
                 col_name = f"{prefix}_{pnl_key}"
-                last_key = f"{prefix}_{pnl_key}"
-                if pos_flag:
-                    self._last_pnl[last_key] = row.get(col_name, 100.0)
+                state_key = f"{prefix}_{pnl_key}"
+                prev_pos = self._prev_pos.get(state_key, False)
+
+                if self._track_pnl_from_price:
+                    # ── 基于滤波价格的 PnL 追踪 ──
+                    filtered_val = row.get(f"{prefix}_filtered", float("nan"))
+                    frozen = self._last_pnl.get(state_key, 100.0)
+
+                    if pos_flag and not prev_pos:
+                        # 入场：PnL = 冻结资本（消除入场跳跃）
+                        self._entry_capital[state_key] = frozen
+                        self._entry_filtered[state_key] = filtered_val
+                        row[col_name] = frozen
+                        self._last_pnl[state_key] = frozen
+                    elif pos_flag:
+                        # 持仓中：PnL = 入场资本 * 滤波价格变化
+                        entry_cap = self._entry_capital.get(state_key, frozen)
+                        entry_filt = self._entry_filtered.get(state_key, filtered_val)
+                        if (
+                            not np.isnan(filtered_val) and filtered_val > 0
+                            and not np.isnan(entry_filt) and entry_filt > 0
+                        ):
+                            if is_short:
+                                # 空头：价格下跌则 PnL 上涨
+                                row[col_name] = entry_cap * (
+                                    2.0 - filtered_val / entry_filt
+                                )
+                            else:
+                                # 多头：价格上涨则 PnL 上涨
+                                row[col_name] = entry_cap * (
+                                    filtered_val / entry_filt
+                                )
+                            self._last_pnl[state_key] = row[col_name]
+                        # 若价格无效，保持 frozen 值不变
+                    else:
+                        # 非持仓：冻结 PnL
+                        row[col_name] = frozen
                 else:
-                    row[col_name] = self._last_pnl.get(last_key, 100.0)
+                    # ── 原有行为：仅冻结 ──
+                    if pos_flag:
+                        self._last_pnl[state_key] = row.get(col_name, 100.0)
+                    else:
+                        row[col_name] = self._last_pnl.get(state_key, 100.0)
+
+                self._prev_pos[state_key] = pos_flag
 
         return row
 
