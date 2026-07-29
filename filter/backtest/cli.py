@@ -123,6 +123,10 @@ def parse_args() -> argparse.Namespace:
         "--quiet", action="store_true",
         help="静默模式，只打印开始和结束信息",
     )
+    parser.add_argument(
+        "--track-pnl", action="store_true", default=False,
+        help="启用基于滤波价格的 PnL 追踪（track_pnl_from_price=True）",
+    )
 
     return parser.parse_args()
 
@@ -536,7 +540,7 @@ def main() -> None:
     # ParquetStore for full data persistence (default on; use --no-save-data to skip)
     parquet_store = None
     if not args.no_save_data:
-        parquet_store = ParquetStore(args.output_dir, args.ticker, configs, save_debug_data=args.debug)
+        parquet_store = ParquetStore(args.output_dir, args.ticker, configs, save_debug_data=args.debug, track_pnl_from_price=args.track_pnl)
         parquet_store.start_session()
         if not args.quiet:
             logger.info("数据存储已启用: {}", parquet_store.output_dir)
