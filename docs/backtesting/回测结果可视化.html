@@ -376,7 +376,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   <div class="section">
     <div class="section-title"><span class="num">4</span> PnL 曲线（4 视图 x 做多+做空）</div>
     <div class="plot-wrap-pnl" id="chart-pnl"></div>
-    <p class="annotation">实线=做多 PnL，虚线=做空 PnL。标注为各曲线终值。</p>
+    <p class="annotation">实线=做多 PnL，细实线=做空 PnL。标注为各曲线终值。▲做多入场 ▼做空入场 ●止盈 ✕止损</p>
   </div>
 
   <!-- Section 4b: Multi-Ticker PnL Overlay (仅多 ticker 时显示) -->
@@ -921,9 +921,45 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         x: barIdx, y: pnlShort,
         type: 'scatter', mode: 'lines',
         name: viewLabel(v) + ' 做空',
-        line: { width: 2, color: VIEW_COLORS[v], dash: 'dash' },
+        line: { width: 1.2, color: VIEW_COLORS[v], dash: 'solid' },
         showlegend: true,
       });
+    });
+
+    // Entry/exit markers on PnL curves
+    const EXIT_TP_COLOR = '#3fb950', EXIT_SL_COLOR = '#f85149';
+    VIEWS.forEach(v => {
+      const tradeCol = col(data, v + '_trade');
+      const reasonCol = col(data, v + '_trade_reason');
+      const pl = col(data, v + '_pnl_long');
+      const ps = col(data, v + '_pnl_short');
+      const lEntryX = [], lEntryY = [];
+      const sEntryX = [], sEntryY = [];
+      const tpX = [], tpY = [];
+      const slX = [], slY = [];
+      for (let i = 0; i < N; i++) {
+        const t = tradeCol[i];
+        if (!t) continue;
+        const r = reasonCol[i] || '';
+        const x = barIdx[i];
+        if (t === 'entry_long') { lEntryX.push(x); lEntryY.push(toNum(pl[i])); }
+        else if (t === 'entry_short') { sEntryX.push(x); sEntryY.push(toNum(ps[i])); }
+        else if (t === 'exit_long' || t === 'exit_short') {
+          const isLong = t === 'exit_long';
+          const y = toNum(isLong ? pl[i] : ps[i]);
+          if (r === 'take_profit') { tpX.push(x); tpY.push(y); }
+          else { slX.push(x); slY.push(y); }
+        }
+      }
+      var mk = function(xs, ys, sym, clr, nm) {
+        if (xs.length) traces.push({x: xs, y: ys, type: 'scatter', mode: 'markers',
+          name: nm, marker: {symbol: sym, color: clr, size: 9, line: {width: 1, color: 'rgba(255,255,255,0.3)'}},
+          showlegend: false, hovertemplate: nm + '<br>bar=%{x}<br>PnL=%{y:.2f}<extra></extra>'});
+      };
+      mk(lEntryX, lEntryY, 'triangle-up', VIEW_COLORS[v], viewLabel(v) + ' 做多入场');
+      mk(sEntryX, sEntryY, 'triangle-down', VIEW_COLORS[v], viewLabel(v) + ' 做空入场');
+      mk(tpX, tpY, 'circle', EXIT_TP_COLOR, viewLabel(v) + ' 止盈');
+      mk(slX, slY, 'x', EXIT_SL_COLOR, viewLabel(v) + ' 止损');
     });
 
     const annotations = [];
@@ -1039,7 +1075,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
           x: barIdx, y: shortData,
           type: 'scatter', mode: 'lines',
           name: tk.name + ' 做空',
-          line: { width: 2, color: tk.color, dash: 'dash' },
+          line: { width: 1.2, color: tk.color, dash: 'solid' },
           showlegend: true,
           hovertemplate: '<b>%{data.name}</b><br>bar_index=%{x}<br>PnL=%{y:.2f}<extra></extra>',
         });
@@ -1052,6 +1088,44 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
             xanchor: 'left', xshift: 5,
           });
         }
+      }
+
+      // Entry/exit markers for multi-ticker PnL
+      if (td.columns) {
+        VIEWS.forEach(function(v) {
+          var tradeKey = v + '_trade';
+          var reasonKey = v + '_trade_reason';
+          var longKey = v + '_pnl_long';
+          var shortKey2 = v + '_pnl_short';
+          if (!td.columns[tradeKey]) return;
+          var tradeArr = td.columns[tradeKey];
+          var reasonArr = td.columns[reasonKey] || [];
+          var longArr = td.columns[longKey] || [];
+          var shortArr = td.columns[shortKey2] || [];
+          var lEx = [], lEy = [], sEx = [], sEy = [], tpx = [], tpy = [], slx = [], sly = [];
+          for (var i2 = 0; i2 < N; i2++) {
+            var tv = tradeArr[i2]; if (!tv) continue;
+            var rv = reasonArr[i2] || '';
+            var xi = barIdx[i2];
+            if (tv === 'entry_long') { lEx.push(xi); lEy.push(toNum(longArr[i2])); }
+            else if (tv === 'entry_short') { sEx.push(xi); sEy.push(toNum(shortArr[i2])); }
+            else if (tv === 'exit_long' || tv === 'exit_short') {
+              var isLong2 = tv === 'exit_long';
+              var yi = toNum(isLong2 ? longArr[i2] : shortArr[i2]);
+              if (rv === 'take_profit') { tpx.push(xi); tpy.push(yi); }
+              else { slx.push(xi); sly.push(yi); }
+            }
+          }
+          var mkM = function(xs, ys, sym, clr, nm) {
+            if (xs.length) traces.push({x: xs, y: ys, type: 'scatter', mode: 'markers',
+              name: tk.name + ' ' + nm, marker: {symbol: sym, color: clr, size: 9, line: {width: 1, color: 'rgba(255,255,255,0.3)'}},
+              showlegend: false, hovertemplate: tk.name + ' ' + nm + '<br>bar=%{x}<br>PnL=%{y:.2f}<extra></extra>'});
+          };
+          mkM(lEx, lEy, 'triangle-up', tk.color, viewLabel(v) + ' 做多入场');
+          mkM(sEx, sEy, 'triangle-down', tk.color, viewLabel(v) + ' 做空入场');
+          mkM(tpx, tpy, 'circle', '#3fb950', viewLabel(v) + ' 止盈');
+          mkM(slx, sly, 'x', '#f85149', viewLabel(v) + ' 止损');
+        });
       }
     });
 
@@ -1374,10 +1448,40 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       x: barIdx, y: pnlShort,
       type: 'scatter', mode: 'lines',
       name: '做空',
-      line: { width: 2, color: color, dash: 'dash' },
+      line: { width: 1.2, color: color, dash: 'solid' },
       xaxis: 'x4', yaxis: 'y4',
       showlegend: true,
     });
+
+    // Entry/exit markers on PnL curves (per-view)
+    (function() {
+      var tradeCol = col(data, v + '_trade');
+      var reasonCol = col(data, v + '_trade_reason');
+      var lEx = [], lEy = [], sEx = [], sEy = [], tpx = [], tpy = [], slx = [], sly = [];
+      for (var i3 = 0; i3 < N; i3++) {
+        var tv = tradeCol[i3]; if (!tv) continue;
+        var rv = reasonCol[i3] || '';
+        var xi = barIdx[i3];
+        if (tv === 'entry_long') { lEx.push(xi); lEy.push(toNum(pnlLong[i3])); }
+        else if (tv === 'entry_short') { sEx.push(xi); sEy.push(toNum(pnlShort[i3])); }
+        else if (tv === 'exit_long' || tv === 'exit_short') {
+          var isLong3 = tv === 'exit_long';
+          var yi = toNum(isLong3 ? pnlLong[i3] : pnlShort[i3]);
+          if (rv === 'take_profit') { tpx.push(xi); tpy.push(yi); }
+          else { slx.push(xi); sly.push(yi); }
+        }
+      }
+      var mkD = function(xs, ys, sym, clr, nm) {
+        if (xs.length) traces.push({x: xs, y: ys, type: 'scatter', mode: 'markers',
+          name: nm, marker: {symbol: sym, color: clr, size: 9, line: {width: 1, color: 'rgba(255,255,255,0.3)'}},
+          showlegend: false, hovertemplate: nm + '<br>bar=%{x}<br>PnL=%{y:.2f}<extra></extra>',
+          xaxis: 'x4', yaxis: 'y4'});
+      };
+      mkD(lEx, lEy, 'triangle-up', color, label + ' 做多入场');
+      mkD(sEx, sEy, 'triangle-down', color, label + ' 做空入场');
+      mkD(tpx, tpy, 'circle', '#3fb950', label + ' 止盈');
+      mkD(slx, sly, 'x', '#f85149', label + ' 止损');
+    })();
 
     // PnL end-value annotations
     const lastL = toNum(pnlLong[N - 1]);
