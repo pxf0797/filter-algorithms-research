@@ -21,7 +21,7 @@ from filter.common.pnl_renderer import (
     make_pnl_combined_trace,
     make_drawdown_trace,
 )
-from filter.constants.colors import COLORS, get_colors, view_color
+from filter.constants.colors import COLORS, view_color
 
 
 def render_backtest_dashboard(
@@ -75,7 +75,7 @@ def render_backtest_dashboard(
     _render_kpi_cards(metrics)
 
     # ── PnL 曲线 + 回撤 ──
-    _render_pnl_chart(long_pnl, short_pnl, result_df, primary_view)
+    _render_pnl_chart(long_pnl, short_pnl, result_df)
 
     # ── 视图对比（多视图时）──
     if len(pnl_views) > 1:
@@ -276,7 +276,6 @@ def _render_pnl_chart(
     long_pnl: np.ndarray,
     short_pnl: np.ndarray,
     df: pd.DataFrame,
-    view_prefix: str = "",
 ) -> None:
     """渲染 PnL 累积曲线和回撤图。
 
@@ -290,7 +289,6 @@ def _render_pnl_chart(
     st.subheader("PnL 曲线")
 
     combined = compute_combined_pnl(long_pnl, short_pnl)
-    colors = get_colors()
 
     fig = make_subplots(
         rows=2, cols=1,
@@ -327,81 +325,6 @@ def _render_pnl_chart(
     )
     # 零线
     fig.add_hline(y=0, line_dash="dash", line_color=COLORS["zero_line"], row=1, col=1)
-
-    # ── 入场/离场标记 ──
-    if view_prefix:
-        trade_col = f"{view_prefix}_trade"
-        return_col = f"{view_prefix}_trade_return"
-        reason_col = f"{view_prefix}_trade_reason"
-        if trade_col in df.columns:
-            # 入场标记
-            l_entry_x, l_entry_y = [], []
-            s_entry_x, s_entry_y = [], []
-            # 离场标记
-            l_exit_sl_x, l_exit_sl_y = [], []
-            l_exit_tp_x, l_exit_tp_y = [], []
-            s_exit_sl_x, s_exit_sl_y = [], []
-            s_exit_tp_x, s_exit_tp_y = [], []
-            # 盈亏标注
-            annotations = []
-
-            for i, trade_val in enumerate(df[trade_col]):
-                if pd.isna(trade_val) or str(trade_val).strip() == "":
-                    continue
-                tv = str(trade_val)
-                if tv.startswith("entry_"):
-                    if "long" in tv:
-                        l_entry_x.append(x_vals[i])
-                        l_entry_y.append(float(long_pnl[i]) - PNL_BASELINE)
-                    else:
-                        s_entry_x.append(x_vals[i])
-                        s_entry_y.append(float(short_pnl[i]) - PNL_BASELINE)
-                elif tv.startswith("exit_"):
-                    pnl_arr = long_pnl if "long" in tv else short_pnl
-                    raw_reason = str(df[reason_col].iloc[i]) if reason_col in df.columns else ""
-                    ret_pct = float(df[return_col].iloc[i]) if return_col in df.columns and not pd.isna(df[return_col].iloc[i]) else 0.0
-                    is_sl = raw_reason == "stop_loss"
-                    if "long" in tv:
-                        if is_sl:
-                            l_exit_sl_x.append(x_vals[i])
-                            l_exit_sl_y.append(float(pnl_arr[i]) - PNL_BASELINE)
-                        else:
-                            l_exit_tp_x.append(x_vals[i])
-                            l_exit_tp_y.append(float(pnl_arr[i]) - PNL_BASELINE)
-                    else:
-                        if is_sl:
-                            s_exit_sl_x.append(x_vals[i])
-                            s_exit_sl_y.append(float(pnl_arr[i]) - PNL_BASELINE)
-                        else:
-                            s_exit_tp_x.append(x_vals[i])
-                            s_exit_tp_y.append(float(pnl_arr[i]) - PNL_BASELINE)
-                    # 盈亏% 标注
-                    label_color = colors["exit_sl"] if is_sl else colors["exit_tp"]
-                    arrow = "↑" if "long" in tv else "↓"
-                    annotations.append(dict(
-                        x=x_vals[i], y=float(pnl_arr[i]) - PNL_BASELINE,
-                        text=f"{arrow}{ret_pct:+.1f}%", showarrow=False,
-                        font=dict(size=8, color=label_color), yshift=12,
-                    ))
-
-            def _add_markers(xs, ys, sym, clr):
-                if xs:
-                    fig.add_trace(
-                        go.Scattergl(x=xs, y=ys, mode="markers",
-                                     marker=dict(color=clr, symbol=sym, size=8),
-                                     showlegend=False),
-                        row=1, col=1,
-                    )
-
-            _add_markers(l_entry_x, l_entry_y, "triangle-up", colors["pnl_long"])
-            _add_markers(s_entry_x, s_entry_y, "triangle-down", colors["pnl_short"])
-            _add_markers(l_exit_sl_x, l_exit_sl_y, "x", colors["exit_sl"])
-            _add_markers(s_exit_sl_x, s_exit_sl_y, "x", colors["exit_sl"])
-            _add_markers(l_exit_tp_x, l_exit_tp_y, "circle", colors["exit_tp"])
-            _add_markers(s_exit_tp_x, s_exit_tp_y, "circle", colors["exit_tp"])
-
-            for ann in annotations:
-                fig.add_annotation(ann, row=1, col=1)
 
     # 回撤
     fig.add_trace(
