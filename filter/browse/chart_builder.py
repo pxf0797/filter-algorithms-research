@@ -292,7 +292,7 @@ def _add_pnl_traces(t, long_pnl, short_pnl, trade_records, pnl_row):
             marker=dict(color=clr, symbol=sym, size=8), showlegend=False,
             xaxis=_pnl_x, yaxis=_pnl_y))
     _mk(_l_entry_x, _l_entry_y, "triangle-up", colors["pnl_long"])
-    _mk(_s_entry_x, _s_entry_y, "triangle-up", colors["pnl_short"])
+    _mk(_s_entry_x, _s_entry_y, "triangle-down", colors["pnl_short"])
     _mk(_l_exit_sl_x, _l_exit_sl_y, "x", colors["exit_sl"])
     _mk(_s_exit_sl_x, _s_exit_sl_y, "x", colors["exit_sl"])
     _mk(_l_exit_tp_x, _l_exit_tp_y, "circle", colors["exit_tp"])

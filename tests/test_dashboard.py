@@ -308,7 +308,7 @@ class TestPnlChartTraces:
     """验证 _render_pnl_chart 同时包含做多、做空和组合曲线。"""
 
     def test_pnl_chart_has_long_short_and_combined_traces(self):
-        """图表应包含 3 条 trace: 做多 PnL (虚线), 做空 PnL (虚线), max(做多,做空) PnL (实线)。"""
+        """图表应包含 3 条 trace: 做多 PnL (虚线), 做空 PnL (细实线), max(做多,做空) PnL (实线)。"""
         from filter.backtest.dashboard import _render_pnl_chart
         import filter.backtest.dashboard as dash_mod
 
@@ -351,8 +351,8 @@ class TestPnlChartTraces:
             long_trace = next(t for t in fig.data if t.name == "做多 PnL")
             assert long_trace.line.dash == "dot"
 
-    def test_short_trace_is_dashed(self):
-        """做空 PnL trace 应为虚线样式。"""
+    def test_short_trace_is_solid_and_thinner(self):
+        """做空 PnL trace 应为细实线样式（solid, width=0.8）。"""
         from filter.backtest.dashboard import _render_pnl_chart
         import filter.backtest.dashboard as dash_mod
 
@@ -366,7 +366,12 @@ class TestPnlChartTraces:
             fig = mock_st.plotly_chart.call_args[0][0]
 
             short_trace = next(t for t in fig.data if t.name == "做空 PnL")
-            assert short_trace.line.dash == "dot"
+            assert short_trace.line.dash == "solid", (
+                f"做空 PnL 应为 solid，实际为 {short_trace.line.dash}"
+            )
+            assert short_trace.line.width == 0.8, (
+                f"做空 PnL linewidth 应为 0.8（细实线），实际为 {short_trace.line.width}"
+            )
 
 
 class TestCombinedPnlIsMaxOfLongShort:
@@ -1447,3 +1452,352 @@ class TestBackwardCompatibilityP3:
                 if "无交易" in str(c[0][0])
             ]
             assert len(caption_calls) >= 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 需求: 做空线细实线 + PnL 曲线标记 (triangle/circle/x)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestShortPnLTraceSolid:
+    """验证做空 PnL trace 为细实线样式。"""
+
+    def test_short_trace_line_dash_is_solid(self):
+        """做空 PnL trace line.dash 应为 'solid'。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        n = 10
+        long_pnl = np.linspace(100, 105, n)
+        short_pnl = np.linspace(100, 108, n)
+        df = pd.DataFrame({"bar_timestamp": pd.date_range("2024-01-01", periods=n, freq="h")})
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df)
+            fig = mock_st.plotly_chart.call_args[0][0]
+
+            short_trace = next(t for t in fig.data if t.name == "做空 PnL")
+            assert short_trace.line.dash == "solid"
+
+    def test_short_trace_line_width_is_thinner(self):
+        """做空 PnL trace line.width 应 < 做多 (0.8 < 1.0)。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        n = 10
+        long_pnl = np.linspace(100, 105, n)
+        short_pnl = np.linspace(100, 108, n)
+        df = pd.DataFrame({"bar_timestamp": pd.date_range("2024-01-01", periods=n, freq="h")})
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df)
+            fig = mock_st.plotly_chart.call_args[0][0]
+
+            long_trace = next(t for t in fig.data if t.name == "做多 PnL")
+            short_trace = next(t for t in fig.data if t.name == "做空 PnL")
+            assert short_trace.line.width < long_trace.line.width, (
+                f"做空线宽({short_trace.line.width})应 < 做多线宽({long_trace.line.width})"
+            )
+
+    def test_long_trace_still_dashed(self):
+        """做多 PnL trace 仍保持虚线样式。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        n = 10
+        long_pnl = np.linspace(100, 105, n)
+        short_pnl = np.linspace(100, 108, n)
+        df = pd.DataFrame({"bar_timestamp": pd.date_range("2024-01-01", periods=n, freq="h")})
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df)
+            fig = mock_st.plotly_chart.call_args[0][0]
+
+            long_trace = next(t for t in fig.data if t.name == "做多 PnL")
+            assert long_trace.line.dash == "dot"
+
+
+class TestPnlChartMarkers:
+    """验证 PnL 图表上的入场/离场标记符号。"""
+
+    def _make_trade_df(self, trades: list[tuple[int, str, str, float]]) -> pd.DataFrame:
+        """构建含 trade 列的测试 DataFrame。
+
+        trades: list of (bar_index, trade_val, reason, return_pct)
+        非 trade 行填空字符串/NaN。
+        """
+        n = trades[-1][0] + 1 if trades else 10
+        data = {
+            "v0_trade": [""] * n,
+            "v0_trade_return": [np.nan] * n,
+            "v0_trade_reason": [""] * n,
+        }
+        for idx, tv, reason, ret in trades:
+            data["v0_trade"][idx] = tv
+            data["v0_trade_return"][idx] = ret
+            data["v0_trade_reason"][idx] = reason
+        return pd.DataFrame(data)
+
+    def test_no_markers_without_view_prefix(self):
+        """无 view_prefix 时不添加任何标记 trace（仅 4 条基础 trace）。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        n = 10
+        long_pnl = np.linspace(100, 110, n)
+        short_pnl = np.linspace(100, 105, n)
+        df = self._make_trade_df([(2, "entry_long", "", 0.0), (7, "exit_long", "take_profit", 5.0)])
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df)  # 不传 view_prefix
+            fig = mock_st.plotly_chart.call_args[0][0]
+            # 基础 4 条：long_dot, short_solid, combined, drawdown
+            assert len(fig.data) == 4, (
+                f"无 view_prefix 应只有 4 条基础 trace，实际 {len(fig.data)}"
+            )
+
+    def test_long_entry_marker_triangle_up(self):
+        """做多入场应为 ▲ (triangle-up)，绿色。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        n = 20
+        long_pnl = np.linspace(100, 120, n)
+        short_pnl = np.full(n, 100.0)
+        # 在 bar 5 做多入场
+        df = self._make_trade_df([(5, "entry_long", "", 0.0)])
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df, view_prefix="v0")
+            fig = mock_st.plotly_chart.call_args[0][0]
+
+            # 找到 triangle-up marker trace
+            triangle_up_traces = [
+                t for t in fig.data
+                if hasattr(t, "marker") and t.marker and t.marker.symbol == "triangle-up"
+            ]
+            assert len(triangle_up_traces) >= 1, (
+                f"应至少有 1 条 triangle-up 标记 trace，实际找到 {len(triangle_up_traces)}"
+            )
+            # 验证颜色为 pnl_long 绿色
+            from filter.constants.colors import COLORS
+            assert triangle_up_traces[0].marker.color == COLORS["pnl_long"]
+
+    def test_short_entry_marker_triangle_down(self):
+        """做空入场应为 ▼ (triangle-down)，红色。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        n = 20
+        long_pnl = np.full(n, 100.0)
+        short_pnl = np.linspace(100, 115, n)
+        # 在 bar 5 做空入场
+        df = self._make_trade_df([(5, "entry_short", "", 0.0)])
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df, view_prefix="v0")
+            fig = mock_st.plotly_chart.call_args[0][0]
+
+            triangle_down_traces = [
+                t for t in fig.data
+                if hasattr(t, "marker") and t.marker and t.marker.symbol == "triangle-down"
+            ]
+            assert len(triangle_down_traces) >= 1, (
+                f"应至少有 1 条 triangle-down 标记 trace，实际找到 {len(triangle_down_traces)}"
+            )
+            from filter.constants.colors import COLORS
+            assert triangle_down_traces[0].marker.color == COLORS["pnl_short"]
+
+    def test_stop_loss_exit_marker_x(self):
+        """止损离场应为 ✕ (x)，红色。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        n = 20
+        long_pnl = np.linspace(100, 120, n)
+        short_pnl = np.full(n, 100.0)
+        # 在 bar 3 做多入场，bar 15 止损离场
+        df = self._make_trade_df([
+            (3, "entry_long", "", 0.0),
+            (15, "exit_long", "stop_loss", -5.0),
+        ])
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df, view_prefix="v0")
+            fig = mock_st.plotly_chart.call_args[0][0]
+
+            x_traces = [
+                t for t in fig.data
+                if hasattr(t, "marker") and t.marker and t.marker.symbol == "x"
+            ]
+            assert len(x_traces) >= 1, (
+                f"止损离场应生成 'x' marker trace，实际找到 {len(x_traces)}"
+            )
+            from filter.constants.colors import COLORS
+            assert x_traces[0].marker.color == COLORS["exit_sl"]
+
+    def test_take_profit_exit_marker_circle(self):
+        """止盈离场应为 ○ (circle)，绿色。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        n = 20
+        long_pnl = np.linspace(100, 120, n)
+        short_pnl = np.full(n, 100.0)
+        # 在 bar 3 做多入场，bar 15 止盈离场（非 stop_loss = take_profit）
+        df = self._make_trade_df([
+            (3, "entry_long", "", 0.0),
+            (15, "exit_long", "take_profit", 8.0),
+        ])
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df, view_prefix="v0")
+            fig = mock_st.plotly_chart.call_args[0][0]
+
+            circle_traces = [
+                t for t in fig.data
+                if hasattr(t, "marker") and t.marker and t.marker.symbol == "circle"
+            ]
+            assert len(circle_traces) >= 1, (
+                f"止盈离场应生成 'circle' marker trace，实际找到 {len(circle_traces)}"
+            )
+            from filter.constants.colors import COLORS
+            assert circle_traces[0].marker.color == COLORS["exit_tp"]
+
+    def test_annotations_have_return_pct(self):
+        """离场标记应包含盈亏% 标注。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        n = 20
+        long_pnl = np.linspace(100, 120, n)
+        short_pnl = np.full(n, 100.0)
+        df = self._make_trade_df([
+            (3, "entry_long", "", 0.0),
+            (15, "exit_long", "stop_loss", -5.2),
+        ])
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df, view_prefix="v0")
+            fig = mock_st.plotly_chart.call_args[0][0]
+
+            assert len(fig.layout.annotations) >= 1, (
+                "离场应生成盈亏% annotation"
+            )
+            # 至少有一个 annotation 包含 "-5.2%"
+            found_pct = any("-5.2%" in (ann.text or "") for ann in fig.layout.annotations)
+            assert found_pct, (
+                f"annotation 应包含 '-5.2%'，实际: {[a.text for a in fig.layout.annotations]}"
+            )
+
+    def test_all_four_marker_types_coexist(self):
+        """多种交易事件的标记共存于同一图表。"""
+        from filter.backtest.dashboard import _render_pnl_chart
+        import filter.backtest.dashboard as dash_mod
+
+        n = 30
+        long_pnl = np.linspace(100, 130, n)
+        short_pnl = np.linspace(100, 125, n)
+        # 混合多种交易
+        df = self._make_trade_df([
+            (2, "entry_long", "", 0.0),
+            (5, "entry_short", "", 0.0),
+            (10, "exit_long", "take_profit", 3.0),
+            (15, "exit_short", "stop_loss", -4.0),
+            (18, "entry_long", "", 0.0),
+            (25, "exit_long", "stop_loss", -2.0),
+        ])
+
+        with patch.object(dash_mod, "st") as mock_st:
+            _render_pnl_chart(long_pnl, short_pnl, df, view_prefix="v0")
+            fig = mock_st.plotly_chart.call_args[0][0]
+
+            symbols = [
+                t.marker.symbol for t in fig.data
+                if hasattr(t, "marker") and t.marker
+            ]
+            assert "triangle-up" in symbols, "应有做多入场标记 ▲"
+            assert "triangle-down" in symbols, "应有做空入场标记 ▼"
+            assert "x" in symbols, "应有止损标记 ✕"
+            assert "circle" in symbols, "应有止盈标记 ○"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 图表构建器做空入场标记验证
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestChartBuilderShortEntryMarker:
+    """验证 chart_builder 中做空入场 marker 使用 triangle-down。"""
+
+    def test_builder_short_entry_uses_triangle_down(self):
+        """_add_pnl_traces 中做空入场标记符号应为 'triangle-down'。"""
+        import inspect
+        from browse.chart_builder import _add_pnl_traces
+
+        source = inspect.getsource(_add_pnl_traces)
+        # 做空入场应使用 triangle-down
+        assert 'triangle-down' in source, (
+            "做空入场标记应为 'triangle-down'"
+        )
+        # 验证仍保留了 triangle-up（做多入场用）
+        assert 'triangle-up' in source, "做多入场标记应继续使用 'triangle-up'"
+
+    def test_long_entry_still_triangle_up(self):
+        """_add_pnl_traces 中做多入场标记仍为 'triangle-up'。"""
+        from browse.chart_builder import _add_pnl_traces
+        import numpy as np
+
+        n = 30
+        t = np.arange(n, dtype=float)
+        long_pnl = np.linspace(100, 120, n)
+        short_pnl = np.full(n, 100.0)
+        trade_records = [
+            {"type": "long", "entry_idx": 5, "exit_idx": 15,
+             "exit_reason": "take_profit", "return_pct": 3.0, "id": 1},
+        ]
+
+        traces, shapes, annotations, yaxes = _add_pnl_traces(
+            t, long_pnl, short_pnl, trade_records, pnl_row=6,
+        )
+
+        # 查找 triangle-up 标记 traces
+        up_traces = [
+            tr for tr in traces
+            if tr.get("mode") == "markers" and tr.get("marker", {}).get("symbol") == "triangle-up"
+        ]
+        assert len(up_traces) >= 1, f"做多入场应有 triangle-up 标记，实际找到 {len(up_traces)} 条"
+
+        # 验证颜色
+        from filter.constants.colors import COLORS
+        assert up_traces[0]["marker"]["color"] == COLORS["pnl_long"]
+
+    def test_short_entry_uses_triangle_down_symbol(self):
+        """做空入场 marker 符号为 'triangle-down'，颜色为做空红。"""
+        from browse.chart_builder import _add_pnl_traces
+        import numpy as np
+
+        n = 30
+        t = np.arange(n, dtype=float)
+        long_pnl = np.full(n, 100.0)
+        short_pnl = np.linspace(100, 120, n)
+        trade_records = [
+            {"type": "short", "entry_idx": 3, "exit_idx": 20,
+             "exit_reason": "take_profit", "return_pct": 5.0, "id": 1},
+        ]
+
+        traces, shapes, annotations, yaxes = _add_pnl_traces(
+            t, long_pnl, short_pnl, trade_records, pnl_row=6,
+        )
+
+        # 查找 triangle-down 标记 traces
+        down_traces = [
+            tr for tr in traces
+            if tr.get("mode") == "markers" and tr.get("marker", {}).get("symbol") == "triangle-down"
+        ]
+        assert len(down_traces) >= 1, (
+            f"做空入场应有 triangle-down 标记，实际找到 {len(down_traces)} 条"
+        )
+
+        from filter.constants.colors import COLORS
+        assert down_traces[0]["marker"]["color"] == COLORS["pnl_short"]
