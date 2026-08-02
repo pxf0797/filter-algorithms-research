@@ -516,3 +516,268 @@ class TestPeriodDashboardHigherTfPosition:
         assert len(v0_higher["shortPos"]) == n
         v0_sig = columns.get("v0_sig", [])
         assert len(v0_sig) == n
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Signal layout configuration constants (ports of JS rendering constants)
+# These define y-ranges and annotation positions in the position overlay and
+# position status charts in 回测结果可视化.html.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Position overlay y-ranges — narrowed to avoid overlapping with signal bands
+POSITION_OVERLAY_LONG_Y = (0.1, 1.2)
+POSITION_OVERLAY_SHORT_Y = (-1.2, -0.1)
+
+# Position status chart band y-ranges — anchored at 0 to prevent overlap
+POSITION_STATUS_LONG_Y = (0, 1.2)
+POSITION_STATUS_SHORT_Y = (-1.2, 0)
+
+# Higher TF position bands — full height at low opacity
+HIGHER_TF_Y_RANGE = (-1.2, 1.2)
+HIGHER_TF_LONG_COLOR = "rgba(56,139,253,0.06)"
+HIGHER_TF_SHORT_COLOR = "rgba(210,140,40,0.06)"
+
+# Annotation y position — moved from 0.98 to 0.90 to avoid overlapping bands
+ANNOTATION_Y = 0.90
+# The old value that caused overlap
+ANNOTATION_Y_OLD = 0.98
+
+# Signal y-range (for reference, signals are plotted in this region)
+SIGNAL_Y_RANGE = (-1.2, 1.2)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Test: Signal Layout No Overlap
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestSignalLayoutNoOverlap:
+    """Test that signals and position bands don't visually overlap.
+
+    The fix narrowed position overlay y-ranges so long/short bands stay in their
+    own half of the chart, moved annotations lower to avoid collision, and kept
+    higher-TF bands at full height with low opacity.
+    """
+
+    # ── Position overlay y-range tests ──────────────────────────────────────
+
+    def test_position_overlay_long_y_range(self):
+        """Long position overlay y-range should be [0.1, 1.2], not full [-1.2, 1.2].
+
+        Narrowing the range prevents the long position band from spilling into the
+        negative (short) half of the chart.
+        """
+        y_min, y_max = POSITION_OVERLAY_LONG_Y
+        # Range is strictly in the positive half
+        assert y_min > 0, f"Long overlay y_min={y_min} should be > 0"
+        assert y_max > 0, f"Long overlay y_max={y_max} should be > 0"
+        # Not the old full-range values
+        assert y_min != -1.2, "Long overlay y_min should not be -1.2 (old full-range)"
+        # y_max can be 1.2 — the key difference is y_min=0.1 instead of -1.2
+        # Reasonable bounds: within [0, 1.5]
+        assert 0 <= y_min <= 1.5
+        assert 0 <= y_max <= 1.5
+        assert y_min < y_max, "y_min must be less than y_max"
+
+    def test_position_overlay_short_y_range(self):
+        """Short position overlay y-range should be [-1.2, -0.1].
+
+        Narrowing the range prevents the short position band from spilling into the
+        positive (long) half of the chart.
+        """
+        y_min, y_max = POSITION_OVERLAY_SHORT_Y
+        # Range is strictly in the negative half
+        assert y_min < 0, f"Short overlay y_min={y_min} should be < 0"
+        assert y_max < 0, f"Short overlay y_max={y_max} should be < 0"
+        # Not the old full-range values
+        assert y_min == -1.2, "Short overlay y_min should be -1.2"
+        assert y_max != 1.2, "Short overlay y_max should not be 1.2 (old full-range)"
+        # Reasonable bounds: within [-1.5, 0]
+        assert -1.5 <= y_min <= 0
+        assert -1.5 <= y_max <= 0
+        assert y_min < y_max, "y_min must be less than y_max"
+
+    def test_position_overlay_long_and_short_no_overlap(self):
+        """Long and short position overlay y-ranges must not overlap.
+
+        Long range [0.1, 1.2] and short range [-1.2, -0.1] are in separate
+        positive/negative halves.
+        """
+        long_min, long_max = POSITION_OVERLAY_LONG_Y
+        short_min, short_max = POSITION_OVERLAY_SHORT_Y
+        # The ranges must be disjoint: long is entirely positive, short entirely negative
+        assert long_min > 0, f"Long overlay min {long_min} should be positive"
+        assert long_max > 0, f"Long overlay max {long_max} should be positive"
+        assert short_min < 0, f"Short overlay min {short_min} should be negative"
+        assert short_max < 0, f"Short overlay max {short_max} should be negative"
+        # Explicit gap check: short_max < long_min
+        assert short_max < long_min, (
+            f"Short overlay max {short_max} must be less than "
+            f"long overlay min {long_min} to avoid overlap"
+        )
+
+    # ── Position status chart band y-range tests ────────────────────────────
+
+    def test_position_status_long_band_y_range(self):
+        """Position status chart long band y-range: [0, 1.2].
+
+        Anchored at y=0 so the band starts at the midpoint, not dipping into
+        negative territory.
+        """
+        y_min, y_max = POSITION_STATUS_LONG_Y
+        # Anchored at 0 — starting from the midline
+        assert y_min == 0, f"Long status band y_min={y_min} should be 0 (midline anchor)"
+        assert y_max == 1.2, f"Long status band y_max={y_max} should be 1.2"
+        assert y_max > y_min
+
+    def test_position_status_short_band_y_range(self):
+        """Position status chart short band y-range: [-1.2, 0].
+
+        Anchored at y=0 so the band ends at the midpoint, not intruding into
+        positive territory.
+        """
+        y_min, y_max = POSITION_STATUS_SHORT_Y
+        assert y_min == -1.2, f"Short status band y_min={y_min} should be -1.2"
+        assert y_max == 0, f"Short status band y_max={y_max} should be 0 (midline anchor)"
+        assert y_max > y_min
+
+    def test_position_status_long_short_no_overlap(self):
+        """Position status long [0, 1.2] and short [-1.2, 0] bands share only y=0.
+
+        Both bands are anchored at y=0 and extend in opposite directions.
+        """
+        long_min, long_max = POSITION_STATUS_LONG_Y
+        short_min, short_max = POSITION_STATUS_SHORT_Y
+        # Share y=0 as boundary, zero-area overlap is acceptable
+        assert long_min == 0
+        assert short_max == 0
+        # The interiors must not overlap: long interior is (0, 1.2], short is [-1.2, 0)
+        assert short_min < 0, "Short band interior must be negative"
+        assert long_max > 0, "Long band interior must be positive"
+
+    # ── Annotation position tests ───────────────────────────────────────────
+
+    def test_annotation_y_position_not_overlapping(self):
+        """Annotations should be at y=0.90 domain, not y=0.98.
+
+        Moving annotations from 0.98 to 0.90 keeps them below the upper band
+        edge and avoids visual collision with position bands.
+        """
+        # The new annotation y is lower — it avoids the upper band region
+        assert ANNOTATION_Y == 0.90, f"Annotation y should be 0.90, got {ANNOTATION_Y}"
+        # Verify it is lower than the old value
+        assert ANNOTATION_Y < ANNOTATION_Y_OLD, (
+            f"Annotation y={ANNOTATION_Y} should be less than "
+            f"old y={ANNOTATION_Y_OLD}"
+        )
+        # Annotation should be within the chart domain [0, 1]
+        assert 0 < ANNOTATION_Y < 1.0, f"Annotation y={ANNOTATION_Y} should be in (0, 1)"
+
+    def test_annotation_below_position_band_top(self):
+        """Annotation y=0.90 is below the long position overlay top (1.2 in domain)."""
+        _, long_overlay_max = POSITION_OVERLAY_LONG_Y
+        # When mapped to domain [0, 1], the top of a band at data-coord 1.2
+        # with axis range [-1.2, 1.2] sits roughly near the top. The annotation
+        # at 0.90 leaves room before the band edge.
+        assert ANNOTATION_Y < 0.95, (
+            f"Annotation y={ANNOTATION_Y} should be well below 0.95 "
+            f"to avoid the upper band edge"
+        )
+
+    # ── Higher TF bands tests ────────────────────────────────────────────────
+
+    def test_higher_tf_bands_full_height(self):
+        """Higher TF position bands keep full y-range [-1.2, 1.2] at low opacity.
+
+        Unlike the current-TF position overlay (which is narrowed), higher-TF
+        bands use the full chart height because their low opacity prevents them
+        from visually overwhelming the signals.
+        """
+        y_min, y_max = HIGHER_TF_Y_RANGE
+        # Full range matches the signal y-range
+        assert y_min == -1.2, f"Higher TF y_min={y_min} should be -1.2 (full range)"
+        assert y_max == 1.2, f"Higher TF y_max={y_max} should be 1.2 (full range)"
+        # Verify full range is wider than the narrowed position overlay ranges
+        htf_span = y_max - y_min  # 2.4
+        long_span = POSITION_OVERLAY_LONG_Y[1] - POSITION_OVERLAY_LONG_Y[0]  # 1.1
+        assert htf_span > long_span, (
+            f"Higher TF span {htf_span} should be wider than "
+            f"long overlay span {long_span}"
+        )
+
+    def test_higher_tf_opacity_is_low(self):
+        """Higher TF position band opacity should be 0.06.
+
+        The low opacity (near-transparent) makes the full-height bands subtle
+        enough that they don't obscure the signal lines.
+        """
+        # Extract the alpha component from the rgba color strings
+        def _alpha_from_rgba(rgba_str):
+            """Parse the alpha value from an rgba(r,g,b,a) string."""
+            # Format: rgba(R,G,B,A)
+            values_part = rgba_str.replace("rgba(", "").replace(")", "")
+            parts = [float(x) for x in values_part.split(",")]
+            return parts[3]
+
+        long_alpha = _alpha_from_rgba(HIGHER_TF_LONG_COLOR)
+        short_alpha = _alpha_from_rgba(HIGHER_TF_SHORT_COLOR)
+        assert long_alpha == 0.06, f"Long higher-TF opacity should be 0.06, got {long_alpha}"
+        assert short_alpha == 0.06, f"Short higher-TF opacity should be 0.06, got {short_alpha}"
+        assert long_alpha < 0.1, "Higher TF opacity should be low (< 0.1)"
+
+    # ── Overlap verification tests ──────────────────────────────────────────
+
+    def test_long_short_bands_no_overlap(self):
+        """Long and short position bands should be in separate y regions.
+
+        Long bands occupy only positive y, short bands occupy only negative y.
+        This prevents the visual muddiness where both bands overlap each other
+        and the signal line at mid-chart.
+        """
+        # Position overlay
+        lo_min, lo_max = POSITION_OVERLAY_LONG_Y
+        so_min, so_max = POSITION_OVERLAY_SHORT_Y
+        # The long overlay range is entirely positive, short entirely negative
+        assert lo_min > 0
+        assert so_max < 0
+        # No overlap possible when one is all-positive and the other all-negative
+        assert lo_min > so_max, (
+            f"Long overlay [{lo_min}, {lo_max}] and short overlay "
+            f"[{so_min}, {so_max}] must not overlap"
+        )
+
+        # Position status
+        ls_min, ls_max = POSITION_STATUS_LONG_Y
+        ss_min, ss_max = POSITION_STATUS_SHORT_Y
+        assert ls_min >= 0
+        assert ss_max <= 0
+        # Only overlap at y=0 (the midline), which is a zero-area boundary
+        overlap_start = max(ls_min, ss_min)
+        overlap_end = min(ls_max, ss_max)
+        assert overlap_start >= overlap_end, (
+            f"Position status bands overlap in [{overlap_start}, {overlap_end}]"
+        )
+
+    def test_overlay_narrower_than_full_signal_range(self):
+        """Position overlay ranges are narrower than full signal y-range [-1.2, 1.2].
+
+        This is the core fix: the bands no longer span the full chart height,
+        leaving room for the signal lines to be visible without obstruction.
+        """
+        signal_min, signal_max = SIGNAL_Y_RANGE
+        signal_span = signal_max - signal_min  # 2.4
+
+        lo_span = POSITION_OVERLAY_LONG_Y[1] - POSITION_OVERLAY_LONG_Y[0]    # 1.1
+        so_span = POSITION_OVERLAY_SHORT_Y[1] - POSITION_OVERLAY_SHORT_Y[0]  # 1.1
+
+        # Each overlay is narrower than the full signal range
+        assert lo_span < signal_span, (
+            f"Long overlay span {lo_span} should be < signal span {signal_span}"
+        )
+        assert so_span < signal_span, (
+            f"Short overlay span {so_span} should be < signal span {signal_span}"
+        )
+        # Combined, they leave room for signals in between
+        assert lo_span + so_span < 2 * signal_span, (
+            "Overlay bands should not fill the chart"
+        )

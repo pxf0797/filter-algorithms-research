@@ -800,15 +800,17 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         connectgaps: false,
       });
 
-      // Add green background bands for long position periods
-      addPosOverlayLocal(longPos, 'rgba(63,185,80,0.12)', barIdx, xaxisName, yaxisName);
+      // Add green background bands for long position periods (upper half y=[0, 1.2])
+      addPosOverlayLocal(longPos, 'rgba(63,185,80,0.12)', barIdx, xaxisName, yaxisName, 0, 1.2);
 
-      // Add red background bands for short position periods
-      addPosOverlayLocal(shortPos, 'rgba(248,81,73,0.12)', barIdx, xaxisName, yaxisName);
+      // Add red background bands for short position periods (lower half y=[-1.2, 0])
+      addPosOverlayLocal(shortPos, 'rgba(248,81,73,0.12)', barIdx, xaxisName, yaxisName, -1.2, 0);
     });
 
     // Helper: add background rectangles for position holding periods
-    function addPosOverlayLocal(posArr, color, barIdxArr, xref, yref) {
+    function addPosOverlayLocal(posArr, color, barIdxArr, xref, yref, y0, y1) {
+      y0 = (y0 !== undefined) ? y0 : -1.2;
+      y1 = (y1 !== undefined) ? y1 : 1.2;
       var segStart = -1;
       for (var i = 0; i <= posArr.length; i++) {
         var inPos = i < posArr.length && (posArr[i] === true || posArr[i] === 1);
@@ -818,7 +820,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
           shapes.push({
             type: 'rect',
             x0: barIdxArr[segStart], x1: barIdxArr[i],
-            y0: -1.2, y1: 1.2,
+            y0: y0, y1: y1,
             fillcolor: color,
             line: { width: 0 },
             layer: 'below',
@@ -831,7 +833,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         shapes.push({
           type: 'rect',
           x0: barIdxArr[segStart], x1: barIdxArr[barIdxArr.length - 1],
-          y0: -1.2, y1: 1.2,
+          y0: y0, y1: y1,
           fillcolor: color,
           line: { width: 0 },
           layer: 'below',
@@ -1077,8 +1079,10 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       for (var s = 0; s < bgShapes.length; s++) shapes.push(bgShapes[s]);
     });
 
-    // P2 fix: 持仓状态叠加带 — draw semi-transparent bands over position holding periods
-    function addPosOverlay(posArr, color, barIdx, xref, yref) {
+    // P2 fix: 持仓状态叠加带 (narrowed pos bands y-range to avoid stacking with signal bg)
+    function addPosOverlay(posArr, color, barIdx, xref, yref, y0, y1) {
+      y0 = (y0 !== undefined) ? y0 : -1.2;
+      y1 = (y1 !== undefined) ? y1 : 1.2;
       var segStart = -1;
       for (var i = 0; i <= posArr.length; i++) {
         var inPos = i < posArr.length && (posArr[i] === true || posArr[i] === 1);
@@ -1088,7 +1092,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
           shapes.push({
             type: 'rect',
             x0: barIdx[segStart], x1: barIdx[i],
-            y0: -1.2, y1: 1.2,
+            y0: y0, y1: y1,
             fillcolor: color,
             line: { width: 0 },
             layer: 'below',
@@ -1102,7 +1106,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         shapes.push({
           type: 'rect',
           x0: barIdx[segStart], x1: barIdx[barIdx.length - 1],
-          y0: -1.2, y1: 1.2,
+          y0: y0, y1: y1,
           fillcolor: color,
           line: { width: 0 },
           layer: 'below',
@@ -1112,12 +1116,12 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     }
     // P2 fix: 持仓状态叠加带
     VIEWS.forEach(function(v, vi) {
-      var longPos = col(data, v + '_long_pos');   // green band for long position
-      var shortPos = col(data, v + '_short_pos'); // red band for short position
+      var longPos = col(data, v + '_long_pos');   // green band for long position (upper half)
+      var shortPos = col(data, v + '_short_pos'); // red band for short position (lower half)
       var xaxisName = vi === 0 ? 'x' : ('x' + (vi + 1));
       var yaxisName = vi === 0 ? 'y' : ('y' + (vi + 1));
-      addPosOverlay(longPos, 'rgba(0,255,0,0.08)', barIdx, xaxisName, yaxisName);
-      addPosOverlay(shortPos, 'rgba(255,0,0,0.08)', barIdx, xaxisName, yaxisName);
+      addPosOverlay(longPos, 'rgba(0,255,0,0.08)', barIdx, xaxisName, yaxisName, 0.1, 1.2);
+      addPosOverlay(shortPos, 'rgba(255,0,0,0.08)', barIdx, xaxisName, yaxisName, -1.2, -0.1);
     });
 
     var layout = {
@@ -1597,8 +1601,10 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       }
     })();
 
-    // Position overlay helper
-    function addPosOverlay(posArr, posColor) {
+    // Position overlay helper (y0/y1 restrict bands to avoid stacking)
+    function addPosOverlay(posArr, posColor, y0, y1) {
+      y0 = (y0 !== undefined) ? y0 : -1.2;
+      y1 = (y1 !== undefined) ? y1 : 1.2;
       let s = -1;
       for (let i = 0; i <= posArr.length; i++) {
         const inPos = i < posArr.length && (posArr[i] === true || posArr[i] === 1);
@@ -1608,7 +1614,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
           shapes.push({
             type: 'rect',
             x0: barIdx[s], x1: barIdx[i],
-            y0: -1.2, y1: 1.2,
+            y0: y0, y1: y1,
             fillcolor: posColor,
             line: { width: 0 },
             layer: 'below',
@@ -1621,7 +1627,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
         shapes.push({
           type: 'rect',
           x0: barIdx[s], x1: barIdx[N - 1],
-          y0: -1.2, y1: 1.2,
+          y0: y0, y1: y1,
           fillcolor: posColor,
           line: { width: 0 },
           layer: 'below',
@@ -1630,8 +1636,8 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       }
     }
 
-    addPosOverlay(col(data, v + '_long_pos'), 'rgba(0,255,0,0.08)');
-    addPosOverlay(col(data, v + '_short_pos'), 'rgba(255,0,0,0.08)');
+    addPosOverlay(col(data, v + '_long_pos'), 'rgba(0,255,0,0.08)', 0.1, 1.2);
+    addPosOverlay(col(data, v + '_short_pos'), 'rgba(255,0,0,0.08)', -1.2, -0.1);
 
     // Position annotation for Row 2 (signal row)
     var _longPos = col(data, v + '_long_pos');
@@ -1641,7 +1647,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       var _posColor = _pos.cls === 'long' ? '#3fb950' : _pos.cls === 'short' ? '#f85149' : '#8b949e';
       annotations.push({
         xref: 'x3 domain', yref: 'y3 domain',
-        x: 0.98, y: 0.98,
+        x: 0.98, y: 0.90,
         text: '持仓: ' + _pos.text,
         showarrow: false,
         font: { color: _posColor, size: 13, family: 'monospace' },
@@ -1669,7 +1675,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       var _higherVLabel = viewLabels[_higherV] || _higherV;
       annotations.push({
         xref: 'x3 domain', yref: 'y3 domain',
-        x: 0.02, y: 0.98,
+        x: 0.02, y: 0.90,
         text: '上级周期(' + _higherVLabel + ')持仓',
         showarrow: false,
         font: { color: '#8b949e', size: 10, family: 'monospace' },
@@ -1679,7 +1685,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       // v0 (coarsest): indicate no higher timeframe
       annotations.push({
         xref: 'x3 domain', yref: 'y3 domain',
-        x: 0.02, y: 0.98,
+        x: 0.02, y: 0.90,
         text: '无上级周期',
         showarrow: false,
         font: { color: '#8b949e', size: 10, family: 'monospace' },
