@@ -1657,10 +1657,24 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       var _higherShortPos = col(data, _higherV + '_short_pos');
       if (_higherLongPos && _higherLongPos.length > 0) {
         addPosOverlay(_higherLongPos, 'rgba(56,139,253,0.06)');
+      } else {
+        console.warn('[' + (label || v) + '] Higher TF position column "' + _higherV + '_long_pos" not available, skipping overlay.');
       }
       if (_higherShortPos && _higherShortPos.length > 0) {
         addPosOverlay(_higherShortPos, 'rgba(210,140,40,0.06)');
+      } else {
+        console.warn('[' + (label || v) + '] Higher TF position column "' + _higherV + '_short_pos" not available, skipping overlay.');
       }
+      // Annotation: indicate higher timeframe position bands in signal row
+      var _higherVLabel = viewLabels[_higherV] || _higherV;
+      annotations.push({
+        xref: 'x3 domain', yref: 'y3 domain',
+        x: 0.02, y: 0.98,
+        text: '上级周期(' + _higherVLabel + ')持仓',
+        showarrow: false,
+        font: { color: '#8b949e', size: 10, family: 'monospace' },
+        xanchor: 'left', yanchor: 'top'
+      });
     } else {
       // v0 (coarsest): indicate no higher timeframe
       annotations.push({

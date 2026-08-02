@@ -101,6 +101,24 @@ def get_higher_tf_position(view_idx, columns, ordered_views):
     }
 
 
+def get_higher_tf_position_color(position_type):
+    """
+    Python port of the CSS rgba color constants used for higher timeframe
+    position bands in the period dashboard rendering.
+
+    Args:
+        position_type: "long" or "short".
+
+    Returns:
+        str: CSS rgba color string.
+    """
+    if position_type == "long":
+        return "rgba(56,139,253,0.06)"
+    elif position_type == "short":
+        return "rgba(210,140,40,0.06)"
+    raise ValueError(f"Unknown position type: {position_type}")
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Test: compute_aligned_pnl
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -401,3 +419,100 @@ class TestIntegrationWithRealData:
             # Verify consistency: a bar can't be both long and short from signal
             for i in range(len(sig)):
                 assert not (result["longPos"][i] and result["shortPos"][i])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Test: Period Dashboard Higher TF Position
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestPeriodDashboardHigherTfPosition:
+    """Test higher timeframe position display logic in period dashboards."""
+
+    ORDERED_VIEWS = ["v0", "v1", "v2", "v3"]
+
+    def test_d1_v0_has_no_higher_tf(self):
+        """D1 (v0/日线): should have no higher TF, annotation shows '无上级周期'"""
+        columns = {"v0_sig": [0, 1, -1, 0, 1]}
+        result = get_higher_tf_position(0, columns, self.ORDERED_VIEWS)
+        # v0 derives from own signal — not another view's position columns
+        assert result["longPos"] == [False, True, False, False, True]
+        assert result["shortPos"] == [False, False, True, False, False]
+
+    def test_d2_v1_uses_v0_position(self):
+        """D2 (v1): higher TF is v0, verify v0's position data is used"""
+        columns = {
+            "v0_long_pos": [True, False, True, False],
+            "v0_short_pos": [False, True, False, False],
+        }
+        result = get_higher_tf_position(1, columns, self.ORDERED_VIEWS)
+        assert result["longPos"] == [True, False, True, False]
+        assert result["shortPos"] == [False, True, False, False]
+
+    def test_d3_v2_uses_v1_position(self):
+        """D3 (v2): higher TF is v1, verify v1's position data is used"""
+        columns = {
+            "v1_long_pos": [False, True, False, True],
+            "v1_short_pos": [True, False, True, False],
+        }
+        result = get_higher_tf_position(2, columns, self.ORDERED_VIEWS)
+        assert result["longPos"] == [False, True, False, True]
+        assert result["shortPos"] == [True, False, True, False]
+
+    def test_d4_v3_uses_v2_position(self):
+        """D4 (v3): higher TF is v2, verify v2's position data is used"""
+        columns = {
+            "v2_long_pos": [True, True, False, False, True],
+            "v2_short_pos": [False, False, True, False, False],
+        }
+        result = get_higher_tf_position(3, columns, self.ORDERED_VIEWS)
+        assert result["longPos"] == [True, True, False, False, True]
+        assert result["shortPos"] == [False, False, True, False, False]
+
+    def test_higher_tf_long_color_value(self):
+        """Verify higher TF long position color is rgba(56,139,253,0.06)"""
+        color = get_higher_tf_position_color("long")
+        assert color == "rgba(56,139,253,0.06)"
+
+    def test_higher_tf_short_color_value(self):
+        """Verify higher TF short position color is rgba(210,140,40,0.06)"""
+        color = get_higher_tf_position_color("short")
+        assert color == "rgba(210,140,40,0.06)"
+
+    def test_all_views_position_chain_on_real_data(self):
+        """Integration: load real parquet, verify v3→v2→v1→v0 chain is complete"""
+        base = Path(__file__).resolve().parent.parent / "backtest_output"
+        candidates = sorted(base.glob("*/backtest_result.parquet"))
+        if not candidates:
+            pytest.skip("No parquet files found in backtest_output")
+
+        parquet_df = pd.read_parquet(str(candidates[0]))
+        columns = {col: parquet_df[col].tolist() for col in parquet_df.columns}
+
+        n = len(columns.get("v0_long_pos", []))
+        assert n > 0, "Parquet data is empty"
+
+        # v3 uses v2's position as higher TF
+        v3_higher = get_higher_tf_position(3, columns, self.ORDERED_VIEWS)
+        assert v3_higher["longPos"] == columns["v2_long_pos"]
+        assert v3_higher["shortPos"] == columns["v2_short_pos"]
+        assert len(v3_higher["longPos"]) == n
+
+        # v2 uses v1's position as higher TF
+        v2_higher = get_higher_tf_position(2, columns, self.ORDERED_VIEWS)
+        assert v2_higher["longPos"] == columns["v1_long_pos"]
+        assert v2_higher["shortPos"] == columns["v1_short_pos"]
+        assert len(v2_higher["longPos"]) == n
+
+        # v1 uses v0's position as higher TF
+        v1_higher = get_higher_tf_position(1, columns, self.ORDERED_VIEWS)
+        assert v1_higher["longPos"] == columns["v0_long_pos"]
+        assert v1_higher["shortPos"] == columns["v0_short_pos"]
+        assert len(v1_higher["longPos"]) == n
+
+        # v0 derives from own signal — annotation would show '无上级周期'
+        v0_higher = get_higher_tf_position(0, columns, self.ORDERED_VIEWS)
+        assert len(v0_higher["longPos"]) == n
+        assert len(v0_higher["shortPos"]) == n
+        v0_sig = columns.get("v0_sig", [])
+        assert len(v0_sig) == n
