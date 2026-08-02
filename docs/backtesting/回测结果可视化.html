@@ -107,6 +107,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 .plot-wrap-signals { width: 100%; height: 600px; }
 .plot-wrap-overview { width: 100%; height: 450px; }
 .plot-wrap-pnl { width: 100%; height: 550px; }
+.plot-wrap-pos-status { width: 100%; height: 500px; }
 .plot-wrap-heatmap { width: 100%; height: 280px; }
 .plot-wrap-trades { width: 100%; height: 500px; }
 .plot-wrap-filtered-individual { width: 100%; height: 280px; }
@@ -371,6 +372,13 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     <div class="section-title"><span class="num">3</span> 信号对比（4 视图独立子图，共享 x 轴）</div>
     <div class="plot-wrap-signals" id="chart-signals"></div>
     <p class="annotation">4 个子图垂直堆叠，共享 x 轴，各自独立 y 轴固定 [-1, +1]。绿(+1)/红(-1)/灰(0) 背景着色，阶梯信号线。</p>
+  </div>
+
+  <!-- Section 3b: Position Status Time-Series -->
+  <div class="section">
+    <div class="section-title"><span class="num">3b</span> 持仓状态时间序列（4 视图，共享 x 轴）</div>
+    <div class="plot-wrap-pos-status" id="chart-position-status"></div>
+    <p class="annotation">4 个子图垂直堆叠，共享 x 轴。绿色背景=做多持仓期间，红色背景=做空持仓期间。阶梯线=实际持仓状态（+1做多/0空仓/-1做空）。</p>
   </div>
 
   <!-- Section 4: PnL Curves -->
@@ -683,7 +691,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 	    document.getElementById('param-summary').innerHTML = tableHtml;
 	  }
 
-	  function buildPositionStatus(columns, viewLabels, orderedViews) {
+	  function buildPositionBadges(columns, viewLabels, orderedViews) {
 	    var container = document.getElementById('position-status');
 	    if (!container) return;
 	    var html = '<strong style="color:#8b949e;">当前持仓: </strong>';
@@ -699,6 +707,188 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 	    }
 	    container.innerHTML = html;
 	  }
+
+  // --- Section 3b: Position Status Time-Series (4 subplot rows, shared x-axis) ---
+  function buildPositionStatusChart(data) {
+    var columns = data.columns;
+    var N = data.N;
+    var barTs = col(data, 'bar_timestamp');
+    var barIdx = col(data, 'bar_index');
+
+    // Guard: empty data
+    if (!barIdx || barIdx.length === 0) return;
+
+    // Sort VIEWS coarsest->finest (same order as renderAll establishes)
+    var sortedViews = VIEWS.slice().sort(function(a, b) {
+      var idxA = ALL_TFS.indexOf(viewLabels[a]);
+      var idxB = ALL_TFS.indexOf(viewLabels[b]);
+      if (idxA === -1 || idxB === -1) return 0;
+      return idxB - idxA;
+    });
+
+    var nViews = sortedViews.length;
+    if (nViews === 0) return;
+
+    var traces = [];
+    var shapes = [];
+
+    // Tick values for shared x-axis
+    var tickStep = Math.max(1, Math.floor(N / 10));
+    var tickVals = [], tickTexts = [];
+    for (var i = 0; i < N; i += tickStep) {
+      tickVals.push(barIdx[i]);
+      tickTexts.push(barTs[i] ? barTs[i].substring(0, 16) : '');
+    }
+
+    // Check if position data is available for any view
+    var hasAnyData = false;
+
+    sortedViews.forEach(function(v, vi) {
+      var longPos = columns[v + '_long_pos'];
+      var shortPos = columns[v + '_short_pos'];
+      if (!longPos || !shortPos) return;
+      if (longPos.length === 0 && shortPos.length === 0) return;
+      hasAnyData = true;
+
+      var xaxisName = vi === 0 ? 'x' : ('x' + (vi + 1));
+      var yaxisName = vi === 0 ? 'y' : ('y' + (vi + 1));
+
+      // Build position arrays separated by value: 1=long, -1=short, 0=empty
+      var longOnly = new Array(N);
+      var shortOnly = new Array(N);
+      var emptyOnly = new Array(N);
+      for (var i = 0; i < N; i++) {
+        if (longPos[i]) {
+          longOnly[i] = 1; shortOnly[i] = null; emptyOnly[i] = null;
+        } else if (shortPos[i]) {
+          longOnly[i] = null; shortOnly[i] = -1; emptyOnly[i] = null;
+        } else {
+          longOnly[i] = null; shortOnly[i] = null; emptyOnly[i] = 0;
+        }
+      }
+
+      // Long position segments (green)
+      traces.push({
+        x: barIdx, y: longOnly,
+        type: 'scatter', mode: 'lines',
+        name: (viewLabels[v] || v) + ' 做多',
+        line: { shape: 'hv', width: 2, color: '#3fb950' },
+        xaxis: xaxisName, yaxis: yaxisName,
+        showlegend: false,
+        connectgaps: false,
+      });
+
+      // Short position segments (red)
+      traces.push({
+        x: barIdx, y: shortOnly,
+        type: 'scatter', mode: 'lines',
+        name: (viewLabels[v] || v) + ' 做空',
+        line: { shape: 'hv', width: 2, color: '#f85149' },
+        xaxis: xaxisName, yaxis: yaxisName,
+        showlegend: false,
+        connectgaps: false,
+      });
+
+      // Empty position segments (gray thin)
+      traces.push({
+        x: barIdx, y: emptyOnly,
+        type: 'scatter', mode: 'lines',
+        name: (viewLabels[v] || v) + ' 空仓',
+        line: { shape: 'hv', width: 1, color: '#8b949e' },
+        xaxis: xaxisName, yaxis: yaxisName,
+        showlegend: false,
+        connectgaps: false,
+      });
+
+      // Add green background bands for long position periods
+      addPosOverlayLocal(longPos, 'rgba(63,185,80,0.12)', barIdx, xaxisName, yaxisName);
+
+      // Add red background bands for short position periods
+      addPosOverlayLocal(shortPos, 'rgba(248,81,73,0.12)', barIdx, xaxisName, yaxisName);
+    });
+
+    // Helper: add background rectangles for position holding periods
+    function addPosOverlayLocal(posArr, color, barIdxArr, xref, yref) {
+      var segStart = -1;
+      for (var i = 0; i <= posArr.length; i++) {
+        var inPos = i < posArr.length && (posArr[i] === true || posArr[i] === 1);
+        if (inPos && segStart === -1) {
+          segStart = i;
+        } else if (!inPos && segStart !== -1) {
+          shapes.push({
+            type: 'rect',
+            x0: barIdxArr[segStart], x1: barIdxArr[i],
+            y0: -1.2, y1: 1.2,
+            fillcolor: color,
+            line: { width: 0 },
+            layer: 'below',
+            xref: xref, yref: yref,
+          });
+          segStart = -1;
+        }
+      }
+      if (segStart !== -1) {
+        shapes.push({
+          type: 'rect',
+          x0: barIdxArr[segStart], x1: barIdxArr[barIdxArr.length - 1],
+          y0: -1.2, y1: 1.2,
+          fillcolor: color,
+          line: { width: 0 },
+          layer: 'below',
+          xref: xref, yref: yref,
+        });
+      }
+    }
+
+    // Guard: no position data at all
+    if (!hasAnyData) {
+      var containerEl = document.getElementById('chart-position-status');
+      if (containerEl) containerEl.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim)">无持仓数据</div>';
+      return;
+    }
+
+    var layout = {
+      template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
+      font: baseFont, displayModeBar: false,
+      margin: { l: 80, r: 40, t: 30, b: 40 },
+      showlegend: false,
+      shapes: shapes,
+      hovermode: 'x unified',
+      hoverlabel: hoverLabelStyle,
+      grid: { rows: nViews, columns: 1, pattern: 'independent', roworder: 'top to bottom', ygap: 0.03 },
+    };
+
+    sortedViews.forEach(function(v, vi) {
+      var xkey = 'xaxis' + (vi === 0 ? '' : (vi + 1));
+      var ykey = 'yaxis' + (vi === 0 ? '' : (vi + 1));
+
+      layout[xkey] = {
+        showgrid: true, gridcolor: gridColor, zeroline: false,
+        tickvals: tickVals, ticktext: tickTexts,
+        showspikes: true, spikemode: 'across', spikesnap: 'cursor',
+        spikethickness: 1, spikecolor: '#8b949e',
+      };
+      // Share x-axis with the bottom subplot
+      if (vi < nViews - 1) {
+        layout[xkey].matches = 'x' + nViews;
+      }
+      if (vi === nViews - 1) {
+        layout[xkey].title = { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } };
+      }
+
+      // Y-axis with Chinese labels
+      layout[ykey] = {
+        tickvals: [-1, 0, 1],
+        ticktext: ['做空', '空仓', '做多'],
+        range: [-1.2, 1.2],
+        showgrid: true, gridcolor: gridColor,
+        zeroline: true, zerolinecolor: zeroLineColor,
+        title: { text: (viewLabels[v] || v), font: { size: 10, color: '#8b949e' } },
+      };
+    });
+
+    Plotly.newPlot('chart-position-status', traces, layout, plotConfig);
+  }
 
   // --- Section 2: Filtered Price Overview (4 views overlay + daily EPS band) ---
   function buildFilteredOverview(data) {
@@ -2062,10 +2252,11 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
     // ── Phase 1: Quick charts (rendered synchronously, visible within one frame) ──
     buildOverview(data);
-    buildPositionStatus(data.columns, viewLabels, VIEWS);
+    buildPositionBadges(data.columns, viewLabels, VIEWS);
     buildSchemaTable();
     buildFilteredOverview(data);
     buildSignals(data);
+    buildPositionStatusChart(data);
     buildPnl(data);
     buildMultiTickerPnl();
     buildHeatmap(data);
