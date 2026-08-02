@@ -356,6 +356,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     <div class="kpi-grid" id="kpi-grid"></div>
     <div class="summary-row" id="summary-row"></div>
 	    <div class="param-summary-table" id="param-summary"></div>
+	    <div id="position-status" style="display:flex; gap:20px; flex-wrap:wrap; margin:12px 0 0 0; padding:10px 16px; background:#161b22; border-radius:6px; font-size:14px;"></div>
 	  </div>
 
 	  <!-- Section 2: Filtered Price Overview -->
@@ -486,6 +487,54 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 	    const g = parseInt(hex.slice(3, 5), 16);
 	    const b = parseInt(hex.slice(5, 7), 16);
 	    return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+	  }
+
+	  /**
+	   * Compute alignment-filtered PnL using higher timeframe position as filter.
+	   * When higher TF holds a position, current TF's PnL change is accumulated.
+	   * When higher TF has no position, PnL stays flat.
+	   */
+	  function computeAlignedPnl(pnlArray, higherPosArray) {
+	    var n = pnlArray.length;
+	    var aligned = new Float64Array(n);
+	    aligned[0] = 100.0;
+	    for (var i = 1; i < n; i++) {
+	      if (higherPosArray[i]) {
+	        aligned[i] = aligned[i - 1] + (pnlArray[i] - pnlArray[i - 1]);
+	      } else {
+	        aligned[i] = aligned[i - 1];
+	      }
+	    }
+	    return aligned;
+	  }
+
+	  /** Get current position text for a view based on last bar's pos data */
+	  function getCurrentPosition(longPos, shortPos) {
+	    var last = longPos.length - 1;
+	    if (longPos[last]) return { text: '做多', cls: 'long' };
+	    if (shortPos[last]) return { text: '做空', cls: 'short' };
+	    return { text: '空仓', cls: 'empty' };
+	  }
+
+	  /** Get higher timeframe position filter array for a given view index */
+	  function getHigherTfPosition(viewIdx, columns, orderedViews) {
+	    if (viewIdx === 0) {
+	      // v0 (coarsest): use self signal direction as filter
+	      var sig = columns[orderedViews[0] + '_sig'];
+	      if (!sig) return { longPos: [], shortPos: [] };
+	      var longPos = new Array(sig.length);
+	      var shortPos = new Array(sig.length);
+	      for (var i = 0; i < sig.length; i++) {
+	        longPos[i] = sig[i] > 0;
+	        shortPos[i] = sig[i] < 0;
+	      }
+	      return { longPos: longPos, shortPos: shortPos };
+	    }
+	    var higherV = orderedViews[viewIdx - 1];
+	    return {
+	      longPos: columns[higherV + '_long_pos'] || [],
+	      shortPos: columns[higherV + '_short_pos'] || []
+	    };
 	  }
 
 	  /** Pick tickformat based on the time span of bar_timestamp data. */
@@ -632,6 +681,23 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
 	    tableHtml += '</tbody></table>';
 	    document.getElementById('param-summary').innerHTML = tableHtml;
+	  }
+
+	  function buildPositionStatus(columns, viewLabels, orderedViews) {
+	    var container = document.getElementById('position-status');
+	    if (!container) return;
+	    var html = '<strong style="color:#8b949e;">当前持仓: </strong>';
+	    for (var vi = 0; vi < orderedViews.length; vi++) {
+	      var v = orderedViews[vi];
+	      var longPos = columns[v + '_long_pos'];
+	      var shortPos = columns[v + '_short_pos'];
+	      if (!longPos || !shortPos) continue;
+	      var pos = getCurrentPosition(longPos, shortPos);
+	      var color = pos.cls === 'long' ? '#3fb950' : pos.cls === 'short' ? '#f85149' : '#8b949e';
+	      html += '<span>' + (viewLabels[v] || v) + ': <span style="color:' + color + ';font-weight:600;">' + pos.text + '</span></span>';
+	      if (vi !== orderedViews.length - 1) html += ' │ ';
+	    }
+	    container.innerHTML = html;
 	  }
 
   // --- Section 2: Filtered Price Overview (4 views overlay + daily EPS band) ---
@@ -927,6 +993,35 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     });
 
     const annotations = [];
+    // Alignment PnL traces: dashed lines showing PnL when higher-TF position aligns
+    VIEWS.forEach((v, vi) => {
+      const higherPos = getHigherTfPosition(vi, columns, VIEWS);
+      const pnlLong = col(data, v + '_pnl_long');
+      const pnlShort = col(data, v + '_pnl_short');
+      if (higherPos.longPos && higherPos.longPos.length > 0 && pnlLong && pnlLong.length > 0) {
+        const alignedLong = computeAlignedPnl(pnlLong, higherPos.longPos);
+        traces.push({
+          x: barIdx, y: alignedLong,
+          type: 'scatter', mode: 'lines',
+          name: viewLabel(v) + ' 同向做多',
+          line: { width: 1.5, color: VIEW_COLORS[v], dash: 'dot' },
+          opacity: 0.5,
+          showlegend: true,
+        });
+      }
+      if (higherPos.shortPos && higherPos.shortPos.length > 0 && pnlShort && pnlShort.length > 0) {
+        const alignedShort = computeAlignedPnl(pnlShort, higherPos.shortPos);
+        traces.push({
+          x: barIdx, y: alignedShort,
+          type: 'scatter', mode: 'lines',
+          name: viewLabel(v) + ' 同向做空',
+          line: { width: 1.0, color: VIEW_COLORS[v], dash: 'dot' },
+          opacity: 0.5,
+          showlegend: true,
+        });
+      }
+    });
+
     VIEWS.forEach(v => {
       const pnlLong = col(data, v + '_pnl_long');
       const pnlShort = col(data, v + '_pnl_short');
@@ -1348,6 +1443,46 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     addPosOverlay(col(data, v + '_long_pos'), 'rgba(0,255,0,0.08)');
     addPosOverlay(col(data, v + '_short_pos'), 'rgba(255,0,0,0.08)');
 
+    // Position annotation for Row 2 (signal row)
+    var _longPos = col(data, v + '_long_pos');
+    var _shortPos = col(data, v + '_short_pos');
+    if (_longPos && _shortPos && _longPos.length > 0) {
+      var _pos = getCurrentPosition(_longPos, _shortPos);
+      var _posColor = _pos.cls === 'long' ? '#3fb950' : _pos.cls === 'short' ? '#f85149' : '#8b949e';
+      annotations.push({
+        xref: 'x3 domain', yref: 'y3 domain',
+        x: 0.98, y: 0.98,
+        text: '持仓: ' + _pos.text,
+        showarrow: false,
+        font: { color: _posColor, size: 13, family: 'monospace' },
+        xanchor: 'right', yanchor: 'top'
+      });
+    }
+
+    // Higher timeframe position bands (semi-transparent rectangles)
+    var _viewIdx = VIEWS.indexOf(v);
+    if (_viewIdx > 0) {
+      var _higherV = VIEWS[_viewIdx - 1];
+      var _higherLongPos = col(data, _higherV + '_long_pos');
+      var _higherShortPos = col(data, _higherV + '_short_pos');
+      if (_higherLongPos && _higherLongPos.length > 0) {
+        addPosOverlay(_higherLongPos, 'rgba(56,139,253,0.06)');
+      }
+      if (_higherShortPos && _higherShortPos.length > 0) {
+        addPosOverlay(_higherShortPos, 'rgba(210,140,40,0.06)');
+      }
+    } else {
+      // v0 (coarsest): indicate no higher timeframe
+      annotations.push({
+        xref: 'x3 domain', yref: 'y3 domain',
+        x: 0.02, y: 0.98,
+        text: '无上级周期',
+        showarrow: false,
+        font: { color: '#8b949e', size: 10, family: 'monospace' },
+        xanchor: 'left', yanchor: 'top'
+      });
+    }
+
     // Signal line (stepped)
     traces.push({
       x: barIdx, y: sig,
@@ -1380,6 +1515,33 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       showlegend: true,
     });
 
+    // Alignment PnL curves (dashed, filtered by higher-TF position)
+    var _pdViewIdx = VIEWS.indexOf(v);
+    var _pdHigherPos = getHigherTfPosition(_pdViewIdx, columns, VIEWS);
+    if (_pdHigherPos.longPos && _pdHigherPos.longPos.length > 0 && pnlLong && pnlLong.length > 0) {
+      var _pdAlignedLong = computeAlignedPnl(pnlLong, _pdHigherPos.longPos);
+      traces.push({
+        x: barIdx, y: _pdAlignedLong,
+        type: 'scatter', mode: 'lines',
+        name: '同向做多',
+        line: { width: 1.5, color: color, dash: 'dot' },
+        opacity: 0.5,
+        xaxis: 'x4', yaxis: 'y4',
+        showlegend: true,
+      });
+    }
+    if (_pdHigherPos.shortPos && _pdHigherPos.shortPos.length > 0 && pnlShort && pnlShort.length > 0) {
+      var _pdAlignedShort = computeAlignedPnl(pnlShort, _pdHigherPos.shortPos);
+      traces.push({
+        x: barIdx, y: _pdAlignedShort,
+        type: 'scatter', mode: 'lines',
+        name: '同向做空',
+        line: { width: 1.0, color: color, dash: 'dot' },
+        opacity: 0.5,
+        xaxis: 'x4', yaxis: 'y4',
+        showlegend: true,
+      });
+    }
 
     // PnL end-value annotations
     const lastL = toNum(pnlLong[N - 1]);
@@ -1900,6 +2062,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 
     // ── Phase 1: Quick charts (rendered synchronously, visible within one frame) ──
     buildOverview(data);
+    buildPositionStatus(data.columns, viewLabels, VIEWS);
     buildSchemaTable();
     buildFilteredOverview(data);
     buildSignals(data);
