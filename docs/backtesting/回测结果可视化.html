@@ -527,16 +527,14 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
 	  /** Get higher timeframe position filter array for a given view index */
 	  function getHigherTfPosition(viewIdx, columns, orderedViews) {
 	    if (viewIdx === 0) {
-	      // v0 (coarsest): use self signal direction as filter
-	      var sig = columns[orderedViews[0] + '_sig'];
-	      if (!sig) return { longPos: [], shortPos: [] };
-	      var longPos = new Array(sig.length);
-	      var shortPos = new Array(sig.length);
-	      for (var i = 0; i < sig.length; i++) {
-	        longPos[i] = sig[i] > 0;
-	        shortPos[i] = sig[i] < 0;
-	      }
-	      return { longPos: longPos, shortPos: shortPos };
+	      // v0 has no parent timeframe; use its own position columns.
+	      // This is correct: filtering v0's PnL by v0's own position mask
+	      // produces aligned PnL identical to original PnL.
+	      var v0 = orderedViews[0];
+	      return {
+	        longPos: columns[v0 + '_long_pos'] || [],
+	        shortPos: columns[v0 + '_short_pos'] || []
+	      };
 	    }
 	    var higherV = orderedViews[viewIdx - 1];
 	    return {

@@ -81,18 +81,14 @@ def get_higher_tf_position(view_idx, columns, ordered_views):
         dict with keys 'longPos' and 'shortPos', each a list of bool.
     """
     if view_idx == 0:
-        sig_key = ordered_views[0] + "_sig"
-        sig = columns.get(sig_key)
-        if sig is None:
-            return {"longPos": [], "shortPos": []}
-        n = len(sig)
-        long_pos = [False] * n
-        short_pos = [False] * n
-        for i in range(n):
-            val = float(sig[i]) if sig[i] is not None else 0.0
-            long_pos[i] = val > 0
-            short_pos[i] = val < 0
-        return {"longPos": long_pos, "shortPos": short_pos}
+        # v0 has no parent timeframe; use its own position columns.
+        # This is correct: filtering v0's PnL by v0's own position mask
+        # produces aligned PnL identical to original PnL.
+        v0 = ordered_views[0]
+        return {
+            "longPos": list(columns.get(v0 + "_long_pos", [])),
+            "shortPos": list(columns.get(v0 + "_short_pos", [])),
+        }
 
     higher_v = ordered_views[view_idx - 1]
     return {
@@ -255,17 +251,18 @@ class TestGetHigherTfPosition:
 
     ORDERED_VIEWS = ["v0", "v1", "v2", "v3"]
 
-    def test_v0_uses_self_signal(self):
-        """v0 (coarsest) derives position from its own signal column."""
+    def test_v0_uses_own_position(self):
+        """v0 uses its own long_pos/short_pos columns (no parent timeframe)."""
         columns = {
-            "v0_sig": [0, 1, -1, 0, 1],
+            "v0_long_pos": [True, False, True, False, False],
+            "v0_short_pos": [False, True, False, True, False],
         }
         result = get_higher_tf_position(0, columns, self.ORDERED_VIEWS)
-        assert result["longPos"] == [False, True, False, False, True]
-        assert result["shortPos"] == [False, False, True, False, False]
+        assert result["longPos"] == [True, False, True, False, False]
+        assert result["shortPos"] == [False, True, False, True, False]
 
-    def test_v0_missing_sig_returns_empty(self):
-        """v0 with no sig column returns empty arrays."""
+    def test_v0_missing_pos_returns_empty(self):
+        """v0 with no position columns returns empty arrays."""
         columns = {}
         result = get_higher_tf_position(0, columns, self.ORDERED_VIEWS)
         assert result["longPos"] == []
@@ -308,10 +305,11 @@ class TestGetHigherTfPosition:
         assert result["longPos"] == []
         assert result["shortPos"] == []
 
-    def test_v0_signal_with_nulls(self):
-        """v0 signal with None/null values treated as 0."""
+    def test_v0_uses_own_position_with_data(self):
+        """v0 uses its own long_pos/short_pos columns directly."""
         columns = {
-            "v0_sig": [1, None, -1, 0, None],
+            "v0_long_pos": [True, False, False, False, False],
+            "v0_short_pos": [False, False, True, False, False],
         }
         result = get_higher_tf_position(0, columns, self.ORDERED_VIEWS)
         assert result["longPos"] == [True, False, False, False, False]
@@ -432,10 +430,13 @@ class TestPeriodDashboardHigherTfPosition:
     ORDERED_VIEWS = ["v0", "v1", "v2", "v3"]
 
     def test_d1_v0_has_no_higher_tf(self):
-        """D1 (v0/日线): should have no higher TF, annotation shows '无上级周期'"""
-        columns = {"v0_sig": [0, 1, -1, 0, 1]}
+        """D1 (v0/日线): v0 has no parent, returns its own position columns."""
+        columns = {
+            "v0_long_pos": [False, True, False, False, True],
+            "v0_short_pos": [False, False, True, False, False],
+        }
         result = get_higher_tf_position(0, columns, self.ORDERED_VIEWS)
-        # v0 derives from own signal — not another view's position columns
+        # v0 uses its own position — not derived from signal
         assert result["longPos"] == [False, True, False, False, True]
         assert result["shortPos"] == [False, False, True, False, False]
 
@@ -1048,20 +1049,11 @@ class TestAllModificationsIntegration:
         assert v1_higher["shortPos"] == columns.get("v0_short_pos", [])
         assert len(v1_higher["longPos"]) == n
 
-        # v0 derives from own signal
+        # v0 uses its own position columns (no parent timeframe)
         v0_higher = get_higher_tf_position(0, columns, self.ORDERED_VIEWS)
-        v0_sig = columns.get("v0_sig", [])
+        assert v0_higher["longPos"] == columns.get("v0_long_pos", [])
+        assert v0_higher["shortPos"] == columns.get("v0_short_pos", [])
         assert len(v0_higher["longPos"]) == n
-        assert len(v0_sig) == n
-        # Verify v0 position is consistent with its signal
-        for i in range(n):
-            s = float(v0_sig[i]) if v0_sig[i] is not None else 0.0
-            assert v0_higher["longPos"][i] == (s > 0), (
-                f"v0 signal-to-position mismatch at index {i}"
-            )
-            assert v0_higher["shortPos"][i] == (s < 0), (
-                f"v0 signal-to-position mismatch at index {i}"
-            )
 
     def test_position_badge_values_match_last_bar(self, parquet_df):
         """Position badge text must match last bar's long_pos/short_pos."""
