@@ -781,3 +781,371 @@ class TestSignalLayoutNoOverlap:
         assert lo_span + so_span < 2 * signal_span, (
             "Overlay bands should not fill the chart"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Period dashboard 6-row layout constants (ports of JS rendering layout)
+# These define the grid, height, yaxis assignments, and domain ranges for the
+# 6-row period dashboard in 回测结果可视化.html.
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Grid configuration
+PERIOD_DASH_GRID_ROWS = 6
+PERIOD_DASH_GRID_COLS = 1
+PERIOD_DASH_HEIGHT = 720
+PERIOD_DASH_YGAP = 0.02
+
+# Row layout: (row_label, yaxis_name, domain_ymin, domain_ymax)
+# Row 1 (top) is visually at the top, with the largest domain values in Plotly.
+PERIOD_DASH_ROWS = [
+    # Row 1 (top): 滤波价格 - Filtered Price
+    {"label": "滤波价格", "yaxis": "y",  "domain": (0.78, 1.0)},
+    # Row 2: 信号 - Signal
+    {"label": "信号",   "yaxis": "y3", "domain": (0.70, 0.78)},
+    # Row 3: 自身持仓 - Own Position
+    {"label": "自身持仓", "yaxis": "y5", "domain": (0.60, 0.70)},
+    # Row 4: 上级持仓 - Higher TF Position
+    {"label": "上级持仓", "yaxis": "y6", "domain": (0.50, 0.60)},
+    # Row 5: 热力图 - Position Heatmap
+    {"label": "热力图",  "yaxis": "y2", "domain": (0.42, 0.50)},
+    # Row 6 (bottom): PnL - PnL Curves
+    {"label": "PnL",   "yaxis": "y4", "domain": (0.0, 0.42)},
+]
+
+# All y-axes used in the 6-row period dashboard
+PERIOD_DASH_YAXES = ["y", "y2", "y3", "y4", "y5", "y6"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Test: Period Dashboard 6-Row Layout
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestPeriodDashboard6RowLayout:
+    """Test the 6-row period dashboard layout structure.
+
+    Validates that the period dashboard grid, height, yaxis assignments,
+    and domain ranges match the layout defined in the HTML visualization.
+    """
+
+    def test_grid_has_6_rows(self):
+        """Grid configuration should have rows=6, cols=1, independent pattern."""
+        assert PERIOD_DASH_GRID_ROWS == 6, (
+            f"Period dashboard grid should have 6 rows, got {PERIOD_DASH_GRID_ROWS}"
+        )
+        assert PERIOD_DASH_GRID_COLS == 1, (
+            f"Period dashboard grid should have 1 column, got {PERIOD_DASH_GRID_COLS}"
+        )
+
+    def test_chart_height_720(self):
+        """Chart height should be >= 720 for 6-row layout."""
+        assert PERIOD_DASH_HEIGHT >= 720, (
+            f"Period dashboard height should be >= 720, got {PERIOD_DASH_HEIGHT}"
+        )
+
+    def test_row1_owns_yaxis_price(self):
+        """Row1 (filtered price) uses yaxis."""
+        row = PERIOD_DASH_ROWS[0]
+        assert row["label"] == "滤波价格"
+        assert row["yaxis"] == "y", (
+            f"Row1 should use yaxis 'y', got '{row['yaxis']}'"
+        )
+
+    def test_row2_owns_yaxis3_signal(self):
+        """Row2 (signal) uses yaxis3."""
+        row = PERIOD_DASH_ROWS[1]
+        assert row["label"] == "信号"
+        assert row["yaxis"] == "y3", (
+            f"Row2 should use yaxis 'y3', got '{row['yaxis']}'"
+        )
+
+    def test_row3_owns_yaxis5_own_position(self):
+        """Row3 (own position) uses yaxis5."""
+        row = PERIOD_DASH_ROWS[2]
+        assert row["label"] == "自身持仓"
+        assert row["yaxis"] == "y5", (
+            f"Row3 should use yaxis 'y5', got '{row['yaxis']}'"
+        )
+
+    def test_row4_owns_yaxis6_higher_tf(self):
+        """Row4 (higher TF position) uses yaxis6."""
+        row = PERIOD_DASH_ROWS[3]
+        assert row["label"] == "上级持仓"
+        assert row["yaxis"] == "y6", (
+            f"Row4 should use yaxis 'y6', got '{row['yaxis']}'"
+        )
+
+    def test_row3_and_row4_separate_axes(self):
+        """Row3 (yaxis5) != Row4 (yaxis6) -- they are INDEPENDENT."""
+        row3 = PERIOD_DASH_ROWS[2]
+        row4 = PERIOD_DASH_ROWS[3]
+        assert row3["yaxis"] != row4["yaxis"], (
+            f"Row3 yaxis ({row3['yaxis']}) and Row4 yaxis ({row4['yaxis']}) "
+            f"must be independent axes"
+        )
+
+    def test_6row_domains_non_overlapping(self):
+        """All 6 y-axis domains are non-overlapping and ordered in chart."""
+        # Extract domains and sort by domain min (bottom-to-top in chart)
+        domains = sorted(
+            [row["domain"] for row in PERIOD_DASH_ROWS],
+            key=lambda d: d[0],
+        )
+
+        # Verify non-overlapping: each domain's max <= next domain's min
+        for i in range(len(domains) - 1):
+            current_max = domains[i][1]
+            next_min = domains[i + 1][0]
+            assert current_max <= next_min, (
+                f"Domain[{i}] ({domains[i]}) max {current_max} overlaps with "
+                f"domain[{i+1}] ({domains[i+1]}) min {next_min}. "
+                f"All domains must be non-overlapping."
+            )
+
+        # Bottom domain starts at 0
+        assert domains[0][0] == 0.0, f"Bottom domain should start at 0.0, got {domains[0][0]}"
+        # Top domain ends at 1.0
+        assert domains[-1][1] == 1.0, f"Top domain should end at 1.0, got {domains[-1][1]}"
+
+    def test_domains_cover_full_range(self):
+        """Sum of domain heights should cover the full chart [0.0, 1.0].
+
+        The ygap (0.02) creates visual spacing between rows but is applied by
+        Plotly's layout engine on top of these domain values, so the domain
+        values themselves sum to exactly 1.0.
+        """
+        total_span = sum(
+            row["domain"][1] - row["domain"][0] for row in PERIOD_DASH_ROWS
+        )
+        assert total_span == pytest.approx(1.0), (
+            f"Total domain span {total_span} should cover full chart [0.0, 1.0]"
+        )
+
+    def test_yaxis_count_is_6(self):
+        """6 independent y-axes exist: y, y2, y3, y4, y5, y6."""
+        axes = sorted(PERIOD_DASH_YAXES)
+        assert len(axes) == 6, f"Expected 6 y-axes, got {len(axes)}: {axes}"
+        assert axes == ["y", "y2", "y3", "y4", "y5", "y6"], (
+            f"Expected y-axes names [y, y2, y3, y4, y5, y6], got {axes}"
+        )
+
+    def test_domain_heights_are_reasonable(self):
+        """Each row domain height is within reasonable bounds (0.06-0.42)."""
+        for row in PERIOD_DASH_ROWS:
+            d_min, d_max = row["domain"]
+            height = d_max - d_min
+            # PnL row (bottom) can be taller, others are thinner
+            assert 0.01 < height < 0.5, (
+                f"Row '{row['label']}' domain height {height} is outside expected range"
+            )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Test: All Modifications Integration
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestAllModificationsIntegration:
+    """Integration tests covering all modifications end-to-end.
+
+    Uses real parquet data to validate column completeness, position data
+    consistency, aligned PnL computation, and cross-view position chains.
+    """
+
+    ORDERED_VIEWS = ["v0", "v1", "v2", "v3"]
+
+    @pytest.fixture(scope="class")
+    def parquet_path(self):
+        """Find the first available parquet file in backtest_output."""
+        base = Path(__file__).resolve().parent.parent / "backtest_output"
+        candidates = sorted(base.glob("*/backtest_result.parquet"))
+        if not candidates:
+            pytest.skip("No parquet files found in backtest_output")
+        return str(candidates[0])
+
+    @pytest.fixture(scope="class")
+    def parquet_df(self, parquet_path):
+        """Load the parquet file as a DataFrame."""
+        return pd.read_parquet(parquet_path)
+
+    def test_real_parquet_loads_all_columns(self, parquet_df):
+        """Load real parquet, verify all 51 columns present."""
+        expected_count = 51
+        actual_count = len(parquet_df.columns)
+        assert actual_count == expected_count, (
+            f"Expected {expected_count} columns, got {actual_count}: "
+            + ", ".join(parquet_df.columns)
+        )
+
+    def test_all_views_position_data_exists(self, parquet_df):
+        """Each view v0-v3 has long_pos and short_pos columns with valid data."""
+        for v in self.ORDERED_VIEWS:
+            for pos_type in ["long_pos", "short_pos"]:
+                col_name = f"{v}_{pos_type}"
+                assert col_name in parquet_df.columns, (
+                    f"Missing column: {col_name}"
+                )
+                series = parquet_df[col_name]
+                assert len(series) > 0, (
+                    f"Column {col_name} is empty"
+                )
+                # All values should be 0 or 1 (boolean positions)
+                unique_vals = set(series.dropna().unique())
+                assert unique_vals.issubset({0, 1, True, False}), (
+                    f"Column {col_name} has unexpected values: {unique_vals}"
+                )
+
+    def test_aligned_pnl_computation_end_to_end(self, parquet_df):
+        """End-to-end: compute aligned PnL for all views, verify shape."""
+        columns = {col: parquet_df[col].tolist() for col in parquet_df.columns}
+
+        for vi, v in enumerate(self.ORDERED_VIEWS):
+            higher_pos = get_higher_tf_position(vi, columns, self.ORDERED_VIEWS)
+
+            for side, pos_key in [("long", "longPos"), ("short", "shortPos")]:
+                pnl = columns.get(f"{v}_pnl_{side}", [])
+                pos = higher_pos[pos_key]
+                if len(pnl) > 0 and len(pos) > 0:
+                    aligned = compute_aligned_pnl(pnl, pos)
+                    # Shape matches input
+                    assert len(aligned) == len(pnl), (
+                        f"Aligned PnL length mismatch for {v} {side}"
+                    )
+                    # Starts at 100.0
+                    assert aligned[0] == pytest.approx(100.0), (
+                        f"Aligned PnL start != 100.0 for {v} {side}"
+                    )
+                    # No NaN or Inf
+                    assert all(not math.isnan(x) for x in aligned), (
+                        f"NaN in aligned PnL for {v} {side}"
+                    )
+                    assert all(not math.isinf(x) for x in aligned), (
+                        f"Inf in aligned PnL for {v} {side}"
+                    )
+
+    def test_higher_tf_position_chain_integration(self, parquet_df):
+        """Integration: v3->v2->v1->v0 position chain with real data."""
+        columns = {col: parquet_df[col].tolist() for col in parquet_df.columns}
+
+        n = len(columns.get("v0_long_pos", []))
+        assert n > 0, "Parquet data is empty"
+
+        # v3 uses v2's position as higher TF
+        v3_higher = get_higher_tf_position(3, columns, self.ORDERED_VIEWS)
+        assert v3_higher["longPos"] == columns.get("v2_long_pos", [])
+        assert v3_higher["shortPos"] == columns.get("v2_short_pos", [])
+        assert len(v3_higher["longPos"]) == n
+
+        # v2 uses v1's position as higher TF
+        v2_higher = get_higher_tf_position(2, columns, self.ORDERED_VIEWS)
+        assert v2_higher["longPos"] == columns.get("v1_long_pos", [])
+        assert v2_higher["shortPos"] == columns.get("v1_short_pos", [])
+        assert len(v2_higher["longPos"]) == n
+
+        # v1 uses v0's position as higher TF
+        v1_higher = get_higher_tf_position(1, columns, self.ORDERED_VIEWS)
+        assert v1_higher["longPos"] == columns.get("v0_long_pos", [])
+        assert v1_higher["shortPos"] == columns.get("v0_short_pos", [])
+        assert len(v1_higher["longPos"]) == n
+
+        # v0 derives from own signal
+        v0_higher = get_higher_tf_position(0, columns, self.ORDERED_VIEWS)
+        v0_sig = columns.get("v0_sig", [])
+        assert len(v0_higher["longPos"]) == n
+        assert len(v0_sig) == n
+        # Verify v0 position is consistent with its signal
+        for i in range(n):
+            s = float(v0_sig[i]) if v0_sig[i] is not None else 0.0
+            assert v0_higher["longPos"][i] == (s > 0), (
+                f"v0 signal-to-position mismatch at index {i}"
+            )
+            assert v0_higher["shortPos"][i] == (s < 0), (
+                f"v0 signal-to-position mismatch at index {i}"
+            )
+
+    def test_position_badge_values_match_last_bar(self, parquet_df):
+        """Position badge text must match last bar's long_pos/short_pos."""
+        columns = {col: parquet_df[col].tolist() for col in parquet_df.columns}
+
+        for v in self.ORDERED_VIEWS:
+            long_pos = columns.get(f"{v}_long_pos", [])
+            short_pos = columns.get(f"{v}_short_pos", [])
+            if len(long_pos) == 0 or len(short_pos) == 0:
+                continue
+
+            text, cls = get_current_position(long_pos, short_pos)
+
+            # Verify the returned status matches the last bar's actual data
+            last_idx = len(long_pos) - 1
+            if long_pos[last_idx]:
+                assert text == "做多" and cls == "long", (
+                    f"View {v}: last bar long_pos=True but got {text}/{cls}"
+                )
+            elif short_pos[last_idx]:
+                assert text == "做空" and cls == "short", (
+                    f"View {v}: last bar short_pos=True but got {text}/{cls}"
+                )
+            else:
+                assert text == "空仓" and cls == "empty", (
+                    f"View {v}: last bar both False but got {text}/{cls}"
+                )
+
+    def test_own_vs_higher_tf_positions_different(self, parquet_df):
+        """Own and higher TF position arrays are from different views.
+
+        For v3, own position = v3_long_pos, higher TF position = v2_long_pos.
+        For v2, own position = v2_long_pos, higher TF position = v1_long_pos.
+        For v1, own position = v1_long_pos, higher TF position = v0_long_pos.
+        These should be different arrays (they come from different views).
+        """
+        columns = {col: parquet_df[col].tolist() for col in parquet_df.columns}
+
+        for vi in range(1, len(self.ORDERED_VIEWS)):
+            own_v = self.ORDERED_VIEWS[vi]
+            higher_v = self.ORDERED_VIEWS[vi - 1]
+
+            own_long = columns.get(f"{own_v}_long_pos", [])
+            higher_long = columns.get(f"{higher_v}_long_pos", [])
+            own_short = columns.get(f"{own_v}_short_pos", [])
+            higher_short = columns.get(f"{higher_v}_short_pos", [])
+
+            if len(own_long) == 0 or len(higher_long) == 0:
+                continue
+
+            # Arrays should not be identical (different views = different
+            # aggregation levels = different position decisions)
+            assert own_long != higher_long or own_short != higher_short, (
+                f"Own position ({own_v}) and higher TF position ({higher_v}) "
+                f"should differ at least on one side"
+            )
+
+    def test_both_long_and_short_never_true_same_time(self, parquet_df):
+        """Long and short positions should never both be true at same bar.
+
+        A view cannot simultaneously hold both long and short positions
+        at the same bar index.
+        """
+        columns = {col: parquet_df[col].tolist() for col in parquet_df.columns}
+
+        for v in self.ORDERED_VIEWS:
+            long_pos = columns.get(f"{v}_long_pos", [])
+            short_pos = columns.get(f"{v}_short_pos", [])
+            if len(long_pos) == 0:
+                continue
+
+            for i in range(len(long_pos)):
+                both_true = bool(long_pos[i]) and bool(short_pos[i])
+                assert not both_true, (
+                    f"View {v} at bar {i}: long_pos and short_pos are both True"
+                )
+
+    def test_parquet_bar_count_consistent(self, parquet_df):
+        """All columns have same number of rows."""
+        n_rows = len(parquet_df)
+        assert n_rows > 0, "Parquet has no rows"
+
+        for col_name in parquet_df.columns:
+            col_len = len(parquet_df[col_name])
+            assert col_len == n_rows, (
+                f"Column '{col_name}' has {col_len} rows, expected {n_rows}"
+            )

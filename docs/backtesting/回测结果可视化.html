@@ -411,29 +411,29 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
   <!-- Period Dashboards -->
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D1</span> <span id="dash-d1-title">日线</span> 完整视图</div>
-    <div class="plot-wrap" style="height:650px"><div id="chart-dash-v0"></div></div>
-    <button onclick="var dashIds=['chart-dash-v0','chart-dash-v1','chart-dash-v2','chart-dash-v3'];dashIds.forEach(function(id){Plotly.relayout(id,{'xaxis4.autorange':true,'xaxis5.autorange':true,'xaxis3.autorange':true,'xaxis2.autorange':true,'xaxis.autorange':true})})" class="btn-reset-zoom">↺ 重置缩放 (全部)</button>
+    <div class="plot-wrap" style="height:750px"><div id="chart-dash-v0"></div></div>
+    <button onclick="var dashIds=['chart-dash-v0','chart-dash-v1','chart-dash-v2','chart-dash-v3'];dashIds.forEach(function(id){Plotly.relayout(id,{'xaxis4.autorange':true,'xaxis5.autorange':true,'xaxis6.autorange':true,'xaxis3.autorange':true,'xaxis2.autorange':true,'xaxis.autorange':true})})" class="btn-reset-zoom">↺ 重置缩放 (全部)</button>
     <div id="date-tip-v0" class="date-tip"></div>
   </div>
 
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D2</span> <span id="dash-d2-title">60分钟</span> 完整视图</div>
-    <div class="plot-wrap" style="height:650px"><div id="chart-dash-v1"></div></div>
-    <button onclick="Plotly.relayout('chart-dash-v1', {'xaxis.autorange': true, 'xaxis2.autorange': true, 'xaxis3.autorange': true, 'xaxis4.autorange': true, 'xaxis5.autorange': true})" class="btn-reset-zoom">↺ 重置缩放</button>
+    <div class="plot-wrap" style="height:750px"><div id="chart-dash-v1"></div></div>
+    <button onclick="Plotly.relayout('chart-dash-v1', {'xaxis.autorange': true, 'xaxis2.autorange': true, 'xaxis3.autorange': true, 'xaxis4.autorange': true, 'xaxis5.autorange': true, 'xaxis6.autorange': true})" class="btn-reset-zoom">↺ 重置缩放</button>
     <div id="date-tip-v1" class="date-tip"></div>
   </div>
 
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D3</span> <span id="dash-d3-title">15分钟</span> 完整视图</div>
-    <div class="plot-wrap" style="height:650px"><div id="chart-dash-v2"></div></div>
-    <button onclick="Plotly.relayout('chart-dash-v2', {'xaxis.autorange': true, 'xaxis2.autorange': true, 'xaxis3.autorange': true, 'xaxis4.autorange': true, 'xaxis5.autorange': true})" class="btn-reset-zoom">↺ 重置缩放</button>
+    <div class="plot-wrap" style="height:750px"><div id="chart-dash-v2"></div></div>
+    <button onclick="Plotly.relayout('chart-dash-v2', {'xaxis.autorange': true, 'xaxis2.autorange': true, 'xaxis3.autorange': true, 'xaxis4.autorange': true, 'xaxis5.autorange': true, 'xaxis6.autorange': true})" class="btn-reset-zoom">↺ 重置缩放</button>
     <div id="date-tip-v2" class="date-tip"></div>
   </div>
 
   <div class="section period-dashboard">
     <div class="section-title"><span class="num">D4</span> <span id="dash-d4-title">5分钟</span> 完整视图</div>
-    <div class="plot-wrap" style="height:650px"><div id="chart-dash-v3"></div></div>
-    <button onclick="Plotly.relayout('chart-dash-v3', {'xaxis.autorange': true, 'xaxis2.autorange': true, 'xaxis3.autorange': true, 'xaxis4.autorange': true, 'xaxis5.autorange': true})" class="btn-reset-zoom">↺ 重置缩放</button>
+    <div class="plot-wrap" style="height:750px"><div id="chart-dash-v3"></div></div>
+    <button onclick="Plotly.relayout('chart-dash-v3', {'xaxis.autorange': true, 'xaxis2.autorange': true, 'xaxis3.autorange': true, 'xaxis4.autorange': true, 'xaxis5.autorange': true, 'xaxis6.autorange': true})" class="btn-reset-zoom">↺ 重置缩放</button>
     <div id="date-tip-v3" class="date-tip"></div>
   </div>
   <!-- Section 6: Trade Events -->
@@ -1569,14 +1569,13 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       showlegend: true,
     });
 
-    // ===== Row 3: Position Status (NEW — dedicated row, yaxis5/xaxis5) =====
-    //   Own position as colored bands + step-line trace; higher TF position as bands.
+    // ===== Row 3: 自身持仓 (Own Position) — yaxis5/xaxis5 =====
     var _viewIdx = VIEWS.indexOf(v);
     var _ownLongPos = col(data, v + '_long_pos');
     var _ownShortPos = col(data, v + '_short_pos');
 
     // Position overlay helper for Row 3 (uses x5/y5)
-    function addPosOverlay(posArr, posColor, y0, y1) {
+    function addPosOverlayOwn(posArr, posColor, y0, y1) {
       y0 = (y0 !== undefined) ? y0 : -1.2;
       y1 = (y1 !== undefined) ? y1 : 1.2;
       var s = -1;
@@ -1611,8 +1610,8 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
     }
 
     // Own position bands: long (green, upper half) + short (red, lower half)
-    addPosOverlay(_ownLongPos, 'rgba(63,185,80,0.12)', 0.0, 1.2);
-    addPosOverlay(_ownShortPos, 'rgba(248,81,73,0.12)', -1.2, 0.0);
+    addPosOverlayOwn(_ownLongPos, 'rgba(63,185,80,0.12)', 0.0, 1.2);
+    addPosOverlayOwn(_ownShortPos, 'rgba(248,81,73,0.12)', -1.2, 0.0);
 
     // Own position step-line traces: 1=long (green), -1=short (red), 0=empty (gray)
     if (_ownLongPos && _ownShortPos && _ownLongPos.length > 0) {
@@ -1639,41 +1638,74 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       });
     }
 
-    // Higher timeframe position bands (semi-transparent, different y-range for visual separation)
+    // ===== Row 4: 上级持仓 (Higher TF Position) — yaxis6/xaxis6 =====
     if (_viewIdx > 0) {
       var _higherV = VIEWS[_viewIdx - 1];
       var _higherLongPos = col(data, _higherV + '_long_pos');
       var _higherShortPos = col(data, _higherV + '_short_pos');
+
+      // Position overlay helper for Row 4 (uses x6/y6)
+      function addPosOverlayHigher(posArr, posColor, y0, y1) {
+        y0 = (y0 !== undefined) ? y0 : -1.2;
+        y1 = (y1 !== undefined) ? y1 : 1.2;
+        var s = -1;
+        for (var i = 0; i <= posArr.length; i++) {
+          var inPos = i < posArr.length && (posArr[i] === true || posArr[i] === 1);
+          if (inPos && s === -1) {
+            s = i;
+          } else if (!inPos && s !== -1) {
+            shapes.push({
+              type: 'rect',
+              x0: barIdx[s], x1: barIdx[i],
+              y0: y0, y1: y1,
+              fillcolor: posColor,
+              line: { width: 0 },
+              layer: 'below',
+              xref: 'x6', yref: 'y6',
+            });
+            s = -1;
+          }
+        }
+        if (s !== -1) {
+          shapes.push({
+            type: 'rect',
+            x0: barIdx[s], x1: barIdx[N - 1],
+            y0: y0, y1: y1,
+            fillcolor: posColor,
+            line: { width: 0 },
+            layer: 'below',
+            xref: 'x6', yref: 'y6',
+          });
+        }
+      }
+
+      // Higher TF position bands: long (blue, upper half) + short (orange, lower half)
       if (_higherLongPos && _higherLongPos.length > 0) {
-        addPosOverlay(_higherLongPos, 'rgba(56,139,253,0.08)');
-      } else {
-        console.warn('[' + (label || v) + '] Higher TF position column "' + _higherV + '_long_pos" not available, skipping overlay.');
+        addPosOverlayHigher(_higherLongPos, 'rgba(56,139,253,0.12)', 0.0, 1.2);
       }
       if (_higherShortPos && _higherShortPos.length > 0) {
-        addPosOverlay(_higherShortPos, 'rgba(210,140,40,0.08)');
-      } else {
-        console.warn('[' + (label || v) + '] Higher TF position column "' + _higherV + '_short_pos" not available, skipping overlay.');
+        addPosOverlayHigher(_higherShortPos, 'rgba(210,140,40,0.12)', -1.2, 0.0);
       }
-      // Higher TF position indicator bars (thin, at top/bottom of the y range)
+
+      // Higher TF position step-line traces
       if (_higherLongPos && _higherLongPos.length > 0) {
-        var _htfLongUp = new Array(N), _htfLongDn = new Array(N);
+        var _htfLongOnly = new Array(N);
         for (var hli = 0; hli < N; hli++) {
-          _htfLongUp[hli] = _higherLongPos[hli] ? 1.2 : null;
-          _htfLongDn[hli] = _higherLongPos[hli] ? 1.15 : null;
+          _htfLongOnly[hli] = _higherLongPos[hli] ? 1 : null;
         }
-        traces.push({ x: barIdx, y: _htfLongUp, type: 'scatter', mode: 'markers', name: '上级做多', marker: { symbol: 'line-ns', size: 6, color: 'rgba(56,139,253,0.6)' }, xaxis: 'x5', yaxis: 'y5', showlegend: false, connectgaps: false });
+        traces.push({ x: barIdx, y: _htfLongOnly, type: 'scatter', mode: 'lines', name: '上级做多', line: { shape: 'hv', width: 2, color: 'rgba(56,139,253,0.6)' }, xaxis: 'x6', yaxis: 'y6', showlegend: false, connectgaps: false });
       }
       if (_higherShortPos && _higherShortPos.length > 0) {
-        var _htfShortUp = new Array(N), _htfShortDn = new Array(N);
+        var _htfShortOnly = new Array(N);
         for (var hsi = 0; hsi < N; hsi++) {
-          _htfShortUp[hsi] = _higherShortPos[hsi] ? -1.15 : null;
-          _htfShortDn[hsi] = _higherShortPos[hsi] ? -1.2 : null;
+          _htfShortOnly[hsi] = _higherShortPos[hsi] ? -1 : null;
         }
-        traces.push({ x: barIdx, y: _htfShortDn, type: 'scatter', mode: 'markers', name: '上级做空', marker: { symbol: 'line-ns', size: 6, color: 'rgba(210,140,40,0.6)' }, xaxis: 'x5', yaxis: 'y5', showlegend: false, connectgaps: false });
+        traces.push({ x: barIdx, y: _htfShortOnly, type: 'scatter', mode: 'lines', name: '上级做空', line: { shape: 'hv', width: 2, color: 'rgba(210,140,40,0.6)' }, xaxis: 'x6', yaxis: 'y6', showlegend: false, connectgaps: false });
       }
+
       var _higherVLabel = viewLabels[_higherV] || _higherV;
       annotations.push({
-        xref: 'x5 domain', yref: 'y5 domain',
+        xref: 'x6 domain', yref: 'y6 domain',
         x: 0.02, y: 0.90,
         text: '上级周期(' + _higherVLabel + ')持仓',
         showarrow: false,
@@ -1682,7 +1714,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       });
     } else {
       annotations.push({
-        xref: 'x5 domain', yref: 'y5 domain',
+        xref: 'x6 domain', yref: 'y6 domain',
         x: 0.02, y: 0.90,
         text: '无上级周期',
         showarrow: false,
@@ -1691,7 +1723,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       });
     }
 
-    // ===== Row 5 (bottom): PnL Curves (yaxis4/xaxis4) =====
+    // ===== Row 6 (bottom): PnL Curves (yaxis4/xaxis4) =====
     const pnlLong = col(data, v + '_pnl_long');
     const pnlShort = col(data, v + '_pnl_short');
 
@@ -1772,7 +1804,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       xref: 'x4', yref: 'y4',
     });
 
-    // ===== Row 4: Position Heatmap (yaxis2/xaxis2) =====
+    // ===== Row 5: Position Heatmap (yaxis2/xaxis2) =====
     const sampleN = Math.min(200, N);
     const sampleStep = Math.max(1, Math.floor(N / sampleN));
     const sampledIndices = [];
@@ -1836,7 +1868,7 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       xaxis: 'x2', yaxis: 'y2',
     });
 
-    // ===== Cross-subplot cursor line (paper coordinates, spans all 5 rows) =====
+    // ===== Cross-subplot cursor line (paper coordinates, spans all 6 rows) =====
     // Plotly's spikemode:'across' only works within a single subplot's yaxis domain.
     // We use a layout shape with yref:'paper' (0-1 across entire chart height) and
     // update its x position via plotly_hover/unhover events to simulate a unified cursor.
@@ -1854,34 +1886,38 @@ h1 { font-size: 28px; font-weight: 700; text-align: center; margin-bottom: 4px; 
       template: 'plotly_dark', paper_bgcolor: paperBg, plot_bgcolor: plotBg,
       font: baseFont, displayModeBar: false,
       margin: { l: 60, r: 20, t: 40, b: 40 },
-      height: 620,
+      height: 720,
       hovermode: 'x unified',
       hoverlabel: hoverLabelStyle,
       showlegend: true,
       legend: { orientation: 'h', y: 1.02, x: 0.5, xanchor: 'center', font: { size: 10, color: '#c9d1d9' }, bgcolor: 'rgba(0,0,0,0)' },
-      grid: { rows: 5, columns: 1, pattern: 'independent', roworder: 'top to bottom', ygap: 0.02 },
+      grid: { rows: 6, columns: 1, pattern: 'independent', roworder: 'top to bottom', ygap: 0.02 },
       shapes: shapes,
       annotations: annotations,
 
       // Row 1 (top): Filtered Price — no tick labels, matches bottom x4
       xaxis: { matches: 'x4', domain: [0.0, 1.0], showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
-      yaxis: { domain: [0.73, 1.0], title: { text: '滤波价格', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
+      yaxis: { domain: [0.78, 1.0], title: { text: '滤波价格', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: false },
 
       // Row 2: Signal — clean, no position overlays, matches bottom x4
       xaxis3: { matches: 'x4', domain: [0.0, 1.0], showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
-      yaxis3: { domain: [0.63, 0.73], title: { text: '信号', font: { size: 10, color: '#8b949e' } }, tickvals: [-1, 0, 1], ticktext: ['空头(-1)', '中性(0)', '多头(+1)'], range: [-1.2, 1.2], showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
+      yaxis3: { domain: [0.70, 0.78], title: { text: '信号', font: { size: 10, color: '#8b949e' } }, tickvals: [-1, 0, 1], ticktext: ['空头(-1)', '中性(0)', '多头(+1)'], range: [-1.2, 1.2], showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
 
-      // Row 3: Position Status (own + higher TF), matches bottom x4
+      // Row 3: 自身持仓 (Own Position), matches bottom x4
       xaxis5: { matches: 'x4', domain: [0.0, 1.0], showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
-      yaxis5: { domain: [0.50, 0.63], title: { text: '持仓状态', font: { size: 10, color: '#8b949e' } }, tickvals: [-1, 0, 1], ticktext: ['做空', '空仓', '做多'], range: [-1.25, 1.25], showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
+      yaxis5: { domain: [0.60, 0.70], title: { text: '自身持仓', font: { size: 10, color: '#8b949e' } }, tickvals: [-1, 0, 1], ticktext: ['做空', '空仓', '做多'], range: [-1.25, 1.25], showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
 
-      // Row 4: Position Heatmap, matches bottom x4
+      // Row 4: 上级持仓 (Higher TF Position), matches bottom x4
+      xaxis6: { matches: 'x4', domain: [0.0, 1.0], showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
+      yaxis6: { domain: [0.50, 0.60], title: { text: '上级持仓', font: { size: 10, color: '#8b949e' } }, tickvals: [-1, 0, 1], ticktext: ['做空', '空仓', '做多'], range: [-1.25, 1.25], showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
+
+      // Row 5: Position Heatmap, matches bottom x4
       xaxis2: { matches: 'x4', domain: [0.0, 1.0], showticklabels: false, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
-      yaxis2: { domain: [0.40, 0.50], automargin: true, showgrid: true, gridcolor: gridColor },
+      yaxis2: { domain: [0.42, 0.50], automargin: true, showgrid: true, gridcolor: gridColor },
 
-      // Row 5 (bottom): PnL — shows tick labels, anchor for all other x-axes
+      // Row 6 (bottom): PnL — shows tick labels, anchor for all other x-axes
       xaxis4: { range: [barIdx[0], barIdx[barIdx.length - 1]], domain: [0.0, 1.0], title: { text: 'bar_index (等间距)', font: { size: 10, color: '#8b949e' } }, tickvals: tickVals, ticktext: tickTexts, showgrid: true, gridcolor: gridColor, zeroline: false, showspikes: true, spikemode: 'across', spikesnap: 'cursor', spikethickness: 1, spikecolor: '#8b949e' },
-      yaxis4: { domain: [0.0, 0.40], title: { text: 'PnL (累计)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
+      yaxis4: { domain: [0.0, 0.42], title: { text: 'PnL (累计)', font: { size: 10, color: '#8b949e' } }, showgrid: true, gridcolor: gridColor, zeroline: true, zerolinecolor: zeroLineColor },
     };
 
     Plotly.newPlot('chart-dash-' + v, traces, layout, plotConfig);
