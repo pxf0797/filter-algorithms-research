@@ -112,19 +112,27 @@ def _render_refresh_row(market, ticker_code) -> tuple:
     if auto_refresh:
         interval = st.sidebar.slider("刷新间隔(秒)", 10, 600, 60, 10, key="refresh_interval")
 
-    # BS 监测周期选择器
+    # BS 监测周期选择器 — 从当前 4 个视图收集已配置的周期
+    view_tfs = []
+    for vi in range(4):
+        tf = AppState.get(f"v{vi}_tf")
+        if tf and tf not in view_tfs:
+            view_tfs.append(tf)
+
+    # 选项：["不选择"] + 当前视图的周期列表
+    options = ["不选择"] + view_tfs
+
     bs_monitor_tf = AppState.get("bs_monitor_tf")
-    if not bs_monitor_tf:
-        bs_monitor_tf = "日线"
-        AppState.set("bs_monitor_tf", "日线")
+    if not bs_monitor_tf or bs_monitor_tf not in options:
+        bs_monitor_tf = options[0]  # 默认"不选择"
+        AppState.set("bs_monitor_tf", bs_monitor_tf)
 
     new_tf = st.sidebar.selectbox(
         "BS监测周期",
-        ALL_TFS,
-        index=ALL_TFS.index(bs_monitor_tf) if bs_monitor_tf in ALL_TFS else 3,
+        options,
+        index=options.index(bs_monitor_tf) if bs_monitor_tf in options else 0,
         key="bs_monitor_tf_selector",
-        on_change=lambda: AppState.set("bs_monitor_tf", st.session_state.bs_monitor_tf_selector),
-        help="选择要监测 BS 信号的周期，与操作周期独立",
+        help="从当前 4 个视图中选择要监测 BS 信号的周期",
     )
     if new_tf != bs_monitor_tf:
         AppState.set("bs_monitor_tf", new_tf)

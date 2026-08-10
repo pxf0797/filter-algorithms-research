@@ -2,9 +2,12 @@
 Tests for BSMonitor — BS 仓位操作监测模块单元测试和集成测试
 """
 
+import numpy as np
 import pandas as pd
 import pytest
 from browse.bs_monitor import BSMonitor, BSRecord
+from engine.schmitt import _find_all_pairs
+from engine.signals import _compute_from_pairs, compute_bs_markers
 
 
 # ── Test data helpers ──────────────────────────────────────────────────
@@ -602,3 +605,336 @@ class TestBSMonitorScenarios:
             make_entry(date_str="2026-08-12"),
         ]))
         assert m.get_new_count() == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# BS 信号对回退分支测试
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestBSFallbackFromPairs:
+    """测试 compute_bs_markers 在无 trade_records 时的信号对回退"""
+
+    @staticmethod
+    def _make_test_data(n=120, long_range=(20, 60), short_range=(80, 110)):
+        """构造测试用 t/dates/schmitt/all_pairs 数据。"""
+        t = np.arange(n, dtype=float)
+        dates = pd.date_range("2026-01-01", periods=n, freq="D")
+        sig = np.zeros(n, dtype=int)
+        sig[long_range[0]:long_range[1]] = 1
+        sig[short_range[0]:short_range[1]] = -1
+        all_pairs = _find_all_pairs(sig)
+        schmitt = {"sig": sig}
+        return t, dates, schmitt, all_pairs
+
+    def test_fallback_without_trades(self):
+        """无 trade_records 时从 all_pairs + schmitt 生成 BS markers"""
+        t, dates, schmitt, all_pairs = self._make_test_data()
+
+        # 无 trade_records → 进入 _compute_from_pairs 回退分支
+        result = _compute_from_pairs(t, dates, schmitt, all_pairs)
+        assert len(result["entry_markers"]) >= 2, (
+            f"回退分支应生成 ≥2 个 entry markers（long + short），"
+            f"实际 {len(result['entry_markers'])} 个"
+        )
+        assert len(result["exit_markers"]) >= 1, (
+            f"回退分支应生成 ≥1 个 exit marker（非末段出场），"
+            f"实际 {len(result['exit_markers'])} 个"
+        )
+
+        # 验证 entry marker 格式：4-元组 (idx, label, color, date)
+        for m in result["entry_markers"]:
+            assert len(m) == 4, f"entry marker 应为 4 元组: {m}"
+            assert m[1] in ("B", "S"), f"label 应为 B 或 S: {m}"
+            assert m[2] in ("green", "red"), f"color 应为 green 或 red: {m}"
+            assert isinstance(m[3], pd.Timestamp), f"date 应为 Timestamp: {m}"
+
+        # 验证 exit marker 格式：_compute_from_pairs 生成 4-元组
+        # (idx, label, color, date)，不包含 exit_reason（与 trade_records 路径不同）
+        # _parse_marker 通过 len(marker) >= 5 判断正确解析两种格式
+        for m in result["exit_markers"]:
+            assert len(m) == 4, (
+                f"_compute_from_pairs exit marker 应为 4 元组（无 exit_reason）: {m}"
+            )
+            assert isinstance(m[3], pd.Timestamp), f"第 4 元素应为 date: {m}"
+
+    def test_fallback_empty_pairs(self):
+        """all_pairs 为空或 schmitt 为 None 时返回空 markers"""
+        n = 50
+        t = np.arange(n, dtype=float)
+        dates = pd.date_range("2026-01-01", periods=n, freq="D")
+        schmitt = {"sig": np.zeros(n, dtype=int)}
+
+        # 空 pairs
+        result = _compute_from_pairs(t, dates, schmitt, [])
+        assert result == {"entry_markers": [], "exit_markers": []}
+
+        # schmitt 为 None
+        result = _compute_from_pairs(t, dates, None, [(10, 30)])
+        assert result == {"entry_markers": [], "exit_markers": []}
+
+        # schmitt["sig"] 为 None
+        result = _compute_from_pairs(t, dates, {"sig": None}, [(10, 30)])
+        assert result == {"entry_markers": [], "exit_markers": []}
+
+    def test_fallback_vs_trade_records_consistency(self):
+        """回退分支与 trade_records 分支产生相同数量的 entry markers"""
+        t, dates, schmitt, all_pairs = self._make_test_data()
+
+        # 根据信号对构造对应的 trade_records
+        trade_records = []
+        for pair_start, pair_end in all_pairs:
+            direction = schmitt["sig"][pair_start]
+            is_long = direction == 1
+            exit_reason = "eod" if pair_end >= len(t) - 1 else "take_profit"
+            trade_records.append({
+                "type": "long" if is_long else "short",
+                "entry_idx": int(pair_start),
+                "exit_idx": int(pair_end),
+                "exit_reason": exit_reason,
+            })
+
+        # Path 1: 有 trade_records（走 _compute_own_from_trades）
+        result_trades = compute_bs_markers(
+            t, dates, schmitt, all_pairs, trade_records, "日线", "日线",
+        )
+
+        # Path 2: 无 trade_records（走 _compute_from_pairs 回退）
+        result_fallback = compute_bs_markers(
+            t, dates, schmitt, all_pairs, [], "日线", "日线",
+        )
+
+        # 两个分支应产生相同数量的 entry markers
+        assert len(result_trades["entry_markers"]) == len(result_fallback["entry_markers"]), (
+            f"trade_records 分支: {len(result_trades['entry_markers'])} entries, "
+            f"回退分支: {len(result_fallback['entry_markers'])} entries — 应一致"
+        )
+        assert len(result_trades["entry_markers"]) > 0
+
+    def test_fallback_last_segment_no_exit(self):
+        """最后一段信号（延伸到数据末尾）不产生出场标记"""
+        n = 80
+        t = np.arange(n, dtype=float)
+        dates = pd.date_range("2026-01-01", periods=n, freq="D")
+        sig = np.zeros(n, dtype=int)
+        # 仅一个长信号段，覆盖到末尾
+        sig[20:] = 1
+        all_pairs = _find_all_pairs(sig)
+        schmitt = {"sig": sig}
+
+        result = _compute_from_pairs(t, dates, schmitt, all_pairs)
+        assert len(result["entry_markers"]) == 1, (
+            f"单段信号应生成 1 个 entry marker，实际 {len(result['entry_markers'])}"
+        )
+        # 末段 pair_end >= n-1，不产生 exit marker
+        assert result["exit_markers"] == [], (
+            f"末段信号不应产生 exit marker，实际: {result['exit_markers']}"
+        )
+
+    def test_fallback_entry_marker_at_signal_start(self):
+        """entry marker 的索引应与信号段的起始位置一致"""
+        t, dates, schmitt, all_pairs = self._make_test_data(
+            n=100, long_range=(15, 40), short_range=(55, 85),
+        )
+
+        result = _compute_from_pairs(t, dates, schmitt, all_pairs)
+        entry_indices = {m[0] for m in result["entry_markers"]}
+        pair_starts = {p[0] for p in all_pairs}
+        assert entry_indices == pair_starts, (
+            f"entry marker indices {entry_indices} 应与 pair starts {pair_starts} 一致"
+        )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# BS 监测周期选择器测试
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestBSMonitorSelector:
+    """测试 BS 监测周期选择器行为（模拟 ViewState）"""
+
+    @staticmethod
+    def _new_monitor(max_records=500):
+        return BSMonitor(max_records=max_records)
+
+    def test_active_view_tfs_collection(self):
+        """仅返回匹配指定周期的记录 — 模拟仅收集当前视图中配置的周期"""
+        m = self._new_monitor()
+        # 模拟 4 个视图：日线、周线、60分钟、30分钟
+        m.feed("0700.HK", "日线", make_markers(entries=[
+            make_entry(date_str="2026-08-10", bs_type="B", color="green"),
+        ]))
+        m.feed("0700.HK", "周线", make_markers(entries=[
+            make_entry(date_str="2026-08-11", bs_type="B", color="green"),
+        ]))
+        m.feed("0700.HK", "60分钟", make_markers(entries=[
+            make_entry(date_str="2026-08-12", bs_type="S", color="red"),
+        ]))
+        m.feed("0700.HK", "30分钟", make_markers(entries=[
+            make_entry(date_str="2026-08-13", bs_type="B", color="green"),
+        ]))
+
+        # 每个周期独立过滤
+        assert len(m.get_all(tf="日线")) == 1
+        assert len(m.get_all(tf="周线")) == 1
+        assert len(m.get_all(tf="60分钟")) == 1
+        assert len(m.get_all(tf="30分钟")) == 1
+        assert len(m.get_all(tf="15分钟")) == 0  # 未配置的周期无数据
+        assert len(m.get_all()) == 4  # tf=None 返回全部
+
+        # 验证过滤的记录周期正确
+        daily = m.get_all(tf="日线")
+        assert all(r.timeframe == "日线" for r in daily)
+
+    def test_no_selection_option(self):
+        """"不选择"时 bs_monitor_tf 为空字符串，get_all("") 返回空列表"""
+        m = self._new_monitor()
+        m.feed("0700.HK", "日线", make_markers(entries=[
+            make_entry(date_str="2026-08-10"),
+        ]))
+
+        # 空字符串 tf — 没有记录的 timeframe 是空字符串
+        assert m.get_all(tf="") == []
+
+        # None — 返回全部
+        assert len(m.get_all(tf=None)) == 1
+
+        # 实际周期 — 返回匹配
+        assert len(m.get_all(tf="日线")) == 1
+
+    def test_no_selection_hides_table(self):
+        """"不选择"时 get_all("") 无数据，render_bs_table 显示 info 而非表格"""
+        m = self._new_monitor()
+        m.feed("0700.HK", "日线", make_markers(entries=[
+            make_entry(date_str="2026-08-10"),
+        ]))
+
+        # 模拟不选择：tf="" → get_all 返回空
+        records = m.get_all(tf="")
+        assert records == [], (
+            f"不选择时 get_all('') 应返回空列表，实际 {len(records)} 条"
+        )
+
+        # 对比：选择有效周期时返回数据
+        assert len(m.get_all(tf="日线")) == 1
+
+    def test_get_all_with_none_after_selective_feed(self):
+        """get_all(tf=None) 始终返回全部记录，不受选择器影响"""
+        m = self._new_monitor()
+        m.feed("0700.HK", "日线", make_markers(entries=[
+            make_entry(date_str="2026-08-10"),
+        ]))
+        m.feed("0700.HK", "60分钟", make_markers(exits=[
+            make_exit(date_str="2026-08-11", bs_type="S", color="green", reason="tp"),
+        ]))
+
+        # None = 全部
+        assert len(m.get_all(tf=None)) == 2
+        # 清除日线后全部减少但 60分钟还在
+        m.clear(tf="日线")
+        assert len(m.get_all(tf=None)) == 1
+        assert m.get_all(tf=None)[0].timeframe == "60分钟"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# BS 监测集成测试
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestBSMonitorIntegration:
+    """BS 监测 + 信号生成的集成场景"""
+
+    def test_daily_tf_without_strategy_still_generates_bs(self):
+        """日线无策略时仍能生成 BS 标记（核心回归测试）
+
+        模拟 ``show_strategy=False`` 场景：
+        - 无 trade_records
+        - 但有 schmitt 信号和 all_pairs
+        → compute_bs_markers 应通过 _compute_from_pairs 回退分支生成 BS 标记
+        """
+        n = 120
+        t = np.arange(n, dtype=float)
+        dates = pd.date_range("2026-01-01", periods=n, freq="D")
+        sig = np.zeros(n, dtype=int)
+        # 构造清晰的买卖信号
+        sig[30:70] = 1     # 做多段
+        sig[85:110] = -1   # 做空段
+        all_pairs = _find_all_pairs(sig)
+        schmitt = {"sig": sig}
+
+        # 核心：无 trade_records，无 holding_masks → 回退分支
+        result = compute_bs_markers(
+            t, dates, schmitt, all_pairs,
+            trade_records=[],
+            tf="日线", operating_tf="日线",
+        )
+
+        entries = result["entry_markers"]
+        exits = result["exit_markers"]
+        total = len(entries) + len(exits)
+
+        assert total > 0, (
+            f"日线无策略时 BS markers 不应为空！"
+            f" entries={len(entries)}, exits={len(exits)}"
+        )
+        assert len(entries) >= 2, (
+            f"应至少有两个 entry markers（做多 + 做空），实际 {len(entries)} 个"
+        )
+
+        # 验证 BS 类型正确：long → B(green), short → S(red)
+        b_types = {m[1] for m in entries}
+        assert b_types.issubset({"B", "S"}), f"entry labels 应为 B/S: {b_types}"
+
+        # 验证通过 BSMonitor.feed 可正常消费（端到端集成）
+        monitor = BSMonitor(max_records=100)
+        new = monitor.feed("0700.HK", "日线", result)
+        assert len(new) >= len(entries), (
+            f"BSMonitor.feed 应接收所有 entry markers，"
+            f"expected >= {len(entries)}, got {len(new)}"
+        )
+        assert len(monitor.get_all(tf="日线")) >= len(entries)
+
+    def test_compute_bs_markers_fallback_via_orchestrator(self):
+        """通过 compute_bs_markers 主入口验证回退分支的三层优先级"""
+        n = 60
+        t = np.arange(n, dtype=float)
+        dates = pd.date_range("2026-01-01", periods=n, freq="D")
+        sig = np.zeros(n, dtype=int)
+        sig[10:30] = 1
+        all_pairs = _find_all_pairs(sig)
+        schmitt = {"sig": sig}
+
+        trade_records = [
+            {"type": "long", "entry_idx": 10, "exit_idx": 30,
+             "exit_reason": "take_profit"},
+        ]
+
+        # 优先级 1: holding_masks + trade_records → _compute_from_trades_filtered
+        long_mask = np.zeros(n, dtype=bool)
+        long_mask[10] = True  # entry_idx=10 在 mask 内
+        result1 = compute_bs_markers(
+            t, dates, schmitt, all_pairs, trade_records,
+            "日线", "日线", holding_masks=(long_mask, np.zeros(n, dtype=bool)),
+        )
+        assert len(result1["entry_markers"]) == 1, "holding_masks 路径应过滤"
+
+        # 优先级 2: trade_records 无 holding_masks → _compute_own_from_trades
+        result2 = compute_bs_markers(
+            t, dates, schmitt, all_pairs, trade_records,
+            "日线", "日线", holding_masks=None,
+        )
+        assert len(result2["entry_markers"]) >= 1, "trade_records 路径应有结果"
+
+        # 优先级 3: schmitt + all_pairs（无 trade_records）→ _compute_from_pairs
+        result3 = compute_bs_markers(
+            t, dates, schmitt, all_pairs, [],
+            "日线", "日线", holding_masks=None,
+        )
+        assert len(result3["entry_markers"]) >= 1, "回退分支应有结果"
+
+        # 全空 → 空 markers
+        result4 = compute_bs_markers(
+            t, dates, None, [], [],
+            "日线", "日线", holding_masks=None,
+        )
+        assert result4 == {"entry_markers": [], "exit_markers": []}

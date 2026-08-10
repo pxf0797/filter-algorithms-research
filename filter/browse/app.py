@@ -894,20 +894,22 @@ def main() -> None:
                                    capture_collector=_capture_collector)
 
     # ── BS 监测: 喂入匹配周期的 BS markers ──
-    bs_monitor_tf = AppState.get("bs_monitor_tf", "日线")
-    bs_monitor = st.session_state.get("bs_monitor")
-    if bs_monitor:
-        bs_markers_for_monitor = st.session_state.get(f"_bs_{bs_monitor_tf}")
-        if bs_markers_for_monitor:
-            new_records = bs_monitor.feed(ticker_code, bs_monitor_tf, bs_markers_for_monitor)
-            if new_records:
-                st.toast(f"BS监测: 检测到 {len(new_records)} 个新信号")
+    bs_monitor_tf = AppState.get("bs_monitor_tf", "不选择")
+    if bs_monitor_tf and bs_monitor_tf != "不选择":
+        bs_monitor = st.session_state.get("bs_monitor")
+        if bs_monitor:
+            bs_markers_for_monitor = st.session_state.get(f"_bs_{bs_monitor_tf}")
+            if bs_markers_for_monitor:
+                new_records = bs_monitor.feed(ticker_code, bs_monitor_tf, bs_markers_for_monitor)
+                if new_records:
+                    st.toast(f"BS监测: 检测到 {len(new_records)} 个新信号")
 
     # ── BS 监测表格 ──
-    st.markdown("---")
-    bs_monitor = st.session_state.get("bs_monitor")
-    if bs_monitor:
-        render_bs_table(bs_monitor, bs_monitor_tf)
+    if bs_monitor_tf and bs_monitor_tf != "不选择":
+        st.markdown("---")
+        bs_monitor = st.session_state.get("bs_monitor")
+        if bs_monitor:
+            render_bs_table(bs_monitor, bs_monitor_tf)
 
     # PIPELINE_CAPTURE: flush step data when bar_index changes
     if _capture_collector is not None and _capture_collector:

@@ -131,6 +131,49 @@ def _compute_from_trades_filtered(t, dates, trade_records, holding_masks) -> dic
     return {"entry_markers": entry, "exit_markers": exit_}
 
 
+def _compute_from_pairs(t, dates, schmitt, all_pairs) -> dict:
+    """从 Schmitt 信号对直接生成 BS 标记（无 trade_records 时的回退路径）。
+
+    根据 ``sig_t[pair_start]`` 方向决定标记类型和颜色：
+    - sig=+1（做多）→ B(绿)入场, S(绿)出场
+    - sig=-1（做空）→ S(红)入场, B(红)出场
+
+    最后一段信号（pair_end == len(t)-1）不出场标记（等价于 eod 延续）。
+    """
+    entry = []
+    exit_ = []
+    n = len(t)
+    n_dates = len(dates) if dates is not None else 0
+    sig_t = schmitt.get("sig") if schmitt is not None else None
+    if sig_t is None or len(all_pairs) == 0:
+        return {"entry_markers": [], "exit_markers": []}
+
+    for pair_start, pair_end in all_pairs:
+        direction = sig_t[pair_start]
+        if direction not in (1, -1):
+            continue
+
+        is_long = direction == 1
+        d_entry = dates[pair_start] if pair_start < n_dates else None
+
+        if is_long:
+            entry.append((int(pair_start), "B", "green", d_entry))
+        else:
+            entry.append((int(pair_start), "S", "red", d_entry))
+
+        # 最后一段信号（延伸到数据末尾）不出场标记
+        if pair_end >= n - 1:
+            continue
+
+        d_exit = dates[pair_end] if pair_end < n_dates else None
+        if is_long:
+            exit_.append((int(pair_end), "S", "green", d_exit))
+        else:
+            exit_.append((int(pair_end), "B", "red", d_exit))
+
+    return {"entry_markers": entry, "exit_markers": exit_}
+
+
 def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
                         tf, operating_tf, higher_bs=None,
                         holding_masks=None) -> dict:
@@ -139,7 +182,7 @@ def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
     统一逻辑：所有周期使用相同的过滤逻辑。
     有 holding_masks + trade_records → 过滤后的标记
     仅有 trade_records → 未过滤的标记
-    都没有 → 空
+    都没有 trade_records 但有 schmitt 信号对 → 从信号对直接生成
 
     Parameters
     ----------
@@ -173,6 +216,10 @@ def compute_bs_markers(t, dates, schmitt, all_pairs, trade_records,
         return _compute_from_trades_filtered(t, dates, trade_records, holding_masks)
     elif trade_records:
         return _compute_own_from_trades(t, dates, trade_records)
+    elif schmitt is not None and all_pairs:
+        # 回退：无 trade_records 时从 schmitt 信号对直接生成 BS 标记
+        # 确保 BS 标注不依赖 show_strategy 开关
+        return _compute_from_pairs(t, dates, schmitt, all_pairs)
     else:
         return {"entry_markers": [], "exit_markers": []}
 
