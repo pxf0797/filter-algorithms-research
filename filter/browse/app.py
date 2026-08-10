@@ -51,6 +51,7 @@ from filter.browse.sidebar import (
 from filter.engine.signals import compute_bs_markers, get_lower_tfs
 from filter.shared.constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY
 from filter.shared.state import AppState
+from filter.browse.bs_monitor import BSMonitor, render_bs_table
 from filter.backtest.capture import PipelineCapture, PipelineStageData
 from filter.backtest.logger import log_data_load
 from filter.backtest.panel import render_backtest_panel, run_backtest_play, sync_backtest_cascading_data
@@ -754,6 +755,10 @@ def main() -> None:
         import_json_files_as_presets()
         AppState.set("_config_initialized", True)
 
+    # 初始化 BS 监测器
+    if "bs_monitor" not in st.session_state:
+        st.session_state.bs_monitor = BSMonitor()
+
     # ── Auto-apply AAPL_US preset on first load ──
     if not AppState.get("_preset_auto_applied"):
         presets = list_presets()
@@ -884,6 +889,22 @@ def main() -> None:
             _render_chart_fragment(market, ticker_code, cfg, f"v{orig_i}", compact=True,
                                    window_start=window_start, cutoff_date=cutoff_date,
                                    capture_collector=_capture_collector)
+
+    # ── BS 监测: 喂入匹配周期的 BS markers ──
+    bs_monitor_tf = AppState.get("bs_monitor_tf", "日线")
+    bs_monitor = st.session_state.get("bs_monitor")
+    if bs_monitor:
+        bs_markers_for_monitor = st.session_state.get(f"_bs_{bs_monitor_tf}")
+        if bs_markers_for_monitor:
+            new_records = bs_monitor.feed(ticker_code, bs_monitor_tf, bs_markers_for_monitor)
+            if new_records:
+                st.toast(f"BS监测: 检测到 {len(new_records)} 个新信号")
+
+    # ── BS 监测表格 ──
+    st.markdown("---")
+    bs_monitor = st.session_state.get("bs_monitor")
+    if bs_monitor:
+        render_bs_table(bs_monitor, bs_monitor_tf)
 
     # PIPELINE_CAPTURE: flush step data when bar_index changes
     if _capture_collector is not None and _capture_collector:

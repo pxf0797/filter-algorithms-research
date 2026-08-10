@@ -83,6 +83,11 @@ def _handle_initial_fetch(market, ticker_code) -> None:
                     st.sidebar.success(f"已获取 {ok}/8 个周期")
         AppState.set("_fetched_ticker", ticker_code)
 
+        # 切换股票时清空 BS 监测数据
+        bs_monitor = st.session_state.get("bs_monitor")
+        if bs_monitor:
+            bs_monitor.reset_stock(ticker_code)
+
 
 def _render_refresh_row(market, ticker_code) -> tuple:
     """Render refresh button + auto-refresh checkbox. Returns (auto_refresh, interval)."""
@@ -106,6 +111,24 @@ def _render_refresh_row(market, ticker_code) -> tuple:
         auto_refresh = st.checkbox("自动刷新", value=False, key="auto_refresh")
     if auto_refresh:
         interval = st.sidebar.slider("刷新间隔(秒)", 10, 600, 60, 10, key="refresh_interval")
+
+    # BS 监测周期选择器
+    bs_monitor_tf = AppState.get("bs_monitor_tf")
+    if not bs_monitor_tf:
+        bs_monitor_tf = "日线"
+        AppState.set("bs_monitor_tf", "日线")
+
+    new_tf = st.sidebar.selectbox(
+        "BS监测周期",
+        ALL_TFS,
+        index=ALL_TFS.index(bs_monitor_tf) if bs_monitor_tf in ALL_TFS else 3,
+        key="bs_monitor_tf_selector",
+        on_change=lambda: AppState.set("bs_monitor_tf", st.session_state.bs_monitor_tf_selector),
+        help="选择要监测 BS 信号的周期，与操作周期独立",
+    )
+    if new_tf != bs_monitor_tf:
+        AppState.set("bs_monitor_tf", new_tf)
+
     return auto_refresh, interval
 
 
@@ -586,6 +609,12 @@ def _run_auto_refresh(market, ticker_code, auto_refresh, interval) -> None:
 
     # 到达刷新时间
     logger.info(f"Auto-refresh triggered for {ticker_code} (interval={interval}s)")
+
+    # 标记 BS 监测上一轮结束
+    bs_monitor = st.session_state.get("bs_monitor")
+    if bs_monitor:
+        bs_monitor.mark_round_complete()
+
     st.cache_data.clear()
     _fetch_all_timeframes(market, ticker_code)
     st.session_state["_last_auto_refresh"] = now
