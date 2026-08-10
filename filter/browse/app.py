@@ -358,7 +358,10 @@ def _prepare_chart_data(params: dict) -> dict:
     # ── Step 8.5: BS markers ──
     _op_tf = st.session_state.get("operating_tf", "日线")
     _lower_tfs = st.session_state.get("_bs_lower_tfs", [])
-    _show_bs = (tf == _op_tf) or (tf in _lower_tfs)
+    # 将 bs_monitor_tf 纳入 _show_bs 判断：确保 BS 监测周期对应的图表
+    # 始终计算 BS markers，即使该周期不是操作周期或其下级周期。
+    _bs_monitor_tf = AppState.get("bs_monitor_tf", "日线")
+    _show_bs = (tf == _op_tf) or (tf in _lower_tfs) or (tf == _bs_monitor_tf)
     bs_markers = None
     if _show_bs:
         _holding = _align_masks if _align_masks is not None else None
