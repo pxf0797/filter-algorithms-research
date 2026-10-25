@@ -1177,7 +1177,7 @@ class TestEngineViewOrdering:
         from filter.backtest.cli import _build_default_configs
 
         configs = _build_default_configs("TEST_TICKER")
-        assert len(configs) == 4
+        assert len(configs) == 6
 
         tf_indices = [ALL_TFS.index(c["tf"]) for c in configs]
         assert tf_indices == sorted(tf_indices, reverse=True), (
@@ -1401,17 +1401,17 @@ class TestEngineViewOrdering:
 
 
 class TestViewTimeframeMapping:
-    """验证 v0=coarsest, v3=finest 映射约定。
+    """验证 v0=coarsest, v5=finest 映射约定。
 
-    DEFAULT_TFS 定义: ["日线", "60分钟", "15分钟", "5分钟"]
-    ALL_TFS 索引: 日线=4, 60分钟=3, 15分钟=2, 5分钟=1
+    DEFAULT_TFS 定义: ["日线", "60分钟", "15分钟", "5分钟", "周线", "月线"]
+    ALL_TFS 索引: 日线=4, 60分钟=3, 15分钟=2, 5分钟=1, 周线=5, 月线=6
     """
 
     def test_v0_is_coarsest_v3_is_finest(self):
-        """DEFAULT_TFS 中 v0=日线(coarsest), v3=5分钟(finest)."""
+        """DEFAULT_TFS 中 v0=日线, v3=5分钟；v4/v5 为追加的更粗周期."""
         from filter.shared.constants import DEFAULT_TFS, ALL_TFS
 
-        assert len(DEFAULT_TFS) == 4
+        assert len(DEFAULT_TFS) == 6
         # v0 索引应最大 (最粗糙)
         assert ALL_TFS.index(DEFAULT_TFS[0]) > ALL_TFS.index(DEFAULT_TFS[1]), (
             f"v0({DEFAULT_TFS[0]}) 应比 v1({DEFAULT_TFS[1]}) 粗糙"
@@ -1421,6 +1421,13 @@ class TestViewTimeframeMapping:
         # v3 索引应最小 (最精细)
         assert ALL_TFS.index(DEFAULT_TFS[3]) < ALL_TFS.index(DEFAULT_TFS[0]), (
             f"v3({DEFAULT_TFS[3]}) 应比 v0({DEFAULT_TFS[0]}) 精细"
+        )
+        # v4/v5 为追加的更粗周期（周线/月线），比前 4 项都粗
+        assert ALL_TFS.index(DEFAULT_TFS[4]) > ALL_TFS.index(DEFAULT_TFS[0]), (
+            f"v4({DEFAULT_TFS[4]}) 应比 v0({DEFAULT_TFS[0]}) 粗糙"
+        )
+        assert ALL_TFS.index(DEFAULT_TFS[5]) > ALL_TFS.index(DEFAULT_TFS[4]), (
+            f"v5({DEFAULT_TFS[5]}) 应比 v4({DEFAULT_TFS[4]}) 粗糙"
         )
 
     def test_all_tfs_index_monotonic(self):

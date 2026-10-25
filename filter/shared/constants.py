@@ -10,8 +10,15 @@
 
 ALL_TFS = ["1分钟", "5分钟", "15分钟", "60分钟", "日线", "周线", "月线", "季线"]
 
-# 默认 4 视图周期
-DEFAULT_TFS = ["日线", "60分钟", "15分钟", "5分钟"]
+# 默认 6 视图周期（顺序即视图编号 v0~v5；v0~v3 为历史绑定，勿重排）
+DEFAULT_TFS = ["日线", "60分钟", "15分钟", "5分钟", "周线", "月线"]
+
+# 视图数唯一真源 —— UI 网格 / CLI / store / recorder 统一引用
+NUM_VIEWS = len(DEFAULT_TFS)
+
+# 视图网格布局：2 行 × 3 列（参数面板与图表共用）
+VIEW_GRID_COLS = 3
+VIEW_GRID_ROWS = (NUM_VIEWS + VIEW_GRID_COLS - 1) // VIEW_GRID_COLS
 
 # 紧邻高周期映射：本周期 → 高周期（用于跨周期PnL参考子图）
 TF_HIERARCHY = {

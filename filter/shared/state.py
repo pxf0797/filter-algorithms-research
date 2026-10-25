@@ -6,7 +6,7 @@
 2. StreamlitStateStore — 封装 st.session_state
 3. DictStateStore — 纯 dict 实现，供 CLI/backtest 使用
 4. AppState 类 — 统一的 session_state 读写，含 _imp_ 备份兼容
-5. 视图参数辅助函数 — 一键读写 4 视图的全部参数
+5. 视图参数辅助函数 — 一键读写全部视图（默认 6 视图）的参数
 6. 向后兼容 — 旧 _imp_ key 自动 fallback，预设/导入/导出无缝衔接
 
 用法:
@@ -139,7 +139,7 @@ GLOBAL_KEYS = {
     "day_step": 5,
 }
 
-# 视图参数默认值（每个视图独立, v0..v3）
+# 视图参数默认值（每个视图独立, v0..v{NUM_VIEWS-1}）
 VIEW_DEFAULTS: Dict[str, Dict[str, Any]] = {
     "tf": {"default": "日线", "type": str},
     "n": {"default": 120, "type": int},
@@ -161,6 +161,20 @@ VIEW_DEFAULTS: Dict[str, Dict[str, Any]] = {
 
 # 滤波器参数中文前缀 → 默认值（占位，实际由 FILTERS 注册表驱动）
 # 编译时检查 st.session_state 即可，不需要枚举所有
+
+
+def _num_views() -> int:
+    """返回视图数（来自 ``shared.constants.NUM_VIEWS`` 单一真源）。
+
+    使用函数内惰性导入：``state.py`` 可被 ``filter.shared.state`` 与
+    ``shared.state``（测试路径）两种根导入；顶层 import 另一根路径会在
+    常量模块半初始化时触发二次加载，故此处延迟到调用时导入。
+    """
+    try:
+        from filter.shared.constants import NUM_VIEWS
+    except ImportError:  # filter/ 直接进 sys.path 的测试路径
+        from shared.constants import NUM_VIEWS
+    return NUM_VIEWS
 
 
 # ---------------------------------------------------------------------------
@@ -208,15 +222,15 @@ class AppState:
 
         清理策略：
         - 只清理可明确判断为无效的 view-pattern key (v{N}_{suffix})
-        - N 不在 0-3 范围内，或 suffix 不在 VIEW_DEFAULTS 中 → 删除
+        - N 不在 0..NUM_VIEWS-1 范围内，或 suffix 不在 VIEW_DEFAULTS 中 → 删除
         - 非 view-pattern 的 _imp_ key 保留（可能是 widget 创建的动态 key）
         """
         s = AppState._resolve_store(store)
 
         # 有效的 view suffix 集合
         valid_suffixes: set = set(VIEW_DEFAULTS.keys()) | {"exp_all"}
-        # 可选的 N 范围
-        valid_view_indices = {0, 1, 2, 3}
+        # 可选的 N 范围（视图数来自 constants 单一真源）
+        valid_view_indices = set(range(_num_views()))
 
         # pattern: v{N}_{suffix}，suffix 至少一个字符
         view_key_re = re.compile(r"^v(\d+)_(.+)$")

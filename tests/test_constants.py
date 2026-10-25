@@ -18,8 +18,11 @@ class TestAllTfs:
 
 
 class TestDefaultTfs:
-    def test_length_is_4(self):
-        assert len(DEFAULT_TFS) == 4
+    def test_length_is_6(self):
+        assert len(DEFAULT_TFS) == 6
+
+    def test_appended_weekly_monthly(self):
+        assert DEFAULT_TFS[-2:] == ["周线", "月线"]
 
     def test_all_in_all_tfs(self):
         for tf in DEFAULT_TFS:

@@ -645,12 +645,15 @@ class TestConfigsViewOrdering:
         )
 
     def test_build_default_configs_sorted_coarse_to_fine(self):
-        """_build_default_configs 输出按 ALL_TFS 降序 (粗→细) 排列."""
+        """_build_default_configs 输出 6 视图，按 ALL_TFS 降序 (粗→细) 排列."""
         from filter.shared.constants import ALL_TFS
         from filter.backtest.cli import _build_default_configs
 
         configs = _build_default_configs("TEST_TICKER")
-        assert len(configs) == 4
+        assert len(configs) == 6
+        assert [c["tf"] for c in configs] == [
+            "月线", "周线", "日线", "60分钟", "15分钟", "5分钟",
+        ]
 
         tf_indices = [ALL_TFS.index(c["tf"]) for c in configs]
         assert tf_indices == sorted(tf_indices, reverse=True), (

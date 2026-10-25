@@ -87,7 +87,7 @@ def _load_backtest_config(ticker_code):
 # ============================================================================
 
 def _get_min_tf_and_count(configs, ticker_code) -> tuple:
-    """从4个视图的tf配置中确定最小周期（最精细）和总bar数。
+    """从各视图的tf配置中确定最小周期（最精细）和总bar数。
     遍历configs中各视图的tf字段，取ALL_TFS中索引最小的（最精细的）为_min_tf。
     从 DB 查询该 tf 的全量 bar 数（不使用 parquet，parquet 只有窗口数据）。
     返回 (_min_tf, bar_count)。"""

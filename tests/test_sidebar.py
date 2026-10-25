@@ -47,13 +47,13 @@ class TestDefaultTFs:
     """DEFAULT_TFS 常量正确性."""
 
     def test_default_tfs_has_expected_elements(self):
-        """DEFAULT_TFS 应包含4个标准周期."""
-        expected = ["日线", "60分钟", "15分钟", "5分钟"]
+        """DEFAULT_TFS 应包含6个标准周期（v4=周线, v5=月线）. """
+        expected = ["日线", "60分钟", "15分钟", "5分钟", "周线", "月线"]
         assert DEFAULT_TFS == expected
 
     def test_default_tfs_length(self):
-        """DEFAULT_TFS 应有4个元素."""
-        assert len(DEFAULT_TFS) == 4
+        """DEFAULT_TFS 应有6个元素."""
+        assert len(DEFAULT_TFS) == 6
 
     def test_default_tfs_subset_of_all_tfs(self):
         """DEFAULT_TFS 应是 ALL_TFS 的子集."""
@@ -61,19 +61,27 @@ class TestDefaultTFs:
             assert tf in ALL_TFS, f"{tf} 不在 ALL_TFS 中"
 
     def test_default_tfs_sorted_coarse_to_fine(self):
-        """P0: DEFAULT_TFS 应按 ALL_TFS 索引降序（粗→细），确保 v0=coarsest, v3=finest.
+        """P0: DEFAULT_TFS 前 4 项块内保持降序，v4/v5 为更粗的追加周期。
 
-        这是多周期视图索引的约定：
-        - v0 = coarsest (highest ALL_TFS index) → 日线
-        - v3 = finest   (lowest ALL_TFS index)  → 5分钟
+        这是多周期视图索引的兼容性约定（视图数已由 4 增至 6）：
+        - v0 = coarsest → 日线，v0..v3 = 日线/60分钟/15分钟/5分钟
+          —— 这 4 项的顺序被已存预设（``v{i}_tf`` 键）绑定，**不可重排**，
+             否则旧预设的视图周期会整体错位；
+        - v4 = 周线, v5 = 月线 —— 纯追加，且必须比前 4 项更粗（ALL_TFS 索引更大），
+          这样「视图编号越大周期越粗」的既有直觉仍成立。
 
-        违反此约定会导致周期倒转，使 v0 滤波值出现在过高频周期上，
-        而新高周期视图（日/周线）出现台阶状数据。
+        因此不变量是「前 4 项块内降序 且 v4/v5 比前 4 项更粗」，而不是整体降序。
         """
         indices = [ALL_TFS.index(tf) for tf in DEFAULT_TFS]
-        assert indices == sorted(indices, reverse=True), (
-            f"DEFAULT_TFS 应按 ALL_TFS 索引降序排列(粗→细)，"
-            f"当前 indices={indices}，期望={sorted(indices, reverse=True)}"
+        assert indices[:4] == sorted(indices[:4], reverse=True), (
+            f"DEFAULT_TFS 前 4 项应按 ALL_TFS 索引降序排列(粗→细)，"
+            f"当前 indices={indices}"
+        )
+        assert indices[4] > indices[3], (
+            f"v4 应比前 4 项更粗，当前 indices={indices}"
+        )
+        assert indices[5] > indices[4], (
+            f"v5 应比 v4 更粗，当前 indices={indices}"
         )
 
 

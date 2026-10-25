@@ -445,7 +445,7 @@ class EventRecorder:
         view_labels: dict[str, str] = {}
         view_configs = config.get("configs", [])
         for i, cfg in enumerate(view_configs):
-            view_labels[f"v{i}"] = cfg.get("tf", f"view_{i}")
+            view_labels[f"v{cfg.get('_vid', i)}"] = cfg.get("tf", f"view_{i}")
 
         metadata: Dict[str, Any] = {
             "ticker": self.ticker,

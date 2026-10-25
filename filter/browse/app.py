@@ -1,5 +1,5 @@
 """
-多周期股票滤波分析工具 — 4视图独立配置, 施密特触发器 + 滤波对比
+多周期股票滤波分析工具 — 6视图独立配置, 施密特触发器 + 滤波对比
 
 入口文件：页面布局 + session_state初始化 + st.fragment 包装
 """
@@ -43,13 +43,16 @@ from filter.browse.chart_builder import (
 )
 from filter.browse.sidebar import (
     _handle_pending_apply, _render_config_import, _handle_initial_fetch,
+    ensure_view_tf_defaults,
     _render_refresh_row, _render_preset_selector, _render_health_check,
     _render_data_validation, _render_filter_selectors, _render_param_panels,
     _render_db_backup, _render_export_config,
     _render_config_history, _render_db_import_export, _run_auto_refresh,
 )
 from filter.engine.signals import compute_bs_markers, get_lower_tfs
-from filter.shared.constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY
+from filter.shared.constants import (
+    ALL_TFS, DEFAULT_TFS, NUM_VIEWS, VIEW_GRID_COLS, VIEW_GRID_ROWS, TF_HIERARCHY,
+)
 from filter.shared.state import AppState
 from filter.browse.bs_monitor import BSMonitor, render_bs_table
 from filter.backtest.capture import PipelineCapture, PipelineStageData
@@ -551,7 +554,7 @@ def _build_chart_figure(data: dict, cfg: dict, compact: bool = True) -> tuple:
 def _render_chart_fragment(market, ticker_code, cfg, key, compact=True, higher_pnl=None, window_start=None, cutoff_date=None, capture_collector=None) -> None:
     """Fragment wrapper around ``_render_chart`` for per-view independent re-rendering.
 
-    The ``@st.fragment`` decorator enables each of the four chart views
+    The ``@st.fragment`` decorator enables each of the six chart views
     to re-render independently without triggering a full-page rerun.
 
     Parameters
@@ -731,9 +734,9 @@ def main() -> None:
        one-off JSON preset import.
     3. **Sidebar (top-down)** — config import, market/ticker, initial
        fetch, refresh, preset selector, health check, data validation,
-       filter selectors, 2x2 parameter panels, time navigation,
+       filter selectors, 2×3 parameter panels, time navigation,
        backtest mode toggle, DB backup/restore.
-    4. **Charts (2x2 grid)** — sorted by timeframe descending; each
+    4. **Charts (2×3 grid)** — sorted by timeframe descending; each
        cell renders a ``_render_chart_fragment``.  In backtest mode a
        cascading data sync (``_sync_all_cascading``) runs first.
     5. **Footer sidebar** — export config, config history, DB import/export.
@@ -784,6 +787,11 @@ def main() -> None:
     _handle_pending_apply()
     _render_config_import()
 
+    # ── 视图周期默认值种子化 ──
+    # 必须在下面「🎯 操作周期」与 _render_refresh_row 的 BS 周期收集之前，
+    # 否则新视图（v4/v5）的周期不会进入候选，需 rerun 才补齐。
+    ensure_view_tf_defaults()
+
     # ── Market ──
     market = st.sidebar.radio("市场", ["美股 US", "A股(沪深)", "港股 HK"],
                                horizontal=True, key="market")
@@ -794,13 +802,16 @@ def main() -> None:
         ticker_code = st.text_input("股票代码", value="AAPL", key="ticker").strip()
     with c2:
         view_tfs = []
-        for i in range(4):
+        for i in range(NUM_VIEWS):
             tf = st.session_state.get(f"v{i}_tf", DEFAULT_TFS[i])
             if tf not in view_tfs:
                 view_tfs.append(tf)
         view_tfs.sort(key=lambda x: ALL_TFS.index(x), reverse=True)
+        # 默认操作周期固定为 DEFAULT_TFS[0]（日线），不随最粗周期变化
+        _default_tf = DEFAULT_TFS[0]
+        _op_index = view_tfs.index(_default_tf) if _default_tf in view_tfs else 0
         operating_tf = st.selectbox(
-            "🎯 操作周期", view_tfs, index=0,
+            "🎯 操作周期", view_tfs, index=_op_index,
             key="operating_tf",
         )
 
@@ -833,7 +844,7 @@ def main() -> None:
     # ── Filter selectors ──
     filter_id, dual, filter_id2 = _render_filter_selectors()
 
-    # ── Pass 1: 2x2 parameter panels ──
+    # ── Pass 1: 2×3 parameter panels ──
     configs = _render_param_panels(filter_id, dual, filter_id2)
 
     # Compute visible lower TFs for BS marker cascade
@@ -847,7 +858,7 @@ def main() -> None:
     # ── DB backup/restore ──
     _render_db_backup()
 
-    # ── Pass 2: 2x2 chart views ──
+    # ── Pass 2: 2×3 chart views ──
     cb_mode = AppState.get("_cb_mode", False)
     if cb_mode:
         window_start = st.session_state.get("_bar_index", 0)
@@ -879,15 +890,13 @@ def main() -> None:
     # PIPELINE_CAPTURE: per-step data collector (populated by _render_chart)
     _capture_collector: dict[str, object] | None = {} if "_pipeline_capture" in st.session_state else None
 
-    grid_cols = []
-    for row_idx in range(2):
-        c1, c2 = st.columns(2)
-        grid_cols.append((c1, c2))
+    grid_cols = [st.columns(VIEW_GRID_COLS) for _ in range(VIEW_GRID_ROWS)]
     sorted_views = sorted(enumerate(configs),
                           key=lambda x: ALL_TFS.index(x[1]["tf"]), reverse=True)
     for orig_i, cfg in sorted_views:
-        row_idx = orig_i // 2
-        col_idx = orig_i % 2
+        # 渲染顺序仍按周期粗→细；格子位置按视图编号 orig_i 定位
+        row_idx = orig_i // VIEW_GRID_COLS
+        col_idx = orig_i % VIEW_GRID_COLS
         with grid_cols[row_idx][col_idx]:
             _render_chart_fragment(market, ticker_code, cfg, f"v{orig_i}", compact=True,
                                    window_start=window_start, cutoff_date=cutoff_date,

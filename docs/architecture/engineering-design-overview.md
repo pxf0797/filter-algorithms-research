@@ -16,7 +16,7 @@
 ```
 
 产品形态与目标：
-- **4 视图并列**（v0~v3），各视图独立选周期/滤波/参数，默认周期 `["日线","60分钟","15分钟","5分钟"]`（`sidebar.py:14 DEFAULT_TFS`），2×2 网格布局。
+- **6 视图并列**（v0~v5；v0~v3 为历史绑定，v4=周线、v5=月线），各视图独立选周期/滤波/参数，默认周期 `["日线","60分钟","15分钟","5分钟","周线","月线"]`（`shared/constants.py` 的 `DEFAULT_TFS`），2×3 网格布局（`VIEW_GRID_ROWS=2` × `VIEW_GRID_COLS=3`）。
 - **两种运行模式**：浏览模式（取最新 N 条窗口，支持按天前后移）与回测模式（按 bar 逐步/自动播放，级联合成未完成 K 线，避免未来信息泄漏）。
 - **配置持久化**：JSON 导入/导出 + SQLite 预设库两条路径；参数以 `VIEW_PARAM_SPECS` 为单一真源。
 - 版本号 `pyproject.toml` 记为 `10.5.0`。技术栈：streamlit 1.57 / plotly 6.7 / numpy 2.2 / scipy 1.17 / pandas 2.3 / statsmodels 0.14 / yfinance 1.4（`filter/requirements.txt`）。
@@ -165,7 +165,7 @@ streamlit_app.py
 - 导入 `_render_config_import`（:837）：读上传 JSON，逐键 `AppState.set` 写入 session_state，用 md5 去重（`_import_data`）。
 
 **路径 B：DB 预设库**
-- `collect_current_params`（`config_db.py:608`）：读 session_state 全局键 + `v0~v3 × VIEW_PARAM_SUFFIXES` + 中文前缀滤波键，产出扁平 dict。
+- `collect_current_params`（`config_db.py:608`）：读 session_state 全局键 + `v0~v5 × VIEW_PARAM_SUFFIXES` + 中文前缀滤波键，产出扁平 dict。
 - 存 `config_presets`（`save_preset` 原子 UPSERT，:211）；应用 `apply_preset` 解析 JSON → `_pending_apply_params` → `_handle_pending_apply`（:826）逐键写回。
 - 启动一次性 `import_json_files_as_presets`（:515）：把 `config/*.json`（现 10 个，如 `AAPL_US.json`、`2382_HK_DP.json`）按后缀推断分类（`_DP`→双滤波、`_QS`→快速、否则单滤波）导入预设表。删除预设时 `delete_preset` 同步删对应 JSON 文件防重导入（:294）。
 

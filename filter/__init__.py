@@ -19,7 +19,10 @@ with open(_pyproject_path, "rb") as _fp:
 
 # Backward compatibility re-exports from shared
 from filter.shared.config import ViewConfig
-from filter.shared.constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY, TF_INTERVAL
+from filter.shared.constants import (
+    ALL_TFS, DEFAULT_TFS, NUM_VIEWS, VIEW_GRID_COLS, VIEW_GRID_ROWS,
+    TF_HIERARCHY, TF_INTERVAL,
+)
 from filter.shared.state import AppState, ViewState, StateStore, StreamlitStateStore, DictStateStore
 
 # Backward compatibility re-exports from engine
@@ -29,7 +32,8 @@ from filter.engine.signals import compute_bs_markers, get_lower_tfs
 __all__ = [
     "__version__",
     "ViewConfig",
-    "ALL_TFS", "DEFAULT_TFS", "TF_HIERARCHY", "TF_INTERVAL",
+    "ALL_TFS", "DEFAULT_TFS", "NUM_VIEWS", "VIEW_GRID_COLS", "VIEW_GRID_ROWS",
+    "TF_HIERARCHY", "TF_INTERVAL",
     "AppState", "ViewState",
     "FILTERS",
     "compute_bs_markers", "get_lower_tfs",

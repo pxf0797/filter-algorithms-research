@@ -66,7 +66,7 @@ class BacktestRunner:
 
         self.ticker = ticker.strip()
         self.save_debug_data = kwargs.get("save_debug_data", False)
-        # 确保 configs 按 coarsest→finest 排序 (v0=coarsest, v3=finest)
+        # 确保 configs 按 coarsest→finest 排序（排序秩 ≠ 视图编号；视图编号见 cfg["_vid"]）
         configs = sorted(configs, key=lambda c: ALL_TFS.index(c["tf"]), reverse=True)
         self.configs = configs
 
@@ -83,7 +83,7 @@ class BacktestRunner:
             _tf_ix[0] < _tf_ix[1] or _tf_ix[1] < _tf_ix[2]
         ):
             logger.info(
-                "configs 视图排序检查 (v0=coarsest, v3=finest): "
+                "configs 视图排序检查 (coarsest→finest, _vid 保留视图编号): "
                 "ALL_TFS_indices={}", _tf_ix,
             )
 
@@ -207,7 +207,7 @@ class BacktestRunner:
                 for view_index, view_cfg in self._sorted_views:
                     tf = view_cfg["tf"]
                     n_pts = view_cfg.get("n_pts", 120)
-                    view_key = f"v{view_index}_{tf}"
+                    view_key = f"v{view_cfg.get('_vid', view_index)}_{tf}"
                     window_data = self._load_window_data(tf, n_pts, cutoff_date)
                     if window_data is None:
                         logger.warning("视图 {} 窗口数据为空，跳过", view_key)
@@ -221,7 +221,7 @@ class BacktestRunner:
                     pipeline_futures: dict = {}
                     with ThreadPoolExecutor(max_workers=min(n_views, 4)) as executor:
                         for view_index, view_cfg in self._sorted_views:
-                            view_key = f"v{view_index}_{view_cfg['tf']}"
+                            view_key = f"v{view_cfg.get('_vid', view_index)}_{view_cfg['tf']}"
                             if view_key not in preloaded:
                                 continue
                             future = executor.submit(
@@ -250,7 +250,7 @@ class BacktestRunner:
                 for view_index, view_cfg in self._sorted_views:
                     tf = view_cfg["tf"]
                     n_pts = view_cfg.get("n_pts", 120)
-                    view_key = f"v{view_index}_{tf}"
+                    view_key = f"v{view_cfg.get('_vid', view_index)}_{tf}"
 
                     window_data = self._load_window_data(tf, n_pts, cutoff_date)
                     if window_data is None:
@@ -418,8 +418,15 @@ class BacktestRunner:
         return state.get("bar_index", 0)
 
     def _config_hash(self) -> str:
-        """计算当前 configs 的确定性哈希，用于断点续跑时校验配置一致性。"""
-        raw = json.dumps(self.configs, sort_keys=True, default=str, ensure_ascii=False)
+        """计算当前 configs 的确定性哈希，用于断点续跑时校验配置一致性。
+
+        ``_vid`` 是视图编号元数据、不改变任何计算输入，故从哈希中排除，
+        以兼容加入该字段之前产生的旧断点文件。
+        """
+        raw = json.dumps(
+            [{k: v for k, v in c.items() if k != "_vid"} for c in self.configs],
+            sort_keys=True, default=str, ensure_ascii=False,
+        )
         return hashlib.sha256(raw.encode()).hexdigest()
 
     # ------------------------------------------------------------------

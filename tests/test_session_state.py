@@ -27,7 +27,7 @@ def _make_ss_with_imp(extras=None):
         # 孤立的 view _imp_ — N 在有效范围但 suffix 无效
         "_imp_v0_oldparam": 123,
         # 孤立的 view _imp_ — N 超出有效范围
-        "_imp_v5_ke": 0.2,
+        "_imp_v6_ke": 0.2,
         "_imp_v99_tf": "周线",
         # 非 view-pattern _imp_（widget key）— 应保留
         "_imp_f_schmitt_ke": 0.15,
@@ -60,14 +60,14 @@ class TestCleanupOrphanedImpKeys:
 
         # 这些孤立 key 应被删除
         assert "_imp_v0_oldparam" not in ss, "无效 suffix 的 _imp_ key 应被删除"
-        assert "_imp_v5_ke" not in ss, "vi=5 超出范围的 _imp_ key 应被删除"
+        assert "_imp_v6_ke" not in ss, "vi=6 超出范围的 _imp_ key 应被删除"
         assert "_imp_v99_tf" not in ss, "vi=99 超出范围的 _imp_ key 应被删除"
 
     def test_preserves_valid_view_imp_keys(self, monkeypatch):
-        """有效的 view-pattern _imp_ key 应保留。"""
+        """有效的 view-pattern _imp_ key 应保留（含新增的 v4/v5 视图）。"""
         from shared.state import AppState
 
-        ss = _make_ss_with_imp()
+        ss = _make_ss_with_imp({"_imp_v4_tf": "周线", "_imp_v5_tf": "月线"})
         mock_st = MagicMock()
         mock_st.session_state = ss
         monkeypatch.setattr("shared.state.st", mock_st)
@@ -78,6 +78,8 @@ class TestCleanupOrphanedImpKeys:
         assert "_imp_v0_tf" in ss, "vi=0 suffix=tf 是有效的 view key"
         assert "_imp_v3_sm" in ss, "vi=3 suffix=sm 是有效的 view key"
         assert "_imp_v1_exp_all" in ss, "vi=1 suffix=exp_all 是有效的 view key"
+        assert "_imp_v4_tf" in ss, "vi=4 (周线) 是有效的 view key"
+        assert "_imp_v5_tf" in ss, "vi=5 (月线) 是有效的 view key"
 
     def test_preserves_non_view_imp_keys(self, monkeypatch):
         """非 view-pattern _imp_ key（widget key、系统 key）应保留。"""
@@ -120,7 +122,7 @@ class TestCleanupOrphanedImpKeys:
 
         # 验证清理已执行
         assert "_imp_v0_oldparam" not in ss
-        assert "_imp_v5_ke" not in ss
+        assert "_imp_v6_ke" not in ss
 
     def test_main_keys_untouched_by_cleanup(self, monkeypatch):
         """cleanup 只删 _imp_ 前缀的 key，主 key 原封不动。"""
@@ -128,17 +130,17 @@ class TestCleanupOrphanedImpKeys:
 
         ss = _make_ss_with_imp()
         # 加一个"疑似孤立但主key还在"的场景
-        ss["v5_ke"] = 0.3
-        ss["_imp_v5_ke"] = 0.3
+        ss["v6_ke"] = 0.3
+        ss["_imp_v6_ke"] = 0.3
         mock_st = MagicMock()
         mock_st.session_state = ss
         monkeypatch.setattr("shared.state.st", mock_st)
 
         AppState.cleanup_orphaned_imp_keys()
 
-        # v5_ke 的 _imp_ 应被删除（vi=5 超出范围），但主 key v5_ke 保留
-        assert "_imp_v5_ke" not in ss
-        assert "v5_ke" in ss, "非 _imp_ 前缀的 key 不受清理影响"
+        # v6_ke 的 _imp_ 应被删除（vi=6 超出范围），但主 key v6_ke 保留
+        assert "_imp_v6_ke" not in ss
+        assert "v6_ke" in ss, "非 _imp_ 前缀的 key 不受清理影响"
         assert "v0_ke" in ss, "有效的 view 主 key 应保留"
         assert "v0_tf" in ss
 

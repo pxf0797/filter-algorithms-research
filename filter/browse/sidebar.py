@@ -29,7 +29,9 @@ from filter.data.db import (
 from filter.data.loader import _fetch_all_timeframes
 from filter.engine.filters import FILTERS
 from filter.browse.components_sidebar import _render_params
-from filter.shared.constants import ALL_TFS, DEFAULT_TFS, TF_INTERVAL
+from filter.shared.constants import (
+    ALL_TFS, DEFAULT_TFS, NUM_VIEWS, VIEW_GRID_COLS, VIEW_GRID_ROWS, TF_INTERVAL,
+)
 from filter.shared.state import AppState
 
 
@@ -112,9 +114,9 @@ def _render_refresh_row(market, ticker_code) -> tuple:
     if auto_refresh:
         interval = st.sidebar.slider("刷新间隔(秒)", 10, 600, 60, 10, key="refresh_interval")
 
-    # BS 监测周期选择器 — 从当前 4 个视图收集已配置的周期
+    # BS 监测周期选择器 — 从当前全部视图中收集已配置的周期
     view_tfs = []
-    for vi in range(4):
+    for vi in range(NUM_VIEWS):
         tf = AppState.get(f"v{vi}_tf")
         if tf and tf not in view_tfs:
             view_tfs.append(tf)
@@ -132,7 +134,7 @@ def _render_refresh_row(market, ticker_code) -> tuple:
         options,
         index=options.index(bs_monitor_tf) if bs_monitor_tf in options else 0,
         key="bs_monitor_tf_selector",
-        help="从当前 4 个视图中选择要监测 BS 信号的周期",
+        help=f"从当前 {NUM_VIEWS} 个视图中选择要监测 BS 信号的周期",
     )
     if new_tf != bs_monitor_tf:
         AppState.set("bs_monitor_tf", new_tf)
@@ -439,17 +441,72 @@ def _render_filter_selectors() -> tuple:
     return filter_id, dual, filter_id2
 
 
+def _default_view_tf(i: int) -> str:
+    """计算视图 ``i`` 首次渲染时的默认周期（避免与更早视图重复）。
+
+    预设（旧 4 键预设只写 ``v0_tf..v3_tf``）与自动应用的首屏预设可能已把
+    低编号视图设成 ``周线`` 等周期；若新视图直接取 ``DEFAULT_TFS[i]``，就会出现
+    「两个周线、没有 5分钟」这类看起来像 bug 的首屏。这里从 ``DEFAULT_TFS``
+    里取第一个「尚未被更早视图占用」的周期，仍按 DEFAULT_TFS 顺序，保证
+    空会话时结果与 ``DEFAULT_TFS[i]`` 完全一致。
+
+    仅在 ``v{i}_tf`` 尚不存在于 session_state 时使用（已存在则完全沿用）。
+    """
+    used = {
+        st.session_state[f"v{j}_tf"]
+        for j in range(i)
+        if f"v{j}_tf" in st.session_state
+    }
+    candidates = [t for t in DEFAULT_TFS if t not in used]
+    return candidates[0] if candidates else DEFAULT_TFS[i]
+
+
+def ensure_view_tf_defaults() -> None:
+    """把每个视图的首次默认周期提前种子化到 ``session_state``。
+
+    侧栏的「🎯 操作周期」与「BS监测周期」收集都发生在参数面板渲染**之前**：
+    若不预先写入 ``v{i}_tf``，新视图（v4/v5）的周期就不会出现在候选里 ——
+    现象是首屏操作周期缺少「5分钟」、BS 监测缺少「5分钟/月线」，必须 rerun
+    一次才补齐。这里按 ``i = 0..NUM_VIEWS-1`` 顺序、只对不存在（或为空）的
+    值调用 :func:`_default_view_tf` 写入；**已存在的用户/预设值一律不覆盖**。
+
+    调用时机：``app.main()`` 中预设自动应用 / ``_handle_pending_apply()`` /
+    ``_render_config_import()`` 之后（即预设已落库到 session_state 之后）、
+    market/ticker 与 ``_render_refresh_row`` 之前。
+    """
+    for i in range(NUM_VIEWS):
+        key = f"v{i}_tf"
+        if not st.session_state.get(key):
+            st.session_state[key] = _default_view_tf(i)
+
+
 def _render_param_panels(filter_id, dual, filter_id2) -> list:
-    """Render 2x2 parameter panels. Returns list of config dicts."""
+    """Render 2×3 parameter panels. Returns list of config dicts.
+
+    网格为 ``VIEW_GRID_ROWS`` 行 × ``VIEW_GRID_COLS`` 列（当前 2×3 = 6 视图），
+    编号 ``i = row * VIEW_GRID_COLS + col`` 即视图索引，并与
+    ``filter.shared.constants.DEFAULT_TFS`` 一一对应。
+
+    默认周期（``v{i}_tf`` 尚未初始化时）走 :func:`_default_view_tf`：取
+    DEFAULT_TFS 中首个未被更早视图占用的周期，使「预设只填了 v0~v3」时
+    首屏 6 个周期也不重复；已存在的用户值一律不覆盖。
+    """
     configs = []
-    for row_idx in range(2):
-        c1, c2 = st.columns(2)
-        for col_idx, col in enumerate([c1, c2]):
-            i = row_idx * 2 + col_idx
+    for row in range(VIEW_GRID_ROWS):
+        cols = st.columns(VIEW_GRID_COLS)
+        for col_idx, col in enumerate(cols):
+            i = row * VIEW_GRID_COLS + col_idx
+            if i >= NUM_VIEWS:
+                continue
+            key = f"v{i}_tf"
+            # 已存在（用户/预设写入）的值一律沿用；仅未初始化时计算去重默认值
+            tf_default = st.session_state.get(key)
+            if not tf_default:
+                tf_default = _default_view_tf(i)
             with col:
-                tf_label = st.session_state.get(f"v{i}_tf", DEFAULT_TFS[i])
-                st.caption(f"视图{i + 1} · {tf_label}")
-                cfg = _render_params(f"v{i}", filter_id, dual, filter_id2, DEFAULT_TFS[i])
+                st.caption(f"视图{i + 1} · {tf_default}")
+                cfg = _render_params(f"v{i}", filter_id, dual, filter_id2, tf_default)
+                cfg["_vid"] = i
                 configs.append(cfg)
     return configs
 

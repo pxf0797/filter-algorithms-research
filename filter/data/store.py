@@ -88,7 +88,7 @@ def _build_full_schema(view_prefixes: list[str]) -> pa.Schema:
 
     The schema has 3 fixed columns (bar_index, bar_timestamp, close) plus
     12 columns per view (信号层 3 + PnL层 2 + 持仓层 2 + 交易层 3 + BS层 2),
-    for a total of 3 + (4 * 12) = 51 columns."""
+    for a total of 3 + (N * 12) columns, e.g. 4 views → 51, 6 views → 75."""
     fields: list[pa.Field] = [pa.field(name, dtype) for name, dtype in _FIXED_FIELDS]
     for prefix in view_prefixes:
         for col in _VIEW_COLUMNS:
@@ -181,7 +181,10 @@ class ParquetStore:
             except OSError:
                 pass
 
-        self._view_prefixes = [f"v{i}" for i in range(len(self._view_configs))]
+        # 列前缀 = 界面视图编号（cfg["_vid"]），与 engine 的 view_key 对齐
+        self._view_prefixes = [
+            f"v{cfg.get('_vid', i)}" for i, cfg in enumerate(self._view_configs)
+        ]
         self._full_schema = _build_full_schema(self._view_prefixes)
         self._column_names = [f.name for f in self._full_schema]
 
@@ -408,7 +411,7 @@ class ParquetStore:
 
         views: dict[str, dict] = stage_outputs.get("views", {})
 
-        # Iterate views in deterministic order (v0, v1, v2, v3)
+        # Iterate views in deterministic order (v0, v1, ... v{N-1})
         sorted_keys = sorted(views.keys(), key=lambda k: k.split("_", 1)[0])
 
         for view_key in sorted_keys:
@@ -918,7 +921,7 @@ class ParquetStore:
 
         view_labels: dict[str, str] = {}
         for i, cfg in enumerate(self._view_configs):
-            view_labels[f"v{i}"] = cfg.get("tf", f"view_{i}")
+            view_labels[f"v{cfg.get('_vid', i)}"] = cfg.get("tf", f"view_{i}")
 
         meta: dict[str, Any] = {
             **existing,
@@ -934,7 +937,8 @@ class ParquetStore:
             "parquet_compression_level": 3,
             "column_names": self._column_names,
             "view_configs": {
-                f"v{i}": cfg for i, cfg in enumerate(self._view_configs)
+                f"v{cfg.get('_vid', i)}": cfg
+                for i, cfg in enumerate(self._view_configs)
             },
             "created_at": datetime.now(timezone.utc).isoformat(),
         }

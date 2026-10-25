@@ -1,8 +1,8 @@
 # 测试文档 — filter_research
 
-**实际测试计数**：818 个测试 / 24 个测试文件
+**实测计数**（2026-10-25）：全量 `python -m pytest tests/ --collect-only -q` = **2565** 个测试；`ls tests/test_*.py | wc -l` = **62** 个测试文件。
 
-pytest 输出：`pytest tests/ --collect-only -q` 确认 801 个测试被收集。
+下表仅列 13 个主要测试文件（分项为历史登记值；第 13 行为本次实测 27）：13 行分项之和 = **360**（原「合计 850」为历史全量口径，非分项之和，已按分项纠正）；「占总量」百分比沿用旧口径，未按全量重算，全量测试数以上面的 collect-only 为准。
 
 ---
 
@@ -27,7 +27,8 @@ tests/
 ├── test_integration.py              # 端到端集成测试（6 个独立函数）
 ├── test_plan_a_api.py               # 方案A API 回归（15 测试，6 类）
 ├── test_plan_a_e2e.py               # 方案A 端到端 Figure 序列化（7 测试，1 类）
-└── test_plan_a_gaps.py              # 审计缺口补充（17 测试，7 类）
+├── test_plan_a_gaps.py              # 审计缺口补充（17 测试，7 类）
+└── test_six_view_layout.py          # 六视图（2 行 × 3 列）布局回归：常量/面板/图表/CLI/_vid/侧栏候选（27 测试，10 类）
 ```
 
 ### 标记（pytest markers）
@@ -58,7 +59,8 @@ tests/
 | 10 | `test_preset_ui_actions.py` | 8 | 45 | 13.5% | — |
 | 11 | `test_db.py` | 14 | 57 | 17.4% | — |
 | 12 | `test_integration.py` | 0 (6 函数) | 6 | 1.8% | — |
-| | **合计** | **66 类 + 6 函数** | **830** | **100%** | |
+| 13 | `test_six_view_layout.py` | 10 | 27 | 3.2% | — |
+| | **合计** | **88 类 + 6 函数** | **360** | **—** | |
 
 ---
 
@@ -321,7 +323,7 @@ open htmlcov/index.html
 
 ### 6.6 文件计数说明
 
-- **24 个测试文件**：`tests/` 目录中所有 `test_*.py` 文件
-- **66+ 个测试类**：分布在 10+ 个类式测试文件中（`test_integration.py` 不含类）
+- **62 个测试文件**：`tests/` 目录中所有 `test_*.py` 文件（`ls tests/test_*.py | wc -l` 实测）
+- **88 个测试类**：上表 13 个主要文件分项之和（`test_integration.py` 不含类）
 - **6 个独立函数**：`test_integration.py` 的 6 个顶级函数
-- **818 个测试**：来自 `pytest --collect-only -q` 的精确计数
+- **2565 个测试**：来自全量 `python -m pytest tests/ --collect-only -q` 的精确计数（2026-10-25 实测）

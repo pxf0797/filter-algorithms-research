@@ -23,7 +23,7 @@ if _pkg_dir not in sys.path:
 
 # ── 项目内导入（与现有模块导入风格一致） ──
 from filter.backtest.engine import BacktestRunner
-from filter.shared.constants import ALL_TFS, DEFAULT_TFS
+from filter.shared.constants import ALL_TFS, DEFAULT_TFS, NUM_VIEWS
 from filter.backtest.recorder import EventRecorder
 from filter.engine.filters import FILTERS
 from filter.data.store import ParquetStore
@@ -135,8 +135,28 @@ def parse_args() -> argparse.Namespace:
 # 配置加载
 # ═══════════════════════════════════════════════════════════════
 
+def _preset_view_count(params: dict) -> int:
+    """推导预设参数对应的视图数（2B：视图数随预设收缩）。
+
+    以预设中实际存在的 ``v{i}_tf`` 键的最高索引 + 1 为准；无任何 ``tf``
+    键时视为完整默认视图集。旧 4 键预设因此仍重建为 4 视图，行为零变化。
+
+    Parameters
+    ----------
+    params : dict
+        平铺预设参数字典。
+
+    Returns
+    -------
+    int
+        视图数，取值 1..NUM_VIEWS。
+    """
+    idxs = [i for i in range(NUM_VIEWS) if f"v{i}_tf" in params]
+    return max(idxs) + 1 if idxs else NUM_VIEWS
+
+
 def _build_configs_from_params(params: dict) -> list:
-    """从预设参数构造 4 视图配置列表。
+    """从预设参数构造视图配置列表（视图数随预设收缩，见 :func:`_preset_view_count`）。
 
     Parameters
     ----------
@@ -147,22 +167,38 @@ def _build_configs_from_params(params: dict) -> list:
     Returns
     -------
     list[dict]
-        视图配置列表，每项包含 ``_fid``, ``tf``, ``n_pts``, ``pv`` 等字段。
+        视图配置列表，每项包含 ``_vid``, ``_fid``, ``tf``, ``n_pts``, ``pv`` 等字段。
     """
     fid = params.get("global_f", "sma")
     dual = params.get("global_dual", False)
     fid2 = params.get("global_f2", None)
 
+    n_views = _preset_view_count(params)
+    used_tfs: set = set()
+
     configs = []
-    for i in range(4):
+    for i in range(n_views):
+        # ── tf：预设缺失时回退到 DEFAULT_TFS[i]，并避免与已用周期重复 ──
+        tf = params.get(f"v{i}_tf")
+        if not tf:
+            tf = next(
+                (t for t in DEFAULT_TFS[i:] + DEFAULT_TFS[:i] if t not in used_tfs),
+                DEFAULT_TFS[i % NUM_VIEWS],
+            )
+        used_tfs.add(tf)
+
         cfg: Dict[str, Any] = {
+            "_vid": i,
             "_fid": fid,
             "_dual": dual,
             "_fid2": fid2,
+            "tf": tf,
         }
 
-        # ── 基础视图参数 ──
+        # ── 其余基础视图参数 ──
         for suffix, cfg_key, default_val in _VIEW_SPECS:
+            if cfg_key == "tf":
+                continue  # tf 已按上面的回退逻辑写入
             preset_key = f"v{i}_{suffix}"
             val = params.get(preset_key, default_val)
             if val is not None or default_val is not None:
@@ -179,7 +215,7 @@ def _build_configs_from_params(params: dict) -> list:
 
         configs.append(cfg)
 
-    # 确保 configs 按 coarsest→finest 排序 (v0=最粗糙, v3=最精细)
+    # 确保 configs 按 coarsest→finest 排序（排序秩 ≠ 视图编号，_vid 保留视图编号）
     configs.sort(key=lambda c: ALL_TFS.index(c["tf"]), reverse=True)
 
     # P0: 防御性检测 — 排序后应始终通过（保留为 INFO 级别便于排查异常）
@@ -188,7 +224,7 @@ def _build_configs_from_params(params: dict) -> list:
         _indices[0] < _indices[1] or _indices[1] < _indices[2]
     ):
         logger.info(
-            "预设 configs 视图排序检查 (v0=coarsest, v3=finest): "
+            "预设 configs 视图排序检查 (coarsest→finest, _vid 保留视图编号): "
             "ALL_TFS_indices={}", _indices,
         )
 
@@ -207,7 +243,7 @@ def _extract_filter_params(
     fid : str
         滤波器 ID（如 ``"savgol"``）。
     view_index : int
-        视图序号 0-3。
+        视图序号 0..NUM_VIEWS-1。
     is_secondary : bool
         是否为主滤波器（``True`` 时为副滤波器）。
 
@@ -269,7 +305,9 @@ def _load_configs_from_file(path: str) -> list:
             if not isinstance(configs, list) or len(configs) == 0:
                 logger.error("configs/view_configs 字段为空或格式不正确")
                 sys.exit(1)
-            # 确保 configs 按 coarsest→finest 排序
+            # 确保 configs 按 coarsest→finest 排序（_vid 缺省时按当前顺序补齐）
+            for i, c in enumerate(configs):
+                c.setdefault("_vid", i)
             configs.sort(key=lambda c: ALL_TFS.index(c["tf"]), reverse=True)
             return configs
 
@@ -282,7 +320,7 @@ def _load_configs_from_file(path: str) -> list:
 
 
 def _build_default_configs(ticker: str) -> list:
-    """构建默认 4 视图配置（savgol + ema 双滤波）。
+    """构建默认视图配置（savgol + ema 双滤波，共 NUM_VIEWS 个）。
 
     当用户既未提供 ``--preset`` 也未提供 ``--config-file`` 时使用。
 
@@ -294,11 +332,12 @@ def _build_default_configs(ticker: str) -> list:
     Returns
     -------
     list[dict]
-        4 视图默认配置列表。
+        NUM_VIEWS 个默认配置列表（含 ``_vid`` 视图编号）。
     """
     configs = []
     for i, tf in enumerate(DEFAULT_TFS):
         cfg = {
+            "_vid": i,
             "_fid": "savgol",
             "_dual": True,
             "_fid2": "ema",
@@ -460,11 +499,11 @@ def main() -> None:
         target = args.view_filter
         filtered = []
         for idx, cfg in enumerate(configs):
-            view_key = f"v{idx}_{cfg.get('tf', '')}"
+            view_key = f"v{cfg.get('_vid', idx)}_{cfg.get('tf', '')}"
             if view_key == target:
                 filtered.append(cfg)
         if not filtered:
-            available_views = [f"v{i}_{c.get('tf', '?')}"
+            available_views = [f"v{c.get('_vid', i)}_{c.get('tf', '?')}"
                                for i, c in enumerate(configs)]
             logger.error("视图 '{}' 不在配置中", target)
             logger.error("可用视图: {}", available_views)

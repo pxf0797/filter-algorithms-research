@@ -11,6 +11,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
+try:
+    from filter.shared.constants import NUM_VIEWS
+except ImportError:  # filter/ 直接进 sys.path 的测试路径
+    from shared.constants import NUM_VIEWS
+
 _CONFIG_DB_PATH = Path(__file__).parent.parent.parent / "data" / "config.db"
 _CONFIG_DIR = Path(__file__).parent.parent.parent / "config"
 
@@ -501,7 +506,7 @@ def import_json_files_as_presets(force: bool = False):
 # ═══════════════════════════════════════════════════════════
 
 # ═══════════════════════════════════════════════════════════
-# 单一参数清单 — 每视图 v0~v3 可持久化参数的唯一真源
+# 单一参数清单 — 每视图 v0~v5 可持久化参数的唯一真源
 # 新增/删除可持久化参数时只改这一处；JSON 导出与 DB 收集都从此驱动，
 # 避免两处手动键表漂移(历史 bug: show_pnl_feedback 曾两处都漏保存)。
 # (session_state 后缀, cfg 键, 导出默认值)
@@ -531,7 +536,7 @@ def collect_current_params() -> Dict[str, Any]:
     """Collect all current configuration parameters from ``st.session_state``.
 
     Reads global parameters (market, ticker, global_f, global_dual,
-    global_f2), view parameters (v0–v3 with their sub-keys), and
+    global_f2), view parameters (v0–v5 with their sub-keys), and
     filter parameters (identified by Chinese-named keys).
 
     Returns
@@ -547,8 +552,8 @@ def collect_current_params() -> Dict[str, Any]:
         if k in st.session_state:
             params[k] = st.session_state[k]
 
-    # 视图参数 v0~v3（键表来自单一真源 VIEW_PARAM_SUFFIXES）
-    for vi in range(4):
+    # 视图参数 v0~v5（键表来自单一真源 VIEW_PARAM_SUFFIXES）
+    for vi in range(NUM_VIEWS):
         for pk in VIEW_PARAM_SUFFIXES:
             k = f"v{vi}_{pk}"
             if k in st.session_state:

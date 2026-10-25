@@ -255,7 +255,7 @@ from filter.shared.constants import ALL_TFS, DEFAULT_TFS, TF_HIERARCHY, TF_INTER
 # 验证这些常量是正确的
 assert len(ALL_TFS) == 8
 assert isinstance(ALL_TFS, list)
-assert len(DEFAULT_TFS) == 4
+assert len(DEFAULT_TFS) == 6
 assert len(TF_HIERARCHY) == 8  # 8 entries (季线→None 也是 entry)
 
 # 验证没有触发 browse 或 backtest 导入
