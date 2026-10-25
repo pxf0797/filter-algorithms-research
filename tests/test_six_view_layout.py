@@ -226,6 +226,55 @@ class TestEnsureViewTfDefaults:
         assert [state[f"v{i}_tf"] for i in range(6)] == DEFAULT_TFS
 
 
+
+def _seed_view_strategies(monkeypatch, initial_state: dict) -> dict:
+    """用假 ``st`` 调 ``ensure_view_strategy_defaults``。"""
+    import filter.browse.sidebar as sidebar
+
+    st_mock = MagicMock()
+    st_mock.session_state = dict(initial_state)
+    monkeypatch.setattr(sidebar, "st", st_mock)
+    sidebar.ensure_view_strategy_defaults()
+    return st_mock.session_state
+
+
+class TestEnsureViewStrategyDefaults:
+    """新视图策略开关继承（修复「视图5/6 没有策略 PnL 与多空持仓带」）。"""
+
+    def test_new_views_inherit_previous_view_flags(self, monkeypatch):
+        """v3 的策略开关为开 → v4/v5 首次渲染时继承（含止损值）。"""
+        state = _seed_view_strategies(monkeypatch, {
+            "v3_strat": True, "v3_cross_pnl": True,
+            "v3_align": True, "v3_pnlfb": True, "v3_sl": 2.5,
+        })
+
+        for i in (4, 5):
+            assert state[f"v{i}_strat"] is True
+            assert state[f"v{i}_cross_pnl"] is True
+            assert state[f"v{i}_align"] is True
+            assert state[f"v{i}_pnlfb"] is True
+            assert state[f"v{i}_sl"] == 2.5
+
+    def test_existing_value_is_not_overwritten(self, monkeypatch):
+        """用户/预设显式设置的值不得被继承覆盖；v5 从 v4 继承。"""
+        state = _seed_view_strategies(monkeypatch, {
+            "v3_strat": True, "v3_sl": 2.0,
+            "v4_strat": False, "v4_sl": 5.0,
+        })
+
+        assert state["v4_strat"] is False
+        assert state["v4_sl"] == 5.0
+        assert state["v5_strat"] is False
+        assert state["v5_sl"] == 5.0
+
+    def test_empty_session_stays_off(self, monkeypatch):
+        """空会话没有任何视图设置 → 不凭空打开策略开关。"""
+        state = _seed_view_strategies(monkeypatch, {})
+
+        assert state.get("v4_strat", False) is False
+        assert state.get("v5_strat", False) is False
+
+
 # ===========================================================================
 # 3. 图表网格 — AppTest 真实渲染
 # ===========================================================================
@@ -369,25 +418,32 @@ class TestChartGridRendered:
         assert all(tf in ALL_TFS for tf in op.options)
 
     def test_first_screen_sidebar_period_options_include_new_views(self, six_view_app):
-        """首屏单次 run 侧栏两个下拉即含 v4/v5 周期（守 ``ensure_view_tf_defaults``）。
+        """首屏单次 run 侧栏两个下拉即含全部 6 个视图周期（守种子化）。
 
-        回归点（T3 major）：修复前 operating_tf 候选缺「5分钟」、BS 候选缺
-        「5分钟/月线」，必须第二次 rerun 才补齐；``ensure_view_tf_defaults()``
-        在 main() 早期预写 v0~v5 后，首屏（本 fixture 只 run 一次）即完整。
-        同时断言 6 个图表渲染且无异常，证明种子化未破坏首屏。
+        回归点（T3 major）：修复前 operating_tf / BS 候选只覆盖 v0~v3，
+        新视图周期必须第二次 rerun 才补齐。这里不绑定某个具体预设的内容
+        （本机预设可能被用户修改），而是断言「侧栏候选集合 == 首屏 6 个
+        视图面板实际周期集合」，且首屏只 run 一次即可用。
         """
         at = six_view_app
         assert [str(e) for e in at.exception] == []
 
+        captions = [str(c.value) for c in at.caption if str(c.value).startswith("视图")]
+        view_tfs = [c.split(" · ", 1)[1].strip() for c in captions]
+        assert len(view_tfs) == 6, f"应有 6 条视图 caption: {captions}"
+
         op = at.selectbox(key="operating_tf")
         assert op.value == "日线"
-        assert "5分钟" in op.options, f"首屏操作周期候选缺 5分钟: {op.options}"
-        assert len(op.options) == 6, f"首屏操作周期应含 6 个视图周期: {op.options}"
+        assert set(op.options) == set(view_tfs), (
+            f"首屏操作周期候选应与 6 个视图周期一致: options={op.options}, views={view_tfs}"
+        )
+        assert len(op.options) == 6, f"首屏操作周期应为 6 项: {op.options}"
 
         bs = at.selectbox(key="bs_monitor_tf_selector")
-        for tf in ("周线", "月线", "5分钟"):
-            assert tf in bs.options, f"首屏 BS 监测候选缺 {tf}: {bs.options}"
-        assert len(bs.options) == 1 + 6, f"BS 监测应为 不选择 + 6 个视图周期: {bs.options}"
+        assert bs.options[0] == "不选择"
+        assert set(bs.options[1:]) == set(view_tfs), (
+            f"首屏 BS 监测候选应与 6 个视图周期一致: options={bs.options}, views={view_tfs}"
+        )
 
         assert len(at.get("iframe")) == 6, "6 个图表窗口应全部渲染"
 

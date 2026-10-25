@@ -480,6 +480,31 @@ def ensure_view_tf_defaults() -> None:
             st.session_state[key] = _default_view_tf(i)
 
 
+# 新视图首次渲染时从「前一视图」继承的策略类开关（会话键后缀）
+_STRATEGY_INHERIT_SUFFIXES = ("strat", "cross_pnl", "align", "pnlfb", "sl")
+
+
+def ensure_view_strategy_defaults() -> None:
+    """新视图的策略类开关默认继承前一视图（仅当该视图尚未初始化时）。
+
+    「视图 4→6」属于纯功能增加：旧预设只保存 v0~v3，新视图的
+    ``strat/cross_pnl/align/pnlfb/sl`` 若走默认 False，会表现为「视图5/6
+    没有策略 PnL 与多空持仓带」。这里在渲染前按视图编号顺序补默认值：
+    ``v{i}`` 缺失时取 ``v{i-1}`` 的当前值（含预设/用户已设值），
+    已存在的键一律不覆盖。
+
+    调用时机：``app.main()`` 中紧跟 :func:`ensure_view_tf_defaults`。
+    """
+    for i in range(1, NUM_VIEWS):
+        for suffix in _STRATEGY_INHERIT_SUFFIXES:
+            key = f"v{i}_{suffix}"
+            if key in st.session_state:
+                continue
+            prev = st.session_state.get(f"v{i - 1}_{suffix}")
+            if prev is not None:
+                st.session_state[key] = prev
+
+
 def _render_param_panels(filter_id, dual, filter_id2) -> list:
     """Render 2×3 parameter panels. Returns list of config dicts.
 

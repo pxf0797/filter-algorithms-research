@@ -77,23 +77,30 @@ def db_target(tmp_path):
     db_path = tmp_path / "test_market.db"
     snap_dir = tmp_path / "snapshots"
 
-    # 保留原始值以便恢复
-    orig_db = db.DB_PATH
-    orig_snap = db.SNAPSHOT_DIR
+    # 代码库存在两个模块对象（data.db 与 filter.data.db）指向同一文件，测试里
+    # 两种导入路径混用；必须同时 patch，否则未 patch 的那个会写真实 market.db。
+    try:
+        import filter.data.db as fdb
+    except ImportError:  # pragma: no cover - filter 包不可用时退化
+        fdb = None
+    modules = [m for m in (db, fdb) if m is not None]
+    orig = [(m, m.DB_PATH, m.SNAPSHOT_DIR) for m in modules]
 
     # 关闭旧连接（若存在），确保 DB_PATH 变更后重建连接 (P2-3 B38)
-    db.close_conn()
-
-    db.DB_PATH = db_path
-    db.SNAPSHOT_DIR = snap_dir
+    for m in modules:
+        m.close_conn()
+        m.DB_PATH = db_path
+        m.SNAPSHOT_DIR = snap_dir
     db.init_db()
 
     yield db, db_path
 
     # 清理 — 避免影响其他模块/测试
-    db.close_conn()
-    db.DB_PATH = orig_db
-    db.SNAPSHOT_DIR = orig_snap
+    for m in modules:
+        m.close_conn()
+    for m, path, snap in orig:
+        m.DB_PATH = path
+        m.SNAPSHOT_DIR = snap
 
 
 @pytest.fixture
@@ -1327,3 +1334,53 @@ class TestRenderDbBackup:
 
             # 验证不抛出异常
             _render_db_backup()
+
+
+# ===========================================================================
+# 测试写库隔离 — 防止样例/测试数据写进真实 data/market.db
+# ===========================================================================
+
+class TestTestWriteGuard:
+    """``_reject_test_writes`` 在 pytest 期间拦截真实库写入。"""
+
+    @staticmethod
+    def _df(n: int = 3) -> pd.DataFrame:
+        dates = pd.date_range("2026-01-01", periods=n, freq="D")
+        close = np.arange(n, dtype=float) + 100
+        return pd.DataFrame(
+            {"Open": close, "High": close + 1, "Low": close - 1,
+             "Close": close, "Volume": np.full(n, 1000.0)},
+            index=dates,
+        )
+
+    @staticmethod
+    def _reset_conn(dbmod) -> None:
+        conn = getattr(dbmod._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        for name in list(vars(dbmod._local)):
+            delattr(dbmod._local, name)
+
+    def test_rejects_repo_db_under_pytest(self, monkeypatch):
+        import filter.data.db as dbmod
+
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", "guard (call)")
+        monkeypatch.delenv("ALLOW_REAL_DB_WRITE", raising=False)
+        monkeypatch.setattr(dbmod, "DB_PATH", dbmod._REPO_DB_PATH)
+
+        with pytest.raises(RuntimeError, match="真实 data/market.db"):
+            dbmod.upsert_kline("GUARD", "日线", self._df())
+
+    def test_allows_tmp_db_under_pytest(self, tmp_path, monkeypatch):
+        import filter.data.db as dbmod
+
+        monkeypatch.setenv("PYTEST_CURRENT_TEST", "guard (call)")
+        monkeypatch.delenv("ALLOW_REAL_DB_WRITE", raising=False)
+        monkeypatch.setattr(dbmod, "DB_PATH", tmp_path / "guard.db")
+        self._reset_conn(dbmod)
+        dbmod.init_db()
+        dbmod.upsert_kline("GUARD", "日线", self._df())
+        assert dbmod.query_kline("GUARD", "日线", 10).shape[0] == 3

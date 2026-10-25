@@ -31,3 +31,4 @@ test_output/
 debug_output/
 *.db-shm
 *.db-wal
+data/*.bak-*

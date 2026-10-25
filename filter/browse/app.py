@@ -43,7 +43,7 @@ from filter.browse.chart_builder import (
 )
 from filter.browse.sidebar import (
     _handle_pending_apply, _render_config_import, _handle_initial_fetch,
-    ensure_view_tf_defaults,
+    ensure_view_tf_defaults, ensure_view_strategy_defaults,
     _render_refresh_row, _render_preset_selector, _render_health_check,
     _render_data_validation, _render_filter_selectors, _render_param_panels,
     _render_db_backup, _render_export_config,
@@ -791,6 +791,7 @@ def main() -> None:
     # 必须在下面「🎯 操作周期」与 _render_refresh_row 的 BS 周期收集之前，
     # 否则新视图（v4/v5）的周期不会进入候选，需 rerun 才补齐。
     ensure_view_tf_defaults()
+    ensure_view_strategy_defaults()
 
     # ── Market ──
     market = st.sidebar.radio("市场", ["美股 US", "A股(沪深)", "港股 HK"],

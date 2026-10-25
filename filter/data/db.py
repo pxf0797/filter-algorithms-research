@@ -15,6 +15,31 @@ from loguru import logger
 
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "market.db"
 SNAPSHOT_DIR = DB_PATH.parent / "snapshots"
+# 仓库内真实数据库路径 — 用于阻止 pytest 期间误写（历史 bug：mock 数据写进真实
+# market.db，导致分钟线混入无时区时间戳、日线混入未来日期，进而拉取解析失败）
+_REPO_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "market.db"
+
+
+def _reject_test_writes() -> None:
+    """pytest 运行期间禁止写入仓库真实 ``data/market.db``。
+
+    测试应把 ``DB_PATH`` 指向 ``tmp_path``；确需写真实库时显式设置
+    ``ALLOW_REAL_DB_WRITE=1``。即使异常被 ``_fetch_stock`` 的 try/except
+    吞掉，也能在日志中发现漏 patch 的测试。
+    """
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        return
+    if os.environ.get("ALLOW_REAL_DB_WRITE") == "1":
+        return
+    try:
+        is_repo_db = Path(DB_PATH).resolve() == _REPO_DB_PATH.resolve()
+    except OSError:
+        is_repo_db = False
+    if is_repo_db:
+        raise RuntimeError(
+            "测试禁止写入真实 data/market.db：请把 DB_PATH 指向 tmp_path，"
+            "或设置 ALLOW_REAL_DB_WRITE=1 显式允许"
+        )
 
 # Thread-local connection storage (fix: B38 singleton was not thread-safe —
 # ThreadPoolExecutor workers in _fetch_all_timeframes couldn't use the
@@ -126,6 +151,7 @@ def upsert_kline(ticker: str, tf: str, df: pd.DataFrame):
         包含 ``Date``, ``Open``, ``High``, ``Low``, ``Close``, ``Volume``
         列的 Pandas DataFrame。
     """
+    _reject_test_writes()
     logger.debug("Upserting kline: ticker={}, tf={}, rows={}", ticker, tf, len(df))
     records = []
     for row in df.itertuples():
@@ -691,6 +717,7 @@ def force_update_kline(ticker, tf, df):
     df : pd.DataFrame
         包含 ``DatetimeIndex`` 及标准 OHLCV 列的 DataFrame。
     """
+    _reject_test_writes()
     records = []
     for row in df.itertuples():
         ts = row.Index.isoformat() if hasattr(row.Index, "isoformat") else str(row.Index)
